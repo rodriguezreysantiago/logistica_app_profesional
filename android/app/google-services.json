@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "444186792745",
+    "project_id": "logisticaapp-e539a",
+    "storage_bucket": "logisticaapp-e539a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:444186792745:android:766198ff5d4b64a4f69d38",
+        "android_client_info": {
+          "package_name": "com.example.logistica_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCuKqPyfeujSaendP08jkM5j9bNiOwZmVg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:444186792745:android:eb89fdab89bf9043f69d38",
+        "android_client_info": {
+          "package_name": "com.example.logistica_app_profesional"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCuKqPyfeujSaendP08jkM5j9bNiOwZmVg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
