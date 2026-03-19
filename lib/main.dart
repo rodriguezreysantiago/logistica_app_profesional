@@ -74,7 +74,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _dniController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
-  final FocusNode _passFocus = FocusNode();
+  final FocusNode _passFocus = FocusNode(); 
   bool _isLoading = false;
 
   Future<void> _login() async {
@@ -86,7 +86,6 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       var doc = await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).get();
       
-      // GUARD: Verificamos si el widget sigue montado después del await de Firestore
       if (!mounted) return;
 
       if (doc.exists && doc.data()!['CLAVE'].toString() == pass) {
@@ -116,7 +115,13 @@ class _LoginScreenState extends State<LoginScreen> {
             TextField(
               controller: _dniController,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: "DNI", border: OutlineInputBorder()),
+              autofocus: true,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: "DNI", 
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.person),
+              ),
               onSubmitted: (_) => FocusScope.of(context).requestFocus(_passFocus),
             ),
             const SizedBox(height: 10),
@@ -124,7 +129,11 @@ class _LoginScreenState extends State<LoginScreen> {
               controller: _passController,
               focusNode: _passFocus,
               obscureText: true,
-              decoration: const InputDecoration(labelText: "Clave", border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: "Clave", 
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.lock),
+              ),
               onSubmitted: (_) => _login(),
             ),
             const SizedBox(height: 20),
@@ -149,6 +158,7 @@ class MainPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // CORRECCIÓN AQUÍ: appBar en lugar de app_bar
       appBar: AppBar(
         title: Text("Hola $nombre"), 
         backgroundColor: Colors.blue.shade900, 
@@ -367,13 +377,11 @@ class _ListaEquiposScreenState extends State<ListaEquiposScreen> {
 class FichaChoferScreen extends StatefulWidget {
   final String dni;
   const FichaChoferScreen({super.key, required this.dni});
-
   @override
   State<FichaChoferScreen> createState() => _FichaChoferScreenState();
 }
 
 class _FichaChoferScreenState extends State<FichaChoferScreen> {
-  // Convertido a StatefulWidget para poder usar 'mounted' dentro de la lógica de selección
   
   void _seleccionarEquipo(String tipoFirestore, String label) {
     showDialog(
@@ -389,9 +397,8 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
                 .snapshots(),
             builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
               if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-              
               var unidades = snapshot.data!.docs;
-              if (unidades.isEmpty) return const Padding(padding: EdgeInsets.all(20), child: Text("No hay unidades disponibles de este tipo."));
+              if (unidades.isEmpty) return const Padding(padding: EdgeInsets.all(20), child: Text("No hay unidades disponibles."));
 
               return ListView.builder(
                 shrinkWrap: true,
@@ -402,13 +409,10 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
                     title: Text(unidad['DOMINIO']),
                     subtitle: Text(unidad['MARCA'] ?? ""),
                     onTap: () async {
-                      // Guardamos referencias necesarias antes del async
                       final messenger = ScaffoldMessenger.of(context);
                       final navigator = Navigator.of(dialogContext);
 
                       await actualizarEquipoChofer(widget.dni, tipoFirestore, unidad['DOMINIO']);
-                      
-                      // GUARD: Después de la actualización de Firebase
                       if (!mounted) return;
                       
                       navigator.pop(); 
@@ -450,7 +454,7 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
                       children: [
                         _botonAsignar(context, "TRACTOR", userData['TRACTOR'], () => _seleccionarEquipo('TRACTOR', 'Tractor')),
                         const SizedBox(width: 10),
-                        _botonAsignar(context, "ACOPLADO", userData['BATEA_TOLVA'], () => _seleccionarEquipo('BATEA_TOLVA', 'Acoplado/Batea')),
+                        _botonAsignar(context, "ACOPLADO", userData['BATEA_TOLVA'], () => _seleccionarEquipo('BATEA_TOLVA', 'Acoplado')),
                       ],
                     ),
                   ],
@@ -478,7 +482,7 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
         child: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.1),
+            color: Colors.white.withAlpha(25),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.white30)
           ),
@@ -496,12 +500,9 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
   }
 }
 
-// --- FICHA VEHICULO ACTUALIZADA PARA EDITAR ---
-
 class FichaVehiculoScreen extends StatefulWidget {
   final Map<String, dynamic> carData;
   const FichaVehiculoScreen({super.key, required this.carData});
-
   @override
   State<FichaVehiculoScreen> createState() => _FichaVehiculoScreenState();
 }
@@ -517,57 +518,33 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
       helpText: "SELECCIONAR $label",
     );
 
-    // GUARD: Si el usuario canceló el calendario o la pantalla se cerró durante la selección
     if (picked == null || !mounted) return;
-
     String nuevaFecha = "${picked.day.toString().padLeft(2, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.year}";
     
     try {
-      await FirebaseFirestore.instance
-          .collection('VEHICULOS')
-          .doc(widget.carData['DOMINIO'])
-          .update({campo: nuevaFecha});
-      
-      // GUARD: Después de la respuesta de Firestore
+      await FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).update({campo: nuevaFecha});
       if (!mounted) return;
-
-      setState(() {
-        widget.carData[campo] = nuevaFecha;
-      });
+      setState(() { widget.carData[campo] = nuevaFecha; });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$label actualizado")));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al actualizar: $e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Ficha: ${widget.carData['DOMINIO'] ?? 'S/D'}"),
-        backgroundColor: Colors.blue.shade900,
-        foregroundColor: Colors.white,
-      ),
+      appBar: AppBar(title: Text("Ficha: ${widget.carData['DOMINIO'] ?? 'S/D'}"), backgroundColor: Colors.blue.shade900, foregroundColor: Colors.white),
       body: SingleChildScrollView(
         child: Column(
           children: [
-            cabeceraFicha(
-              widget.carData['DOMINIO'], 
-              "${widget.carData['MARCA'] ?? 'S/M'} ${widget.carData['MODELO'] ?? ''}"
-            ),
+            cabeceraFicha(widget.carData['DOMINIO'], "${widget.carData['MARCA'] ?? 'S/M'} ${widget.carData['MODELO'] ?? ''}"),
             tituloSeccion("ESPECIFICACIONES"),
             filaDato(Icons.settings_suggest, "TIPO", widget.carData['TIPO']),
             filaDato(Icons.business, "EMPRESA", widget.carData['EMPRESA']),
-            
             tituloSeccion("DOCUMENTACIÓN (TOCAR PARA EDITAR)"),
-            InkWell(
-              onTap: () => _editarFecha('VENCIMIENTO_RTO', 'VENCIMIENTO RTO'),
-              child: filaVtoSemaforo("VENCIMIENTO RTO", widget.carData['VENCIMIENTO_RTO']),
-            ),
-            InkWell(
-              onTap: () => _editarFecha('VENCIMIENTO_POLIZA', 'VENCIMIENTO PÓLIZA'),
-              child: filaVtoSemaforo("VENCIMIENTO PÓLIZA", widget.carData['VENCIMIENTO_POLIZA']),
-            ),
+            InkWell(onTap: () => _editarFecha('VENCIMIENTO_RTO', 'VENCIMIENTO RTO'), child: filaVtoSemaforo("VENCIMIENTO RTO", widget.carData['VENCIMIENTO_RTO'])),
+            InkWell(onTap: () => _editarFecha('VENCIMIENTO_POLIZA', 'VENCIMIENTO PÓLIZA'), child: filaVtoSemaforo("VENCIMIENTO PÓLIZA", widget.carData['VENCIMIENTO_POLIZA'])),
           ],
         ),
       ),
@@ -579,24 +556,17 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
 
 Widget cabeceraFicha(String? titulo, String? subtitulo) {
   return Container(
-    width: double.infinity,
-    color: Colors.blue.shade900,
-    padding: const EdgeInsets.all(24),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(titulo?.toUpperCase() ?? "S/D", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-        Text(subtitulo ?? "", style: const TextStyle(color: Colors.white70, fontSize: 14)),
-      ],
-    ),
+    width: double.infinity, color: Colors.blue.shade900, padding: const EdgeInsets.all(24),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(titulo?.toUpperCase() ?? "S/D", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+      Text(subtitulo ?? "", style: const TextStyle(color: Colors.white70, fontSize: 14)),
+    ]),
   );
 }
 
 Widget tituloSeccion(String texto) {
   return Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-    color: Colors.grey.shade200,
+    width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10), color: Colors.grey.shade200,
     child: Text(texto, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900, fontSize: 12)),
   );
 }
@@ -620,17 +590,10 @@ Widget filaVtoSemaforo(String titulo, String? fecha) {
     try {
       String f = fecha.replaceAll('/', '-');
       List<String> partes = f.split('-');
-      DateTime fechaVto;
-      if (partes[0].length == 4) {
-        fechaVto = DateTime.parse(f);
-      } else {
-        fechaVto = DateTime.parse("${partes[2]}-${partes[1]}-${partes[0]}");
-      }
+      DateTime fechaVto = partes[0].length == 4 ? DateTime.parse(f) : DateTime.parse("${partes[2]}-${partes[1]}-${partes[0]}");
       int dias = fechaVto.difference(DateTime.now()).inDays;
       bg = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
-    } catch (_) {
-      bg = Colors.grey.shade400;
-    }
+    } catch (_) { bg = Colors.grey.shade400; }
   }
   return Padding(
     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
@@ -647,10 +610,6 @@ Widget filaVtoSemaforo(String titulo, String? fecha) {
 
 Future<void> actualizarEquipoChofer(String dni, String campo, String nuevoDominio) async {
   try {
-    await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({
-      campo: nuevoDominio,
-    });
-  } catch (e) {
-    debugPrint("Error Firebase: $e");
-  }
+    await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: nuevoDominio});
+  } catch (e) { debugPrint("Error Firebase: $e"); }
 }
