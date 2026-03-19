@@ -168,6 +168,9 @@ class MainPanel extends StatelessWidget {
             _card(context, Icons.people, "PERSONAL", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaPersonalScreen()))),
             const SizedBox(height: 10),
             _card(context, Icons.local_shipping, "EQUIPOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaEquiposScreen()))),
+            const SizedBox(height: 10),
+            // --- NUEVO BOTÓN DE VENCIMIENTOS ---
+            _card(context, Icons.notification_important, "CONTROL VENCIMIENTOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PanelVencimientosScreen()))),
           ],
         ],
       ),
@@ -179,7 +182,118 @@ class MainPanel extends StatelessWidget {
   }
 }
 
-// --- PERSONAL ---
+// --- PANTALLA DE CONTROL DE VENCIMIENTOS ---
+
+class PanelVencimientosScreen extends StatelessWidget {
+  const PanelVencimientosScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text("Vencimientos Globales"),
+          backgroundColor: Colors.red.shade900,
+          foregroundColor: Colors.white,
+          bottom: const TabBar(
+            indicatorColor: Colors.white,
+            tabs: [
+              Tab(icon: Icon(Icons.person), text: "PERSONAL"),
+              Tab(icon: Icon(Icons.local_shipping), text: "EQUIPOS"),
+            ],
+          ),
+        ),
+        body: const TabBarView(
+          children: [
+            _ListaVencimientosGenerica(coleccion: 'EMPLEADOS', nombreCampo: 'CHOFER'),
+            _ListaVencimientosGenerica(coleccion: 'VEHICULOS', nombreCampo: 'DOMINIO'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ListaVencimientosGenerica extends StatelessWidget {
+  final String coleccion;
+  final String nombreCampo;
+  const _ListaVencimientosGenerica({required this.coleccion, required this.nombreCampo});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: FirebaseFirestore.instance.collection(coleccion).snapshots(),
+      builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+        List<Map<String, dynamic>> alertas = [];
+
+        for (var doc in snapshot.data!.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final nombreSujeto = data[nombreCampo] ?? "Sin nombre";
+
+          data.forEach((key, value) {
+            // Buscamos campos de fecha
+            if (key.contains("VENCIMIENTO") || key == "EPAP" || key == "LIC_COND" || key == "CURSO_MANEJO" || key == "CURSO_MERCANCIAS") {
+              if (value != null && value.toString().isNotEmpty && value != "---" && value != "nan") {
+                int dias = _obtenerDiasRestantes(value.toString());
+                if (dias <= 45) { // Mostramos si faltan 45 días o menos
+                  alertas.add({
+                    'sujeto': nombreSujeto,
+                    'documento': key.replaceAll('VENCIMIENTO_', '').replaceAll('_', ' '),
+                    'fecha': value,
+                    'dias': dias,
+                  });
+                }
+              }
+            }
+          });
+        }
+
+        alertas.sort((a, b) => a['dias'].compareTo(b['dias']));
+
+        if (alertas.isEmpty) return const Center(child: Text("No hay vencimientos próximos"));
+
+        return ListView.builder(
+          itemCount: alertas.length,
+          itemBuilder: (context, index) {
+            final al = alertas[index];
+            final bool vencido = al['dias'] < 0;
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              child: ListTile(
+                leading: Icon(Icons.warning, color: vencido ? Colors.red : Colors.orange),
+                title: Text(al['sujeto']),
+                subtitle: Text("${al['documento']}: ${formatearFecha(al['fecha'])}"),
+                trailing: Text(
+                  vencido ? "VENCIDO" : "EN ${al['dias']} DÍAS",
+                  style: TextStyle(color: vencido ? Colors.red : Colors.orange, fontWeight: FontWeight.bold),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  int _obtenerDiasRestantes(String fecha) {
+    try {
+      final String f = fecha.replaceAll('/', '-');
+      final List<String> partes = f.split('-');
+      DateTime fVto;
+      if (partes[0].length == 4) {
+        fVto = DateTime.parse(f);
+      } else {
+        fVto = DateTime.parse("${partes[2]}-${partes[1].padLeft(2,'0')}-${partes[0].padLeft(2,'0')}");
+      }
+      return fVto.difference(DateTime.now()).inDays;
+    } catch (_) { return 999; }
+  }
+}
+
+// --- RESTO DE PANTALLAS (PERSONAL Y EQUIPOS) ---
 
 class ListaPersonalScreen extends StatefulWidget {
   const ListaPersonalScreen({super.key});
@@ -532,7 +646,6 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
                 
                 tituloSeccion("FICHA TÉCNICA"),
                 
-                // --- CAMPO MARCA AGREGADO ---
                 filaDato(Icons.branding_watermark, "MARCA", v['MARCA']?.toString() ?? "Sin datos"),
                 filaDato(Icons.directions_car, "MODELO", v['MODELO']?.toString() ?? "Sin datos"),
                 filaDato(Icons.calendar_today, "AÑO", v['AÑO']?.toString() ?? "Sin datos"),
@@ -585,14 +698,11 @@ Widget filaVtoSemaforo(String titulo, String? fecha) {
       final String f = fecha.replaceAll('/', '-');
       final List<String> partes = f.split('-');
       DateTime fechaVto;
-      
-      // Parseo robusto de fecha ISO (YYYY-MM-DD) o Local (DD-MM-YYYY)
       if (partes[0].length == 4) {
         fechaVto = DateTime.parse(f);
       } else {
         fechaVto = DateTime.parse("${partes[2]}-${partes[1].padLeft(2,'0')}-${partes[0].padLeft(2,'0')}");
       }
-      
       final int dias = fechaVto.difference(DateTime.now()).inDays;
       bg = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
     } catch (_) { bg = Colors.grey.shade400; }
