@@ -15,6 +15,14 @@ class LogisticaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(1.4),
+          ),
+          child: child!,
+        );
+      },
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue.shade900),
         useMaterial3: true,
@@ -28,7 +36,9 @@ class LogisticaApp extends StatelessWidget {
 
 String formatearDNI(dynamic dni) {
   String s = dni?.toString() ?? "";
-  if (s.length < 7 || s.length > 8) return s;
+  if (s.length < 7 || s.length > 8) {
+    return s;
+  }
   return s.length == 7 
       ? "${s.substring(0, 1)}.${s.substring(1, 4)}.${s.substring(4)}"
       : "${s.substring(0, 2)}.${s.substring(2, 5)}.${s.substring(5)}";
@@ -36,17 +46,25 @@ String formatearDNI(dynamic dni) {
 
 String formatearCUIL(dynamic cuil) {
   String s = cuil?.toString() ?? "";
-  if (s.length != 11) return s;
+  if (s.length != 11) {
+    return s;
+  }
   return "${s.substring(0, 2)}-${s.substring(2, 10)}-${s.substring(10)}";
 }
 
 String formatearFecha(String? fecha) {
-  if (fecha == null || fecha.isEmpty || fecha == "---") return "No cargada";
+  if (fecha == null || fecha.isEmpty || fecha == "---") {
+    return "No cargada";
+  }
   try {
     List<String> partes = fecha.split('-');
-    if (partes.length == 3) return "${partes[2]}-${partes[1]}-${partes[0]}";
+    if (partes.length == 3) {
+      return "${partes[2]}-${partes[1]}-${partes[0]}";
+    }
     return fecha;
-  } catch (e) { return fecha; }
+  } catch (e) { 
+    return fecha; 
+  }
 }
 
 // --- PANTALLAS ---
@@ -66,20 +84,45 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _login() async {
     String dni = _dniController.text.trim();
     String pass = _passController.text.trim();
-    if (dni.isEmpty || pass.isEmpty) return;
-    setState(() => _isLoading = true);
+    if (dni.isEmpty || pass.isEmpty) {
+      return;
+    }
+    
+    setState(() {
+      _isLoading = true;
+    });
+    
     try {
       var doc = await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).get();
+      
+      if (!mounted) {
+        return;
+      }
+
       if (doc.exists && doc.data()!['CLAVE'].toString() == pass) {
-        if (!mounted) return;
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => MainPanel(
           nombre: doc.data()!['CHOFER'] ?? "Usuario", 
           rol: doc.data()!['ROL'] ?? "USUARIO"
         )));
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("DNI o Clave incorrectos")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("DNI o Clave incorrectos"))
+        );
       }
-    } finally { if (mounted) setState(() => _isLoading = false); }
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error de conexión: $e"))
+      );
+    } finally { 
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -175,7 +218,9 @@ class ListaEquiposScreen extends StatelessWidget {
       body: StreamBuilder(
         stream: FirebaseFirestore.instance.collection('EMPLEADOS').snapshots(),
         builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
           var docs = snapshot.data!.docs.where((doc) {
             var data = doc.data() as Map<String, dynamic>;
             return data.containsKey('TRACTOR') && data['TRACTOR'] != null && data['TRACTOR'] != "---";
@@ -218,14 +263,20 @@ class _ListaPersonalScreenState extends State<ListaPersonalScreen> {
             padding: const EdgeInsets.all(12.0),
             child: TextField(
               decoration: InputDecoration(hintText: "Buscar chofer...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-              onChanged: (value) => setState(() => _searchQuery = value.toUpperCase()),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value.toUpperCase();
+                });
+              },
             ),
           ),
           Expanded(
             child: StreamBuilder(
               stream: FirebaseFirestore.instance.collection('EMPLEADOS').orderBy('CHOFER').snapshots(),
               builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
                 var docs = snapshot.data!.docs.where((doc) {
                   return doc['CHOFER'].toString().toUpperCase().contains(_searchQuery);
                 }).toList();
@@ -237,9 +288,10 @@ class _ListaPersonalScreenState extends State<ListaPersonalScreen> {
                       child: ListTile(
                         leading: const Icon(Icons.person),
                         title: Text(user['CHOFER'] ?? "Sin Nombre"),
-                        subtitle: Text("DNI: ${formatearDNI(user['DNI'])}"),
                         trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => FichaChoferScreen(userData: user))),
+                        onTap: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => FichaChoferScreen(userData: user)));
+                        },
                       ),
                     );
                   },
@@ -253,7 +305,6 @@ class _ListaPersonalScreenState extends State<ListaPersonalScreen> {
   }
 }
 
-// --- FICHA DEL CHOFER (DISEÑO FINAL COMPACTO) ---
 class FichaChoferScreen extends StatelessWidget {
   final Map<String, dynamic> userData;
   const FichaChoferScreen({super.key, required this.userData});
@@ -267,46 +318,64 @@ class FichaChoferScreen extends StatelessWidget {
         title: const Text("Ficha del Personal"), 
         backgroundColor: Colors.blue.shade900, 
         foregroundColor: Colors.white,
-        toolbarHeight: 40,
+        toolbarHeight: 50,
       ),
-      body: SingleChildScrollView( // Usamos SingleChildScrollView con Column para control total
-        child: Column(
-          mainAxisSize: MainAxisSize.min, // LA CLAVE: Ocupa lo mínimo necesario
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // CABECERA
-            Container(
-              width: double.infinity,
-              color: Colors.blue.shade900,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(nombre.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Row(
+      body: Align(
+        alignment: Alignment.topCenter,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  color: Colors.blue.shade900,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _datoHeaderCompacto("TRACTOR", userData['TRACTOR']),
-                      const SizedBox(width: 40),
-                      _datoHeaderCompacto("BATEA", userData['BATEA_TOLVA']),
+                      Text(nombre.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          _datoHeaderCompacto("TRACTOR", userData['TRACTOR']),
+                          const SizedBox(width: 60),
+                          _datoHeaderCompacto("BATEA", userData['BATEA_TOLVA']),
+                        ],
+                      ),
                     ],
                   ),
-                ],
-              ),
+                ),
+                _tituloSeccion("DATOS PERSONALES"),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Column(
+                    children: [
+                      _filaDatoAjustada(Icons.badge, "DNI", formatearDNI(userData['DNI'])),
+                      _filaDatoAjustada(Icons.fingerprint, "CUIL", formatearCUIL(userData['CUIL'])),
+                      _filaDatoAjustada(Icons.phone, "TELEFONO", userData['TELEFONO']),
+                      _filaDatoAjustada(Icons.business, "EMPRESA", userData['EMPRESA']),
+                    ],
+                  ),
+                ),
+                _tituloSeccion("ESTADO VENCIMIENTOS"),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Column(
+                    children: [
+                      _filaVtoSemaforoAjustada("(EPAP) PREOCUPACIONAL", userData['EPAP']),
+                      _filaVtoSemaforoAjustada("(LICENCIA DE CONDUCIR)", userData['LIC_COND']),
+                      _filaVtoSemaforoAjustada("CURSO DE MANEJO DEFENSIVO", userData['CURSO_MANEJO']),
+                      _filaVtoSemaforoAjustada("CURSO DE MERCANCIAS PELIGROSAS", userData['CURSO_MERCANCIAS']),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 30),
+              ],
             ),
-
-            _tituloSeccion("DATOS PERSONALES"),
-            _filaDatoMinima(Icons.badge, "DNI", formatearDNI(userData['DNI'])),
-            _filaDatoMinima(Icons.fingerprint, "CUIL", formatearCUIL(userData['CUIL'])),
-            _filaDatoMinima(Icons.phone, "TELEFONO", userData['TELEFONO']),
-            _filaDatoMinima(Icons.business, "EMPRESA", userData['EMPRESA']),
-            
-            _tituloSeccion("ESTADO VENCIMIENTOS"),
-            _filaVtoSemaforoCompacta("(EPAP) PREOCUPACIONAL", userData['EPAP']),
-            _filaVtoSemaforoCompacta("(LICENCIA DE CONDUCIR)", userData['LIC_COND']),
-            _filaVtoSemaforoCompacta("CURSO DE MANEJO DEFENSIVO", userData['CURSO_MANEJO']),
-            _filaVtoSemaforoCompacta("CURSO DE MERCANCIAS PELIGROSAS", userData['CURSO_MERCANCIAS']),
-          ],
+          ),
         ),
       ),
     );
@@ -315,9 +384,9 @@ class FichaChoferScreen extends StatelessWidget {
   Widget _tituloSeccion(String texto) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
       color: Colors.grey.shade200,
-      child: Text(texto, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900, fontSize: 9)),
+      child: Text(texto, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900, fontSize: 11)),
     );
   }
 
@@ -325,36 +394,35 @@ class FichaChoferScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 8, color: Colors.white70)),
-        Text(valor?.toString() ?? "---", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.white)),
+        Text(label, style: const TextStyle(fontSize: 10, color: Colors.white70)),
+        Text(valor?.toString() ?? "---", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
       ],
     );
   }
 
-  Widget _filaDatoMinima(IconData icono, String label, dynamic valor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3), // ESPACIO MÍNIMO
+  Widget _filaDatoAjustada(IconData icono, String label, dynamic valor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.shade100))),
       child: Row(
         children: [
-          Icon(icono, size: 12, color: Colors.blue.shade800),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+          Icon(icono, size: 18, color: Colors.blue.shade800),
+          const SizedBox(width: 12),
+          Text(label, style: const TextStyle(fontSize: 13, color: Colors.black54)),
           const Spacer(),
-          Text(valor?.toString() ?? "---", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+          Text(valor?.toString() ?? "---", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 
-  Widget _filaVtoSemaforoCompacta(String titulo, String? fecha) {
+  Widget _filaVtoSemaforoAjustada(String titulo, String? fecha) {
     Color bgStatus = Colors.grey.shade400; 
-
     if (fecha != null && fecha.isNotEmpty && fecha != "---") {
       try {
         DateTime hoy = DateTime.now();
         DateTime vto = DateTime.parse(fecha);
         int diasDiferencia = vto.difference(hoy).inDays;
-
         if (diasDiferencia < 0) {
           bgStatus = Colors.red.shade600; 
         } else if (diasDiferencia <= 30) {
@@ -362,25 +430,20 @@ class FichaChoferScreen extends StatelessWidget {
         } else {
           bgStatus = Colors.green.shade600; 
         }
-      } catch (e) {
-        bgStatus = Colors.grey.shade400;
+      } catch (e) { 
+        bgStatus = Colors.grey.shade400; 
       }
     }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2), // CASI SIN ESPACIO
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.shade100))),
       child: Row(
         children: [
-          Expanded(
-            child: Text(titulo, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w500)),
-          ),
+          Expanded(child: Text(titulo, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(color: bgStatus, borderRadius: BorderRadius.circular(2)),
-            child: Text(
-              formatearFecha(fecha), 
-              style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(color: bgStatus, borderRadius: BorderRadius.circular(4)),
+            child: Text(formatearFecha(fecha), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
           ),
         ],
       ),
