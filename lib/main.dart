@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:flutter_localizations/flutter_localizations.dart'; // NUEVO
 import 'firebase_options.dart';
 
 void main() async {
@@ -15,6 +19,17 @@ class LogisticaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      // --- CONFIGURACIÓN DE IDIOMA ESPAÑOL ARGENTINA ---
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('es', 'AR'), 
+      ],
+      locale: const Locale('es', 'AR'), 
+      // -----------------------------------------------
       builder: (context, child) {
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(
@@ -38,7 +53,7 @@ const List<String> empresasDisponibles = [
   "SUCESIÓN DE VECCHI CARLOS LUIS (20-08569424-4)"
 ];
 
-// --- FUNCIONES DE FORMATEO Y LÓGICA ---
+// --- FUNCIONES DE LÓGICA ---
 
 String formatearDNI(dynamic dni) {
   final String s = dni?.toString() ?? "";
@@ -82,7 +97,119 @@ int _calcularDiasRestantes(String? fecha) {
   } catch (_) { return 999; }
 }
 
-// --- PANTALLAS ---
+// --- FUNCIÓN PARA SUBIR IMAGENES  ---
+
+Future<void> _subirSolicitudImagen(BuildContext context, {
+  required String idSujeto, 
+  required String nombreSujeto, 
+  required String documentoEtiqueta, 
+  required String campoFirestore,
+  required String coleccionDestino,
+}) async {
+  final ImagePicker picker = ImagePicker();
+  
+  // 1. Elegir la imagen
+  final XFile? image = await showModalBottomSheet<XFile>(
+    context: context,
+    builder: (ctx) => SafeArea(
+      child: Wrap(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.camera_alt), 
+            title: const Text('Tomar Foto'), 
+            onTap: () async {
+              final img = await picker.pickImage(source: ImageSource.camera, imageQuality: 50);
+              if (ctx.mounted) Navigator.pop(ctx, img);
+            }
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library), 
+            title: const Text('Galería'), 
+            onTap: () async {
+              final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
+              if (ctx.mounted) Navigator.pop(ctx, img);
+            }
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (image == null || !context.mounted) return;
+
+  // 2. Elegir la fecha
+  final DateTime? nuevaFecha = await showDatePicker(
+    context: context,
+    initialDate: DateTime.now(),
+    firstDate: DateTime(2024),
+    lastDate: DateTime(2035),
+    helpText: "SELECCIONE EL NUEVO VENCIMIENTO",
+  );
+
+  if (nuevaFecha == null || !context.mounted) return;
+  final String fechaString = "${nuevaFecha.year}-${nuevaFecha.month.toString().padLeft(2,'0')}-${nuevaFecha.day.toString().padLeft(2,'0')}";
+
+  // 3. Mostrar diálogo de carga
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => const AlertDialog(
+      content: Row(
+        children: [
+          CircularProgressIndicator(), 
+          SizedBox(width: 20), 
+          Text("Subiendo a la nube...")
+        ]
+      )
+    ),
+  );
+
+  try {
+    // Referencia al archivo local
+    File file = File(image.path);
+    
+    // Nombre único para el archivo en la nube
+    String fileName = "solicitud_${idSujeto}_${DateTime.now().millisecondsSinceEpoch}.jpg";
+    
+    // Referencia al bucket específico que me pasaste
+    // Usamos el .ref() por defecto que ya tiene configurado el bucket en FirebaseOptions
+    Reference ref = FirebaseStorage.instance.ref().child('solicitudes').child(fileName);
+
+    // INICIAR SUBIDA
+    UploadTask uploadTask = ref.putFile(file);
+    
+    // Esperar a que la subida termine al 100%
+    TaskSnapshot snapshot = await uploadTask;
+    
+    // RECIÉN AHÍ pedimos la URL (esto evita el error object-not-found)
+    String url = await snapshot.ref.getDownloadURL();
+
+    // 4. Guardar datos en Firestore
+    await FirebaseFirestore.instance.collection('SOLICITUDES').add({
+      'ID_SUJETO': idSujeto,
+      'NOMBRE_SUJETO': nombreSujeto,
+      'DOCUMENTO': documentoEtiqueta,
+      'CAMPO_FIRESTORE': campoFirestore,
+      'COLECCION_DESTINO': coleccionDestino,
+      'NUEVA_FECHA': fechaString,
+      'URL_FOTO': url,
+      'ESTADO': 'PENDIENTE',
+      'FECHA_PEDIDO': DateTime.now(),
+    });
+
+    if (!context.mounted) return;
+    Navigator.of(context, rootNavigator: true).pop(); // Cerrar diálogo de carga
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("¡Solicitud enviada con éxito!")));
+
+  } catch (e) {
+    debugPrint("Error en proceso: $e");
+    if (!context.mounted) return;
+    Navigator.of(context, rootNavigator: true).pop(); // Cerrar diálogo de carga
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+  }
+}
+
+/// --- PANTALLAS ---
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -196,36 +323,97 @@ class MainPanel extends StatelessWidget {
   }
 }
 
-// --- PANEL DE CONTROL VENCIMIENTOS (ADMIN) ---
-
 class PanelVencimientosScreen extends StatelessWidget {
   const PanelVencimientosScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text("Vencimientos Próximos"),
+          title: const Text("Vencimientos"),
           backgroundColor: Colors.red.shade900,
           foregroundColor: Colors.white,
           bottom: const TabBar(
             indicatorColor: Colors.white,
             tabs: [
-              Tab(icon: Icon(Icons.person), text: "PERSONAL"),
-              Tab(icon: Icon(Icons.local_shipping), text: "EQUIPOS"),
+              Tab(text: "PERSONAL"),
+              Tab(text: "EQUIPOS"),
+              Tab(icon: Icon(Icons.camera_alt), text: "SOLICITUDES"),
             ],
           ),
         ),
-        body: const TabBarView(
+        body: TabBarView(
           children: [
-            _ListaVencimientosGenerica(coleccion: 'EMPLEADOS', nombreCampo: 'CHOFER'),
-            _ListaVencimientosGenerica(coleccion: 'VEHICULOS', nombreCampo: 'DOMINIO'),
+            const _ListaVencimientosGenerica(coleccion: 'EMPLEADOS', nombreCampo: 'CHOFER'),
+            const _ListaVencimientosGenerica(coleccion: 'VEHICULOS', nombreCampo: 'DOMINIO'),
+            _SeccionSolicitudesPendientesAdmin(),
           ],
         ),
       ),
     );
+  }
+}
+
+class _SeccionSolicitudesPendientesAdmin extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: FirebaseFirestore.instance.collection('SOLICITUDES').where('ESTADO', isEqualTo: 'PENDIENTE').snapshots(),
+      builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final solicitudes = snapshot.data!.docs;
+        if (solicitudes.isEmpty) return const Center(child: Text("No hay fotos pendientes de revisión"));
+
+        return ListView.builder(
+          itemCount: solicitudes.length,
+          itemBuilder: (context, index) {
+            final sol = solicitudes[index];
+            return Card(
+              margin: const EdgeInsets.all(10),
+              child: ListTile(
+                leading: InkWell(
+                  onTap: () => _verFotoGrande(context, sol['URL_FOTO']),
+                  child: Image.network(sol['URL_FOTO'], width: 50, height: 50, fit: BoxFit.cover),
+                ),
+                title: Text("${sol['NOMBRE_SUJETO']}"),
+                subtitle: Text("Documento: ${sol['DOCUMENTO']}\nNuevo Vto: ${formatearFecha(sol['NUEVA_FECHA'])}"),
+                isThreeLine: true,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(icon: const Icon(Icons.check_circle, color: Colors.green), onPressed: () => _aprobarSolicitud(context, sol)),
+                    IconButton(icon: const Icon(Icons.cancel, color: Colors.red), onPressed: () => _rechazarSolicitud(context, sol)),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _verFotoGrande(BuildContext context, String url) {
+    showDialog(context: context, builder: (_) => Dialog(child: Column(mainAxisSize: MainAxisSize.min, children: [Image.network(url), TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cerrar"))])));
+  }
+
+  Future<void> _aprobarSolicitud(BuildContext context, DocumentSnapshot sol) async {
+    try {
+      await FirebaseFirestore.instance.collection(sol['COLECCION_DESTINO']).doc(sol['ID_SUJETO']).update({
+        sol['CAMPO_FIRESTORE']: sol['NUEVA_FECHA'],
+        'FOTO_${sol['CAMPO_FIRESTORE']}': sol['URL_FOTO']
+      });
+      await sol.reference.update({'ESTADO': 'APROBADO'});
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vencimiento actualizado correctamente")));
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+  }
+
+  Future<void> _rechazarSolicitud(BuildContext context, DocumentSnapshot sol) async {
+    await sol.reference.update({'ESTADO': 'RECHAZADO'});
   }
 }
 
@@ -301,8 +489,6 @@ class _ListaVencimientosGenerica extends StatelessWidget {
     );
   }
 }
-
-// --- GESTIÓN DE PERSONAL ---
 
 class ListaPersonalScreen extends StatefulWidget {
   const ListaPersonalScreen({super.key});
@@ -580,8 +766,6 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
   }
 }
 
-// --- GESTIÓN DE EQUIPOS (FLOTA) ---
-
 class ListaEquiposScreen extends StatefulWidget {
   const ListaEquiposScreen({super.key});
   @override
@@ -736,8 +920,6 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
   }
 }
 
-// --- PANTALLA USUARIO: MIS DOCUMENTOS ---
-
 class MisDocumentosScreen extends StatelessWidget {
   final String dni;
   const MisDocumentosScreen({super.key, required this.dni});
@@ -758,19 +940,20 @@ class MisDocumentosScreen extends StatelessWidget {
           }
 
           final user = snapshot.data!.data() as Map<String, dynamic>;
+          final String nombre = user['CHOFER'] ?? "Usuario";
           final String tractorAsignado = user['TRACTOR'] ?? "";
           final String acopladoAsignado = user['BATEA_TOLVA'] ?? "";
 
           return SingleChildScrollView(
             child: Column(
               children: [
-                cabeceraFicha(user['CHOFER'] ?? "Sin Nombre", "DNI: ${formatearDNI(user['DNI'])}"),
+                cabeceraFicha(nombre, "DNI: ${formatearDNI(user['DNI'])}"),
                 
                 tituloSeccion("MI DOCUMENTACIÓN PERSONAL"),
-                filaVtoSemaforo("LICENCIA DE CONDUCIR", user['LIC_COND']),
-                filaVtoSemaforo("PREOCUPACIONAL (EPAP)", user['EPAP']),
-                filaVtoSemaforo("CURSO MANEJO DEFENSIVO", user['CURSO_MANEJO']),
-                filaVtoSemaforo("CURSO MERCANCÍAS PELIGROSAS", user['CURSO_MERCANCIAS']),
+                filaVtoSemaforo("LICENCIA DE CONDUCIR", user['LIC_COND'], onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "LICENCIA", campoFirestore: "LIC_COND", coleccionDestino: 'EMPLEADOS'), urlFoto: user['FOTO_LIC_COND']),
+                filaVtoSemaforo("PREOCUPACIONAL (EPAP)", user['EPAP'], onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "EPAP", campoFirestore: "EPAP", coleccionDestino: 'EMPLEADOS'), urlFoto: user['FOTO_EPAP']),
+                filaVtoSemaforo("CURSO MANEJO DEFENSIVO", user['CURSO_MANEJO'], onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "CURSO MANEJO", campoFirestore: "CURSO_MANEJO", coleccionDestino: 'EMPLEADOS'), urlFoto: user['FOTO_CURSO_MANEJO']),
+                filaVtoSemaforo("CURSO MERCANCÍAS PELIGROSAS", user['CURSO_MERCANCIAS'], onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "MERCANCIAS", campoFirestore: "CURSO_MERCANCIAS", coleccionDestino: 'EMPLEADOS'), urlFoto: user['FOTO_CURSO_MERCANCIAS']),
 
                 if (tractorAsignado.isNotEmpty || acopladoAsignado.isNotEmpty) ...[
                   tituloSeccion("DOCUMENTACIÓN DE MI EQUIPO"),
@@ -814,12 +997,12 @@ class _StreamDocumentacionVehiculo extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
               width: double.infinity,
-              color: Colors.blue.withValues(alpha: 0.1),
+              color: Colors.blue.withAlpha(25),
               child: Text("$etiqueta: $dominio", 
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blue)),
             ),
-            filaVtoSemaforo("VENCIMIENTO RTO", v['VENCIMIENTO_RTO']),
-            filaVtoSemaforo("VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA']),
+            filaVtoSemaforo("VENCIMIENTO RTO", v['VENCIMIENTO_RTO'], onSubir: () => _subirSolicitudImagen(context, idSujeto: dominio, nombreSujeto: "EQUIPO $dominio", documentoEtiqueta: "RTO", campoFirestore: "VENCIMIENTO_RTO", coleccionDestino: 'VEHICULOS'), urlFoto: v['FOTO_VENCIMIENTO_RTO']),
+            filaVtoSemaforo("VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'], onSubir: () => _subirSolicitudImagen(context, idSujeto: dominio, nombreSujeto: "EQUIPO $dominio", documentoEtiqueta: "POLIZA", campoFirestore: "VENCIMIENTO_POLIZA", coleccionDestino: 'VEHICULOS'), urlFoto: v['FOTO_VENCIMIENTO_POLIZA']),
             const Divider(),
           ],
         );
@@ -845,7 +1028,7 @@ Widget filaDato(IconData icono, String label, dynamic valor) {
   return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), child: Row(children: [Icon(icono, size: 20, color: Colors.blue.shade800), const SizedBox(width: 15), Text(label), const Spacer(), Text(valor?.toString() ?? "---", style: const TextStyle(fontWeight: FontWeight.bold))]));
 }
 
-Widget filaVtoSemaforo(String titulo, String? fecha) {
+Widget filaVtoSemaforo(String titulo, String? fecha, {VoidCallback? onSubir, String? urlFoto}) {
   Color bg = Colors.grey;
   int dias = _calcularDiasRestantes(fecha);
   
@@ -853,8 +1036,21 @@ Widget filaVtoSemaforo(String titulo, String? fecha) {
     bg = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
   }
 
-  return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10), child: Row(children: [
-    Expanded(child: Text(titulo)),
-    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)), child: Text(formatearFecha(fecha), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-  ]));
+  return Builder(
+    builder: (context) {
+      return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10), child: Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(titulo, style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 4),
+          Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)), child: Text(formatearFecha(fecha), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+        ])),
+        if (urlFoto != null && urlFoto.isNotEmpty) 
+          IconButton(icon: const Icon(Icons.image, color: Colors.blue), onPressed: () {
+            showDialog(context: context, builder: (_) => Dialog(child: Column(mainAxisSize: MainAxisSize.min, children: [Image.network(urlFoto), TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cerrar"))])));
+          }),
+        if (onSubir != null)
+          IconButton(icon: const Icon(Icons.cloud_upload_outlined, color: Colors.blue), onPressed: onSubir),
+      ]));
+    }
+  );
 }

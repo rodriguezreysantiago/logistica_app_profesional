@@ -13,17 +13,19 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   
-  # Versiones compatibles entre sí para evitar conflictos
+  # Localización e Idiomas
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
+
+  # Firebase
   firebase_core: ^3.10.1
   cloud_firestore: ^5.6.1
-  firebase_storage: ^12.4.10  # <--- Versión sugerida por el sistema
+  firebase_storage: ^12.4.10
   
-  # Paquetes para fotos y archivos
-  image_picker: ^1.1.2         
-  path_provider: ^2.1.5       
-  
-  # Otros
-  intl: ^0.20.2
+  # Fotos y archivos
+  image_picker: ^1.1.2
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:
