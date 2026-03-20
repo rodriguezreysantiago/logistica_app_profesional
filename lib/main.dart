@@ -38,7 +38,7 @@ const List<String> empresasDisponibles = [
   "SUCESIÓN DE VECCHI CARLOS LUIS (20-08569424-4)"
 ];
 
-// --- FUNCIONES DE FORMATEO ---
+// --- FUNCIONES DE FORMATEO Y LÓGICA ---
 
 String formatearDNI(dynamic dni) {
   final String s = dni?.toString() ?? "";
@@ -65,6 +65,21 @@ String formatearFecha(String? fecha) {
     }
     return fecha;
   } catch (e) { return fecha; }
+}
+
+int _calcularDiasRestantes(String? fecha) {
+  if (fecha == null || fecha.isEmpty || fecha == "---" || fecha == "nan") return 999;
+  try {
+    final String f = fecha.replaceAll('/', '-');
+    final List<String> partes = f.split('-');
+    DateTime fVto;
+    if (partes[0].length == 4) {
+      fVto = DateTime.parse(f);
+    } else {
+      fVto = DateTime.parse("${partes[2]}-${partes[1].padLeft(2,'0')}-${partes[0].padLeft(2,'0')}");
+    }
+    return fVto.difference(DateTime.now()).inDays;
+  } catch (_) { return 999; }
 }
 
 // --- PANTALLAS ---
@@ -169,7 +184,6 @@ class MainPanel extends StatelessWidget {
             const SizedBox(height: 10),
             _card(context, Icons.local_shipping, "EQUIPOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaEquiposScreen()))),
             const SizedBox(height: 10),
-            // --- NUEVO BOTÓN DE VENCIMIENTOS ---
             _card(context, Icons.notification_important, "CONTROL VENCIMIENTOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PanelVencimientosScreen()))),
           ],
         ],
@@ -182,7 +196,7 @@ class MainPanel extends StatelessWidget {
   }
 }
 
-// --- PANTALLA DE CONTROL DE VENCIMIENTOS ---
+// --- PANEL DE CONTROL VENCIMIENTOS (ADMIN) ---
 
 class PanelVencimientosScreen extends StatelessWidget {
   const PanelVencimientosScreen({super.key});
@@ -193,7 +207,7 @@ class PanelVencimientosScreen extends StatelessWidget {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text("Vencimientos Globales"),
+          title: const Text("Vencimientos Próximos"),
           backgroundColor: Colors.red.shade900,
           foregroundColor: Colors.white,
           bottom: const TabBar(
@@ -222,28 +236,31 @@ class _ListaVencimientosGenerica extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder(
-      stream: FirebaseFirestore.instance.collection(coleccion).snapshots(),
+    return FutureBuilder(
+      future: FirebaseFirestore.instance.collection(coleccion).get(),
       builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
+        if (snapshot.hasError) return const Center(child: Text("Error de conexión"));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
+        final docs = snapshot.data!.docs;
         List<Map<String, dynamic>> alertas = [];
 
-        for (var doc in snapshot.data!.docs) {
+        for (var doc in docs) {
           final data = doc.data() as Map<String, dynamic>;
           final nombreSujeto = data[nombreCampo] ?? "Sin nombre";
 
           data.forEach((key, value) {
-            // Buscamos campos de fecha
             if (key.contains("VENCIMIENTO") || key == "EPAP" || key == "LIC_COND" || key == "CURSO_MANEJO" || key == "CURSO_MERCANCIAS") {
               if (value != null && value.toString().isNotEmpty && value != "---" && value != "nan") {
-                int dias = _obtenerDiasRestantes(value.toString());
-                if (dias <= 45) { // Mostramos si faltan 45 días o menos
+                int dias = _calcularDiasRestantes(value.toString());
+                if (dias <= 45) {
                   alertas.add({
                     'sujeto': nombreSujeto,
                     'documento': key.replaceAll('VENCIMIENTO_', '').replaceAll('_', ' '),
                     'fecha': value,
                     'dias': dias,
+                    'id': doc.id,
+                    'dataFull': data,
                   });
                 }
               }
@@ -252,8 +269,7 @@ class _ListaVencimientosGenerica extends StatelessWidget {
         }
 
         alertas.sort((a, b) => a['dias'].compareTo(b['dias']));
-
-        if (alertas.isEmpty) return const Center(child: Text("No hay vencimientos próximos"));
+        if (alertas.isEmpty) return const Center(child: Text("Sin vencimientos próximos (45 días)"));
 
         return ListView.builder(
           itemCount: alertas.length,
@@ -263,13 +279,20 @@ class _ListaVencimientosGenerica extends StatelessWidget {
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               child: ListTile(
-                leading: Icon(Icons.warning, color: vencido ? Colors.red : Colors.orange),
+                leading: Icon(Icons.warning, color: vencido ? Colors.red : (al['dias'] <= 15 ? Colors.orange : Colors.amber)),
                 title: Text(al['sujeto']),
                 subtitle: Text("${al['documento']}: ${formatearFecha(al['fecha'])}"),
                 trailing: Text(
                   vencido ? "VENCIDO" : "EN ${al['dias']} DÍAS",
                   style: TextStyle(color: vencido ? Colors.red : Colors.orange, fontWeight: FontWeight.bold),
                 ),
+                onTap: () {
+                   if(coleccion == 'EMPLEADOS') {
+                     Navigator.push(context, MaterialPageRoute(builder: (context) => FichaChoferScreen(dni: al['id'])));
+                   } else {
+                     Navigator.push(context, MaterialPageRoute(builder: (context) => FichaVehiculoScreen(carData: al['dataFull'])));
+                   }
+                },
               ),
             );
           },
@@ -277,23 +300,9 @@ class _ListaVencimientosGenerica extends StatelessWidget {
       },
     );
   }
-
-  int _obtenerDiasRestantes(String fecha) {
-    try {
-      final String f = fecha.replaceAll('/', '-');
-      final List<String> partes = f.split('-');
-      DateTime fVto;
-      if (partes[0].length == 4) {
-        fVto = DateTime.parse(f);
-      } else {
-        fVto = DateTime.parse("${partes[2]}-${partes[1].padLeft(2,'0')}-${partes[0].padLeft(2,'0')}");
-      }
-      return fVto.difference(DateTime.now()).inDays;
-    } catch (_) { return 999; }
-  }
 }
 
-// --- RESTO DE PANTALLAS (PERSONAL Y EQUIPOS) ---
+// --- GESTIÓN DE PERSONAL ---
 
 class ListaPersonalScreen extends StatefulWidget {
   const ListaPersonalScreen({super.key});
@@ -433,8 +442,6 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
     if (picked == null || !mounted) return;
     final String nueva = "${picked.year}-${picked.month.toString().padLeft(2,'0')}-${picked.day.toString().padLeft(2,'0')}";
     await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({campo: nueva});
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$label actualizado")));
   }
 
   void _seleccionarEquipo(String tipoFirestore, String label) {
@@ -442,23 +449,92 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text("Asignar $label"),
-        content: SizedBox(width: double.maxFinite, child: StreamBuilder(
-          stream: FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', isEqualTo: tipoFirestore == 'TRACTOR' ? 'TRACTOR' : (tipoFirestore == 'BATEA_TOLVA' ? 'BATEA' : 'TOLVA')).snapshots(),
-          builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-            final unidades = snapshot.data!.docs;
-            return ListView.builder(shrinkWrap: true, itemCount: unidades.length, itemBuilder: (context, index) => ListTile(title: Text(unidades[index]['DOMINIO']), onTap: () async {
-              final nav = Navigator.of(dialogContext);
-              await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({tipoFirestore: unidades[index]['DOMINIO']});
-              if (!dialogContext.mounted) return;
-              nav.pop();
-            }));
-          },
-        )),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: StreamBuilder(
+            stream: FirebaseFirestore.instance.collection('EMPLEADOS').snapshots(),
+            builder: (context, AsyncSnapshot<QuerySnapshot> empleadoSnapshot) {
+              if (!empleadoSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+              List<String> dominiosOcupados = [];
+              for (var doc in empleadoSnapshot.data!.docs) {
+                final data = doc.data() as Map<String, dynamic>;
+                if (data['TRACTOR'] != null && data['TRACTOR'] != "") dominiosOcupados.add(data['TRACTOR']);
+                if (data['BATEA_TOLVA'] != null && data['BATEA_TOLVA'] != "") dominiosOcupados.add(data['BATEA_TOLVA']);
+              }
+
+              return StreamBuilder(
+                stream: tipoFirestore == 'TRACTOR'
+                    ? FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', isEqualTo: 'TRACTOR').snapshots()
+                    : FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', whereIn: ['BATEA', 'TOLVA']).snapshots(),
+                builder: (context, AsyncSnapshot<QuerySnapshot> vehiculoSnapshot) {
+                  if (!vehiculoSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+
+                  final unidadesLibres = vehiculoSnapshot.data!.docs.where((doc) {
+                    final dominio = doc['DOMINIO'];
+                    return !dominiosOcupados.contains(dominio);
+                  }).toList();
+
+                  return ListView(
+                    shrinkWrap: true,
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.not_interested, color: Colors.red),
+                        title: Text("QUITAR $label (SIN ASIGNAR)", 
+                          style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)
+                        ),
+                        onTap: () async {
+                          final nav = Navigator.of(dialogContext);
+                          await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({
+                            tipoFirestore: "" 
+                          });
+                          if (!dialogContext.mounted) return;
+                          nav.pop();
+                        },
+                      ),
+                      const Divider(),
+                      
+                      ...unidadesLibres.map((doc) {
+                        return ListTile(
+                          leading: const Icon(Icons.local_shipping, color: Colors.green),
+                          title: Text(doc['DOMINIO']),
+                          subtitle: Text(doc['TIPO']),
+                          onTap: () async {
+                            final nav = Navigator.of(dialogContext);
+                            await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({
+                              tipoFirestore: doc['DOMINIO']
+                            });
+                            if (!dialogContext.mounted) return;
+                            nav.pop();
+                          },
+                        );
+                      }),
+                      
+                      if (unidadesLibres.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(16.0),
+                          child: Text("No hay unidades libres disponibles.", 
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey)
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("CERRAR"),
+          ),
+        ],
       ),
     );
   }
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -504,7 +580,7 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
   }
 }
 
-// --- EQUIPOS ---
+// --- GESTIÓN DE EQUIPOS (FLOTA) ---
 
 class ListaEquiposScreen extends StatefulWidget {
   const ListaEquiposScreen({super.key});
@@ -552,17 +628,7 @@ class _ListaEquiposScreenState extends State<ListaEquiposScreen> {
         floatingActionButton: FloatingActionButton(onPressed: _dialogNuevoEquipo, child: const Icon(Icons.add)),
         body: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: TextField(
-                decoration: InputDecoration(
-                  hintText: "Buscar dominio...", 
-                  prefixIcon: const Icon(Icons.search), 
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))
-                ), 
-                onChanged: (v) => setState(() => _searchQuery = v.toUpperCase())
-              ),
-            ),
+            Padding(padding: const EdgeInsets.all(12), child: TextField(decoration: InputDecoration(hintText: "Buscar dominio...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), onChanged: (v) => setState(() => _searchQuery = v.toUpperCase()))),
             Expanded(
               child: TabBarView(children: [
                 _buildLista("TRACTOR"), 
@@ -608,6 +674,25 @@ class FichaVehiculoScreen extends StatefulWidget {
 
 class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
   
+  Future<void> _editarCampoTexto(String campo, String etiqueta, String valorActual) async {
+    final ctrl = TextEditingController(text: valorActual == "S/D" ? "" : valorActual);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Editar $etiqueta"),
+        content: TextField(controller: ctrl, textCapitalization: TextCapitalization.characters),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
+          ElevatedButton(onPressed: () async {
+            await FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).update({campo: ctrl.text.trim().toUpperCase()});
+            if (!ctx.mounted) return;
+            Navigator.pop(ctx);
+          }, child: const Text("Guardar"))
+        ],
+      ),
+    );
+  }
+
   Future<void> _editarFecha(String campo) async {
     final DateTime? picked = await showDatePicker(
       context: context, 
@@ -617,54 +702,31 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
     );
     if (picked != null && mounted) {
       final String nueva = "${picked.year}-${picked.month.toString().padLeft(2,'0')}-${picked.day.toString().padLeft(2,'0')}";
-      await FirebaseFirestore.instance
-          .collection('VEHICULOS')
-          .doc(widget.carData['DOMINIO'])
-          .update({campo: nueva});
+      await FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).update({campo: nueva});
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Ficha: ${widget.carData['DOMINIO']}"), 
-        backgroundColor: Colors.blue.shade900, 
-        foregroundColor: Colors.white
-      ),
+      appBar: AppBar(title: Text("Ficha: ${widget.carData['DOMINIO']}"), backgroundColor: Colors.blue.shade900, foregroundColor: Colors.white),
       body: StreamBuilder(
         stream: FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).snapshots(),
         builder: (context, AsyncSnapshot<DocumentSnapshot> snapshot) {
           if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator());
-          
           final v = snapshot.data!.data() as Map<String, dynamic>;
-          
           return SingleChildScrollView(
             child: Column(
               children: [
                 cabeceraFicha(v['DOMINIO'], v['TIPO']),
-                
-                tituloSeccion("FICHA TÉCNICA"),
-                
-                filaDato(Icons.branding_watermark, "MARCA", v['MARCA']?.toString() ?? "Sin datos"),
-                filaDato(Icons.directions_car, "MODELO", v['MODELO']?.toString() ?? "Sin datos"),
-                filaDato(Icons.calendar_today, "AÑO", v['AÑO']?.toString() ?? "Sin datos"),
-                filaDato(Icons.settings, "TIPIFICACIÓN", v['TIPIFICADA']?.toString() ?? "Sin datos"),
-                filaDato(Icons.business, "EMPRESA", v['EMPRESA']?.toString() ?? "Sin datos"),
-                
-                tituloSeccion("DOCUMENTACIÓN (TOCAR PARA ACTUALIZAR)"),
-                
-                InkWell(
-                  onTap: () => _editarFecha('VENCIMIENTO_RTO'), 
-                  child: filaVtoSemaforo("VENCIMIENTO RTO", v['VENCIMIENTO_RTO'])
-                ),
-                
-                InkWell(
-                  onTap: () => _editarFecha('VENCIMIENTO_POLIZA'), 
-                  child: filaVtoSemaforo("VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'])
-                ),
-                
-                const SizedBox(height: 20),
+                tituloSeccion("FICHA TÉCNICA (TOCAR PARA EDITAR)"),
+                InkWell(onTap: () => _editarCampoTexto('MARCA', 'MARCA', v['MARCA'] ?? "S/D"), child: filaDato(Icons.branding_watermark, "MARCA", v['MARCA'] ?? "S/D")),
+                InkWell(onTap: () => _editarCampoTexto('MODELO', 'MODELO', v['MODELO'] ?? "S/D"), child: filaDato(Icons.directions_car, "MODELO", v['MODELO'] ?? "S/D")),
+                InkWell(onTap: () => _editarCampoTexto('AÑO', 'AÑO', v['AÑO'] ?? "S/D"), child: filaDato(Icons.calendar_today, "AÑO", v['AÑO'] ?? "S/D")),
+                InkWell(onTap: () => _editarCampoTexto('EMPRESA', 'EMPRESA', v['EMPRESA'] ?? "S/D"), child: filaDato(Icons.business, "EMPRESA", v['EMPRESA'] ?? "S/D")),
+                tituloSeccion("DOCUMENTACIÓN (TOCAR PARA EDITAR)"),
+                InkWell(onTap: () => _editarFecha('VENCIMIENTO_RTO'), child: filaVtoSemaforo("VENCIMIENTO RTO", v['VENCIMIENTO_RTO'])),
+                InkWell(onTap: () => _editarFecha('VENCIMIENTO_POLIZA'), child: filaVtoSemaforo("VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'])),
               ],
             ),
           );
@@ -674,7 +736,99 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
   }
 }
 
-// --- COMPONENTES GLOBALES ---
+// --- PANTALLA USUARIO: MIS DOCUMENTOS ---
+
+class MisDocumentosScreen extends StatelessWidget {
+  final String dni;
+  const MisDocumentosScreen({super.key, required this.dni});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Mis Documentos"),
+        backgroundColor: Colors.blue.shade900,
+        foregroundColor: Colors.white,
+      ),
+      body: StreamBuilder(
+        stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).snapshots(),
+        builder: (context, AsyncSnapshot<DocumentSnapshot> snapshot) {
+          if (!snapshot.hasData || !snapshot.data!.exists) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final user = snapshot.data!.data() as Map<String, dynamic>;
+          final String tractorAsignado = user['TRACTOR'] ?? "";
+          final String acopladoAsignado = user['BATEA_TOLVA'] ?? "";
+
+          return SingleChildScrollView(
+            child: Column(
+              children: [
+                cabeceraFicha(user['CHOFER'] ?? "Sin Nombre", "DNI: ${formatearDNI(user['DNI'])}"),
+                
+                tituloSeccion("MI DOCUMENTACIÓN PERSONAL"),
+                filaVtoSemaforo("LICENCIA DE CONDUCIR", user['LIC_COND']),
+                filaVtoSemaforo("PREOCUPACIONAL (EPAP)", user['EPAP']),
+                filaVtoSemaforo("CURSO MANEJO DEFENSIVO", user['CURSO_MANEJO']),
+                filaVtoSemaforo("CURSO MERCANCÍAS PELIGROSAS", user['CURSO_MERCANCIAS']),
+
+                if (tractorAsignado.isNotEmpty || acopladoAsignado.isNotEmpty) ...[
+                  tituloSeccion("DOCUMENTACIÓN DE MI EQUIPO"),
+                  if (tractorAsignado.isNotEmpty)
+                    _StreamDocumentacionVehiculo(dominio: tractorAsignado, etiqueta: "TRACTOR"),
+                  if (acopladoAsignado.isNotEmpty)
+                    _StreamDocumentacionVehiculo(dominio: acopladoAsignado, etiqueta: "ACOPLADO / BATEA"),
+                ] else ...[
+                  const Padding(
+                    padding: EdgeInsets.all(30.0),
+                    child: Text("No tienes vehículos asignados.", 
+                      style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _StreamDocumentacionVehiculo extends StatelessWidget {
+  final String dominio;
+  final String etiqueta;
+  const _StreamDocumentacionVehiculo({required this.dominio, required this.etiqueta});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: FirebaseFirestore.instance.collection('VEHICULOS').doc(dominio).snapshots(),
+      builder: (context, AsyncSnapshot<DocumentSnapshot> vehiculoSnapshot) {
+        if (!vehiculoSnapshot.hasData || !vehiculoSnapshot.data!.exists) {
+          return filaDato(Icons.warning, etiqueta, "$dominio (No cargado)");
+        }
+
+        final v = vehiculoSnapshot.data!.data() as Map<String, dynamic>;
+        return Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              width: double.infinity,
+              color: Colors.blue.withValues(alpha: 0.1),
+              child: Text("$etiqueta: $dominio", 
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blue)),
+            ),
+            filaVtoSemaforo("VENCIMIENTO RTO", v['VENCIMIENTO_RTO']),
+            filaVtoSemaforo("VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA']),
+            const Divider(),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// --- COMPONENTES VISUALES ---
 
 Widget cabeceraFicha(String? titulo, String? subtitulo) {
   return Container(width: double.infinity, color: Colors.blue.shade900, padding: const EdgeInsets.all(24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -693,48 +847,14 @@ Widget filaDato(IconData icono, String label, dynamic valor) {
 
 Widget filaVtoSemaforo(String titulo, String? fecha) {
   Color bg = Colors.grey;
+  int dias = _calcularDiasRestantes(fecha);
+  
   if (fecha != null && fecha != "---" && fecha != "nan" && fecha.isNotEmpty) {
-    try {
-      final String f = fecha.replaceAll('/', '-');
-      final List<String> partes = f.split('-');
-      DateTime fechaVto;
-      if (partes[0].length == 4) {
-        fechaVto = DateTime.parse(f);
-      } else {
-        fechaVto = DateTime.parse("${partes[2]}-${partes[1].padLeft(2,'0')}-${partes[0].padLeft(2,'0')}");
-      }
-      final int dias = fechaVto.difference(DateTime.now()).inDays;
-      bg = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
-    } catch (_) { bg = Colors.grey.shade400; }
+    bg = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
   }
+
   return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10), child: Row(children: [
     Expanded(child: Text(titulo)),
-    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)), child: Text(formatearFecha(fecha), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
+    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)), child: Text(formatearFecha(fecha), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
   ]));
-}
-
-class MisDocumentosScreen extends StatelessWidget {
-  final String dni;
-  const MisDocumentosScreen({super.key, required this.dni});
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Mis Documentos"), backgroundColor: Colors.blue.shade900, foregroundColor: Colors.white),
-      body: StreamBuilder(
-        stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).snapshots(),
-        builder: (context, AsyncSnapshot<DocumentSnapshot> snapshot) {
-          if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator());
-          final user = snapshot.data!.data() as Map<String, dynamic>;
-          return Column(children: [
-            cabeceraFicha(user['CHOFER'], "DNI: ${formatearDNI(user['DNI'])}"),
-            tituloSeccion("ESTADO DE MIS VENCIMIENTOS"),
-            filaVtoSemaforo("LICENCIA DE CONDUCIR", user['LIC_COND']),
-            filaVtoSemaforo("PREOCUPACIONAL (EPAP)", user['EPAP']),
-            filaVtoSemaforo("CURSO MANEJO DEFENSIVO", user['CURSO_MANEJO']),
-            filaVtoSemaforo("CURSO MERCANCÍAS PELIGROSAS", user['CURSO_MERCANCIAS']),
-          ]);
-        },
-      ),
-    );
-  }
 }
