@@ -95,7 +95,7 @@ int _calcularDiasRestantes(String? fecha) {
   } catch (_) { return 999; }
 }
 
-// --- FUNCIÓN PARA SUBIR IMAGENES ---
+// --- GESTIÓN DE IMÁGENES ---
 
 Future<void> _subirSolicitudImagen(BuildContext context, {
   required String idSujeto, 
@@ -185,14 +185,79 @@ Future<void> _subirSolicitudImagen(BuildContext context, {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("¡Solicitud enviada con éxito!")));
 
   } catch (e) {
-    debugPrint("Error en proceso: $e");
     if (!context.mounted) return;
     Navigator.of(context, rootNavigator: true).pop();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
   }
 }
 
-/// --- PANTALLAS ---
+Future<void> _subirImagenDirectaAdmin(BuildContext context, String idSujeto, String campoFirestore, String coleccionDestino) async {
+  final ImagePicker picker = ImagePicker();
+  final XFile? image = await picker.pickImage(source: ImageSource.camera, imageQuality: 50);
+
+  if (image == null || !context.mounted) return;
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => const AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Actualizando imagen...")])),
+  );
+
+  try {
+    File file = File(image.path);
+    String fileName = "admin_update_${idSujeto}_${DateTime.now().millisecondsSinceEpoch}.jpg";
+    Reference ref = FirebaseStorage.instance.ref().child('documentos').child(fileName);
+
+    await ref.putFile(file);
+    String url = await ref.getDownloadURL();
+
+    await FirebaseFirestore.instance.collection(coleccionDestino).doc(idSujeto).update({
+      'FOTO_$campoFirestore': url,
+    });
+
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Imagen actualizada con éxito")));
+    }
+  } catch (e) {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al actualizar: $e"), backgroundColor: Colors.red));
+    }
+  }
+}
+
+Future<void> _confirmarEliminarImagen(BuildContext context, String col, String id, String campo, String url) async {
+  bool? confirmar = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text("¿Eliminar imagen?"),
+      content: const Text("Esta acción borrará la foto permanentemente de la base de datos."),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCELAR")),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("ELIMINAR", style: TextStyle(color: Colors.red))),
+      ],
+    ),
+  );
+
+  if (confirmar == true) {
+    try {
+      await FirebaseFirestore.instance.collection(col).doc(id).update({
+        'FOTO_$campo': FieldValue.delete(),
+      });
+      
+      try {
+        await FirebaseStorage.instance.refFromURL(url).delete();
+      } catch (_) {}
+
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Imagen eliminada")));
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+    }
+  }
+}
+
+// --- PANTALLAS ---
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -357,7 +422,7 @@ class _SeccionSolicitudesPendientesAdmin extends StatelessWidget {
               margin: const EdgeInsets.all(10),
               child: ListTile(
                 leading: InkWell(
-                  onTap: () => _verFotoGrande(context, sol['URL_FOTO']),
+                  onTap: () => _verFotoGrande(context, sol['DOCUMENTO'], sol['URL_FOTO']),
                   child: Image.network(sol['URL_FOTO'], width: 50, height: 50, fit: BoxFit.cover),
                 ),
                 title: Text("${sol['NOMBRE_SUJETO']}"),
@@ -378,8 +443,11 @@ class _SeccionSolicitudesPendientesAdmin extends StatelessWidget {
     );
   }
 
-  void _verFotoGrande(BuildContext context, String url) {
-    showDialog(context: context, builder: (_) => Dialog(child: Column(mainAxisSize: MainAxisSize.min, children: [Image.network(url), TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cerrar"))])));
+  void _verFotoGrande(BuildContext context, String titulo, String url) {
+    showDialog(context: context, builder: (_) => Dialog(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      AppBar(title: Text(titulo), automaticallyImplyLeading: false, actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))]),
+      InteractiveViewer(child: Image.network(url)),
+    ])));
   }
 
   Future<void> _aprobarSolicitud(BuildContext context, DocumentSnapshot sol) async {
@@ -601,8 +669,6 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
     );
   }
 
- 
-
   void _seleccionarEquipo(String tipoFirestore, String label) {
     showDialog(
       context: context,
@@ -652,7 +718,6 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
                         },
                       ),
                       const Divider(),
-                      
                       ...unidadesLibres.map((doc) {
                         return ListTile(
                           leading: const Icon(Icons.local_shipping, color: Colors.green),
@@ -668,15 +733,6 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
                           },
                         );
                       }),
-                      
-                      if (unidadesLibres.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Text("No hay unidades libres disponibles.", 
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey)
-                          ),
-                        ),
                     ],
                   );
                 },
@@ -684,12 +740,7 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
             },
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text("CERRAR"),
-          ),
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text("CERRAR"))],
       ),
     );
   }
@@ -720,11 +771,10 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
               InkWell(onTap: () => _editarCampoTexto('TELEFONO', 'TELÉFONO', u['TELEFONO']?.toString() ?? ""), child: filaDato(Icons.phone, "TELÉFONO", u['TELEFONO'] ?? "Sin datos")),
               InkWell(onTap: () => _seleccionarEmpresa('EMPLEADOS', widget.dni), child: filaDato(Icons.business, "EMPRESA", u['EMPRESA'] ?? "Sin datos")),
               tituloSeccion("VENCIMIENTOS (TOCAR PARA EDITAR)"),
-              // Pasamos idSujeto y campoFirestore para ver el estado de revisión
-              filaVtoSemaforo("(EPAP) PREOCUPACIONAL", u['EPAP'], idSujeto: widget.dni, campoFirestore: 'EPAP',coleccionDestino: 'EMPLEADOS',urlFoto: u['FOTO_EPAP']),  
-              filaVtoSemaforo("(LICENCIA DE CONDUCIR)", u['LIC_COND'], idSujeto: widget.dni, campoFirestore: 'LIC_COND',urlFoto: u['FOTO_LIC_COND']),
-              filaVtoSemaforo("CURSO MANEJO DEFENSIVO", u['CURSO_MANEJO'], idSujeto: widget.dni, campoFirestore: 'CURSO_MANEJO',urlFoto: u['FOTO_CURSO_MANEJO']),
-              filaVtoSemaforo("CURSO MERCANCÍAS PELIGROSAS", u['CURSO_MERCANCIAS'], idSujeto: widget.dni, campoFirestore: 'CURSO_MERCANCIAS',urlFoto: u['FOTO_CURSO_MERCANCIAS']),
+              filaVtoSemaforo(context, "(EPAP) PREOCUPACIONAL", u['EPAP'], idSujeto: widget.dni, campoFirestore: 'EPAP', coleccionDestino: 'EMPLEADOS', urlFoto: u['FOTO_EPAP']),  
+              filaVtoSemaforo(context, "(LICENCIA DE CONDUCIR)", u['LIC_COND'], idSujeto: widget.dni, campoFirestore: 'LIC_COND', coleccionDestino: 'EMPLEADOS', urlFoto: u['FOTO_LIC_COND']),
+              filaVtoSemaforo(context, "CURSO MANEJO DEFENSIVO", u['CURSO_MANEJO'], idSujeto: widget.dni, campoFirestore: 'CURSO_MANEJO', coleccionDestino: 'EMPLEADOS', urlFoto: u['FOTO_CURSO_MANEJO']),
+              filaVtoSemaforo(context, "CURSO MERCANCÍAS PELIGROSAS", u['CURSO_MERCANCIAS'], idSujeto: widget.dni, campoFirestore: 'CURSO_MERCANCIAS', coleccionDestino: 'EMPLEADOS', urlFoto: u['FOTO_CURSO_MERCANCIAS']),
             ]),
           );
         },
@@ -851,8 +901,6 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
     );
   }
 
-  
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -872,8 +920,8 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
                 InkWell(onTap: () => _editarCampoTexto('AÑO', 'AÑO', v['AÑO'] ?? "S/D"), child: filaDato(Icons.calendar_today, "AÑO", v['AÑO'] ?? "S/D")),
                 InkWell(onTap: () => _editarCampoTexto('EMPRESA', 'EMPRESA', v['EMPRESA'] ?? "S/D"), child: filaDato(Icons.business, "EMPRESA", v['EMPRESA'] ?? "S/D")),
                 tituloSeccion("DOCUMENTACIÓN (TOCAR PARA EDITAR)"),
-                filaVtoSemaforo("VENCIMIENTO RTO", v['VENCIMIENTO_RTO'], idSujeto: v['DOMINIO'], campoFirestore: 'VENCIMIENTO_RTO',coleccionDestino: 'VEHICULOS'),
-                filaVtoSemaforo("VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'], idSujeto: v['DOMINIO'], campoFirestore: 'VENCIMIENTO_POLIZA'),
+                filaVtoSemaforo(context, "VENCIMIENTO RTO", v['VENCIMIENTO_RTO'], idSujeto: v['DOMINIO'], campoFirestore: 'VENCIMIENTO_RTO', coleccionDestino: 'VEHICULOS', urlFoto: v['FOTO_VENCIMIENTO_RTO']),
+                filaVtoSemaforo(context, "VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'], idSujeto: v['DOMINIO'], campoFirestore: 'VENCIMIENTO_POLIZA', coleccionDestino: 'VEHICULOS', urlFoto: v['FOTO_VENCIMIENTO_POLIZA']),
               ],
             ),
           );
@@ -913,19 +961,19 @@ class MisDocumentosScreen extends StatelessWidget {
                 cabeceraFicha(nombre, "DNI: ${formatearDNI(user['DNI'])}"),
                 
                 tituloSeccion("MI DOCUMENTACIÓN PERSONAL"),
-                filaVtoSemaforo("LICENCIA DE CONDUCIR", user['LIC_COND'], 
+                filaVtoSemaforo(context, "LICENCIA DE CONDUCIR", user['LIC_COND'], 
                     idSujeto: dni, campoFirestore: 'LIC_COND',
                     onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "LICENCIA", campoFirestore: "LIC_COND", coleccionDestino: 'EMPLEADOS'), 
                     urlFoto: user['FOTO_LIC_COND']),
-                filaVtoSemaforo("PREOCUPACIONAL (EPAP)", user['EPAP'], 
+                filaVtoSemaforo(context, "PREOCUPACIONAL (EPAP)", user['EPAP'], 
                     idSujeto: dni, campoFirestore: 'EPAP',
                     onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "EPAP", campoFirestore: "EPAP", coleccionDestino: 'EMPLEADOS'), 
                     urlFoto: user['FOTO_EPAP']),
-                filaVtoSemaforo("CURSO MANEJO DEFENSIVO", user['CURSO_MANEJO'], 
+                filaVtoSemaforo(context, "CURSO MANEJO DEFENSIVO", user['CURSO_MANEJO'], 
                     idSujeto: dni, campoFirestore: 'CURSO_MANEJO',
                     onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "CURSO MANEJO", campoFirestore: "CURSO_MANEJO", coleccionDestino: 'EMPLEADOS'), 
                     urlFoto: user['FOTO_CURSO_MANEJO']),
-                filaVtoSemaforo("CURSO MERCANCÍAS PELIGROSAS", user['CURSO_MERCANCIAS'], 
+                filaVtoSemaforo(context, "CURSO MERCANCÍAS PELIGROSAS", user['CURSO_MERCANCIAS'], 
                     idSujeto: dni, campoFirestore: 'CURSO_MERCANCIAS',
                     onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "MERCANCIAS", campoFirestore: "CURSO_MERCANCIAS", coleccionDestino: 'EMPLEADOS'), 
                     urlFoto: user['FOTO_CURSO_MERCANCIAS']),
@@ -936,12 +984,6 @@ class MisDocumentosScreen extends StatelessWidget {
                     _StreamDocumentacionVehiculo(dominio: tractorAsignado, etiqueta: "TRACTOR"),
                   if (acopladoAsignado.isNotEmpty)
                     _StreamDocumentacionVehiculo(dominio: acopladoAsignado, etiqueta: "ACOPLADO / BATEA"),
-                ] else ...[
-                  const Padding(
-                    padding: EdgeInsets.all(30.0),
-                    child: Text("No tienes vehículos asignados.", 
-                      style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
-                  ),
                 ],
               ],
             ),
@@ -976,11 +1018,11 @@ class _StreamDocumentacionVehiculo extends StatelessWidget {
               child: Text("$etiqueta: $dominio", 
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blue)),
             ),
-            filaVtoSemaforo("VENCIMIENTO RTO", v['VENCIMIENTO_RTO'], 
+            filaVtoSemaforo(context, "VENCIMIENTO RTO", v['VENCIMIENTO_RTO'], 
                 idSujeto: dominio, campoFirestore: 'VENCIMIENTO_RTO',
                 onSubir: () => _subirSolicitudImagen(context, idSujeto: dominio, nombreSujeto: "EQUIPO $dominio", documentoEtiqueta: "RTO", campoFirestore: "VENCIMIENTO_RTO", coleccionDestino: 'VEHICULOS'), 
                 urlFoto: v['FOTO_VENCIMIENTO_RTO']),
-            filaVtoSemaforo("VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'], 
+            filaVtoSemaforo(context, "VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'], 
                 idSujeto: dominio, campoFirestore: 'VENCIMIENTO_POLIZA',
                 onSubir: () => _subirSolicitudImagen(context, idSujeto: dominio, nombreSujeto: "EQUIPO $dominio", documentoEtiqueta: "POLIZA", campoFirestore: "VENCIMIENTO_POLIZA", coleccionDestino: 'VEHICULOS'), 
                 urlFoto: v['FOTO_VENCIMIENTO_POLIZA']),
@@ -1009,7 +1051,7 @@ Widget filaDato(IconData icono, String label, dynamic valor) {
   return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), child: Row(children: [Icon(icono, size: 20, color: Colors.blue.shade800), const SizedBox(width: 15), Text(label), const Spacer(), Text(valor?.toString() ?? "---", style: const TextStyle(fontWeight: FontWeight.bold))]));
 }
 
-Widget filaVtoSemaforo(String titulo, String? fecha, {
+Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
   required String idSujeto, 
   required String campoFirestore, 
   VoidCallback? onSubir, 
@@ -1068,32 +1110,94 @@ Widget filaVtoSemaforo(String titulo, String? fecha, {
                 ]
               )
             ),
-            // --- BOTÓN PARA VER LA FOTO ACTUAL (Para el Chofer) ---
+            
             if (urlFoto != null && urlFoto.isNotEmpty && urlFoto != "null") 
-              IconButton(
-                icon: const Icon(Icons.remove_red_eye, color: Colors.blue), 
-                tooltip: "Ver documento actual",
-                onPressed: () {
-                  showDialog(
-                    context: context, 
-                    builder: (_) => Dialog(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min, 
-                        children: [
-                          AppBar(
-                            title: Text(titulo, style: const TextStyle(fontSize: 16)),
-                            automaticallyImplyLeading: false,
-                            actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))],
-                          ),
-                          InteractiveViewer(child: Image.network(urlFoto, fit: BoxFit.contain)),
-                        ]
-                      )
-                    )
-                  );
-                }
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.image, color: Colors.blue),
+                onSelected: (value) async {
+                  if (value == 'ver') {
+                    showDialog(context: context, builder: (_) => Dialog(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      AppBar(title: Text(titulo), automaticallyImplyLeading: false, actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))]),
+                      InteractiveViewer(child: Image.network(urlFoto, fit: BoxFit.contain)),
+                    ])));
+                  } else if (value == 'eliminar' && coleccionDestino != null) {
+                    await _confirmarEliminarImagen(context, coleccionDestino, idSujeto, campoFirestore, urlFoto);
+                  } else if (value == 'reemplazar' && coleccionDestino != null) {
+                    await _subirImagenDirectaAdmin(context, idSujeto, campoFirestore, coleccionDestino);
+                  }
+                },
+                itemBuilder: (ctx) => [
+                  const PopupMenuItem(value: 'ver', child: ListTile(leading: Icon(Icons.remove_red_eye), title: Text("Ver foto"))),
+                  if (coleccionDestino != null) ...[
+                    const PopupMenuItem(value: 'reemplazar', child: ListTile(leading: Icon(Icons.edit), title: Text("Reemplazar"))),
+                    const PopupMenuItem(value: 'eliminar', child: ListTile(leading: Icon(Icons.delete, color: Colors.red), title: Text("Eliminar", style: TextStyle(color: Colors.red)))),
+                  ]
+                ],
               ),
-            // Botón de subida (Solo si se provee la función onSubir)
-            if (onSubir != null)
+
+            if (coleccionDestino != null)
+              IconButton(
+                icon: const Icon(Icons.calendar_month, color: Colors.blueGrey),
+                onPressed: () async {
+                  final String? accion = await showDialog<String>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text("Gestión de Vencimiento"),
+                      content: Text("Documento: $titulo"),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, 'borrar'),
+                          child: const Text("BORRAR FECHA", style: TextStyle(color: Colors.red)),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx, 'editar'),
+                          child: const Text("CAMBIAR FECHA"),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  // GUARDIA: Verificamos si el widget sigue activo después del diálogo
+                  if (!context.mounted) return;
+
+                  if (accion == 'borrar') {
+                    bool? confirmar = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text("¿Confirmar eliminación?"),
+                        content: const Text("La fecha pasará a estar vacía (Sin datos)."),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCELAR")),
+                          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("SÍ, BORRAR")),
+                        ],
+                      ),
+                    );
+
+                    if (confirmar == true) {
+                      await FirebaseFirestore.instance
+                          .collection(coleccionDestino)
+                          .doc(idSujeto)
+                          .update({campoFirestore: "---"});
+                    }
+                  } else if (accion == 'editar') {
+                    DateTime? picked = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2035),
+                    );
+                    
+                    if (picked != null) {
+                      String nuevaFecha = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+                      await FirebaseFirestore.instance
+                          .collection(coleccionDestino)
+                          .doc(idSujeto)
+                          .update({campoFirestore: nuevaFecha});
+                    }
+                  }
+                },
+              )
+            else if (onSubir != null)
               IconButton(
                 icon: Icon(
                   tienePendiente ? Icons.hourglass_top : Icons.cloud_upload_outlined, 
