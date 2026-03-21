@@ -104,15 +104,31 @@ Future<void> _subirSolicitudImagen(BuildContext context, {
   required String campoFirestore,
   required String coleccionDestino,
 }) async {
+  // 1. PRIMERO: SELECCIONAR LA NUEVA FECHA
+  final DateTime? nuevaFecha = await showDatePicker(
+    context: context,
+    initialDate: DateTime.now(),
+    firstDate: DateTime(2024),
+    lastDate: DateTime(2035),
+    helpText: "PASO 1: SELECCIONE EL VENCIMIENTO",
+  );
+
+  if (nuevaFecha == null || !context.mounted) return;
+  final String fechaString = "${nuevaFecha.year}-${nuevaFecha.month.toString().padLeft(2,'0')}-${nuevaFecha.day.toString().padLeft(2,'0')}";
+
+  // 2. SEGUNDO: MENÚ PARA ADJUNTAR RESPALDO
   final ImagePicker picker = ImagePicker();
-  
   final XFile? image = await showModalBottomSheet<XFile>(
     context: context,
     builder: (ctx) => SafeArea(
       child: Wrap(
         children: [
+          const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text("PASO 2: ADJUNTAR COMPROBANTE", style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
           ListTile(
-            leading: const Icon(Icons.camera_alt), 
+            leading: const Icon(Icons.camera_alt, color: Colors.blue), 
             title: const Text('Tomar Foto'), 
             onTap: () async {
               final img = await picker.pickImage(source: ImageSource.camera, imageQuality: 50);
@@ -120,12 +136,17 @@ Future<void> _subirSolicitudImagen(BuildContext context, {
             }
           ),
           ListTile(
-            leading: const Icon(Icons.photo_library), 
-            title: const Text('Galería'), 
+            leading: const Icon(Icons.photo_library, color: Colors.green), 
+            title: const Text('Elegir de Galería'), 
             onTap: () async {
               final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
               if (ctx.mounted) Navigator.pop(ctx, img);
             }
+          ),
+          ListTile(
+            leading: const Icon(Icons.close), 
+            title: const Text('Cancelar'), 
+            onTap: () => Navigator.pop(ctx),
           ),
         ],
       ),
@@ -134,17 +155,7 @@ Future<void> _subirSolicitudImagen(BuildContext context, {
 
   if (image == null || !context.mounted) return;
 
-  final DateTime? nuevaFecha = await showDatePicker(
-    context: context,
-    initialDate: DateTime.now(),
-    firstDate: DateTime(2024),
-    lastDate: DateTime(2035),
-    helpText: "SELECCIONE EL NUEVO VENCIMIENTO",
-  );
-
-  if (nuevaFecha == null || !context.mounted) return;
-  final String fechaString = "${nuevaFecha.year}-${nuevaFecha.month.toString().padLeft(2,'0')}-${nuevaFecha.day.toString().padLeft(2,'0')}";
-
+  // 3. TERCERO: PROCESO DE SUBIDA
   showDialog(
     context: context,
     barrierDismissible: false,
@@ -153,7 +164,7 @@ Future<void> _subirSolicitudImagen(BuildContext context, {
         children: [
           CircularProgressIndicator(), 
           SizedBox(width: 20), 
-          Text("Subiendo a la nube...")
+          Text("Enviando revisión...")
         ]
       )
     ),
@@ -161,13 +172,14 @@ Future<void> _subirSolicitudImagen(BuildContext context, {
 
   try {
     File file = File(image.path);
-    String fileName = "solicitud_${idSujeto}_${DateTime.now().millisecondsSinceEpoch}.jpg";
+    String fileName = "solicitud_${campoFirestore}_${DateTime.now().millisecondsSinceEpoch}.jpg";
     Reference ref = FirebaseStorage.instance.ref().child('solicitudes').child(fileName);
 
     UploadTask uploadTask = ref.putFile(file);
     TaskSnapshot snapshot = await uploadTask;
     String url = await snapshot.ref.getDownloadURL();
 
+    // Guardamos la solicitud para que el admin la apruebe
     await FirebaseFirestore.instance.collection('SOLICITUDES').add({
       'ID_SUJETO': idSujeto,
       'NOMBRE_SUJETO': nombreSujeto,
@@ -181,13 +193,17 @@ Future<void> _subirSolicitudImagen(BuildContext context, {
     });
 
     if (!context.mounted) return;
-    Navigator.of(context, rootNavigator: true).pop();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("¡Solicitud enviada con éxito!")));
+    Navigator.of(context, rootNavigator: true).pop(); // Cerrar loading
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Solicitud enviada. El administrador la revisará pronto."))
+    );
 
   } catch (e) {
     if (!context.mounted) return;
     Navigator.of(context, rootNavigator: true).pop();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Error al enviar: $e"), backgroundColor: Colors.red)
+    );
   }
 }
 
@@ -1056,7 +1072,7 @@ Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
   required String campoFirestore, 
   VoidCallback? onSubir, 
   String? urlFoto, 
-  String? coleccionDestino
+  String? coleccionDestino,
 }) {
   return StreamBuilder(
     stream: FirebaseFirestore.instance
@@ -1068,11 +1084,14 @@ Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
     builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
       bool tienePendiente = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
 
+      // Colores del semáforo
       Color bg = Colors.grey;
       int dias = _calcularDiasRestantes(fecha);
       if (fecha != null && fecha != "---" && fecha != "nan" && fecha.isNotEmpty) {
         bg = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
       }
+
+      bool tieneFoto = urlFoto != null && urlFoto.isNotEmpty && urlFoto != "null" && urlFoto != "---";
 
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10), 
@@ -1082,7 +1101,7 @@ Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, 
                 children: [
-                  Text(titulo, style: const TextStyle(fontSize: 13)),
+                  Text(titulo, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 4),
                   Row(
                     children: [
@@ -1111,97 +1130,57 @@ Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
               )
             ),
             
-            if (urlFoto != null && urlFoto.isNotEmpty && urlFoto != "null") 
+            // 1. VER FOTO (Ojo azul)
+            if (tieneFoto)
+              IconButton(
+                icon: const Icon(Icons.remove_red_eye, color: Colors.blue),
+                onPressed: () {
+                  showDialog(
+                    context: context, 
+                    builder: (_) => Dialog(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min, 
+                        children: [
+                          AppBar(
+                            title: Text(titulo), 
+                            automaticallyImplyLeading: false, 
+                            actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))]
+                          ),
+                          InteractiveViewer(child: Image.network(urlFoto, fit: BoxFit.contain)),
+                        ]
+                      )
+                    )
+                  );
+                },
+              ),
+
+            // 2. ACCIONES (ADMIN O CHOFER)
+            if (coleccionDestino != null)
+              // Menú para el Administrador
               PopupMenuButton<String>(
-                icon: const Icon(Icons.image, color: Colors.blue),
+                icon: const Icon(Icons.settings_suggest, color: Colors.blueGrey),
                 onSelected: (value) async {
-                  if (value == 'ver') {
-                    showDialog(context: context, builder: (_) => Dialog(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      AppBar(title: Text(titulo), automaticallyImplyLeading: false, actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))]),
-                      InteractiveViewer(child: Image.network(urlFoto, fit: BoxFit.contain)),
-                    ])));
-                  } else if (value == 'eliminar' && coleccionDestino != null) {
-                    await _confirmarEliminarImagen(context, coleccionDestino, idSujeto, campoFirestore, urlFoto);
-                  } else if (value == 'reemplazar' && coleccionDestino != null) {
+                  if (value == 'fecha') {
+                    _gestionarFechaAdmin(context, idSujeto, campoFirestore, coleccionDestino);
+                  } else if (value == 'foto') {
                     await _subirImagenDirectaAdmin(context, idSujeto, campoFirestore, coleccionDestino);
+                  } else if (value == 'eliminar_foto' && tieneFoto) {
+                    await _confirmarEliminarImagen(context, coleccionDestino, idSujeto, campoFirestore, urlFoto);
                   }
                 },
                 itemBuilder: (ctx) => [
-                  const PopupMenuItem(value: 'ver', child: ListTile(leading: Icon(Icons.remove_red_eye), title: Text("Ver foto"))),
-                  if (coleccionDestino != null) ...[
-                    const PopupMenuItem(value: 'reemplazar', child: ListTile(leading: Icon(Icons.edit), title: Text("Reemplazar"))),
-                    const PopupMenuItem(value: 'eliminar', child: ListTile(leading: Icon(Icons.delete, color: Colors.red), title: Text("Eliminar", style: TextStyle(color: Colors.red)))),
-                  ]
+                  const PopupMenuItem(value: 'fecha', child: ListTile(leading: Icon(Icons.calendar_month), title: Text("Gestionar Fecha"))),
+                  PopupMenuItem(value: 'foto', child: ListTile(leading: const Icon(Icons.camera_alt), title: Text(tieneFoto ? "Reemplazar Foto" : "Subir Foto"))),
+                  if (tieneFoto)
+                    const PopupMenuItem(value: 'eliminar_foto', child: ListTile(leading: Icon(Icons.delete_forever, color: Colors.red), title: Text("Eliminar Foto", style: TextStyle(color: Colors.red)))),
                 ],
-              ),
-
-            if (coleccionDestino != null)
-              IconButton(
-                icon: const Icon(Icons.calendar_month, color: Colors.blueGrey),
-                onPressed: () async {
-                  final String? accion = await showDialog<String>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text("Gestión de Vencimiento"),
-                      content: Text("Documento: $titulo"),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, 'borrar'),
-                          child: const Text("BORRAR FECHA", style: TextStyle(color: Colors.red)),
-                        ),
-                        ElevatedButton(
-                          onPressed: () => Navigator.pop(ctx, 'editar'),
-                          child: const Text("CAMBIAR FECHA"),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  // GUARDIA: Verificamos si el widget sigue activo después del diálogo
-                  if (!context.mounted) return;
-
-                  if (accion == 'borrar') {
-                    bool? confirmar = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text("¿Confirmar eliminación?"),
-                        content: const Text("La fecha pasará a estar vacía (Sin datos)."),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCELAR")),
-                          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("SÍ, BORRAR")),
-                        ],
-                      ),
-                    );
-
-                    if (confirmar == true) {
-                      await FirebaseFirestore.instance
-                          .collection(coleccionDestino)
-                          .doc(idSujeto)
-                          .update({campoFirestore: "---"});
-                    }
-                  } else if (accion == 'editar') {
-                    DateTime? picked = await showDatePicker(
-                      context: context,
-                      initialDate: DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2035),
-                    );
-                    
-                    if (picked != null) {
-                      String nuevaFecha = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
-                      await FirebaseFirestore.instance
-                          .collection(coleccionDestino)
-                          .doc(idSujeto)
-                          .update({campoFirestore: nuevaFecha});
-                    }
-                  }
-                },
               )
             else if (onSubir != null)
+              // Botón para el Chofer
               IconButton(
                 icon: Icon(
                   tienePendiente ? Icons.hourglass_top : Icons.cloud_upload_outlined, 
-                  color: tienePendiente ? Colors.grey : Colors.blue
+                  color: tienePendiente ? Colors.orange : Colors.blue
                 ), 
                 onPressed: tienePendiente ? () {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ya tienes una actualización en revisión.")));
@@ -1212,4 +1191,41 @@ Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
       );
     }
   );
+}
+
+// --- FUNCIÓN PARA EL ADMIN ---
+Future<void> _gestionarFechaAdmin(BuildContext context, String idSujeto, String campoFirestore, String coleccionDestino) async {
+  final String? accion = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text("Gestión de Vencimiento"),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, 'borrar'), 
+          child: const Text("BORRAR FECHA", style: TextStyle(color: Colors.red))
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(ctx, 'editar'), 
+          child: const Text("CAMBIAR FECHA")
+        ),
+      ],
+    ),
+  );
+
+  if (!context.mounted || accion == null) return;
+
+  if (accion == 'borrar') {
+    await FirebaseFirestore.instance.collection(coleccionDestino).doc(idSujeto).update({campoFirestore: "---"});
+  } else if (accion == 'editar') {
+    DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (picked != null) {
+      String nuevaFecha = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+      await FirebaseFirestore.instance.collection(coleccionDestino).doc(idSujeto).update({campoFirestore: nuevaFecha});
+    }
+  }
 }
