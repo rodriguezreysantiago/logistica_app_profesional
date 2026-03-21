@@ -566,39 +566,225 @@ class ListaPersonalScreen extends StatefulWidget {
 class _ListaPersonalScreenState extends State<ListaPersonalScreen> {
   String _searchQuery = "";
 
-  void _dialogNuevoChofer() {
-    final nCtrl = TextEditingController();
-    final dCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Nuevo Chofer"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min, 
-          children: [
-            TextField(controller: nCtrl, decoration: const InputDecoration(labelText: "Nombre Completo"), textCapitalization: TextCapitalization.characters),
-            const SizedBox(height: 10), 
-            TextField(controller: dCtrl, decoration: const InputDecoration(labelText: "DNI"), keyboardType: TextInputType.number),
-          ],
+void _dialogNuevoChofer() {
+  final nCtrl = TextEditingController();
+  final dCtrl = TextEditingController();
+  final cuilCtrl = TextEditingController();
+  final telCtrl = TextEditingController();
+  
+  String empresaSel = empresasDisponibles.first; 
+
+  // Variables para Fechas
+  String? fechaPreo, fechaLic, fechaManejo, fechaCargas;
+  // Variables para los archivos de imagen locales
+  File? filePreo, fileLic, fileManejo, fileCargas;
+
+  showDialog(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (context, setSt) => AlertDialog(
+        title: const Text("Nuevo Personal", style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: MediaQuery.of(context).size.width * 0.9,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nCtrl, decoration: const InputDecoration(labelText: "Nombre Completo"), textCapitalization: TextCapitalization.characters),
+                TextField(controller: dCtrl, decoration: const InputDecoration(labelText: "DNI (Obligatorio) *"), keyboardType: TextInputType.number),
+                TextField(controller: cuilCtrl, decoration: const InputDecoration(labelText: "CUIL"), keyboardType: TextInputType.number),
+                TextField(controller: telCtrl, decoration: const InputDecoration(labelText: "Teléfono"), keyboardType: TextInputType.phone),
+                
+                const SizedBox(height: 20),
+                const Align(alignment: Alignment.centerLeft, child: Text("Empresa:", style: TextStyle(fontSize: 12, color: Colors.grey))),
+                DropdownButton<String>(
+                  value: empresaSel,
+                  isExpanded: true,
+                  items: empresasDisponibles.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 11)))).toList(),
+                  onChanged: (v) => setSt(() => empresaSel = v!),
+                ),
+                
+                const Divider(height: 40),
+                const Text("Vencimientos y Fotos", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                const SizedBox(height: 10),
+
+                // ITEMS CON FECHA Y CÁMARA
+                _itemCompletoDialog(context, "Preocupacional (EPAP)", fechaPreo, filePreo, 
+                  onFecha: (f) => setSt(() => fechaPreo = f), 
+                  onFoto: (file) => setSt(() => filePreo = file)),
+                
+                _itemCompletoDialog(context, "Licencia de Conducir", fechaLic, fileLic, 
+                  onFecha: (f) => setSt(() => fechaLic = f), 
+                  onFoto: (file) => setSt(() => fileLic = file)),
+                
+                _itemCompletoDialog(context, "Manejo Defensivo", fechaManejo, fileManejo, 
+                  onFecha: (f) => setSt(() => fechaManejo = f), 
+                  onFoto: (file) => setSt(() => fileManejo = file)),
+                
+                _itemCompletoDialog(context, "Mercancías Peligrosas", fechaCargas, fileCargas, 
+                  onFecha: (f) => setSt(() => fechaCargas = f), 
+                  onFoto: (file) => setSt(() => fileCargas = file)),
+              ],
+            ),
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
-          ElevatedButton(onPressed: () async {
-            if (dCtrl.text.isEmpty) return;
-            final nav = Navigator.of(ctx);
-            await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dCtrl.text.trim()).set({
-              'CHOFER': nCtrl.text.toUpperCase(),
-              'DNI': dCtrl.text.trim(),
-              'CLAVE': dCtrl.text.trim(),
-              'ROL': 'USUARIO'
-            });
-            if (!ctx.mounted) return;
-            nav.pop();
-          }, child: const Text("Guardar"))
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            onPressed: () async {
+              if (dCtrl.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("El DNI es obligatorio")));
+                return;
+              }
+
+              // Mostrar indicador de carga
+              showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+              try {
+                final String dni = dCtrl.text.trim();
+                
+                // Función interna para subir imagen si existe
+                Future<String> subir(File? f, String nombreDoc) async {
+                  if (f == null) return '---';
+                  final ref = FirebaseStorage.instance.ref().child('CHOFERES/$dni/$nombreDoc.jpg');
+                  await ref.putFile(f);
+                  return await ref.getDownloadURL();
+                }
+
+                // Subir todas las fotos en paralelo
+                String urlP = await subir(filePreo, 'EPAP');
+                String urlL = await subir(fileLic, 'LICENCIA');
+                String urlM = await subir(fileManejo, 'MANEJO');
+                String urlC = await subir(fileCargas, 'CARGAS');
+
+                await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).set({
+                  'CHOFER': nCtrl.text.toUpperCase().trim(),
+                  'DNI': dni,
+                  'CUIL': cuilCtrl.text.trim(),
+                  'TELEFONO': telCtrl.text.trim(),
+                  'EMPRESA': empresaSel,
+                  'CLAVE': dni,
+                  'ROL': 'USUARIO',
+                  'ESTADO': 'ACTIVO',
+                  'VTO_EPAP': fechaPreo ?? '---',
+                  'VTO_LICENCIA': fechaLic ?? '---',
+                  'VTO_MANEJO': fechaManejo ?? '---',
+                  'VTO_CARGAS': fechaCargas ?? '---',
+                  'URL_EPAP': urlP,
+                  'URL_LICENCIA': urlL,
+                  'URL_MANEJO': urlM,
+                  'URL_CARGAS': urlC,
+                });
+                if (!context.mounted) return; // Verifica que la pantalla siga activa
+                Navigator.pop(context); // Cierra el loading
+                Navigator.pop(ctx);    // Cierra el alta
+                Navigator.pop(context); // Cierra el loading
+                Navigator.pop(ctx);    // Cierra el alta
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al subir: $e")));
+              }
+            }, 
+            child: const Text("Guardar Todo")
+          )
         ],
       ),
-    );
-  }
+    ),
+  );
+}
+
+Widget _itemCompletoDialog(
+  BuildContext context, 
+  String titulo, 
+  String? fecha, 
+  File? foto, 
+  {required Function(String) onFecha, required Function(File) onFoto}
+) {
+  return ListTile(
+    contentPadding: EdgeInsets.zero,
+    title: Text(titulo, style: const TextStyle(fontSize: 12)),
+    subtitle: Text(
+      fecha ?? "Sin fecha", 
+      style: TextStyle(
+        color: fecha == null ? Colors.grey : Colors.blue, 
+        fontWeight: FontWeight.bold, 
+        fontSize: 11
+      )
+    ),
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Botón Calendario
+        IconButton(
+          icon: const Icon(Icons.calendar_month, size: 20),
+          onPressed: () async {
+            DateTime? p = await showDatePicker(
+              context: context, 
+              initialDate: DateTime.now(), 
+              firstDate: DateTime(2020), 
+              lastDate: DateTime(2035)
+            );
+            if (!context.mounted) return;
+            if (p != null) {
+              onFecha("${p.year}-${p.month.toString().padLeft(2, '0')}-${p.day.toString().padLeft(2, '0')}");
+            }
+          },
+        ),
+        
+        // Botón Cámara / Selección de Imagen
+        IconButton(
+          icon: Icon(
+            foto == null ? Icons.camera_alt_outlined : Icons.check_circle, 
+            color: foto == null ? Colors.grey : Colors.green, 
+            size: 20
+          ),
+          onPressed: () async {
+            // 1. Mostramos menú para elegir origen (Cámara o Carpeta)
+            final ImageSource? origen = await showDialog<ImageSource>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text("Seleccionar imagen", style: TextStyle(fontSize: 16)),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.camera_alt),
+                      title: const Text("Cámara (Webcam)"),
+                      onTap: () => Navigator.pop(ctx, ImageSource.camera),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.folder),
+                      title: const Text("Carpeta (Archivos)"),
+                      onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+                    ),
+                  ],
+                ),
+              ),
+            );
+
+            // Si el usuario cancela el menú, salimos
+            if (origen == null) return;
+
+            // 2. Ejecutamos el selector según la opción elegida
+            final picker = ImagePicker();
+            final picked = await picker.pickImage(
+              source: origen, 
+              imageQuality: 50
+            );
+            
+            if (!context.mounted) return;
+            
+            if (picked != null) {
+              onFoto(File(picked.path));
+            }
+          },
+        ),
+      ],
+    ),
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -634,8 +820,9 @@ class FichaChoferScreen extends StatefulWidget {
 
 class _FichaChoferScreenState extends State<FichaChoferScreen> {
   
+  // --- FUNCIÓN PARA EDITAR CAMPOS DE TEXTO ---
   Future<void> _editarCampoTexto(String campo, String etiqueta, String valorActual) async {
-    final ctrl = TextEditingController(text: valorActual == "Sin datos" ? "" : valorActual);
+    final ctrl = TextEditingController(text: valorActual == "Sin datos" || valorActual == "---" ? "" : valorActual);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -644,7 +831,8 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
           controller: ctrl,
           decoration: InputDecoration(hintText: "Ingrese $etiqueta"),
           textCapitalization: TextCapitalization.characters,
-          keyboardType: campo == 'TELEFONO' || campo == 'CUIL' ? TextInputType.number : TextInputType.text,
+          keyboardType: (campo == 'TELEFONO' || campo == 'CUIL' || campo == 'DNI') 
+              ? TextInputType.number : TextInputType.text,
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
@@ -664,6 +852,7 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
     );
   }
 
+  // --- FUNCIÓN PARA SELECCIONAR EMPRESA ---
   void _seleccionarEmpresa(String coleccion, String idDoc) {
     showDialog(
       context: context,
@@ -685,6 +874,7 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
     );
   }
 
+  // --- FUNCIÓN PARA ASIGNAR EQUIPOS (TRACTOR / ACOPLADO) ---
   void _seleccionarEquipo(String tipoFirestore, String label) {
     showDialog(
       context: context,
@@ -721,34 +911,26 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
                     children: [
                       ListTile(
                         leading: const Icon(Icons.not_interested, color: Colors.red),
-                        title: Text("QUITAR $label (SIN ASIGNAR)", 
-                          style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)
-                        ),
+                        title: Text("QUITAR $label", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                         onTap: () async {
                           final nav = Navigator.of(dialogContext);
-                          await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({
-                            tipoFirestore: "" 
-                          });
+                          await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({tipoFirestore: ""});
                           if (!dialogContext.mounted) return;
                           nav.pop();
                         },
                       ),
                       const Divider(),
-                      ...unidadesLibres.map((doc) {
-                        return ListTile(
-                          leading: const Icon(Icons.local_shipping, color: Colors.green),
-                          title: Text(doc['DOMINIO']),
-                          subtitle: Text(doc['TIPO']),
-                          onTap: () async {
-                            final nav = Navigator.of(dialogContext);
-                            await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({
-                              tipoFirestore: doc['DOMINIO']
-                            });
-                            if (!dialogContext.mounted) return;
-                            nav.pop();
-                          },
-                        );
-                      }),
+                      ...unidadesLibres.map((doc) => ListTile(
+                        leading: const Icon(Icons.local_shipping, color: Colors.green),
+                        title: Text(doc['DOMINIO']),
+                        subtitle: Text(doc['TIPO']),
+                        onTap: () async {
+                          final nav = Navigator.of(dialogContext);
+                          await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({tipoFirestore: doc['DOMINIO']});
+                          if (!dialogContext.mounted) return;
+                          nav.pop();
+                        },
+                      )),
                     ],
                   );
                 },
@@ -764,28 +946,79 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Ficha del Personal"), backgroundColor: Colors.blue.shade900, foregroundColor: Colors.white),
+      appBar: AppBar(
+        title: const Text("Ficha del Personal"), 
+        backgroundColor: Colors.blue.shade900, 
+        foregroundColor: Colors.white,
+        actions: [
+          // BOTÓN ELIMINAR CHOFER
+          IconButton(
+            icon: const Icon(Icons.delete_forever, color: Colors.white),
+            onPressed: () async {
+              bool? confirmar = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text("¿Eliminar Personal?"),
+                  content: const Text("Esta acción borrará al chofer permanentemente."),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCELAR")),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () => Navigator.pop(ctx, true), 
+                      child: const Text("ELIMINAR", style: TextStyle(color: Colors.white))
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirmar == true) {
+                await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).delete();
+                if (!context.mounted) return;
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Chofer eliminado")));
+              }
+            },
+          ),
+        ],
+      ),
       body: StreamBuilder(
         stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).snapshots(),
         builder: (context, AsyncSnapshot<DocumentSnapshot> snapshot) {
           if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator());
           final u = snapshot.data!.data() as Map<String, dynamic>;
+          
           return SingleChildScrollView(
             child: Column(children: [
-              Container(width: double.infinity, color: Colors.blue.shade900, padding: const EdgeInsets.all(24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(u['CHOFER']?.toUpperCase() ?? "S/D", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 15),
-                Row(children: [
-                  _botonAsignar("TRACTOR", u['TRACTOR'], () => _seleccionarEquipo('TRACTOR', 'Tractor')),
-                  const SizedBox(width: 10),
-                  _botonAsignar("ACOPLADO", u['BATEA_TOLVA'], () => _seleccionarEquipo('BATEA_TOLVA', 'Acoplado')),
-                ]),
-              ])),
-              tituloSeccion("DATOS PERSONALES (TOCAR PARA EDITAR)"),
+              // CABECERA AZUL
+              Container(
+                width: double.infinity, 
+                color: Colors.blue.shade900, 
+                padding: const EdgeInsets.all(24), 
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  InkWell(
+                    onTap: () => _editarCampoTexto('CHOFER', 'Nombre Completo', u['CHOFER']),
+                    child: Row(
+                      children: [
+                        Expanded(child: Text(u['CHOFER']?.toUpperCase() ?? "S/D", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold))),
+                        const Icon(Icons.edit, color: Colors.white70, size: 20),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  Row(children: [
+                    _botonAsignar("TRACTOR", u['TRACTOR'], () => _seleccionarEquipo('TRACTOR', 'Tractor')),
+                    const SizedBox(width: 10),
+                    _botonAsignar("ACOPLADO", u['BATEA_TOLVA'], () => _seleccionarEquipo('BATEA_TOLVA', 'Acoplado')),
+                  ]),
+                ])
+              ),
+              
+              tituloSeccion("DATOS PERSONALES"),
               filaDato(Icons.badge, "DNI", formatearDNI(u['DNI'])),
-              InkWell(onTap: () => _editarCampoTexto('CUIL', 'CUIL', u['CUIL']?.toString() ?? ""), child: filaDato(Icons.fingerprint, "CUIL", formatearCUIL(u['CUIL'] ?? "---"))),
-              InkWell(onTap: () => _editarCampoTexto('TELEFONO', 'TELÉFONO', u['TELEFONO']?.toString() ?? ""), child: filaDato(Icons.phone, "TELÉFONO", u['TELEFONO'] ?? "Sin datos")),
+              InkWell(onTap: () => _editarCampoTexto('CUIL', 'CUIL', u['CUIL'] ?? ""), child: filaDato(Icons.fingerprint, "CUIL", formatearCUIL(u['CUIL'] ?? "---"))),
+              InkWell(onTap: () => _editarCampoTexto('TELEFONO', 'TELÉFONO', u['TELEFONO'] ?? ""), child: filaDato(Icons.phone, "TELÉFONO", u['TELEFONO'] ?? "Sin datos")),
               InkWell(onTap: () => _seleccionarEmpresa('EMPLEADOS', widget.dni), child: filaDato(Icons.business, "EMPRESA", u['EMPRESA'] ?? "Sin datos")),
+              
               tituloSeccion("VENCIMIENTOS (TOCAR PARA EDITAR)"),
               filaVtoSemaforo(context, "(EPAP) PREOCUPACIONAL", u['EPAP'], idSujeto: widget.dni, campoFirestore: 'EPAP', coleccionDestino: 'EMPLEADOS', urlFoto: u['FOTO_EPAP']),  
               filaVtoSemaforo(context, "(LICENCIA DE CONDUCIR)", u['LIC_COND'], idSujeto: widget.dni, campoFirestore: 'LIC_COND', coleccionDestino: 'EMPLEADOS', urlFoto: u['FOTO_LIC_COND']),
@@ -799,10 +1032,19 @@ class _FichaChoferScreenState extends State<FichaChoferScreen> {
   }
 
   Widget _botonAsignar(String label, String? valor, VoidCallback tap) {
-    return Expanded(child: InkWell(onTap: tap, child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.white.withAlpha(25), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.white30)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
-      Text(valor == null || valor == "" ? "ASIGNAR" : valor, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-    ]))));
+    return Expanded(
+      child: InkWell(
+        onTap: tap, 
+        child: Container(
+          padding: const EdgeInsets.all(10), 
+          decoration: BoxDecoration(color: Colors.white.withAlpha(25), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.white30)), 
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
+            Text(valor == null || valor == "" ? "ASIGNAR" : valor, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+          ])
+        )
+      )
+    );
   }
 }
 
@@ -816,22 +1058,45 @@ class _ListaEquiposScreenState extends State<ListaEquiposScreen> {
   String _searchQuery = "";
 
   void _dialogNuevoEquipo() {
-    final dCtrl = TextEditingController();
+    final dCtrl = TextEditingController(); // Dominio/Patente
+    final mCtrl = TextEditingController(); // Marca
+    final modCtrl = TextEditingController(); // Modelo
+    final vCtrl = TextEditingController(); // VIN
     String tipoSel = 'TRACTOR';
+
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (context, setSt) => AlertDialog(
         title: const Text("Nuevo Equipo"),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: dCtrl, decoration: const InputDecoration(labelText: "Dominio"), textCapitalization: TextCapitalization.characters),
-          DropdownButton<String>(value: tipoSel, isExpanded: true, items: ['TRACTOR', 'BATEA', 'TOLVA'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(), onChanged: (v) => setSt(() => tipoSel = v!)),
-        ]),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            DropdownButton<String>(
+              value: tipoSel, 
+              isExpanded: true, 
+              items: ['TRACTOR', 'BATEA', 'TOLVA'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(), 
+              onChanged: (v) => setSt(() => tipoSel = v!)
+            ),
+            TextField(controller: dCtrl, decoration: const InputDecoration(labelText: "Dominio (Patente)"), textCapitalization: TextCapitalization.characters),
+            TextField(controller: mCtrl, decoration: const InputDecoration(labelText: "Marca"), textCapitalization: TextCapitalization.characters),
+            TextField(controller: modCtrl, decoration: const InputDecoration(labelText: "Modelo"), textCapitalization: TextCapitalization.characters),
+            // Solo mostramos VIN si es Tractor
+            if (tipoSel == 'TRACTOR')
+              TextField(controller: vCtrl, decoration: const InputDecoration(labelText: "Nro de VIN (Chasis)"), textCapitalization: TextCapitalization.characters),
+          ]),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
           ElevatedButton(onPressed: () async {
             if (dCtrl.text.isEmpty) return;
             final nav = Navigator.of(ctx);
-            await FirebaseFirestore.instance.collection('VEHICULOS').doc(dCtrl.text.toUpperCase().trim()).set({'DOMINIO': dCtrl.text.toUpperCase().trim(), 'TIPO': tipoSel});
+            await FirebaseFirestore.instance.collection('VEHICULOS').doc(dCtrl.text.toUpperCase().trim()).set({
+              'DOMINIO': dCtrl.text.toUpperCase().trim(), 
+              'TIPO': tipoSel,
+              'MARCA': mCtrl.text.toUpperCase(),
+              'MODELO': modCtrl.text.toUpperCase(),
+              'VIN': tipoSel == 'TRACTOR' ? vCtrl.text.toUpperCase() : 'N/A', // VIN condicional
+              'ESTADO': 'ACTIVO'
+            });
             if (!ctx.mounted) return;
             nav.pop();
           }, child: const Text("Guardar"))
@@ -898,21 +1163,53 @@ class FichaVehiculoScreen extends StatefulWidget {
 
 class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
   
+  // --- FUNCIÓN PARA EDITAR TEXTOS (MARCA, MODELO, AÑO) ---
   Future<void> _editarCampoTexto(String campo, String etiqueta, String valorActual) async {
-    final ctrl = TextEditingController(text: valorActual == "S/D" ? "" : valorActual);
+    final ctrl = TextEditingController(text: valorActual == "S/D" || valorActual == "---" ? "" : valorActual);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text("Editar $etiqueta"),
-        content: TextField(controller: ctrl, textCapitalization: TextCapitalization.characters),
+        content: TextField(
+          controller: ctrl, 
+          textCapitalization: TextCapitalization.characters,
+          keyboardType: campo == 'AÑO' ? TextInputType.number : TextInputType.text,
+          decoration: InputDecoration(hintText: "Ingrese $etiqueta"),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
-          ElevatedButton(onPressed: () async {
-            await FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).update({campo: ctrl.text.trim().toUpperCase()});
-            if (!ctx.mounted) return;
-            Navigator.pop(ctx);
-          }, child: const Text("Guardar"))
+          ElevatedButton(
+            onPressed: () async {
+              await FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).update({
+                campo: ctrl.text.trim().toUpperCase()
+              });
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+            }, 
+            child: const Text("Guardar")
+          )
         ],
+      ),
+    );
+  }
+
+  // --- FUNCIÓN PARA SELECCIONAR EMPRESA DESDE LISTA ---
+  void _seleccionarEmpresaVehiculo(String dominio) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Seleccionar Empresa Propietaria"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: empresasDisponibles.map((emp) => ListTile(
+            title: Text(emp),
+            onTap: () async {
+              await FirebaseFirestore.instance.collection('VEHICULOS').doc(dominio).update({'EMPRESA': emp});
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+            },
+          )).toList(),
+        ),
       ),
     );
   }
@@ -920,24 +1217,94 @@ class _FichaVehiculoScreenState extends State<FichaVehiculoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Ficha: ${widget.carData['DOMINIO']}"), backgroundColor: Colors.blue.shade900, foregroundColor: Colors.white),
+      appBar: AppBar(
+        title: Text("Ficha: ${widget.carData['DOMINIO']}"), 
+        backgroundColor: Colors.blue.shade900, 
+        foregroundColor: Colors.white,
+        actions: [
+          // BOTÓN ELIMINAR VEHÍCULO
+          IconButton(
+            icon: const Icon(Icons.delete_forever, color: Colors.white),
+            tooltip: "Eliminar vehículo",
+            onPressed: () async {
+              bool? confirmar = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text("¿Eliminar Equipo?"),
+                  content: Text("¿Seguro que quieres borrar el dominio ${widget.carData['DOMINIO']} de la base de datos?"),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCELAR")),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () => Navigator.pop(ctx, true), 
+                      child: const Text("ELIMINAR", style: TextStyle(color: Colors.white))
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirmar == true) {
+                await FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).delete();
+                if (!context.mounted) return;
+                Navigator.pop(context); // Vuelve a la lista de administración
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vehículo eliminado correctamente")));
+              }
+            },
+          ),
+        ],
+      ),
       body: StreamBuilder(
         stream: FirebaseFirestore.instance.collection('VEHICULOS').doc(widget.carData['DOMINIO']).snapshots(),
         builder: (context, AsyncSnapshot<DocumentSnapshot> snapshot) {
           if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator());
           final v = snapshot.data!.data() as Map<String, dynamic>;
+          
           return SingleChildScrollView(
             child: Column(
               children: [
                 cabeceraFicha(v['DOMINIO'], v['TIPO']),
+                
                 tituloSeccion("FICHA TÉCNICA (TOCAR PARA EDITAR)"),
-                InkWell(onTap: () => _editarCampoTexto('MARCA', 'MARCA', v['MARCA'] ?? "S/D"), child: filaDato(Icons.branding_watermark, "MARCA", v['MARCA'] ?? "S/D")),
-                InkWell(onTap: () => _editarCampoTexto('MODELO', 'MODELO', v['MODELO'] ?? "S/D"), child: filaDato(Icons.directions_car, "MODELO", v['MODELO'] ?? "S/D")),
-                InkWell(onTap: () => _editarCampoTexto('AÑO', 'AÑO', v['AÑO'] ?? "S/D"), child: filaDato(Icons.calendar_today, "AÑO", v['AÑO'] ?? "S/D")),
-                InkWell(onTap: () => _editarCampoTexto('EMPRESA', 'EMPRESA', v['EMPRESA'] ?? "S/D"), child: filaDato(Icons.business, "EMPRESA", v['EMPRESA'] ?? "S/D")),
+                
+                InkWell(
+                  onTap: () => _editarCampoTexto('MARCA', 'MARCA', v['MARCA'] ?? "S/D"), 
+                  child: filaDato(Icons.branding_watermark, "MARCA", v['MARCA'] ?? "S/D")
+                ),
+                
+                InkWell(
+                  onTap: () => _editarCampoTexto('MODELO', 'MODELO', v['MODELO'] ?? "S/D"), 
+                  child: filaDato(Icons.directions_car, "MODELO", v['MODELO'] ?? "S/D")
+                ),
+                
+                InkWell(
+                  onTap: () => _editarCampoTexto('AÑO', 'AÑO', v['AÑO'] ?? "S/D"), 
+                  child: filaDato(Icons.calendar_today, "AÑO", v['AÑO'] ?? "S/D")
+                ),
+                
+                InkWell(
+                  onTap: () => _seleccionarEmpresaVehiculo(v['DOMINIO']), 
+                  child: filaDato(Icons.business, "EMPRESA", v['EMPRESA'] ?? "S/D")
+                ),
+                
                 tituloSeccion("DOCUMENTACIÓN (TOCAR PARA EDITAR)"),
-                filaVtoSemaforo(context, "VENCIMIENTO RTO", v['VENCIMIENTO_RTO'], idSujeto: v['DOMINIO'], campoFirestore: 'VENCIMIENTO_RTO', coleccionDestino: 'VEHICULOS', urlFoto: v['FOTO_VENCIMIENTO_RTO']),
-                filaVtoSemaforo(context, "VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'], idSujeto: v['DOMINIO'], campoFirestore: 'VENCIMIENTO_POLIZA', coleccionDestino: 'VEHICULOS', urlFoto: v['FOTO_VENCIMIENTO_POLIZA']),
+                
+                filaVtoSemaforo(
+                  context, "VENCIMIENTO RTO", v['VENCIMIENTO_RTO'], 
+                  idSujeto: v['DOMINIO'], 
+                  campoFirestore: 'VENCIMIENTO_RTO', 
+                  coleccionDestino: 'VEHICULOS', 
+                  urlFoto: v['FOTO_VENCIMIENTO_RTO']
+                ),
+                
+                filaVtoSemaforo(
+                  context, "VENCIMIENTO PÓLIZA", v['VENCIMIENTO_POLIZA'], 
+                  idSujeto: v['DOMINIO'], 
+                  campoFirestore: 'VENCIMIENTO_POLIZA', 
+                  coleccionDestino: 'VEHICULOS', 
+                  urlFoto: v['FOTO_VENCIMIENTO_POLIZA']
+                ),
+                
+                const SizedBox(height: 30),
               ],
             ),
           );
