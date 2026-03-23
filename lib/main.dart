@@ -1057,51 +1057,171 @@ class ListaEquiposScreen extends StatefulWidget {
 class _ListaEquiposScreenState extends State<ListaEquiposScreen> {
   String _searchQuery = "";
 
-  void _dialogNuevoEquipo() {
-    final dCtrl = TextEditingController(); // Dominio/Patente
-    final mCtrl = TextEditingController(); // Marca
-    final modCtrl = TextEditingController(); // Modelo
-    final vCtrl = TextEditingController(); // VIN
-    String tipoSel = 'TRACTOR';
+  void _dialogNuevoVehiculo(BuildContext context) {
+    final domCtrl = TextEditingController();
+    final marcaCtrl = TextEditingController();
+    final modeloCtrl = TextEditingController();
+    final anioCtrl = TextEditingController();
+    
+    String tipoSeleccionado = 'TRACTOR';
+    String empresaSeleccionada = empresasDisponibles.first;
+    
+    // Variables para fechas
+    String fechaRTO = "---";
+    String fechaSeguro = "---";
+    
+    // Variables para archivos (Imágenes)
+    File? fileRTO;
+    File? fileSeguro;
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(builder: (context, setSt) => AlertDialog(
-        title: const Text("Nuevo Equipo"),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            DropdownButton<String>(
-              value: tipoSel, 
-              isExpanded: true, 
-              items: ['TRACTOR', 'BATEA', 'TOLVA'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(), 
-              onChanged: (v) => setSt(() => tipoSel = v!)
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSt) => AlertDialog(
+          title: const Text("Nuevo Vehículo / Equipo"),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: domCtrl,
+                    decoration: const InputDecoration(labelText: "DOMINIO (PATENTE)"),
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: tipoSeleccionado,
+                    decoration: const InputDecoration(labelText: "TIPO DE UNIDAD"),
+                    items: ['TRACTOR', 'BATEA', 'TOLVA'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                    onChanged: (v) => setSt(() => tipoSeleccionado = v!),
+                  ),
+                  TextField(
+                    controller: marcaCtrl,
+                    decoration: const InputDecoration(labelText: "MARCA"),
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                  TextField(
+                    controller: modeloCtrl,
+                    decoration: const InputDecoration(labelText: "MODELO"),
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                  TextField(
+                    controller: anioCtrl,
+                    decoration: const InputDecoration(labelText: "AÑO"),
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue:  empresaSeleccionada,
+                    decoration: const InputDecoration(labelText: "EMPRESA PROPIETARIA"),
+                    items: empresasDisponibles.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    onChanged: (v) => setSt(() => empresaSeleccionada = v!),
+                  ),
+                  const Divider(height: 30),
+                  
+                  // SECCIÓN RTO
+                  const Text("VENCIMIENTO RTO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  Row(
+                    children: [
+                      Expanded(child: Text("Fecha: $fechaRTO")),
+                      IconButton(
+                        icon: const Icon(Icons.calendar_today),
+                        onPressed: () async {
+                          DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                          if (p != null) setSt(() => fechaRTO = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.camera_alt, color: fileRTO != null ? Colors.green : Colors.grey),
+                        onPressed: () async {
+                          final p = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 50);
+                          if (p != null) setSt(() => fileRTO = File(p.path));
+                        },
+                      ),
+                    ],
+                  ),
+
+                  // SECCIÓN SEGURO
+                  const Text("VENCIMIENTO SEGURO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  Row(
+                    children: [
+                      Expanded(child: Text("Fecha: $fechaSeguro")),
+                      IconButton(
+                        icon: const Icon(Icons.calendar_today),
+                        onPressed: () async {
+                          DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                          if (p != null) setSt(() => fechaSeguro = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.camera_alt, color: fileSeguro != null ? Colors.green : Colors.grey),
+                        onPressed: () async {
+                          final p = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 50);
+                          if (p != null) setSt(() => fileSeguro = File(p.path));
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            TextField(controller: dCtrl, decoration: const InputDecoration(labelText: "Dominio (Patente)"), textCapitalization: TextCapitalization.characters),
-            TextField(controller: mCtrl, decoration: const InputDecoration(labelText: "Marca"), textCapitalization: TextCapitalization.characters),
-            TextField(controller: modCtrl, decoration: const InputDecoration(labelText: "Modelo"), textCapitalization: TextCapitalization.characters),
-            // Solo mostramos VIN si es Tractor
-            if (tipoSel == 'TRACTOR')
-              TextField(controller: vCtrl, decoration: const InputDecoration(labelText: "Nro de VIN (Chasis)"), textCapitalization: TextCapitalization.characters),
-          ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")),
+            ElevatedButton(
+              onPressed: () async {
+                if (domCtrl.text.isEmpty) return;
+                
+                // Mostrar círculo de carga
+                showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+
+                try {
+                  String urlRTO = "---";
+                  String urlSeguro = "---";
+
+                  // Subir RTO si hay archivo
+                  if (fileRTO != null) {
+                    final ref = FirebaseStorage.instance.ref().child('VEHICULOS/${domCtrl.text}/RTO.jpg');
+                    await ref.putFile(fileRTO!);
+                    urlRTO = await ref.getDownloadURL();
+                  }
+
+                  // Subir SEGURO si hay archivo
+                  if (fileSeguro != null) {
+                    final ref = FirebaseStorage.instance.ref().child('VEHICULOS/${domCtrl.text}/SEGURO.jpg');
+                    await ref.putFile(fileSeguro!);
+                    urlSeguro = await ref.getDownloadURL();
+                  }
+
+                  // Guardar en Firestore
+                  await FirebaseFirestore.instance.collection('VEHICULOS').doc(domCtrl.text.toUpperCase().trim()).set({
+                    'DOMINIO': domCtrl.text.toUpperCase().trim(),
+                    'TIPO': tipoSeleccionado,
+                    'MARCA': marcaCtrl.text.toUpperCase().trim(),
+                    'MODELO': modeloCtrl.text.toUpperCase().trim(),
+                    'AÑO': anioCtrl.text.trim(),
+                    'EMPRESA': empresaSeleccionada,
+                    'VENCIMIENTO_RTO': fechaRTO,
+                    'FOTO_VENCIMIENTO_RTO': urlRTO,
+                    'VENCIMIENTO_POLIZA': fechaSeguro, // Usamos POLIZA para ser consistentes con tu ficha
+                    'FOTO_VENCIMIENTO_POLIZA': urlSeguro,
+                  });
+
+                  if (!context.mounted) return;
+                  Navigator.pop(context); // Cierra loading
+                  Navigator.pop(ctx);     // Cierra diálogo
+                } catch (e) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                }
+              },
+              child: const Text("GUARDAR EQUIPO"),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
-          ElevatedButton(onPressed: () async {
-            if (dCtrl.text.isEmpty) return;
-            final nav = Navigator.of(ctx);
-            await FirebaseFirestore.instance.collection('VEHICULOS').doc(dCtrl.text.toUpperCase().trim()).set({
-              'DOMINIO': dCtrl.text.toUpperCase().trim(), 
-              'TIPO': tipoSel,
-              'MARCA': mCtrl.text.toUpperCase(),
-              'MODELO': modCtrl.text.toUpperCase(),
-              'VIN': tipoSel == 'TRACTOR' ? vCtrl.text.toUpperCase() : 'N/A', // VIN condicional
-              'ESTADO': 'ACTIVO'
-            });
-            if (!ctx.mounted) return;
-            nav.pop();
-          }, child: const Text("Guardar"))
-        ],
-      )),
+      ),
     );
   }
 
@@ -1114,7 +1234,12 @@ class _ListaEquiposScreenState extends State<ListaEquiposScreen> {
           title: const Text("Equipos"), 
           bottom: const TabBar(tabs: [Tab(text: "TRACTORES"), Tab(text: "BATEAS"), Tab(text: "TOLVAS")]),
         ),
-        floatingActionButton: FloatingActionButton(onPressed: _dialogNuevoEquipo, child: const Icon(Icons.add)),
+       floatingActionButton: FloatingActionButton(
+  backgroundColor: Colors.blue.shade900,
+  // Esta es la forma correcta de pasarle el contexto:
+  onPressed: () => _dialogNuevoVehiculo(context), 
+  child: const Icon(Icons.add, color: Colors.white),
+),
         body: Column(
           children: [
             Padding(padding: const EdgeInsets.all(12), child: TextField(decoration: InputDecoration(hintText: "Buscar dominio...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), onChanged: (v) => setState(() => _searchQuery = v.toUpperCase()))),
