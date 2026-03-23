@@ -6,6 +6,9 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter_localizations/flutter_localizations.dart'; 
 import 'firebase_options.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -566,231 +569,206 @@ class ListaPersonalScreen extends StatefulWidget {
 class _ListaPersonalScreenState extends State<ListaPersonalScreen> {
   String _searchQuery = "";
 
-void _dialogNuevoChofer() {
-  final nCtrl = TextEditingController();
-  final dCtrl = TextEditingController();
+void _dialogNuevoChofer(BuildContext context) {
+  final nomCtrl = TextEditingController();
+  final dniCtrl = TextEditingController();
   final cuilCtrl = TextEditingController();
   final telCtrl = TextEditingController();
-  
-  String empresaSel = empresasDisponibles.first; 
+  final passCtrl = TextEditingController(); // Controlador para la clave
 
-  // Variables para Fechas
-  String? fechaPreo, fechaLic, fechaManejo, fechaCargas;
-  // Variables para los archivos de imagen locales
-  File? filePreo, fileLic, fileManejo, fileCargas;
+  String empresaSeleccionada = empresasDisponibles.first;
+  bool obscurePass = true; // Para mostrar/ocultar clave
+
+  // Vencimientos
+  String vtoLicencia = "---";
+  String vtoLinti = "---";
+  String vtoEpap = "---";
+  String vtoManejo = "---";
+
+  // Archivos
+  File? fileLicencia; String nameLicencia = "Sin archivo";
+  File? fileLinti; String nameLinti = "Sin archivo";
+  File? fileEpap; String nameEpap = "Sin archivo";
+  File? fileManejo; String nameManejo = "Sin archivo";
 
   showDialog(
     context: context,
     builder: (ctx) => StatefulBuilder(
       builder: (context, setSt) => AlertDialog(
-        title: const Text("Nuevo Personal", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text("Nuevo Personal"),
         content: SizedBox(
-          width: MediaQuery.of(context).size.width * 0.9,
+          width: double.maxFinite,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nCtrl, decoration: const InputDecoration(labelText: "Nombre Completo"), textCapitalization: TextCapitalization.characters),
-                TextField(controller: dCtrl, decoration: const InputDecoration(labelText: "DNI (Obligatorio) *"), keyboardType: TextInputType.number),
-                TextField(controller: cuilCtrl, decoration: const InputDecoration(labelText: "CUIL"), keyboardType: TextInputType.number),
-                TextField(controller: telCtrl, decoration: const InputDecoration(labelText: "Teléfono"), keyboardType: TextInputType.phone),
+                TextField(controller: nomCtrl, decoration: const InputDecoration(labelText: "NOMBRE COMPLETO"), textCapitalization: TextCapitalization.characters),
+                TextField(controller: dniCtrl, decoration: const InputDecoration(labelText: "DNI"), keyboardType: TextInputType.number),
                 
-                const SizedBox(height: 20),
-                const Align(alignment: Alignment.centerLeft, child: Text("Empresa:", style: TextStyle(fontSize: 12, color: Colors.grey))),
-                DropdownButton<String>(
-                  value: empresaSel,
-                  isExpanded: true,
-                  items: empresasDisponibles.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 11)))).toList(),
-                  onChanged: (v) => setSt(() => empresaSel = v!),
+                // CAMPO DE CONTRASEÑA NUEVO
+                TextField(
+                  controller: passCtrl,
+                  obscureText: obscurePass,
+                  decoration: InputDecoration(
+                    labelText: "CONTRASEÑA DE ACCESO",
+                    suffixIcon: IconButton(
+                      icon: Icon(obscurePass ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setSt(() => obscurePass = !obscurePass),
+                    ),
+                  ),
                 ),
                 
-                const Divider(height: 40),
-                const Text("Vencimientos y Fotos", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                TextField(controller: cuilCtrl, decoration: const InputDecoration(labelText: "CUIL"), keyboardType: TextInputType.number),
+                TextField(controller: telCtrl, decoration: const InputDecoration(labelText: "TELÉFONO"), keyboardType: TextInputType.phone),
+                
+                DropdownButtonFormField<String>(
+                  initialValue: empresaSeleccionada,
+                  decoration: const InputDecoration(labelText: "EMPRESA"),
+                  items: empresasDisponibles.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                  onChanged: (v) => setSt(() => empresaSeleccionada = v!),
+                ),
+                const Divider(),
+
+                // 1. LICENCIA
+                _buildSelectorArchivo(
+                  titulo: "VTO. LICENCIA DE CONDUCIR",
+                  fecha: vtoLicencia,
+                  nombreArchivo: nameLicencia,
+                  onFecha: () async {
+                    DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                    if (p != null) setSt(() => vtoLicencia = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                  },
+                  onFile: () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+                    if (result != null) setSt(() { fileLicencia = File(result.files.single.path!); nameLicencia = result.files.single.name; });
+                  }
+                ),
+
+                // 2. LINTI
+                _buildSelectorArchivo(
+                  titulo: "VTO. CURSO LINTI",
+                  fecha: vtoLinti,
+                  nombreArchivo: nameLinti,
+                  onFecha: () async {
+                    DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                    if (p != null) setSt(() => vtoLinti = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                  },
+                  onFile: () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+                    if (result != null) setSt(() { fileLinti = File(result.files.single.path!); nameLinti = result.files.single.name; });
+                  }
+                ),
+
                 const SizedBox(height: 10),
 
-                // ITEMS CON FECHA Y CÁMARA
-                _itemCompletoDialog(context, "Preocupacional (EPAP)", fechaPreo, filePreo, 
-                  onFecha: (f) => setSt(() => fechaPreo = f), 
-                  onFoto: (file) => setSt(() => filePreo = file)),
-                
-                _itemCompletoDialog(context, "Licencia de Conducir", fechaLic, fileLic, 
-                  onFecha: (f) => setSt(() => fechaLic = f), 
-                  onFoto: (file) => setSt(() => fileLic = file)),
-                
-                _itemCompletoDialog(context, "Manejo Defensivo", fechaManejo, fileManejo, 
-                  onFecha: (f) => setSt(() => fechaManejo = f), 
-                  onFoto: (file) => setSt(() => fileManejo = file)),
-                
-                _itemCompletoDialog(context, "Mercancías Peligrosas", fechaCargas, fileCargas, 
-                  onFecha: (f) => setSt(() => fechaCargas = f), 
-                  onFoto: (file) => setSt(() => fileCargas = file)),
+                // 3. EPAP
+                _buildSelectorArchivo(
+                  titulo: "VTO. EPAP (PREOCUPACIONAL)",
+                  fecha: vtoEpap,
+                  nombreArchivo: nameEpap,
+                  onFecha: () async {
+                    DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                    if (p != null) setSt(() => vtoEpap = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                  },
+                  onFile: () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+                    if (result != null) setSt(() { fileEpap = File(result.files.single.path!); nameEpap = result.files.single.name; });
+                  }
+                ),
+
+                const SizedBox(height: 10),
+
+                // 4. MANEJO DEFENSIVO
+                _buildSelectorArchivo(
+                  titulo: "VTO. MANEJO DEFENSIVO",
+                  fecha: vtoManejo,
+                  nombreArchivo: nameManejo,
+                  onFecha: () async {
+                    DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                    if (p != null) setSt(() => vtoManejo = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                  },
+                  onFile: () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+                    if (result != null) setSt(() { fileManejo = File(result.files.single.path!); nameManejo = result.files.single.name; });
+                  }
+                ),
               ],
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancelar")),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
             onPressed: () async {
-              if (dCtrl.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("El DNI es obligatorio")));
+              if (nomCtrl.text.isEmpty || dniCtrl.text.isEmpty || passCtrl.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Nombre, DNI y Clave son obligatorios")));
                 return;
               }
-
-              // Mostrar indicador de carga
               showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
-
+              
               try {
-                final String dni = dCtrl.text.trim();
-                
-                // Función interna para subir imagen si existe
-                Future<String> subir(File? f, String nombreDoc) async {
-                  if (f == null) return '---';
-                  final ref = FirebaseStorage.instance.ref().child('CHOFERES/$dni/$nombreDoc.jpg');
-                  await ref.putFile(f);
-                  return await ref.getDownloadURL();
+                String urlLic = "---"; String urlLinti = "---";
+                String urlEpap = "---"; String urlManejo = "---";
+
+                if (fileLicencia != null) {
+                  final ref = FirebaseStorage.instance.ref().child('EMPLEADOS/${dniCtrl.text}/LICENCIA_$nameLicencia');
+                  await ref.putFile(fileLicencia!); urlLic = await ref.getDownloadURL();
+                }
+                if (fileLinti != null) {
+                  final ref = FirebaseStorage.instance.ref().child('EMPLEADOS/${dniCtrl.text}/LINTI_$nameLinti');
+                  await ref.putFile(fileLinti!); urlLinti = await ref.getDownloadURL();
+                }
+                if (fileEpap != null) {
+                  final ref = FirebaseStorage.instance.ref().child('EMPLEADOS/${dniCtrl.text}/EPAP_$nameEpap');
+                  await ref.putFile(fileEpap!); urlEpap = await ref.getDownloadURL();
+                }
+                if (fileManejo != null) {
+                  final ref = FirebaseStorage.instance.ref().child('EMPLEADOS/${dniCtrl.text}/MANEJO_$nameManejo');
+                  await ref.putFile(fileManejo!); urlManejo = await ref.getDownloadURL();
                 }
 
-                // Subir todas las fotos en paralelo
-                String urlP = await subir(filePreo, 'EPAP');
-                String urlL = await subir(fileLic, 'LICENCIA');
-                String urlM = await subir(fileManejo, 'MANEJO');
-                String urlC = await subir(fileCargas, 'CARGAS');
-
-                await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).set({
-                  'CHOFER': nCtrl.text.toUpperCase().trim(),
-                  'DNI': dni,
+                await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dniCtrl.text.trim()).set({
+                  'CHOFER': nomCtrl.text.toUpperCase().trim(),
+                  'DNI': dniCtrl.text.trim(),
+                  'CLAVE': passCtrl.text.trim(), // Se guarda la clave aquí
                   'CUIL': cuilCtrl.text.trim(),
                   'TELEFONO': telCtrl.text.trim(),
-                  'EMPRESA': empresaSel,
-                  'CLAVE': dni,
-                  'ROL': 'USUARIO',
-                  'ESTADO': 'ACTIVO',
-                  'VTO_EPAP': fechaPreo ?? '---',
-                  'VTO_LICENCIA': fechaLic ?? '---',
-                  'VTO_MANEJO': fechaManejo ?? '---',
-                  'VTO_CARGAS': fechaCargas ?? '---',
-                  'URL_EPAP': urlP,
-                  'URL_LICENCIA': urlL,
-                  'URL_MANEJO': urlM,
-                  'URL_CARGAS': urlC,
+                  'EMPRESA': empresaSeleccionada,
+                  'LIC_COND': vtoLicencia,
+                  'FOTO_LIC_COND': urlLic,
+                  'CURSO_MERCANCIAS': vtoLinti,
+                  'FOTO_CURSO_MERCANCIAS': urlLinti,
+                  'EPAP': vtoEpap,
+                  'FOTO_EPAP': urlEpap,
+                  'CURSO_MANEJO': vtoManejo,
+                  'FOTO_CURSO_MANEJO': urlManejo,
+                  'TRACTOR': '',
+                  'BATEA_TOLVA': '',
                 });
-                if (!context.mounted) return; // Verifica que la pantalla siga activa
-                Navigator.pop(context); // Cierra el loading
-                Navigator.pop(ctx);    // Cierra el alta
-                Navigator.pop(context); // Cierra el loading
-                Navigator.pop(ctx);    // Cierra el alta
+
+                if (!context.mounted) return;
+                Navigator.pop(context); // Cierra loading
+                Navigator.pop(ctx);     // Cierra diálogo
               } catch (e) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al subir: $e")));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
               }
-            }, 
-            child: const Text("Guardar Todo")
-          )
+            },
+            child: const Text("GUARDAR PERSONAL"),
+          ),
         ],
       ),
     ),
   );
 }
 
-Widget _itemCompletoDialog(
-  BuildContext context, 
-  String titulo, 
-  String? fecha, 
-  File? foto, 
-  {required Function(String) onFecha, required Function(File) onFoto}
-) {
-  return ListTile(
-    contentPadding: EdgeInsets.zero,
-    title: Text(titulo, style: const TextStyle(fontSize: 12)),
-    subtitle: Text(
-      fecha ?? "Sin fecha", 
-      style: TextStyle(
-        color: fecha == null ? Colors.grey : Colors.blue, 
-        fontWeight: FontWeight.bold, 
-        fontSize: 11
-      )
-    ),
-    trailing: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Botón Calendario
-        IconButton(
-          icon: const Icon(Icons.calendar_month, size: 20),
-          onPressed: () async {
-            DateTime? p = await showDatePicker(
-              context: context, 
-              initialDate: DateTime.now(), 
-              firstDate: DateTime(2020), 
-              lastDate: DateTime(2035)
-            );
-            if (!context.mounted) return;
-            if (p != null) {
-              onFecha("${p.year}-${p.month.toString().padLeft(2, '0')}-${p.day.toString().padLeft(2, '0')}");
-            }
-          },
-        ),
-        
-        // Botón Cámara / Selección de Imagen
-        IconButton(
-          icon: Icon(
-            foto == null ? Icons.camera_alt_outlined : Icons.check_circle, 
-            color: foto == null ? Colors.grey : Colors.green, 
-            size: 20
-          ),
-          onPressed: () async {
-            // 1. Mostramos menú para elegir origen (Cámara o Carpeta)
-            final ImageSource? origen = await showDialog<ImageSource>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text("Seleccionar imagen", style: TextStyle(fontSize: 16)),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.camera_alt),
-                      title: const Text("Cámara (Webcam)"),
-                      onTap: () => Navigator.pop(ctx, ImageSource.camera),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.folder),
-                      title: const Text("Carpeta (Archivos)"),
-                      onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-                    ),
-                  ],
-                ),
-              ),
-            );
-
-            // Si el usuario cancela el menú, salimos
-            if (origen == null) return;
-
-            // 2. Ejecutamos el selector según la opción elegida
-            final picker = ImagePicker();
-            final picked = await picker.pickImage(
-              source: origen, 
-              imageQuality: 50
-            );
-            
-            if (!context.mounted) return;
-            
-            if (picked != null) {
-              onFoto(File(picked.path));
-            }
-          },
-        ),
-      ],
-    ),
-  );
-}
-
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Personal")),
-      floatingActionButton: FloatingActionButton(onPressed: _dialogNuevoChofer, child: const Icon(Icons.add)),
+      floatingActionButton: FloatingActionButton(onPressed: () => _dialogNuevoChofer(context), 
+  child: const Icon(Icons.add, color: Colors.white),
+),
       body: Column(children: [
         Padding(padding: const EdgeInsets.all(12), child: TextField(decoration: InputDecoration(hintText: "Buscar chofer...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), onChanged: (v) => setState(() => _searchQuery = v.toUpperCase()))),
         Expanded(
@@ -1057,173 +1035,175 @@ class ListaEquiposScreen extends StatefulWidget {
 class _ListaEquiposScreenState extends State<ListaEquiposScreen> {
   String _searchQuery = "";
 
-  void _dialogNuevoVehiculo(BuildContext context) {
-    final domCtrl = TextEditingController();
-    final marcaCtrl = TextEditingController();
-    final modeloCtrl = TextEditingController();
-    final anioCtrl = TextEditingController();
-    
-    String tipoSeleccionado = 'TRACTOR';
-    String empresaSeleccionada = empresasDisponibles.first;
-    
-    // Variables para fechas
-    String fechaRTO = "---";
-    String fechaSeguro = "---";
-    
-    // Variables para archivos (Imágenes)
-    File? fileRTO;
-    File? fileSeguro;
+  // Importante: Asegurate de tener este import arriba de todo en el archivo:
+// import 'package:file_picker/file_picker.dart';
 
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setSt) => AlertDialog(
-          title: const Text("Nuevo Vehículo / Equipo"),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: domCtrl,
-                    decoration: const InputDecoration(labelText: "DOMINIO (PATENTE)"),
-                    textCapitalization: TextCapitalization.characters,
-                  ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    initialValue: tipoSeleccionado,
-                    decoration: const InputDecoration(labelText: "TIPO DE UNIDAD"),
-                    items: ['TRACTOR', 'BATEA', 'TOLVA'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                    onChanged: (v) => setSt(() => tipoSeleccionado = v!),
-                  ),
-                  TextField(
-                    controller: marcaCtrl,
-                    decoration: const InputDecoration(labelText: "MARCA"),
-                    textCapitalization: TextCapitalization.characters,
-                  ),
-                  TextField(
-                    controller: modeloCtrl,
-                    decoration: const InputDecoration(labelText: "MODELO"),
-                    textCapitalization: TextCapitalization.characters,
-                  ),
-                  TextField(
-                    controller: anioCtrl,
-                    decoration: const InputDecoration(labelText: "AÑO"),
-                    keyboardType: TextInputType.number,
-                  ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    initialValue:  empresaSeleccionada,
-                    decoration: const InputDecoration(labelText: "EMPRESA PROPIETARIA"),
-                    items: empresasDisponibles.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                    onChanged: (v) => setSt(() => empresaSeleccionada = v!),
-                  ),
-                  const Divider(height: 30),
-                  
-                  // SECCIÓN RTO
-                  const Text("VENCIMIENTO RTO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                  Row(
-                    children: [
-                      Expanded(child: Text("Fecha: $fechaRTO")),
-                      IconButton(
-                        icon: const Icon(Icons.calendar_today),
-                        onPressed: () async {
-                          DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
-                          if (p != null) setSt(() => fechaRTO = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.camera_alt, color: fileRTO != null ? Colors.green : Colors.grey),
-                        onPressed: () async {
-                          final p = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 50);
-                          if (p != null) setSt(() => fileRTO = File(p.path));
-                        },
-                      ),
-                    ],
-                  ),
+void _dialogNuevoVehiculo(BuildContext context) {
+  final domCtrl = TextEditingController();
+  final marcaCtrl = TextEditingController();
+  final modeloCtrl = TextEditingController();
+  final anioCtrl = TextEditingController();
+  
+  String tipoSeleccionado = 'TRACTOR';
+  String empresaSeleccionada = empresasDisponibles.first;
+  String fechaRTO = "---";
+  String fechaSeguro = "---";
+  
+  // Ahora guardamos la ruta del archivo y el nombre para mostrarlo
+  File? fileRTO;
+  String nameRTO = "Sin archivo";
+  File? fileSeguro;
+  String nameSeguro = "Sin archivo";
 
-                  // SECCIÓN SEGURO
-                  const Text("VENCIMIENTO SEGURO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                  Row(
-                    children: [
-                      Expanded(child: Text("Fecha: $fechaSeguro")),
-                      IconButton(
-                        icon: const Icon(Icons.calendar_today),
-                        onPressed: () async {
-                          DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
-                          if (p != null) setSt(() => fechaSeguro = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.camera_alt, color: fileSeguro != null ? Colors.green : Colors.grey),
-                        onPressed: () async {
-                          final p = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 50);
-                          if (p != null) setSt(() => fileSeguro = File(p.path));
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+  showDialog(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (context, setSt) => AlertDialog(
+        title: const Text("Nuevo Vehículo / Equipo"),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: domCtrl, decoration: const InputDecoration(labelText: "DOMINIO (PATENTE)"), textCapitalization: TextCapitalization.characters),
+                DropdownButtonFormField<String>(
+                  initialValue: tipoSeleccionado,
+                  decoration: const InputDecoration(labelText: "TIPO DE UNIDAD"),
+                  items: ['TRACTOR', 'BATEA', 'TOLVA'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                  onChanged: (v) => setSt(() => tipoSeleccionado = v!),
+                ),
+                TextField(controller: marcaCtrl, decoration: const InputDecoration(labelText: "MARCA"), textCapitalization: TextCapitalization.characters),
+                TextField(controller: modeloCtrl, decoration: const InputDecoration(labelText: "MODELO"), textCapitalization: TextCapitalization.characters),
+                TextField(controller: anioCtrl, decoration: const InputDecoration(labelText: "AÑO"), keyboardType: TextInputType.number),
+                DropdownButtonFormField<String>(
+                  initialValue: empresaSeleccionada,
+                  decoration: const InputDecoration(labelText: "EMPRESA PROPIETARIA"),
+                  items: empresasDisponibles.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                  onChanged: (v) => setSt(() => empresaSeleccionada = v!),
+                ),
+                const Divider(height: 30),
+                
+                // SECCIÓN RTO (IMAGEN O PDF)
+                _buildSelectorArchivo(
+                  titulo: "VENCIMIENTO RTO",
+                  fecha: fechaRTO,
+                  nombreArchivo: nameRTO,
+                  onFecha: () async {
+                    DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                    if (p != null) setSt(() => fechaRTO = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                  },
+                  onFile: () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+                    if (result != null) {
+                      setSt(() {
+                        fileRTO = File(result.files.single.path!);
+                        nameRTO = result.files.single.name;
+                      });
+                    }
+                  }
+                ),
+
+                const SizedBox(height: 15),
+
+                // SECCIÓN SEGURO (IMAGEN O PDF)
+                _buildSelectorArchivo(
+                  titulo: "VENCIMIENTO SEGURO",
+                  fecha: fechaSeguro,
+                  nombreArchivo: nameSeguro,
+                  onFecha: () async {
+                    DateTime? p = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2035));
+                    if (p != null) setSt(() => fechaSeguro = "${p.year}-${p.month.toString().padLeft(2,'0')}-${p.day.toString().padLeft(2,'0')}");
+                  },
+                  onFile: () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+                    if (result != null) {
+                      setSt(() {
+                        fileSeguro = File(result.files.single.path!);
+                        nameSeguro = result.files.single.name;
+                      });
+                    }
+                  }
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")),
-            ElevatedButton(
-              onPressed: () async {
-                if (domCtrl.text.isEmpty) return;
-                
-                // Mostrar círculo de carga
-                showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
-
-                try {
-                  String urlRTO = "---";
-                  String urlSeguro = "---";
-
-                  // Subir RTO si hay archivo
-                  if (fileRTO != null) {
-                    final ref = FirebaseStorage.instance.ref().child('VEHICULOS/${domCtrl.text}/RTO.jpg');
-                    await ref.putFile(fileRTO!);
-                    urlRTO = await ref.getDownloadURL();
-                  }
-
-                  // Subir SEGURO si hay archivo
-                  if (fileSeguro != null) {
-                    final ref = FirebaseStorage.instance.ref().child('VEHICULOS/${domCtrl.text}/SEGURO.jpg');
-                    await ref.putFile(fileSeguro!);
-                    urlSeguro = await ref.getDownloadURL();
-                  }
-
-                  // Guardar en Firestore
-                  await FirebaseFirestore.instance.collection('VEHICULOS').doc(domCtrl.text.toUpperCase().trim()).set({
-                    'DOMINIO': domCtrl.text.toUpperCase().trim(),
-                    'TIPO': tipoSeleccionado,
-                    'MARCA': marcaCtrl.text.toUpperCase().trim(),
-                    'MODELO': modeloCtrl.text.toUpperCase().trim(),
-                    'AÑO': anioCtrl.text.trim(),
-                    'EMPRESA': empresaSeleccionada,
-                    'VENCIMIENTO_RTO': fechaRTO,
-                    'FOTO_VENCIMIENTO_RTO': urlRTO,
-                    'VENCIMIENTO_POLIZA': fechaSeguro, // Usamos POLIZA para ser consistentes con tu ficha
-                    'FOTO_VENCIMIENTO_POLIZA': urlSeguro,
-                  });
-
-                  if (!context.mounted) return;
-                  Navigator.pop(context); // Cierra loading
-                  Navigator.pop(ctx);     // Cierra diálogo
-                } catch (e) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-                }
-              },
-              child: const Text("GUARDAR EQUIPO"),
-            ),
-          ],
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")),
+          ElevatedButton(
+            onPressed: () async {
+              if (domCtrl.text.isEmpty) return;
+              showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+              try {
+                String urlRTO = "---";
+                String urlSeguro = "---";
+
+                if (fileRTO != null) {
+                  final ref = FirebaseStorage.instance.ref().child('VEHICULOS/${domCtrl.text}/RTO_$nameRTO');
+                  await ref.putFile(fileRTO!);
+                  urlRTO = await ref.getDownloadURL();
+                }
+                if (fileSeguro != null) {
+                  final ref = FirebaseStorage.instance.ref().child('VEHICULOS/${domCtrl.text}/SEGURO_$nameSeguro');
+                  await ref.putFile(fileSeguro!);
+                  urlSeguro = await ref.getDownloadURL();
+                }
+
+                await FirebaseFirestore.instance.collection('VEHICULOS').doc(domCtrl.text.toUpperCase().trim()).set({
+                  'DOMINIO': domCtrl.text.toUpperCase().trim(),
+                  'TIPO': tipoSeleccionado,
+                  'MARCA': marcaCtrl.text.toUpperCase().trim(),
+                  'MODELO': modeloCtrl.text.toUpperCase().trim(),
+                  'AÑO': anioCtrl.text.trim(),
+                  'EMPRESA': empresaSeleccionada,
+                  'VENCIMIENTO_RTO': fechaRTO,
+                  'FOTO_VENCIMIENTO_RTO': urlRTO,
+                  'VENCIMIENTO_POLIZA': fechaSeguro, 
+                  'FOTO_VENCIMIENTO_POLIZA': urlSeguro,
+                });
+
+                if (!context.mounted) return;
+                Navigator.pop(context); // Cierra loading
+                Navigator.pop(ctx);     // Cierra diálogo
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+              }
+            },
+            child: const Text("GUARDAR EQUIPO"),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
+
+// Widget auxiliar para no repetir código de diseño
+Widget _buildSelectorArchivo({required String titulo, required String fecha, required String nombreArchivo, required VoidCallback onFecha, required VoidCallback onFile}) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blueGrey)),
+      Row(
+        children: [
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Vto: $fecha", style: const TextStyle(fontSize: 13)),
+              Text(nombreArchivo, style: const TextStyle(fontSize: 11, color: Colors.grey, overflow: TextOverflow.ellipsis)),
+            ],
+          )),
+          IconButton(icon: const Icon(Icons.calendar_today, size: 20), onPressed: onFecha),
+          IconButton(
+            icon: Icon(Icons.attach_file, color: nombreArchivo != "Sin archivo" ? Colors.green : Colors.grey),
+            onPressed: onFile,
+          ),
+        ],
+      ),
+    ],
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -1624,27 +1604,11 @@ Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
             
             // 1. VER FOTO (Ojo azul)
             if (tieneFoto)
-              IconButton(
-                icon: const Icon(Icons.remove_red_eye, color: Colors.blue),
-                onPressed: () {
-                  showDialog(
-                    context: context, 
-                    builder: (_) => Dialog(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min, 
-                        children: [
-                          AppBar(
-                            title: Text(titulo), 
-                            automaticallyImplyLeading: false, 
-                            actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))]
-                          ),
-                          InteractiveViewer(child: Image.network(urlFoto, fit: BoxFit.contain)),
-                        ]
-                      )
-                    )
-                  );
-                },
-              ),
+              // Busca el IconButton del ojo dentro de filaVtoSemaforo y reemplázalo:
+IconButton(
+  icon: const Icon(Icons.remove_red_eye, color: Colors.blueGrey),
+  onPressed: () => _verAdjunto(context, urlFoto, titulo), // <--- Ahora usa la nueva función
+),
 
             // 2. ACCIONES (ADMIN O CHOFER)
             if (coleccionDestino != null)
@@ -1720,4 +1684,103 @@ Future<void> _gestionarFechaAdmin(BuildContext context, String idSujeto, String 
       await FirebaseFirestore.instance.collection(coleccionDestino).doc(idSujeto).update({campoFirestore: nuevaFecha});
     }
   }
+}
+
+ void _verAdjunto(BuildContext context, String? url, String titulo) async {
+  if (url == null || url == "---" || url.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("No hay un archivo o imagen cargada."))
+    );
+    return;
+  }
+
+  // Detectamos si es una imagen por la extensión
+  bool esImagen = url.toLowerCase().contains('.jpg') || 
+                  url.toLowerCase().contains('.jpeg') || 
+                  url.toLowerCase().contains('.png');
+
+  showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(titulo),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: esImagen 
+          ? Image.network(
+              url, 
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => const Center(
+                child: Text("Error al cargar la imagen. Intente abrir como archivo."),
+              ),
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.insert_drive_file, size: 80, color: Colors.blueGrey),
+                const SizedBox(height: 15),
+                const Text("Este documento es un PDF o archivo externo.", textAlign: TextAlign.center),
+              ],
+            ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CERRAR")),
+        ElevatedButton.icon(
+          icon: const Icon(Icons.open_in_new),
+          label: const Text("ABRIR / DESCARGAR"),
+          onPressed: () async {
+            final Uri uri = Uri.parse(url);
+            if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("No se pudo abrir el enlace."))
+                );
+              }
+            }
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+// --- FUNCIÓN GLOBAL PARA SELECCIONAR ARCHIVOS ---
+// Pegar esto al final del archivo main.dart (fuera de cualquier clase)
+Widget _buildSelectorArchivo({
+  required String titulo, 
+  required String fecha, 
+  required String nombreArchivo, 
+  required VoidCallback onFecha, 
+  required VoidCallback onFile
+}) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blueGrey)),
+      Row(
+        children: [
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Vto: $fecha", style: const TextStyle(fontSize: 13)),
+              Text(nombreArchivo, 
+                style: const TextStyle(fontSize: 11, color: Colors.grey, overflow: TextOverflow.ellipsis),
+                maxLines: 1,
+              ),
+            ],
+          )),
+          IconButton(
+            icon: const Icon(Icons.calendar_today, size: 20), 
+            onPressed: onFecha
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.attach_file, 
+              color: nombreArchivo != "Sin archivo" ? Colors.green : Colors.grey
+            ),
+            onPressed: onFile,
+          ),
+        ],
+      ),
+    ],
+  );
 }
