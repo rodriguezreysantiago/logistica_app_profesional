@@ -18,10 +18,16 @@ void main() async {
 
 class LogisticaApp extends StatelessWidget {
   const LogisticaApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      // 1. ACÁ CAMBIAMOS EL NOMBRE DE LA VENTANA
+      title: 'S.M.A.R.T. Logística', 
+      
       debugShowCheckedModeBanner: false,
+      
+      // Localización en español Argentina
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -31,6 +37,8 @@ class LogisticaApp extends StatelessWidget {
         Locale('es', 'AR'), 
       ],
       locale: const Locale('es', 'AR'), 
+
+      // Ajuste de escala de texto para que se vea bien en monitores
       builder: (context, child) {
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(
@@ -39,10 +47,17 @@ class LogisticaApp extends StatelessWidget {
           child: child!,
         );
       },
+
+      // Configuración de colores profesional
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue.shade900),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1A3A5A), // Usamos el azul SMART como base
+          primary: const Color(0xFF1A3A5A),
+        ),
         useMaterial3: true,
+        visualDensity: VisualDensity.adaptivePlatformDensity, // Mejor para Windows
       ),
+
       home: const LoginScreen(),
     );
   }
@@ -330,6 +345,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  // VARIABLES ÚNICAS (Sin duplicados)
   final TextEditingController _dniController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
   final FocusNode _passFocus = FocusNode(); 
@@ -345,11 +361,14 @@ class _LoginScreenState extends State<LoginScreen> {
       final doc = await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).get();
       if (!mounted) return;
       if (doc.exists && doc.data()!['CLAVE'].toString() == pass) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => MainPanel(
-          dni: dni, 
-          nombre: doc.data()!['CHOFER'] ?? "Usuario", 
-          rol: doc.data()!['ROL'] ?? "USUARIO"
-        )));
+        Navigator.pushReplacement(
+          context, 
+          MaterialPageRoute(builder: (context) => MainPanel(
+            dni: dni, 
+            nombre: doc.data()!['CHOFER'] ?? "Usuario", 
+            rol: doc.data()!['ROL'] ?? "USUARIO"
+          ))
+        );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("DNI o Clave incorrectos")));
       }
@@ -363,34 +382,94 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          child: SizedBox(width: 300, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.local_shipping, size: 80, color: Colors.blue),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _dniController,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: "DNI", border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
-              onSubmitted: (_) => FocusScope.of(context).requestFocus(_passFocus),
+      body: Stack(
+        children: [
+          // 1. FONDO SMART (Asegurate que el archivo esté en assets/images/)
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/images/fondo_login.jpg'),
+                fit: BoxFit.cover,
+              ),
             ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _passController,
-              focusNode: _passFocus,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: "Clave", border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
-              onSubmitted: (_) => _login(),
+          ),
+          
+          // 2. FILTRO PARA LUCIR LA IMAGEN
+          Container(color: Colors.black.withValues(alpha: 0.25)),
+
+          // 3. CUADRO DE LOGIN TRASLÚCIDO
+          Center(
+            child: SingleChildScrollView(
+              child: Container(
+                width: 420,
+                padding: const EdgeInsets.all(40),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.8), 
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 30,
+                    )
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      "S.M.A.R.T.",
+                      style: TextStyle(
+                        fontSize: 35,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A3A5A),
+                        letterSpacing: 6,
+                      ),
+                    ),
+                    const Text("Logística y Monitoreo", style: TextStyle(color: Colors.blueGrey)),
+                    const SizedBox(height: 40),
+                    TextField(
+                      controller: _dniController,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: "DNI",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                      onSubmitted: (_) => FocusScope.of(context).requestFocus(_passFocus),
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: _passController,
+                      focusNode: _passFocus,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: "Clave",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.lock),
+                      ),
+                      onSubmitted: (_) => _login(),
+                    ),
+                    const SizedBox(height: 35),
+                    _isLoading 
+                      ? const CircularProgressIndicator(color: Color(0xFF1A3A5A)) 
+                      : ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1A3A5A),
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(double.infinity, 55),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: _login, 
+                          child: const Text("INGRESAR", style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(height: 20),
-            _isLoading ? const CircularProgressIndicator() : ElevatedButton(
-              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-              onPressed: _login, 
-              child: const Text("INGRESAR")
-            ),
-          ])),
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -416,7 +495,13 @@ class MainPanel extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          _card(context, Icons.folder, "MIS DOCUMENTOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => MisDocumentosScreen(dni: dni)))),
+          _card(context, Icons.account_circle, "MI PERFIL", () {
+    Navigator.push(
+      context, 
+      MaterialPageRoute(builder: (context) => PerfilScreen(dni: dni))
+    );
+  }),
+          _card(context, Icons.event_busy, "MIS VENCIMIENTOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => MisDocumentosScreen(dni: dni)))),
           if (rol.toUpperCase() == "ADMIN") ...[
             const SizedBox(height: 10),
             _card(context, Icons.people, "PERSONAL", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaPersonalScreen()))),
@@ -431,8 +516,33 @@ class MainPanel extends StatelessWidget {
   }
 
   Widget _card(BuildContext context, IconData i, String t, VoidCallback tap) {
-    return Card(child: ListTile(leading: Icon(i, color: Colors.blue), title: Text(t), trailing: const Icon(Icons.arrow_forward_ios), onTap: tap));
-  }
+  return Card(
+    elevation: 4, // Le da un poco de sombra para que resalte
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+    margin: const EdgeInsets.only(bottom: 15),
+    child: ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A3A5A).withValues(alpha: 0.1), // Azul traslúcido
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(i, color: const Color(0xFF1A3A5A), size: 30),
+      ),
+      title: Text(
+        t,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 18,
+          color: Color(0xFF1A3A5A),
+        ),
+      ),
+      trailing: const Icon(Icons.arrow_forward_ios, size: 18, color: Colors.grey),
+      onTap: tap,
+    ),
+  );
+}
 }
 
 class PanelVencimientosScreen extends StatelessWidget {
@@ -2040,3 +2150,265 @@ void _verFotoGrande(BuildContext context, String? url, String titulo) async {
     ),
   );
 }
+
+// --- PANTALLA MI PERFIL (CORREGIDA Y COMPLETA) ---
+
+class PerfilScreen extends StatefulWidget {
+  final String dni;
+  const PerfilScreen({super.key, required this.dni});
+
+  @override
+  State<PerfilScreen> createState() => _PerfilScreenState();
+}
+
+class _PerfilScreenState extends State<PerfilScreen> {
+  
+  // SUBIR FOTO
+  // --- NUEVA FUNCIÓN PARA ELEGIR Y SUBIR FOTO DE PERFIL ---
+  Future<void> _subirFotoPerfil() async {
+    File? archivoSeleccionado;
+
+    // 1. Menú para elegir Cámara o Archivo
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            const ListTile(
+              title: Text("Actualizar Foto de Perfil", style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Color(0xFF1A3A5A)),
+              title: const Text('Cámara (Sacar foto)'),
+              onTap: () async {
+                final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 60);
+                if (img != null) {
+                  archivoSeleccionado = File(img.path);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder, color: Colors.orange),
+              title: const Text('Galería o Archivo'),
+              onTap: () async {
+                // Usamos FilePicker para que pueda elegir fotos o archivos del celu
+                FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.image);
+                if (result != null) {
+                  archivoSeleccionado = File(result.files.single.path!);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // 2. Si no seleccionó nada o cerró el menú, salimos
+    if (archivoSeleccionado == null) return;
+
+    // --- IMPORTANTE: Verificamos el context antes de seguir (async gap) ---
+    if (!mounted) return;
+
+    // 3. Mostrar el círculo de carga
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // 4. Subir a Storage
+      String fileName = "perfil_${widget.dni}_${DateTime.now().millisecondsSinceEpoch}.jpg";
+      Reference ref = FirebaseStorage.instance.ref().child('perfiles').child(fileName);
+
+      await ref.putFile(archivoSeleccionado!);
+      String url = await ref.getDownloadURL();
+
+      // 5. Actualizar Firestore
+      await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({
+        'FOTO_PERFIL': url,
+      });
+
+      // 6. Cerrar loading y avisar
+      if (mounted) {
+        Navigator.pop(context); // Cierra el CircularProgressIndicator
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Foto de perfil actualizada")));
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+      }
+    }
+  }
+  
+
+
+  @override
+  Widget build(BuildContext context) {
+    const Color azulPrimario = Color(0xFF1A3A5A);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("MI PERFIL", style: TextStyle(color: Colors.white)),
+        backgroundColor: azulPrimario,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: Text("No hay datos"));
+
+          var datos = snapshot.data!.data() as Map<String, dynamic>;
+          String urlFoto = datos['FOTO_PERFIL'] ?? "";
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                Center(
+                  child: Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 60,
+                        backgroundColor: azulPrimario,
+                        backgroundImage: urlFoto.isNotEmpty ? NetworkImage(urlFoto) : null,
+                        child: urlFoto.isEmpty ? const Icon(Icons.person, size: 70, color: Colors.white) : null,
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: CircleAvatar(
+                          backgroundColor: Colors.white,
+                          radius: 20,
+                          child: IconButton(
+                            icon: const Icon(Icons.camera_alt, color: azulPrimario, size: 20),
+                            onPressed: _subirFotoPerfil,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 15),
+
+                // NOMBRE Y EMPRESA
+                Text(datos['CHOFER'] ?? "S/D", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: azulPrimario)),
+                const SizedBox(height: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
+                  decoration: BoxDecoration(color: Colors.orange[800], borderRadius: BorderRadius.circular(20)),
+                  child: Text(datos['EMPRESA']?.toString().toUpperCase() ?? "SIN EMPRESA", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+
+                const SizedBox(height: 25),
+
+                // DATOS BLOQUEADOS
+                _grupo("INFORMACIÓN PERSONAL", [
+                  _dato(Icons.person, "Nombre", datos['CHOFER'] ?? "S/D"),
+                  _dato(Icons.badge, "DNI", datos['DNI'] ?? ""),
+                  _dato(Icons.fingerprint, "CUIL", datos['CUIL'] ?? ""),
+                ]),
+
+                const SizedBox(height: 15),
+
+                // BOTÓN CLAVE (Usando la sintaxis nueva .withValues)
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.lock_reset),
+                  label: const Text("CAMBIAR CONTRASEÑA"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: azulPrimario.withValues(alpha: 0.1), 
+                    foregroundColor: azulPrimario
+                  ),
+                  onPressed: () => _dialogClave(context, widget.dni, datos['CLAVE'] ?? ""),
+                ),
+
+                const Divider(height: 40),
+
+                // EQUIPO
+                _grupo("MI EQUIPO", [
+                  _dato(Icons.local_shipping, "TRACTOR", datos['TRACTOR'] ?? "Sin Asignar"),
+                  _dato(Icons.grid_view, "ACOPLADO", datos['BATEA_TOLVA'] ?? "Sin Asignar"),
+                ]),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _grupo(String titulo, List<Widget> items) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A3A5A).withValues(alpha: 0.05), 
+        borderRadius: BorderRadius.circular(15)
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A3A5A))),
+        const Divider(),
+        ...items
+      ]),
+    );
+  }
+
+  Widget _dato(IconData icon, String label, String valor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(children: [
+        Icon(icon, color: Colors.blueGrey, size: 20),
+        const SizedBox(width: 15),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(valor, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+        ]),
+        const Spacer(),
+        const Icon(Icons.lock_outline, size: 16, color: Colors.black12),
+      ]),
+    );
+  }
+
+  void _dialogClave(BuildContext context, String dni, String actual) {
+    final c1 = TextEditingController();
+    final c2 = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Nueva Contraseña"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min, 
+          children: [
+            TextField(controller: c1, decoration: const InputDecoration(labelText: "Contraseña Actual"), obscureText: true),
+            TextField(controller: c2, decoration: const InputDecoration(labelText: "Nueva Contraseña"), obscureText: true),
+          ]
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text("CANCELAR")),
+          ElevatedButton(
+            onPressed: () async {
+              if (c1.text != actual) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("La clave actual no coincide")));
+                return;
+              }
+              
+              // Operación asincrónica
+              await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({'CLAVE': c2.text.trim()});
+              
+              // --- ESTA ES LA SOLUCIÓN AL ERROR ---
+              // Verificamos que el diálogo todavía exista antes de intentar cerrarlo
+              if (!context.mounted) return;
+              
+              Navigator.pop(dialogContext);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Contraseña cambiada")));
+            },
+            child: const Text("GUARDAR"),
+          ),
+        ],
+      ),
+    );
+  }}
