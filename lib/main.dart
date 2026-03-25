@@ -98,115 +98,158 @@ int _calcularDiasRestantes(String? fecha) {
   } catch (_) { return 999; }
 }
 
-// --- GESTIÓN DE IMÁGENES ---
+// --- GESTIÓN DE IMÁGENES CORREGIDA ---
 
-Future<void> _subirSolicitudImagen(BuildContext context, {
-  required String idSujeto, 
-  required String nombreSujeto, 
-  required String documentoEtiqueta, 
-  required String campoFirestore,
-  required String coleccionDestino,
-}) async {
-  // 1. PRIMERO: SELECCIONAR LA NUEVA FECHA
-  final DateTime? nuevaFecha = await showDatePicker(
-    context: context,
-    initialDate: DateTime.now(),
-    firstDate: DateTime(2024),
-    lastDate: DateTime(2035),
-    helpText: "PASO 1: SELECCIONE EL VENCIMIENTO",
-  );
+// 1. FUNCIÓN PARA INICIAR EL PROCESO (FECHA + ARCHIVO)
+  Future<void> _subirSolicitudImagen(BuildContext context, {
+    required String idSujeto,
+    required String nombreSujeto,
+    required String documentoEtiqueta,
+    required String campoFirestore,
+    required String coleccionDestino,
+  }) async {
+    
+    // PASO A: SELECCIONAR FECHA
+    DateTime? fechaElegida = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      helpText: "PASO 1: SELECCIONAR VENCIMIENTO",
+      locale: const Locale('es', 'AR'),
+    );
 
-  if (nuevaFecha == null || !context.mounted) return;
-  final String fechaString = "${nuevaFecha.year}-${nuevaFecha.month.toString().padLeft(2,'0')}-${nuevaFecha.day.toString().padLeft(2,'0')}";
+    if (fechaElegida == null || !context.mounted) return;
+    
+    String fechaFormateada = "${fechaElegida.year}-${fechaElegida.month.toString().padLeft(2, '0')}-${fechaElegida.day.toString().padLeft(2, '0')}";
 
-  // 2. SEGUNDO: MENÚ PARA ADJUNTAR RESPALDO
-  final ImagePicker picker = ImagePicker();
-  final XFile? image = await showModalBottomSheet<XFile>(
-    context: context,
-    builder: (ctx) => SafeArea(
-      child: Wrap(
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text("PASO 2: ADJUNTAR COMPROBANTE", style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          ListTile(
-            leading: const Icon(Icons.camera_alt, color: Colors.blue), 
-            title: const Text('Tomar Foto'), 
-            onTap: () async {
-              final img = await picker.pickImage(source: ImageSource.camera, imageQuality: 50);
-              if (ctx.mounted) Navigator.pop(ctx, img);
-            }
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_library, color: Colors.green), 
-            title: const Text('Elegir de Galería'), 
-            onTap: () async {
-              final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
-              if (ctx.mounted) Navigator.pop(ctx, img);
-            }
-          ),
-          ListTile(
-            leading: const Icon(Icons.close), 
-            title: const Text('Cancelar'), 
-            onTap: () => Navigator.pop(ctx),
-          ),
-        ],
+    // PASO B: SELECCIONAR ARCHIVO
+    File? archivoSeleccionado;
+    
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              title: Text("PASO 2: ADJUNTAR A $documentoEtiqueta", style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text("Vencimiento: $fechaFormateada"),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.blue),
+              title: const Text('Cámara (Sacar foto)'),
+              onTap: () async {
+                final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70);
+                if (img != null) {
+                  archivoSeleccionado = File(img.path);
+                  if (context.mounted) Navigator.pop(ctx);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file, color: Colors.green),
+              title: const Text('Galería o Archivo'),
+              onTap: () async {
+                final res = await FilePicker.platform.pickFiles(type: FileType.any);
+                if (res != null && res.files.single.path != null) {
+                  archivoSeleccionado = File(res.files.single.path!);
+                  if (context.mounted) Navigator.pop(ctx);
+                }
+              },
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
 
-  if (image == null || !context.mounted) return;
+    // PASO C: 
+    if (archivoSeleccionado != null && context.mounted) {
+      _procederALaSubidaFinal(
+        context, 
+        idSujeto, 
+        documentoEtiqueta, 
+        campoFirestore, 
+        archivoSeleccionado!, 
+        fechaFormateada,
+        "PERSONAL" // <-- Aquí le decimos que la colección destino es PERSONAL, pero podrías hacer lógica para decidirlo según el campo o etiqueta
+      );
+    }
+  }
 
-  // 3. TERCERO: PROCESO DE SUBIDA
+// 2. FUNCIÓN DE SUBIDA FINAL (CORREGIDA Y UNIFICADA)
+  void _procederALaSubidaFinal(BuildContext context, String dni, String etiqueta, String campo, File archivo, String fechaS, String coleccionDestino) async {
+  
+  // 1. Mostrar el cartel de carga
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (ctx) => const AlertDialog(
-      content: Row(
-        children: [
-          CircularProgressIndicator(), 
-          SizedBox(width: 20), 
-          Text("Enviando revisión...")
-        ]
-      )
-    ),
+    builder: (BuildContext context) {
+      return AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        content: Row(
+          children: const [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text("Subiendo archivo...")),
+          ],
+        ),
+      );
+    },
   );
 
   try {
-    File file = File(image.path);
-    String fileName = "solicitud_${campoFirestore}_${DateTime.now().millisecondsSinceEpoch}.jpg";
-    Reference ref = FirebaseStorage.instance.ref().child('solicitudes').child(fileName);
+    // 2. Determinar el tipo de archivo (MIME Type) para que no llegue sin formato
+    String extension = archivo.path.split('.').last.toLowerCase();
+    String contentType = 'application/octet-stream'; // Por defecto
+    if (extension == 'pdf') contentType = 'application/pdf';
+    if (extension == 'jpg' || extension == 'jpeg') contentType = 'image/jpeg';
+    if (extension == 'png') contentType = 'image/png';
 
-    UploadTask uploadTask = ref.putFile(file);
-    TaskSnapshot snapshot = await uploadTask;
-    String url = await snapshot.ref.getDownloadURL();
+    // 3. Subida a Firebase Storage con METADATOS
+    final String nombreArchivo = '${dni}_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension';
+    final ref = FirebaseStorage.instance.ref().child('REVISIONES/$nombreArchivo');
+    
+    // Agregamos SettableMetadata para que Firebase sepa qué archivo es
+    await ref.putFile(archivo, SettableMetadata(contentType: contentType));
+    
+    String url = await ref.getDownloadURL();
 
-    // Guardamos la solicitud para que el admin la apruebe
-    await FirebaseFirestore.instance.collection('SOLICITUDES').add({
-      'ID_SUJETO': idSujeto,
-      'NOMBRE_SUJETO': nombreSujeto,
-      'DOCUMENTO': documentoEtiqueta,
-      'CAMPO_FIRESTORE': campoFirestore,
-      'COLECCION_DESTINO': coleccionDestino,
-      'NUEVA_FECHA': fechaString,
-      'URL_FOTO': url,
+    // 4. Guardar registro en Firestore (Colección REVISIONES en MAYÚSCULAS)
+    await FirebaseFirestore.instance.collection('REVISIONES').add({
+      'DNI': dni.trim(),
+      'CAMPO': campo, 
+      'CAMPO_FOTO': 'FOTO_$campo', 
+      'COLECCION_DESTINO': coleccionDestino, 
+      'ETIQUETA': etiqueta,
+      'NUEVA_FECHA': fechaS,
+      'URL_ADJUNTO': url,
       'ESTADO': 'PENDIENTE',
-      'FECHA_PEDIDO': DateTime.now(),
+      'FECHA_SOLICITUD': DateTime.now(),
     });
 
-    if (!context.mounted) return;
-    Navigator.of(context, rootNavigator: true).pop(); // Cerrar loading
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Solicitud enviada. El administrador la revisará pronto."))
-    );
+    // 5. Éxito: Cerramos el diálogo y avisamos
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop(); // Cierra el Alert de carga
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("$etiqueta: Enviado a revisión con éxito"), 
+          backgroundColor: Colors.green
+        ),
+      );
+    }
 
   } catch (e) {
-    if (!context.mounted) return;
-    Navigator.of(context, rootNavigator: true).pop();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Error al enviar: $e"), backgroundColor: Colors.red)
-    );
+    // 6. Error: Cerramos el diálogo y mostramos el error
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop(); // Cierra el Alert de carga
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Error al subir: $e"), 
+          backgroundColor: Colors.red
+        ),
+      );
+    }
+    debugPrint("Error en la subida: $e");
   }
 }
 
@@ -219,7 +262,9 @@ Future<void> _subirImagenDirectaAdmin(BuildContext context, String idSujeto, Str
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (ctx) => const AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Actualizando imagen...")])),
+    builder: (ctx) => const AlertDialog(
+      content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text("Actualizando imagen...")])
+    ),
   );
 
   try {
@@ -235,12 +280,12 @@ Future<void> _subirImagenDirectaAdmin(BuildContext context, String idSujeto, Str
     });
 
     if (context.mounted) {
-      Navigator.of(context, rootNavigator: true).pop();
+      Navigator.pop(context); // Cierra loading
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Imagen actualizada con éxito")));
     }
   } catch (e) {
     if (context.mounted) {
-      Navigator.of(context, rootNavigator: true).pop();
+      Navigator.pop(context); // Cierra loading
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error al actualizar: $e"), backgroundColor: Colors.red));
     }
   }
@@ -264,7 +309,7 @@ Future<void> _confirmarEliminarImagen(BuildContext context, String col, String i
       await FirebaseFirestore.instance.collection(col).doc(id).update({
         'FOTO_$campo': FieldValue.delete(),
       });
-      
+
       try {
         await FirebaseStorage.instance.refFromURL(url).delete();
       } catch (_) {}
@@ -424,68 +469,150 @@ class PanelVencimientosScreen extends StatelessWidget {
 }
 
 class _SeccionSolicitudesPendientesAdmin extends StatelessWidget {
+  const _SeccionSolicitudesPendientesAdmin();
+
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder(
-      stream: FirebaseFirestore.instance.collection('SOLICITUDES').where('ESTADO', isEqualTo: 'PENDIENTE').snapshots(),
-      builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        final solicitudes = snapshot.data!.docs;
-        if (solicitudes.isEmpty) return const Center(child: Text("No hay fotos pendientes de revisión"));
+    return Scaffold(
+      appBar: AppBar(title: const Text("Control de Vencimientos"), backgroundColor: Colors.blueGrey),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('REVISIONES')
+            .where('ESTADO', isEqualTo: 'PENDIENTE')
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text("No hay trámites pendientes"));
 
-        return ListView.builder(
-          itemCount: solicitudes.length,
-          itemBuilder: (context, index) {
-            final sol = solicitudes[index];
-            return Card(
-              margin: const EdgeInsets.all(10),
-              child: ListTile(
-                leading: InkWell(
-                  onTap: () => _verFotoGrande(context, sol['DOCUMENTO'], sol['URL_FOTO']),
-                  child: Image.network(sol['URL_FOTO'], width: 50, height: 50, fit: BoxFit.cover),
+          final solicitudes = snapshot.data!.docs;
+          return ListView.builder(
+            itemCount: solicitudes.length,
+            itemBuilder: (context, index) {
+              // ✅ Cambiamos 'sol' por 'doc' para que coincida con la lógica de abajo
+              final doc = solicitudes[index];
+              final data = doc.data() as Map<String, dynamic>;
+              
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: ListTile(
+                  leading: const Icon(Icons.assignment, color: Colors.blueGrey),
+                  title: Text(data['ETIQUETA'] ?? 'Sin Título'),
+                  subtitle: Text("ID: ${data['DNI']} - Vto: ${data['NUEVA_FECHA']}"),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _mostrarDetalleSolicitud(context, doc), // ✅ Pasamos 'doc'
                 ),
-                title: Text("${sol['NOMBRE_SUJETO']}"),
-                subtitle: Text("Documento: ${sol['DOCUMENTO']}\nNuevo Vto: ${formatearFecha(sol['NUEVA_FECHA'])}"),
-                isThreeLine: true,
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(icon: const Icon(Icons.check_circle, color: Colors.green), onPressed: () => _aprobarSolicitud(context, sol)),
-                    IconButton(icon: const Icon(Icons.cancel, color: Colors.red), onPressed: () => _rechazarSolicitud(context, sol)),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+              );
+            },
+          );
+        },
+      ),
     );
   }
+}
 
-  void _verFotoGrande(BuildContext context, String titulo, String url) {
-    showDialog(context: context, builder: (_) => Dialog(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      AppBar(title: Text(titulo), automaticallyImplyLeading: false, actions: [IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))]),
-      InteractiveViewer(child: Image.network(url)),
-    ])));
-  }
 
-  Future<void> _aprobarSolicitud(BuildContext context, DocumentSnapshot sol) async {
-    try {
-      await FirebaseFirestore.instance.collection(sol['COLECCION_DESTINO']).doc(sol['ID_SUJETO']).update({
-        sol['CAMPO_FIRESTORE']: sol['NUEVA_FECHA'],
-        'FOTO_${sol['CAMPO_FIRESTORE']}': sol['URL_FOTO']
-      });
-      await sol.reference.update({'ESTADO': 'APROBADO'});
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vencimiento actualizado correctamente")));
-    } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-    }
-  }
 
-  Future<void> _rechazarSolicitud(BuildContext context, DocumentSnapshot sol) async {
+// --- FUNCIÓN ÚNICA Y FINAL PARA MOSTRAR DETALLE Y GESTIONAR ---
+void _mostrarDetalleSolicitud(BuildContext context, DocumentSnapshot doc) {
+  final data = doc.data() as Map<String, dynamic>;
+
+  showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text("Revisar: ${data['ETIQUETA'] ?? 'Trámite'}"),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("ID / Patente: ${data['DNI']}", style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text("Nueva Fecha: ${data['NUEVA_FECHA']}"),
+            const SizedBox(height: 15),
+            Center(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.remove_red_eye),
+                label: const Text("VER ARCHIVO ADJUNTO"),
+                onPressed: () => _verFotoGrande(context, data['URL_ADJUNTO'], data['ETIQUETA'] ?? "Documento"),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () async {
+            await doc.reference.update({'ESTADO': 'RECHAZADO'});
+            if (context.mounted) Navigator.pop(ctx);
+          },
+          child: const Text("RECHAZAR", style: TextStyle(color: Colors.red)),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+          onPressed: () async {
+            // 1. Declaramos la variable FUERA del try para que el SnackBar la vea
+            String coleccionFinal = "EMPLEADOS"; 
+
+            try {
+              String idDocumento = data['DNI'].toString().trim();
+              String campoAActualizar = data['CAMPO'] ?? '';
+              String nuevaUrl = data['URL_ADJUNTO'] ?? '';
+              String nuevaFecha = data['NUEVA_FECHA'] ?? '';
+              
+              String destinoTramite = (data['COLECCION_DESTINO'] ?? '').toString().toUpperCase();
+
+              // 2. Lógica de selección de carpeta
+              if (destinoTramite.contains("VEHICULOS") || destinoTramite.contains("UNIDADES")) {
+                coleccionFinal = "VEHICULOS";
+              } else {
+                bool esPatente = RegExp(r'^[A-Z0-9]{6,7}$').hasMatch(idDocumento);
+                if (esPatente) coleccionFinal = "VEHICULOS";
+              }
+
+              // 3. Actualización
+              await FirebaseFirestore.instance
+                  .collection(coleccionFinal)
+                  .doc(idDocumento)
+                  .update({
+                campoAActualizar: nuevaFecha,
+                'FOTO_$campoAActualizar': nuevaUrl,
+                'FOTO': nuevaUrl, 
+              });
+
+              await doc.reference.update({'ESTADO': 'APROBADO'});
+
+              if (context.mounted) {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("¡$coleccionFinal actualizado correctamente!"), 
+                    backgroundColor: Colors.green
+                  ),
+                );
+              }
+            } catch (e) {
+              debugPrint("Error al aprobar: $e");
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Error: No se encontró el registro en $coleccionFinal."), 
+                    backgroundColor: Colors.red
+                  ),
+                );
+              }
+            }
+          },
+          child: const Text("APROBAR Y ACTUALIZAR", style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    ),
+  );
+}
+
+
+  Future<void> rechazarSolicitud(BuildContext context, DocumentSnapshot sol) async {
     await sol.reference.update({'ESTADO': 'RECHAZADO'});
   }
-}
+
 
 class _ListaVencimientosGenerica extends StatelessWidget {
   final String coleccion;
@@ -1449,23 +1576,73 @@ class MisDocumentosScreen extends StatelessWidget {
                 cabeceraFicha(nombre, "DNI: ${formatearDNI(user['DNI'])}"),
                 
                 tituloSeccion("MI DOCUMENTACIÓN PERSONAL"),
-                filaVtoSemaforo(context, "LICENCIA DE CONDUCIR", user['LIC_COND'], 
-                    idSujeto: dni, campoFirestore: 'LIC_COND',
-                    onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "LICENCIA", campoFirestore: "LIC_COND", coleccionDestino: 'EMPLEADOS'), 
-                    urlFoto: user['FOTO_LIC_COND']),
-                filaVtoSemaforo(context, "PREOCUPACIONAL (EPAP)", user['EPAP'], 
-                    idSujeto: dni, campoFirestore: 'EPAP',
-                    onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "EPAP", campoFirestore: "EPAP", coleccionDestino: 'EMPLEADOS'), 
-                    urlFoto: user['FOTO_EPAP']),
-                filaVtoSemaforo(context, "CURSO MANEJO DEFENSIVO", user['CURSO_MANEJO'], 
-                    idSujeto: dni, campoFirestore: 'CURSO_MANEJO',
-                    onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "CURSO MANEJO", campoFirestore: "CURSO_MANEJO", coleccionDestino: 'EMPLEADOS'), 
-                    urlFoto: user['FOTO_CURSO_MANEJO']),
-                filaVtoSemaforo(context, "CURSO MERCANCÍAS PELIGROSAS", user['CURSO_MERCANCIAS'], 
-                    idSujeto: dni, campoFirestore: 'CURSO_MERCANCIAS',
-                    onSubir: () => _subirSolicitudImagen(context, idSujeto: dni, nombreSujeto: nombre, documentoEtiqueta: "MERCANCIAS", campoFirestore: "CURSO_MERCANCIAS", coleccionDestino: 'EMPLEADOS'), 
-                    urlFoto: user['FOTO_CURSO_MERCANCIAS']),
+                filaVtoSemaforo(
+  context, 
+  "LICENCIA DE CONDUCIR", 
+  user['LIC_COND'], 
+  idSujeto: dni, 
+  campoFirestore: 'LIC_COND',
+  onSubir: () => _subirSolicitudImagen(
+    context, 
+    idSujeto: dni, 
+    nombreSujeto: nombre, 
+    documentoEtiqueta: "LICENCIA", 
+    campoFirestore: "LIC_COND", 
+    coleccionDestino: 'EMPLEADOS'
+  ), 
+  urlFoto: user['FOTO_LIC_COND']
+),
 
+filaVtoSemaforo(
+  context, 
+  "PREOCUPACIONAL (EPAP)", 
+  user['EPAP'], 
+  idSujeto: dni, 
+  campoFirestore: 'EPAP',
+  onSubir: () => _subirSolicitudImagen(
+    context, 
+    idSujeto: dni, 
+    nombreSujeto: nombre, 
+    documentoEtiqueta: "EPAP", 
+    campoFirestore: "EPAP", 
+    coleccionDestino: 'EMPLEADOS'
+  ), 
+  urlFoto: user['FOTO_EPAP']
+),
+
+filaVtoSemaforo(
+  context, 
+  "CURSO MANEJO DEFENSIVO", 
+  user['CURSO_MANEJO'], 
+  idSujeto: dni, 
+  campoFirestore: 'CURSO_MANEJO',
+  onSubir: () => _subirSolicitudImagen(
+    context, 
+    idSujeto: dni, 
+    nombreSujeto: nombre, 
+    documentoEtiqueta: "CURSO MANEJO", 
+    campoFirestore: "CURSO_MANEJO", 
+    coleccionDestino: 'EMPLEADOS'
+  ), 
+  urlFoto: user['FOTO_CURSO_MANEJO']
+),
+
+filaVtoSemaforo(
+  context, 
+  "CURSO MERCANCÍAS PELIGROSAS", 
+  user['CURSO_MERCANCIAS'], 
+  idSujeto: dni, 
+  campoFirestore: 'CURSO_MERCANCIAS',
+  onSubir: () => _subirSolicitudImagen(
+    context, 
+    idSujeto: dni, 
+    nombreSujeto: nombre, 
+    documentoEtiqueta: "MERCANCIAS", 
+    campoFirestore: "CURSO_MERCANCIAS", 
+    coleccionDestino: 'EMPLEADOS'
+  ), 
+  urlFoto: user['FOTO_CURSO_MERCANCIAS']
+),
                 if (tractorAsignado.isNotEmpty || acopladoAsignado.isNotEmpty) ...[
                   tituloSeccion("DOCUMENTACIÓN DE MI EQUIPO"),
                   if (tractorAsignado.isNotEmpty)
@@ -1539,48 +1716,50 @@ Widget filaDato(IconData icono, String label, dynamic valor) {
   return Padding(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), child: Row(children: [Icon(icono, size: 20, color: Colors.blue.shade800), const SizedBox(width: 15), Text(label), const Spacer(), Text(valor?.toString() ?? "---", style: const TextStyle(fontWeight: FontWeight.bold))]));
 }
 
+
 Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
-  required String idSujeto, 
-  required String campoFirestore, 
-  VoidCallback? onSubir, 
-  String? urlFoto, 
+  required String idSujeto,
+  required String campoFirestore,
+  VoidCallback? onSubir,
   String? coleccionDestino,
+  String? urlFoto,
 }) {
-  return StreamBuilder(
+  return StreamBuilder<QuerySnapshot>(
     stream: FirebaseFirestore.instance
-        .collection('SOLICITUDES')
-        .where('ID_SUJETO', isEqualTo: idSujeto)
-        .where('CAMPO_FIRESTORE', isEqualTo: campoFirestore)
+        .collection('REVISIONES')
+        .where('DNI', isEqualTo: idSujeto)
+        .where('CAMPO', isEqualTo: campoFirestore)
         .where('ESTADO', isEqualTo: 'PENDIENTE')
         .snapshots(),
-    builder: (context, AsyncSnapshot<QuerySnapshot> snapshot) {
+    builder: (context, snapshot) {
       bool tienePendiente = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
-
-      // Colores del semáforo
+      bool tieneFoto = urlFoto != null && urlFoto.isNotEmpty && urlFoto != "null" && urlFoto != "---";
+      
       Color bg = Colors.grey;
       int dias = _calcularDiasRestantes(fecha);
       if (fecha != null && fecha != "---" && fecha != "nan" && fecha.isNotEmpty) {
         bg = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
       }
 
-      bool tieneFoto = urlFoto != null && urlFoto.isNotEmpty && urlFoto != "null" && urlFoto != "---";
-
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10), 
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
         child: Row(
           children: [
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, 
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(titulo, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 4),
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), 
-                        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)), 
-                        child: Text(formatearFecha(fecha), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+                        child: Text(
+                          formatearFecha(fecha), 
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)
+                        ),
                       ),
                       if (tienePendiente) ...[
                         const SizedBox(width: 10),
@@ -1598,21 +1777,15 @@ Widget filaVtoSemaforo(BuildContext context, String titulo, String? fecha, {
                       ],
                     ],
                   ),
-                ]
-              )
+                ],
+              ),
             ),
-            
-            // 1. VER FOTO (Ojo azul)
             if (tieneFoto)
-              // Busca el IconButton del ojo dentro de filaVtoSemaforo y reemplázalo:
-IconButton(
-  icon: const Icon(Icons.remove_red_eye, color: Colors.blueGrey),
-  onPressed: () => _verAdjunto(context, urlFoto, titulo), // <--- Ahora usa la nueva función
-),
-
-            // 2. ACCIONES (ADMIN O CHOFER)
+              IconButton(
+                icon: const Icon(Icons.remove_red_eye, color: Colors.blueGrey, size: 22),
+                onPressed: () => _verAdjunto(context, urlFoto, titulo),
+              ),
             if (coleccionDestino != null)
-              // Menú para el Administrador
               PopupMenuButton<String>(
                 icon: const Icon(Icons.settings_suggest, color: Colors.blueGrey),
                 onSelected: (value) async {
@@ -1632,22 +1805,22 @@ IconButton(
                 ],
               )
             else if (onSubir != null)
-              // Botón para el Chofer
               IconButton(
                 icon: Icon(
-                  tienePendiente ? Icons.hourglass_top : Icons.cloud_upload_outlined, 
-                  color: tienePendiente ? Colors.orange : Colors.blue
-                ), 
-                onPressed: tienePendiente ? () {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ya tienes una actualización en revisión.")));
-                } : onSubir,
+                  tienePendiente ? Icons.hourglass_top : Icons.settings, 
+                  color: tienePendiente ? Colors.orange : Colors.blueGrey
+                ),
+                onPressed: tienePendiente 
+                  ? () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Ya tienes una actualización en revisión."))) 
+                  : onSubir,
               ),
-          ]
-        )
+          ],
+        ),
       );
-    }
+    },
   );
 }
+
 
 // --- FUNCIÓN PARA EL ADMIN ---
 Future<void> _gestionarFechaAdmin(BuildContext context, String idSujeto, String campoFirestore, String coleccionDestino) async {
@@ -1782,5 +1955,88 @@ Widget _buildSelectorArchivo({
         ],
       ),
     ],
+  );
+}
+
+// --- FUNCIÓN GLOBAL PARA VER FOTOS ---
+void _verFotoGrande(BuildContext context, String? url, String titulo) async {
+  if (url == null || url == "---" || url.isEmpty || url == "null") {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("No hay archivo disponible."))
+    );
+    return;
+  }
+
+  // Detectamos si es una imagen o un archivo (PDF, etc.)
+  final uri = Uri.parse(url);
+  final esImagen = url.toLowerCase().contains('.jpg') || 
+                   url.toLowerCase().contains('.jpeg') || 
+                   url.toLowerCase().contains('.png') ||
+                   url.toLowerCase().contains('image');
+
+  if (!esImagen) {
+    // PLAN B: Si no es imagen (es PDF o archivo), lo abrimos fuera de la app
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No se pudo abrir el archivo externo."))
+        );
+      }
+    }
+    return;
+  }
+
+  // PLAN A: Si es imagen, mostramos el visor que ya tenías
+  if (!context.mounted) return;
+  showDialog(
+    context: context, 
+    builder: (dialogContext) => Dialog(
+      backgroundColor: Colors.black, // Fondo negro para que resalte la foto
+      child: Column(
+        mainAxisSize: MainAxisSize.min, 
+        children: [
+          AppBar(
+            title: Text(titulo, style: const TextStyle(color: Colors.white)), 
+            automaticallyImplyLeading: false, 
+            backgroundColor: Colors.blueGrey[900],
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white), 
+                onPressed: () => Navigator.pop(dialogContext) 
+              )
+            ]
+          ),
+          Flexible(
+            child: InteractiveViewer(
+              panEnabled: true,
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: Image.network(
+                url, 
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return const Center(child: CircularProgressIndicator());
+                },
+                errorBuilder: (c, e, s) => Container(
+                  padding: const EdgeInsets.all(20.0),
+                  color: Colors.white,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                      SizedBox(height: 10),
+                      Text("Error al cargar imagen. Puede ser un archivo PDF."),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
   );
 }
