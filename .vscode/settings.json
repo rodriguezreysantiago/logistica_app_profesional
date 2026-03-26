@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/Users/Colo Logistica/logistica_app_profesional/windows"
+    "cmake.sourceDirectory": "C:/Users/Colo Logistica/logistica_app_profesional/windows",
+    "github.copilot.editor.enableCodeActions": false
 }

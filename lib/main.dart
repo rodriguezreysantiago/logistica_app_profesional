@@ -475,6 +475,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
+// --- COPIAR DESDE AQUÍ HACIA ABAJO ---
+
 class MainPanel extends StatelessWidget {
   final String dni;
   final String nombre;
@@ -485,65 +487,226 @@ class MainPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Hola $nombre"), 
-        backgroundColor: Colors.blue.shade900, 
+        title: Text("Hola $nombre"),
+        backgroundColor: Colors.blue.shade900,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(icon: const Icon(Icons.logout), onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen())))
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const LoginScreen()),
+            ),
+          )
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           _card(context, Icons.account_circle, "MI PERFIL", () {
-    Navigator.push(
-      context, 
-      MaterialPageRoute(builder: (context) => PerfilScreen(dni: dni))
-    );
-  }),
-          _card(context, Icons.event_busy, "MIS VENCIMIENTOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => MisDocumentosScreen(dni: dni)))),
+            Navigator.push(context, MaterialPageRoute(builder: (context) => PerfilScreen(dni: dni)));
+          }),
+          const SizedBox(height: 10),
+          _card(context, Icons.local_shipping, "MI EQUIPO", () {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => MiEquipoScreen(dni: dni)));
+          }),
+          const SizedBox(height: 10),
+          _card(context, Icons.event_busy, "MIS VENCIMIENTOS", () {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => MisDocumentosScreen(dni: dni)));
+          }),
           if (rol.toUpperCase() == "ADMIN") ...[
+            const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider()),
+            _card(context, Icons.people, "PERSONAL", () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaPersonalScreen()));
+            }),
             const SizedBox(height: 10),
-            _card(context, Icons.people, "PERSONAL", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaPersonalScreen()))),
+            _card(context, Icons.local_shipping, "EQUIPOS", () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaEquiposScreen()));
+            }),
             const SizedBox(height: 10),
-            _card(context, Icons.local_shipping, "EQUIPOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ListaEquiposScreen()))),
-            const SizedBox(height: 10),
-            _card(context, Icons.notification_important, "CONTROL VENCIMIENTOS", () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PanelVencimientosScreen()))),
+            _card(context, Icons.notification_important, "CONTROL VENCIMIENTOS", () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const PanelVencimientosScreen()));
+            }),
           ],
         ],
       ),
     );
   }
 
-  Widget _card(BuildContext context, IconData i, String t, VoidCallback tap) {
-  return Card(
-    elevation: 4, // Le da un poco de sombra para que resalte
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-    margin: const EdgeInsets.only(bottom: 15),
-    child: ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A3A5A).withValues(alpha: 0.1), // Azul traslúcido
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(i, color: const Color(0xFF1A3A5A), size: 30),
+  Widget _card(BuildContext context, IconData icono, String texto, VoidCallback accion) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: ListTile(
+        leading: Icon(icono, color: Colors.blue.shade900, size: 30),
+        title: Text(texto, style: const TextStyle(fontWeight: FontWeight.bold)),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 18),
+        onTap: accion,
       ),
-      title: Text(
-        t,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 18,
-          color: Color(0xFF1A3A5A),
+    );
+  }
+}
+
+class MiEquipoScreen extends StatelessWidget {
+  final String dni;
+  const MiEquipoScreen({super.key, required this.dni});
+
+  // Función para enviar la solicitud a Firebase
+  void _solicitarCambio(BuildContext context, String equipoActual) {
+    final motivoController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Solicitar Cambio de Unidad"),
+        content: TextField(
+          controller: motivoController,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: "Escribe el motivo del cambio (ej: Avería, reasignación, etc.)",
+            border: OutlineInputBorder(),
+          ),
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A3A5A)),
+            onPressed: () async {
+              if (motivoController.text.isEmpty) return;
+
+              // Guardamos la solicitud en una nueva colección
+              await FirebaseFirestore.instance.collection('SOLICITUDES_CAMBIO').add({
+                'dni_chofer': dni,
+                'equipo_actual': equipoActual,
+                'motivo': motivoController.text,
+                'fecha': FieldValue.serverTimestamp(),
+                'estado': 'PENDIENTE', // El admin la verá como pendiente
+              });
+
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Solicitud enviada al administrador")),
+                );
+              }
+            },
+            child: const Text("ENVIAR SOLICITUD", style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 18, color: Colors.grey),
-      onTap: tap,
-    ),
-  );
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("MI EQUIPO"),
+        backgroundColor: const Color(0xFF1A3A5A),
+        foregroundColor: Colors.white,
+      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          
+          final userData = snapshot.data!.data() as Map<String, dynamic>;
+          final String tractor = userData['TRACTOR'] ?? "";
+          final String batea = userData['BATEA_TOLVA'] ?? "";
+          final String equipoCompleto = "Tractor: $tractor / Acoplado: $batea";
+
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (tractor.isNotEmpty) _buildFichaVehiculoSimple("TRACTOR", tractor),
+              const SizedBox(height: 15),
+              if (batea.isNotEmpty) _buildFichaVehiculoSimple("ACOPLADO / BATEA", batea),
+              
+              const SizedBox(height: 30),
+              
+              // BOTÓN DE SOLICITUD
+              ElevatedButton.icon(
+                icon: const Icon(Icons.swap_horiz),
+                label: const Text("SOLICITAR CAMBIO DE UNIDAD"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange.shade800,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+                ),
+                onPressed: () => _solicitarCambio(context, equipoCompleto),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 8.0),
+                child: Text(
+                  "La solicitud será enviada para aprobación del administrador.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // (Mantenemos tu función _buildFichaVehiculoSimple igual que antes...)
+  Widget _buildFichaVehiculoSimple(String tipo, String dominio) {
+    return FutureBuilder<QuerySnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('VEHICULOS')
+          .where('DOMINIO', isEqualTo: dominio)
+          .limit(1)
+          .get(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const LinearProgressIndicator();
+        if (snapshot.data!.docs.isEmpty) return Text("No se encontró info de $dominio");
+        
+        final vehicleData = snapshot.data!.docs.first.data() as Map<String, dynamic>;
+        
+        return Card(
+          elevation: 3,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.local_shipping, color: Color(0xFF1A3A5A)),
+                    const SizedBox(width: 10),
+                    Text(tipo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  ],
+                ),
+                const Divider(),
+                // AQUÍ ES DONDE USAMOS LA FUNCIÓN PARA QUE NO DE ERROR
+                _datoEquipo("DOMINIO", vehicleData['DOMINIO']),
+                _datoEquipo("MARCA/MODELO", vehicleData['MODELO']),
+                _datoEquipo("EMPRESA", vehicleData['EMPRESA']),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Esta es la función que te marcaba el error; ahora está siendo llamada arriba
+  Widget _datoEquipo(String label, dynamic valor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Text("$label: ", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          Expanded(child: Text("${valor ?? '---'}", style: const TextStyle(fontSize: 14))),
+        ],
+      ),
+    );
+  }
 }
-}
+
 
 class PanelVencimientosScreen extends StatelessWidget {
   const PanelVencimientosScreen({super.key});
@@ -1664,7 +1827,7 @@ class MisDocumentosScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Mis Documentos"),
+        title: const Text("Mis Vencimientos"),
         backgroundColor: Colors.blue.shade900,
         foregroundColor: Colors.white,
       ),
@@ -2163,55 +2326,50 @@ class PerfilScreen extends StatefulWidget {
 
 class _PerfilScreenState extends State<PerfilScreen> {
   
-  // SUBIR FOTO
-  // --- NUEVA FUNCIÓN PARA ELEGIR Y SUBIR FOTO DE PERFIL ---
   Future<void> _subirFotoPerfil() async {
     File? archivoSeleccionado;
+    final messenger = ScaffoldMessenger.of(context);
 
-    // 1. Menú para elegir Cámara o Archivo
     await showModalBottomSheet(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            const ListTile(
-              title: Text("Actualizar Foto de Perfil", style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Color(0xFF1A3A5A)),
-              title: const Text('Cámara (Sacar foto)'),
-              onTap: () async {
-                final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 60);
-                if (img != null) {
-                  archivoSeleccionado = File(img.path);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder, color: Colors.orange),
-              title: const Text('Galería o Archivo'),
-              onTap: () async {
-                // Usamos FilePicker para que pueda elegir fotos o archivos del celu
-                FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.image);
-                if (result != null) {
-                  archivoSeleccionado = File(result.files.single.path!);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }
-              },
-            ),
-          ],
-        ),
-      ),
+      builder: (ctx) {
+        final nav = Navigator.of(ctx);
+        return SafeArea(
+          child: Wrap(
+            children: [
+              const ListTile(
+                title: Text("Actualizar Foto de Perfil", style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Color(0xFF1A3A5A)),
+                title: const Text('Cámara (Sacar foto)'),
+                onTap: () async {
+                  final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 60);
+                  if (img != null) {
+                    archivoSeleccionado = File(img.path);
+                    if (nav.canPop()) nav.pop();
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder, color: Colors.orange),
+                title: const Text('Galería o Archivo'),
+                onTap: () async {
+                  FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.image);
+                  if (result != null) {
+                    archivoSeleccionado = File(result.files.single.path!);
+                    if (nav.canPop()) nav.pop();
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
 
-    // 2. Si no seleccionó nada o cerró el menú, salimos
-    if (archivoSeleccionado == null) return;
+    if (archivoSeleccionado == null || !mounted) return;
 
-    // --- IMPORTANTE: Verificamos el context antes de seguir (async gap) ---
-    if (!mounted) return;
-
-    // 3. Mostrar el círculo de carga
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -2219,32 +2377,27 @@ class _PerfilScreenState extends State<PerfilScreen> {
     );
 
     try {
-      // 4. Subir a Storage
       String fileName = "perfil_${widget.dni}_${DateTime.now().millisecondsSinceEpoch}.jpg";
       Reference ref = FirebaseStorage.instance.ref().child('perfiles').child(fileName);
 
       await ref.putFile(archivoSeleccionado!);
       String url = await ref.getDownloadURL();
 
-      // 5. Actualizar Firestore
       await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({
         'FOTO_PERFIL': url,
       });
 
-      // 6. Cerrar loading y avisar
       if (mounted) {
-        Navigator.pop(context); // Cierra el CircularProgressIndicator
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Foto de perfil actualizada")));
+        Navigator.of(context).pop(); 
+        messenger.showSnackBar(const SnackBar(content: Text("Foto de perfil actualizada")));
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+        Navigator.of(context).pop();
+        messenger.showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
       }
     }
   }
-  
-
 
   @override
   Widget build(BuildContext context) {
@@ -2264,6 +2417,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
 
           var datos = snapshot.data!.data() as Map<String, dynamic>;
           String urlFoto = datos['FOTO_PERFIL'] ?? "";
+          String nombreChofer = datos['CHOFER'] ?? "S/D";
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
@@ -2293,46 +2447,29 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 15),
+                const SizedBox(height: 10),
 
-                // NOMBRE Y EMPRESA
-                Text(datos['CHOFER'] ?? "S/D", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: azulPrimario)),
-                const SizedBox(height: 5),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                  decoration: BoxDecoration(color: Colors.orange[800], borderRadius: BorderRadius.circular(20)),
-                  child: Text(datos['EMPRESA']?.toString().toUpperCase() ?? "SIN EMPRESA", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(nombreChofer, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: azulPrimario)),
+                
+                TextButton.icon(
+                  onPressed: () => _dialogClave(context, widget.dni, datos['CLAVE'] ?? ""),
+                  icon: const Icon(Icons.lock_reset, size: 20, color: Colors.orange),
+                  label: const Text(
+                    "CAMBIAR CONTRASEÑA", 
+                    style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13)
+                  ),
                 ),
 
-                const SizedBox(height: 25),
+                const SizedBox(height: 20),
 
-                // DATOS BLOQUEADOS
                 _grupo("INFORMACIÓN PERSONAL", [
-                  _dato(Icons.person, "Nombre", datos['CHOFER'] ?? "S/D"),
+                  _dato(Icons.person, "Nombre", nombreChofer),
                   _dato(Icons.badge, "DNI", datos['DNI'] ?? ""),
                   _dato(Icons.fingerprint, "CUIL", datos['CUIL'] ?? ""),
+                  _dato(Icons.business, "EMPRESA", datos['EMPRESA']?.toString().toUpperCase() ?? "SIN ASIGNAR"),
                 ]),
 
-                const SizedBox(height: 15),
-
-                // BOTÓN CLAVE (Usando la sintaxis nueva .withValues)
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.lock_reset),
-                  label: const Text("CAMBIAR CONTRASEÑA"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: azulPrimario.withValues(alpha: 0.1), 
-                    foregroundColor: azulPrimario
-                  ),
-                  onPressed: () => _dialogClave(context, widget.dni, datos['CLAVE'] ?? ""),
-                ),
-
-                const Divider(height: 40),
-
-                // EQUIPO
-                _grupo("MI EQUIPO", [
-                  _dato(Icons.local_shipping, "TRACTOR", datos['TRACTOR'] ?? "Sin Asignar"),
-                  _dato(Icons.grid_view, "ACOPLADO", datos['BATEA_TOLVA'] ?? "Sin Asignar"),
-                ]),
+                // SE ELIMINÓ EL BLOQUE "MI EQUIPO" DE AQUÍ
               ],
             ),
           );
@@ -2345,11 +2482,11 @@ class _PerfilScreenState extends State<PerfilScreen> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A3A5A).withValues(alpha: 0.05), 
+        color: const Color(0xFF1A3A5A).withAlpha(13), // 0.05 approx
         borderRadius: BorderRadius.circular(15)
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A3A5A))),
+        Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A3A5A), fontSize: 12)),
         const Divider(),
         ...items
       ]),
@@ -2362,12 +2499,13 @@ class _PerfilScreenState extends State<PerfilScreen> {
       child: Row(children: [
         Icon(icon, color: Colors.blueGrey, size: 20),
         const SizedBox(width: 15),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          Text(valor, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-        ]),
-        const Spacer(),
-        const Icon(Icons.lock_outline, size: 16, color: Colors.black12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            Text(valor, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+          ]),
+        ),
+        const Icon(Icons.lock_outline, size: 14, color: Colors.black12),
       ]),
     );
   }
@@ -2375,40 +2513,42 @@ class _PerfilScreenState extends State<PerfilScreen> {
   void _dialogClave(BuildContext context, String dni, String actual) {
     final c1 = TextEditingController();
     final c2 = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
     
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text("Nueva Contraseña"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min, 
-          children: [
-            TextField(controller: c1, decoration: const InputDecoration(labelText: "Contraseña Actual"), obscureText: true),
-            TextField(controller: c2, decoration: const InputDecoration(labelText: "Nueva Contraseña"), obscureText: true),
-          ]
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text("CANCELAR")),
-          ElevatedButton(
-            onPressed: () async {
-              if (c1.text != actual) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("La clave actual no coincide")));
-                return;
-              }
-              
-              // Operación asincrónica
-              await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({'CLAVE': c2.text.trim()});
-              
-              // --- ESTA ES LA SOLUCIÓN AL ERROR ---
-              // Verificamos que el diálogo todavía exista antes de intentar cerrarlo
-              if (!context.mounted) return;
-              
-              Navigator.pop(dialogContext);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Contraseña cambiada")));
-            },
-            child: const Text("GUARDAR"),
+      builder: (dialogContext) {
+        final nav = Navigator.of(dialogContext);
+        return AlertDialog(
+          title: const Text("Nueva Contraseña"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min, 
+            children: [
+              TextField(controller: c1, decoration: const InputDecoration(labelText: "Contraseña Actual"), obscureText: true),
+              TextField(controller: c2, decoration: const InputDecoration(labelText: "Nueva Contraseña"), obscureText: true),
+            ]
           ),
-        ],
-      ),
+          actions: [
+            TextButton(onPressed: () => nav.pop(), child: const Text("CANCELAR")),
+            ElevatedButton(
+              onPressed: () async {
+                if (c1.text != actual) {
+                  messenger.showSnackBar(const SnackBar(content: Text("La clave actual no coincide")));
+                  return;
+                }
+                
+                await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({'CLAVE': c2.text.trim()});
+                
+                if (mounted) {
+                  nav.pop();
+                  messenger.showSnackBar(const SnackBar(content: Text("Contraseña cambiada")));
+                }
+              },
+              child: const Text("GUARDAR"),
+            ),
+          ],
+        );
+      },
     );
-  }}
+  }
+}
