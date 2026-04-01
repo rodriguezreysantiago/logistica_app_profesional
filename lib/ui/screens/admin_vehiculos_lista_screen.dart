@@ -31,7 +31,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3, // Tractores, Bateas y Tolvas
       child: Scaffold(
         appBar: AppBar(
           title: const Text("Gestión de Flota"),
@@ -46,7 +46,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                   child: TextField(
                     controller: _searchController,
                     decoration: InputDecoration(
-                      hintText: "Buscar por patente (Dominio)...",
+                      hintText: "Buscar por patente (DOMINIO)...",
                       prefixIcon: const Icon(Icons.search),
                       fillColor: Colors.white,
                       filled: true,
@@ -58,13 +58,16 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                     ),
                   ),
                 ),
-                const TabBar(
+                // Se quitó 'const' de aquí para evitar errores con widgets dinámicos
+                TabBar(
                   indicatorColor: Colors.white,
                   labelColor: Colors.white,
                   unselectedLabelColor: Colors.white70,
+                  isScrollable: true,
                   tabs: [
-                    Tab(icon: Icon(Icons.local_shipping), text: "CHASIS"),
-                    Tab(icon: Icon(Icons.ad_units), text: "ACOPLADOS"),
+                    Tab(icon: Icon(Icons.local_shipping), text: "TRACTORES"),
+                    Tab(icon: Icon(Icons.inventory_2), text: "BATEAS"),
+                    Tab(icon: Icon(Icons.agriculture), text: "TOLVAS"),
                   ],
                 ),
               ],
@@ -73,8 +76,9 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
         ),
         body: TabBarView(
           children: [
-            _buildListaFiltrada("CHASIS"),
-            _buildListaFiltrada("ACOPLADO"),
+            _buildListaFiltrada("TRACTOR"),
+            _buildListaFiltrada("BATEA"),
+            _buildListaFiltrada("TOLVA"),
           ],
         ),
       ),
@@ -89,18 +93,21 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           .orderBy('DOMINIO')
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const Center(child: Text("Error al cargar datos"));
+        if (snapshot.hasError) {
+          return Center(child: Text("Error: ${snapshot.error}"));
+        }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final lista = snapshot.data!.docs.where((doc) {
+        final docs = snapshot.data?.docs ?? [];
+        final lista = docs.where((doc) {
           final patente = (doc['DOMINIO'] as String? ?? '').toUpperCase();
           return patente.contains(_searchText);
         }).toList();
 
         if (lista.isEmpty) {
-          return const Center(child: Text("No se encontraron unidades"));
+          return Center(child: Text("No se encontraron: $tipoVehiculo"));
         }
 
         return ListView.builder(
@@ -109,19 +116,28 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           itemBuilder: (context, index) {
             var data = lista[index].data() as Map<String, dynamic>;
 
-            // --- LÓGICA DE VENCIMIENTOS ---
-            String venceRto = data['VENCE_RTO'] ?? 'Sin fecha';
-            String venceSeguro = data['VENCE_SEGURO'] ?? 'Sin fecha';
+            String venceRto = data['VENCIMIENTO_RTO'] ?? 'Sin fecha';
+            String venceSeguro = data['VENCIMIENTO_POLIZA'] ?? 'Sin fecha';
             
-            // Ejemplo de alerta: si la fecha contiene un año pasado, se pone rojo
+            // Lógica de alerta por año
             bool esCritico = venceRto.contains("2024") || venceRto.contains("2023");
+
+            // Selección de Icono dinámico
+            IconData iconito;
+            if (tipoVehiculo == "TRACTOR") {
+              iconito = Icons.local_shipping;
+            } else if (tipoVehiculo == "BATEA") {
+              iconito = Icons.view_agenda_outlined;
+            } else {
+              iconito = Icons.agriculture;
+            }
 
             return Card(
               elevation: 3,
               margin: const EdgeInsets.symmetric(vertical: 6),
               child: ExpansionTile(
                 leading: Icon(
-                  tipoVehiculo == "CHASIS" ? Icons.local_shipping : Icons.local_shipping, // Cambié el segundo por trailer para diferenciar
+                  iconito,
                   color: esCritico ? Colors.red : Colors.orange.shade900,
                   size: 30,
                 ),
@@ -142,7 +158,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                         const SizedBox(height: 10),
                         TextButton.icon(
                           onPressed: () {
-                            // Aquí iría tu lógica para editar
+                            // Lógica para editar
                           },
                           icon: const Icon(Icons.edit),
                           label: const Text("Editar Vehículo"),
@@ -159,7 +175,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
     );
   }
 
-  // Widget pequeño para organizar las filas de datos
   Widget _filaDato(String titulo, String valor, IconData icono) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
