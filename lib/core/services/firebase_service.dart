@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart'; 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
@@ -6,22 +7,17 @@ class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  // --- 1. MÉTODOS DE SUBIDA GENÉRICOS (Para Fotos de Perfil y otros) ---
+  // --- 1. MÉTODOS DE SUBIDA GENÉRICOS ---
 
-  /// Sube cualquier archivo a Storage y devuelve la URL de descarga.
-  /// Se usa para la Foto de Perfil.
   Future<String> subirArchivoGenerico({
     required File archivo,
     required String rutaStorage,
   }) async {
     try {
-      // Determinamos el tipo de contenido según la extensión
       String extension = archivo.path.split('.').last.toLowerCase();
       String contentType = (extension == 'pdf') ? 'application/pdf' : 'image/jpeg';
 
       final ref = _storage.ref().child(rutaStorage);
-      
-      // Subida con metadatos para que se previsualice bien en la web/app
       await ref.putFile(archivo, SettableMetadata(contentType: contentType));
       
       return await ref.getDownloadURL();
@@ -30,41 +26,46 @@ class FirebaseService {
     }
   }
 
-  // --- 2. SOLICITUDES DE REVISIÓN (Trámites del Chofer) ---
+  // --- 2. SOLICITUDES DE REVISIÓN (Chofer) ---
   
   Future<void> registrarSolicitudRevision({
     required String dni,
+    required String nombreUsuario, // <-- NUEVO: Recibimos el nombre
     required String etiqueta,
     required String campo,
     required File archivo,
     required String fechaS,
     required String coleccionDestino,
   }) async {
-    String extension = archivo.path.split('.').last.toLowerCase();
-    String contentType = extension == 'pdf' ? 'application/pdf' : 'image/jpeg';
+    try {
+      String extension = archivo.path.split('.').last.toLowerCase();
+      String contentType = extension == 'pdf' ? 'application/pdf' : 'image/jpeg';
 
-    final String nombreArchivo = 'REVISIONES/${dni}_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension';
-    
-    // Usamos el método genérico internamente o lo hacemos directo
-    final ref = _storage.ref().child(nombreArchivo);
-    await ref.putFile(archivo, SettableMetadata(contentType: contentType));
-    String url = await ref.getDownloadURL();
+      final String nombreArchivo = 'REVISIONES/${dni}_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      
+      final ref = _storage.ref().child(nombreArchivo);
+      await ref.putFile(archivo, SettableMetadata(contentType: contentType));
+      String url = await ref.getDownloadURL();
 
-    await _db.collection('REVISIONES').add({
-      'DNI': dni.trim(),
-      'CAMPO': campo,
-      'COLECCION_DESTINO': coleccionDestino,
-      'ETIQUETA': etiqueta,
-      'NUEVA_FECHA': fechaS,
-      'URL_ADJUNTO': url,
-      'ESTADO': 'PENDIENTE',
-      'FECHA_SOLICITUD': FieldValue.serverTimestamp(),
-    });
+      await _db.collection('REVISIONES').add({
+        'dni': dni.trim(),
+        'nombre_usuario': nombreUsuario, // <-- NUEVO: Guardamos el nombre en Firestore
+        'campo': campo,
+        'coleccion_destino': coleccionDestino,
+        'etiqueta': etiqueta,
+        'fecha_vencimiento': fechaS,
+        'url_archivo': url,
+        'path_storage': nombreArchivo,
+        'estado': 'PENDIENTE',
+        'fecha_solicitud': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw Exception("Error al registrar solicitud: $e");
+    }
   }
 
   // --- 3. GESTIÓN DE USUARIOS / EMPLEADOS ---
 
-  /// Actualiza datos específicos de un empleado (como el MAIL)
   Future<void> actualizarDatoEmpleado(String dni, String campo, dynamic valor) async {
     try {
       await _db.collection('EMPLEADOS').doc(dni).update({
@@ -75,37 +76,48 @@ class FirebaseService {
     }
   }
 
-  // --- 4. CONSULTAS PARA EL ADMIN ---
+  // --- 4. CONSULTAS Y PROCESAMIENTO (Admin) ---
+
+  Future<void> finalizarRevision({
+    required String idSolicitud,
+    required bool aprobado,
+    Map<String, dynamic>? datos,
+  }) async {
+    try {
+      WriteBatch batch = _db.batch();
+
+      if (aprobado && datos != null) {
+        String colDestino = datos['coleccion_destino'];
+        String idDoc = datos['dni'];
+        String campoAct = datos['campo'];
+        String nuevaF = datos['fecha_vencimiento'];
+
+        DocumentReference destinoRef = _db.collection(colDestino).doc(idDoc);
+        batch.update(destinoRef, {campoAct: nuevaF});
+      } 
+      
+      if (!aprobado && datos != null && datos['path_storage'] != null) {
+        try {
+          await _storage.ref().child(datos['path_storage']).delete();
+        } catch (e) {
+          debugPrint("El archivo no existía o no se pudo borrar: $e");
+        }
+      }
+
+      DocumentReference solicitudRef = _db.collection('REVISIONES').doc(idSolicitud);
+      batch.delete(solicitudRef);
+
+      await batch.commit();
+    } catch (e) {
+      throw Exception("Error al finalizar la revisión: $e");
+    }
+  }
 
   Stream<QuerySnapshot> getSolicitudesPendientes() {
     return _db
         .collection('REVISIONES')
-        .where('ESTADO', isEqualTo: 'PENDIENTE')
-        .orderBy('FECHA_SOLICITUD', descending: true)
+        .where('estado', isEqualTo: 'PENDIENTE')
+        .orderBy('fecha_solicitud', descending: true)
         .snapshots();
-  }
-
-  Future<void> procesarSolicitud({
-    required String solicitudId,
-    required String nuevoEstado,
-    String? dni,
-    String? campo,
-    String? nuevaFecha,
-    String? coleccionDestino,
-  }) async {
-    WriteBatch batch = _db.batch();
-
-    DocumentReference solicitudRef = _db.collection('REVISIONES').doc(solicitudId);
-    batch.update(solicitudRef, {
-      'ESTADO': nuevoEstado,
-      'FECHA_PROCESADO': FieldValue.serverTimestamp(),
-    });
-
-    if (nuevoEstado == 'APROBADO' && dni != null && campo != null && nuevaFecha != null) {
-      DocumentReference destinoRef = _db.collection(coleccionDestino!).doc(dni);
-      batch.update(destinoRef, {campo: nuevaFecha});
-    }
-
-    await batch.commit();
   }
 }

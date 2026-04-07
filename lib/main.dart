@@ -16,6 +16,12 @@ import 'ui/screens/admin_panel_screen.dart';
 import 'ui/screens/admin_personal_lista_screen.dart';  
 import 'ui/screens/admin_vehiculos_lista_screen.dart'; 
 import 'ui/screens/admin_vencimientos_menu_screen.dart'; 
+import 'ui/screens/admin_revisiones_screen.dart'; 
+
+// --- NUEVAS IMPORTACIONES (AUDITORÍA) ---
+import 'ui/screens/admin_vencimientos_choferes_screen.dart';
+import 'ui/screens/admin_vencimientos_chasis_screen.dart';
+import 'ui/screens/admin_vencimientos_acoplados_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,7 +63,6 @@ class LogisticaApp extends StatelessWidget {
         // --- RUTAS COMUNES ---
         
         if (settings.name == '/home') {
-          // Blindaje para evitar crash si args es nulo
           final args = settings.arguments as Map<String, dynamic>? ?? {};
           return MaterialPageRoute(
             builder: (context) => MainPanel(
@@ -78,7 +83,7 @@ class LogisticaApp extends StatelessWidget {
         if (settings.name == '/equipo') {
           final dni = settings.arguments as String? ?? '';
           return MaterialPageRoute(
-            builder: (context) => UserMiEquipoScreen  (dniUser: dni),
+            builder: (context) => UserMiEquipoScreen(dniUser: dni),
           );
         }
 
@@ -112,6 +117,32 @@ class LogisticaApp extends StatelessWidget {
         if (settings.name == '/admin_vencimientos_menu') {
           return MaterialPageRoute(
             builder: (context) => const AdminVencimientosMenuScreen(),
+          );
+        }
+
+        if (settings.name == '/admin_revisiones') {
+          return MaterialPageRoute(
+            builder: (context) => const AdminRevisionesScreen(),
+          );
+        }
+
+        // --- NUEVAS RUTAS DE AUDITORÍA REGISTRADAS ---
+
+        if (settings.name == '/vencimientos_choferes') {
+          return MaterialPageRoute(
+            builder: (context) => const AdminVencimientosChoferesScreen(),
+          );
+        }
+
+        if (settings.name == '/vencimientos_chasis') {
+          return MaterialPageRoute(
+            builder: (context) => const AdminVencimientosChasisScreen(),
+          );
+        }
+
+        if (settings.name == '/vencimientos_acoplados') {
+          return MaterialPageRoute(
+            builder: (context) => const AdminVencimientosAcopladosScreen(),
           );
         }
 
