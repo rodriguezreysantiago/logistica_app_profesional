@@ -12,7 +12,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _dniController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
   
-  // Nodos de foco para controlar el teclado
   final FocusNode _dniFocus = FocusNode(); 
   final FocusNode _passFocus = FocusNode();
   
@@ -20,7 +19,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    // Limpiamos los controladores y nodos al cerrar la pantalla
     _dniController.dispose();
     _passController.dispose();
     _dniFocus.dispose();
@@ -70,10 +68,14 @@ class _LoginScreenState extends State<LoginScreen> {
     final colorPrimario = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
+      // Evita que el fondo se deforme cuando aparece el teclado
+      resizeToAvoidBottomInset: false, 
       body: Stack(
         children: [
-          // 1. Imagen de Fondo
+          // 1. Imagen de Fondo (Colores originales)
           Container(
+            width: double.infinity,
+            height: double.infinity,
             decoration: const BoxDecoration(
               image: DecorationImage(
                 image: AssetImage('assets/images/fondo_login.jpg'),
@@ -81,18 +83,28 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-          // 2. Filtro oscuro (Corregido a WithOpacity para mejor compatibilidad)
-          Container(color: Colors.blue.withValues(alpha:0.5)),
           
-          // 3. Formulario
+          // --- SE ELIMINÓ EL CONTAINER AZUL QUE MODIFICABA LOS COLORES ---
+
+          // 2. Formulario centralizado
           Center(
             child: SingleChildScrollView(
               child: Container(
                 width: 400,
+                // Margen para pantallas pequeñas
+                margin: const EdgeInsets.symmetric(horizontal: 20), 
                 padding: const EdgeInsets.all(30),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha:0.85),
+                  // Blanco con opacidad alta para no ensuciar la imagen de fondo
+                  color: Colors.white.withValues(alpha: 0.9), 
                   borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
+                    )
+                  ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -106,19 +118,24 @@ class _LoginScreenState extends State<LoginScreen> {
                         letterSpacing: 4
                       ),
                     ),
-                    const Text("Logística y Monitoreo", style: TextStyle(color: Colors.blueGrey)),
-                    const SizedBox(height: 30),
+                    const Text(
+                      "Logística y Monitoreo", 
+                      style: TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.w500)
+                    ),
+                    const SizedBox(height: 35),
                     
                     // --- CAMPO DNI ---
                     TextField(
                       controller: _dniController,
                       focusNode: _dniFocus,
-                      autofocus: true, // ✅ ESTO ACTIVA EL TECLADO AL ENTRAR
+                      autofocus: true, 
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                         labelText: "DNI",
                         prefixIcon: Icon(Icons.person),
                         border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.white54,
                       ),
                       onSubmitted: (_) => FocusScope.of(context).requestFocus(_passFocus),
                     ),
@@ -134,22 +151,31 @@ class _LoginScreenState extends State<LoginScreen> {
                         labelText: "Contraseña",
                         prefixIcon: Icon(Icons.lock),
                         border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.white54,
                       ),
                       onSubmitted: (_) => _login(),
                     ),
                     
-                    const SizedBox(height: 30),
+                    const SizedBox(height: 35),
                     
                     _isLoading 
                     ? const CircularProgressIndicator()
                     : ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 50),
+                          minimumSize: const Size(double.infinity, 55),
                           backgroundColor: colorPrimario,
                           foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
                         ),
                         onPressed: _login,
-                        child: const Text("INGRESAR"),
+                        child: const Text(
+                          "INGRESAR", 
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                        ),
                       ),
                   ],
                 ),

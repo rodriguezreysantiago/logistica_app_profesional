@@ -102,7 +102,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     _ejecutarTareaAsincrona(
       tarea: () async {
         String url = await _firebaseService.subirArchivoGenerico(archivo: File(image.path), rutaStorage: 'PERFILES/${widget.dni}.jpg');
-        await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({'FOTO_URL': url});
+        await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({'FOTO_PERFIL': url});
       },
       mensajeExito: "Foto actualizada",
     );
@@ -159,8 +159,8 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
         CircleAvatar(
           radius: 55, 
           backgroundColor: Colors.blueGrey.shade100, 
-          backgroundImage: (data['FOTO_URL'] != null && data['FOTO_URL'].isNotEmpty) ? NetworkImage(data['FOTO_URL']) : null, 
-          child: (data['FOTO_URL'] == null || data['FOTO_URL'].isEmpty) ? const Icon(Icons.person, size: 55, color: Colors.white) : null
+          backgroundImage: (data['FOTO_PERFIL'] != null && data['FOTO_PERFIL'].isNotEmpty) ? NetworkImage(data['FOTO_PERFIL']) : null, 
+          child: (data['FOTO_PERFIL'] == null || data['FOTO_PERFIL'].isEmpty) ? const Icon(Icons.person, size: 55, color: Colors.white) : null
         ),
         Positioned(bottom: 0, right: 0, child: GestureDetector(onTap: _mostrarOpcionesFoto, child: const CircleAvatar(radius: 18, backgroundColor: Color(0xFF1A3A5A), child: Icon(Icons.camera_alt, size: 18, color: Colors.white)))),
       ]),

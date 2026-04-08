@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../widgets/menu_card.dart';
 
 class MainPanel extends StatefulWidget {
   final String dni;
@@ -18,18 +17,17 @@ class MainPanel extends StatefulWidget {
 }
 
 class _MainPanelState extends State<MainPanel> {
-  // ✅ Se eliminó la función _mostrarSubMenuAdmin porque ahora usamos una pantalla completa
-
   @override
   Widget build(BuildContext context) {
-    // Normalizamos el rol a mayúsculas
     final bool isAdmin = widget.rol.toUpperCase() == 'ADMIN';
 
     return Scaffold(
+      extendBodyBehindAppBar: true, 
       appBar: AppBar(
         title: const Text('S.M.A.R.T. Logística'),
         centerTitle: true,
-        backgroundColor: const Color(0xFF1A3A5A),
+        backgroundColor: Colors.transparent, 
+        elevation: 0,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
@@ -39,66 +37,138 @@ class _MainPanelState extends State<MainPanel> {
           ),
         ],
       ),
-      body: Container(
-        padding: const EdgeInsets.all(20.0),
+      body: Stack(
+        children: [
+          // 1. Imagen de Fondo
+          Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/images/fondo_login.jpg'),
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          
+          // 2. Capa de oscurecimiento
+          Container(color: Colors.black.withValues(alpha: 0.45)),
+
+          // 3. Contenido Principal
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: kToolbarHeight + 40), 
+                
+                // Cabecera Bienvenida
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Bienvenido, ${widget.nombre}",
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Text(
+                        "Gestión de flota y documentación",
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.7), 
+                          fontSize: 14,
+                          letterSpacing: 0.5
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 30),
+
+                // 4. Grid de Menú con ICONOS MÁS GRANDES
+                Expanded(
+                  child: GridView.count(
+                    crossAxisCount: 4, 
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    // Aumentamos un poco la altura relativa para que no se pegue el texto al icono
+                    childAspectRatio: 0.78, 
+                    children: [
+                      _buildMenuButton(
+                        titulo: "MI PERFIL",
+                        icono: Icons.person_outline,
+                        color: Colors.blueAccent,
+                        onTap: () => Navigator.pushNamed(context, '/perfil', arguments: widget.dni),
+                      ),
+                      _buildMenuButton(
+                        titulo: "MI EQUIPO",
+                        icono: Icons.local_shipping_outlined,
+                        color: Colors.orangeAccent,
+                        onTap: () => Navigator.pushNamed(context, '/equipo', arguments: widget.dni),
+                      ),
+                      _buildMenuButton(
+                        titulo: "MIS VENCIMIENTOS",
+                        icono: Icons.event_note_outlined,
+                        color: Colors.greenAccent,
+                        onTap: () => Navigator.pushNamed(context, '/mis_vencimientos', arguments: widget.dni),
+                      ),
+                      if (isAdmin)
+                        _buildMenuButton(
+                          titulo: "PANEL ADMINISTRADOR",
+                          icono: Icons.admin_panel_settings_outlined,
+                          color: Colors.redAccent,
+                          onTap: () => Navigator.pushNamed(context, '/admin_panel'),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuButton({
+    required String titulo,
+    required IconData icono,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18), 
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+        ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // ICONO AGRANDADO de 28 a 38
+            Icon(icono, color: color, size: 38), 
+            const SizedBox(height: 10),
             Text(
-              "Bienvenido, ${widget.nombre}",
+              titulo,
+              textAlign: TextAlign.center,
               style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1A3A5A)),
-            ),
-            const Text(
-              "Gestión de flota y documentación",
-              style: TextStyle(color: Colors.blueGrey, fontSize: 14),
-            ),
-            const SizedBox(height: 25),
-            Expanded(
-              child: GridView.count(
-                crossAxisCount: MediaQuery.of(context).size.width > 600 ? 3 : 2,
-                crossAxisSpacing: 18,
-                mainAxisSpacing: 18,
-                children: [
-                  // 1. MI PERFIL
-                  MenuCard(
-                    titulo: "MI PERFIL",
-                    icono: Icons.person_outline,
-                    color: Colors.blue.shade700,
-                    onTap: () => Navigator.pushNamed(context, '/perfil',
-                        arguments: widget.dni),
-                  ),
-
-                  // 2. MI EQUIPO
-                  MenuCard(
-                    titulo: "MI EQUIPO",
-                    icono: Icons.local_shipping_outlined,
-                    color: Colors.indigo.shade600,
-                    onTap: () => Navigator.pushNamed(context, '/equipo',
-                        arguments: widget.dni),
-                  ),
-
-                  // 3. MIS VENCIMIENTOS
-                  MenuCard(
-                    titulo: "MIS VENCIMIENTOS",
-                    icono: Icons.event_note_outlined,
-                    color: Colors.teal.shade700,
-                    onTap: () => Navigator.pushNamed(context, '/mis_vencimientos',
-                        arguments: widget.dni),
-                  ),
-
-                  // 4. ADMINISTRADOR (Ahora lleva al nuevo PANEL DE CONTROL)
-                  if (isAdmin)
-                    MenuCard(
-                      titulo: "ADMINISTRADOR",
-                      icono: Icons.admin_panel_settings_outlined,
-                      color: Colors.red.shade900,
-                      // ✅ CAMBIO CLAVE: Ahora navega a la ruta del panel admin
-                      onTap: () => Navigator.pushNamed(context, '/admin_panel'),
-                    ),
-                ],
+                color: Colors.white,
+                fontSize: 11, // Subimos un punto la fuente también
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
