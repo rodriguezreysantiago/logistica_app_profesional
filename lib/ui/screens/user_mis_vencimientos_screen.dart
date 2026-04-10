@@ -4,8 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart'; 
 
+import '../../ui/widgets/preview_screen.dart';
 import '../../core/services/firebase_service.dart';
 import '../../core/utils/formatters.dart';
 
@@ -21,61 +21,43 @@ class UserMisVencimientosScreen extends StatefulWidget {
 class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
   final FirebaseService _firebaseService = FirebaseService();
 
-  // --- FUNCIÓN PARA ABRIR EL DOCUMENTO ---
-  Future<void> _abrirArchivo(String? url) async {
+  // --- MANTENEMOS TU LÓGICA DE ARCHIVOS ---
+  void _abrirArchivo(String? url, String titulo) {
     if (url == null || url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("No hay un archivo digital cargado.")),
       );
       return;
     }
-    final Uri uri = Uri.parse(url);
-    try {
-      // Intenta abrir en navegador externo o visor de archivos del sistema
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("No se pudo abrir el archivo: $e"), backgroundColor: Colors.red),
-      );
-    }
+    Navigator.push(context, MaterialPageRoute(builder: (context) => PreviewScreen(url: url, titulo: titulo)));
   }
 
-  // --- MOTOR ASÍNCRONO ---
-  Future<void> _ejecutarTareaAsincrona({
-    required Future<void> Function() tarea,
-    required String mensajeExito,
-  }) async {
+  Future<void> _ejecutarTareaAsincrona({required Future<void> Function() tarea, required String mensajeExito}) async {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (c) => const Center(child: CircularProgressIndicator()),
+      builder: (c) => const Center(child: CircularProgressIndicator(color: Colors.orangeAccent)),
     );
-
     try {
       await tarea();
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(mensajeExito), backgroundColor: Colors.green),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensajeExito), backgroundColor: Colors.green));
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
     }
   }
 
-  // --- LÓGICA DE TRÁMITE ---
+  // --- MANTENEMOS TU LÓGICA DE TRÁMITES Y DIÁLOGOS ---
   void _iniciarTramiteManual({
     required String etiqueta, 
     required String campo, 
     required String idDocumento, 
     required String coleccion,
     required String nombreUsuario, 
-    String? infoExtra,           
+    String? infoExtra,            
   }) {
     final TextEditingController fechaCtrl = TextEditingController();
     final GlobalKey<FormState> formKey = GlobalKey<FormState>();
@@ -83,41 +65,30 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Actualizar: $etiqueta", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            if (infoExtra != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4.0),
-                child: Text(infoExtra, style: const TextStyle(fontSize: 14, color: Colors.blue, fontWeight: FontWeight.bold)),
-              ),
-          ],
-        ),
+        backgroundColor: Colors.grey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text("Actualizar: $etiqueta", style: const TextStyle(color: Colors.white, fontSize: 18)),
         content: Form(
           key: formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text("Nueva fecha de vencimiento:", style: TextStyle(fontSize: 13)),
+              const Text("Nueva fecha de vencimiento:", style: TextStyle(color: Colors.white70, fontSize: 13)),
               const SizedBox(height: 15),
               TextFormField(
                 controller: fechaCtrl,
                 keyboardType: TextInputType.number,
                 autofocus: true,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 22, letterSpacing: 2, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 22, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
                 decoration: const InputDecoration(
                   hintText: "DD/MM/AAAA",
-                  border: OutlineInputBorder(),
-                  counterText: "",
+                  hintStyle: TextStyle(color: Colors.white24),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
                 ),
                 maxLength: 10,
                 inputFormatters: [_FechaInputFormatter()],
-                validator: (value) {
-                  if (value == null || value.length < 10) return "Fecha incompleta";
-                  return null;
-                },
+                validator: (value) => (value == null || value.length < 10) ? "Fecha incompleta" : null,
               ),
             ],
           ),
@@ -125,17 +96,16 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("CANCELAR")),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
             onPressed: () {
               if (formKey.currentState!.validate()) {
                 final partes = fechaCtrl.text.split('/');
                 final fechaS = "${partes[2]}-${partes[1]}-${partes[0]}";
                 Navigator.pop(dCtx);
-                
-                String etiquetaFinal = infoExtra != null ? "$etiqueta ($infoExtra)" : etiqueta;
-                _mostrarSelectorArchivo(etiquetaFinal, campo, fechaS, idDocumento, coleccion, nombreUsuario);
+                _mostrarSelectorArchivo(etiqueta, campo, fechaS, idDocumento, coleccion, nombreUsuario);
               }
             },
-            child: const Text("SIGUIENTE"),
+            child: const Text("SIGUIENTE", style: TextStyle(color: Colors.black)),
           ),
         ],
       ),
@@ -145,12 +115,14 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
   void _mostrarSelectorArchivo(String etiqueta, String campo, String fechaS, String id, String coleccion, String nombreUsuario) {
     showModalBottomSheet(
       context: context,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sCtx) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.blue),
-              title: const Text("Tomar Foto"),
+              leading: const Icon(Icons.camera_alt, color: Colors.orangeAccent),
+              title: const Text("Tomar Foto", style: TextStyle(color: Colors.white)),
               onTap: () async {
                 final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70);
                 if (img != null) _enviarRevision(etiqueta, campo, File(img.path), fechaS, id, coleccion, nombreUsuario);
@@ -158,8 +130,8 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
-              title: const Text("Subir Archivo / PDF"),
+              leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+              title: const Text("Subir Archivo / PDF", style: TextStyle(color: Colors.white)),
               onTap: () async {
                 final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf', 'jpg', 'png']);
                 if (res != null) _enviarRevision(etiqueta, campo, File(res.files.single.path!), fechaS, id, coleccion, nombreUsuario);
@@ -190,75 +162,88 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true, 
       appBar: AppBar(
         title: const Text("Mis Vencimientos"),
-        backgroundColor: const Color(0xFF1A3A5A),
+        centerTitle: true,
+        backgroundColor: Colors.transparent, 
+        elevation: 0,
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dniUser).snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator());
+      body: Stack(
+        children: [
+          Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
+          Positioned.fill(child: Container(color: Colors.black.withAlpha(180))),
 
-          var data = snapshot.data!.data() as Map<String, dynamic>;
-          String nombreChofer = data['CHOFER'] ?? "Sin Nombre";
-          String pTractor = data['TRACTOR'] ?? "";
-          String pAcoplado = data['BATEA_TOLVA'] ?? "";
+          SafeArea(
+            child: StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dniUser).snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator(color: Colors.white));
 
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _buildTituloPrincipal("DOCUMENTACIÓN PERSONAL"),
-              _buildCardVencimiento(
-                titulo: "Licencia de Conducir", 
-                fecha: data['LIC_COND'], 
-                campo: "LIC_COND", 
-                urlArchivo: data['FOTO_LIC_COND'], // Mapeo correcto según tu Firebase
-                idDoc: widget.dniUser,
-                onUpload: () => _iniciarTramiteManual(
-                  etiqueta: "LICENCIA", campo: "LIC_COND", idDocumento: widget.dniUser, 
-                  coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
-                )
-              ),
-              _buildCardVencimiento(
-                titulo: "Curso Manejo Defensivo", 
-                fecha: data['CURSO_MANEJO'], 
-                campo: "CURSO_MANEJO", 
-                urlArchivo: data['FOTO_CURSO_MANEJO'], 
-                idDoc: widget.dniUser,
-                onUpload: () => _iniciarTramiteManual(
-                  etiqueta: "MANEJO DEFENSIVO", campo: "CURSO_MANEJO", idDocumento: widget.dniUser, 
-                  coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
-                )
-              ),
-              _buildCardVencimiento(
-                titulo: "Psicofísico (EPAP)", 
-                fecha: data['EPAP'], 
-                campo: "EPAP", 
-                urlArchivo: data['FOTO_EPAP'], 
-                idDoc: widget.dniUser,
-                onUpload: () => _iniciarTramiteManual(
-                  etiqueta: "EPAP", campo: "EPAP", idDocumento: widget.dniUser, 
-                  coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
-                )
-              ),
+                var data = snapshot.data!.data() as Map<String, dynamic>;
+                
+                String nombreChofer = data['NOMBRE'] ?? "Sin Nombre";
+                String pVehiculo = data['VEHICULO'] ?? "";
+                String pEnganche = data['ENGANCHE'] ?? "";
 
-              const SizedBox(height: 30),
-              _buildTituloPrincipal("VENCIMIENTOS DE EQUIPO"),
-              
-              if (pTractor.isNotEmpty && pTractor != "SIN ASIGNAR")
-                _buildDetalleVehiculo(pTractor, "CHASIS", nombreChofer)
-              else
-                _buildCardVacia("No hay chasis asignado"),
+                return ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    _buildTituloPrincipal("DOCUMENTACIÓN PERSONAL"),
+                    _buildCardVencimiento(
+                      titulo: "Licencia de Conducir", 
+                      fecha: data['VENCIMIENTO_LICENCIA_DE_CONDUCIR'], 
+                      campo: "VENCIMIENTO_LICENCIA_DE_CONDUCIR", 
+                      urlArchivo: data['ARCHIVO_LICENCIA_DE_CONDUCIR'], 
+                      idDoc: widget.dniUser,
+                      onUpload: () => _iniciarTramiteManual(
+                        etiqueta: "LICENCIA", campo: "VENCIMIENTO_LICENCIA_DE_CONDUCIR", idDocumento: widget.dniUser, 
+                        coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
+                      )
+                    ),
+                    _buildCardVencimiento(
+                      titulo: "Curso Manejo Defensivo", 
+                      fecha: data['VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO'], 
+                      campo: "VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO", 
+                      urlArchivo: data['ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO'], 
+                      idDoc: widget.dniUser,
+                      onUpload: () => _iniciarTramiteManual(
+                        etiqueta: "MANEJO DEFENSIVO", campo: "VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO", idDocumento: widget.dniUser, 
+                        coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
+                      )
+                    ),
+                    _buildCardVencimiento(
+                      titulo: "Psicofísico", 
+                      fecha: data['VENCIMIENTO_PSICOFISICO'], 
+                      campo: "VENCIMIENTO_PSICOFISICO", 
+                      urlArchivo: data['ARCHIVO_PSICOFISICO'], 
+                      idDoc: widget.dniUser,
+                      onUpload: () => _iniciarTramiteManual(
+                        etiqueta: "PSICOFÍSICO", campo: "VENCIMIENTO_PSICOFISICO", idDocumento: widget.dniUser, 
+                        coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
+                      )
+                    ),
 
-              const SizedBox(height: 20),
-              if (pAcoplado.isNotEmpty && pAcoplado != "SIN ASIGNAR")
-                _buildDetalleVehiculo(pAcoplado, "ACOPLADO", nombreChofer)
-              else
-                _buildCardVacia("No hay acoplado asignado"),
-            ],
-          );
-        },
+                    const SizedBox(height: 30),
+                    _buildTituloPrincipal("VENCIMIENTOS DE EQUIPO"),
+                    
+                    if (pVehiculo.isNotEmpty && pVehiculo != "SIN ASIGNAR")
+                      _buildDetalleVehiculo(pVehiculo, "VEHÍCULO", nombreChofer)
+                    else
+                      _buildCardVacia("No hay vehículo asignado"),
+
+                    const SizedBox(height: 20),
+                    if (pEnganche.isNotEmpty && pEnganche != "SIN ASIGNAR")
+                      _buildDetalleVehiculo(pEnganche, "ENGANCHE", nombreChofer)
+                    else
+                      _buildCardVacia("No hay enganche asignado"),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -269,34 +254,30 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
       if (!vehiculoSnap.hasData || !vehiculoSnap.data!.exists) return _buildCardVacia("Patente $patente no encontrada");
       var vData = vehiculoSnap.data!.data() as Map<String, dynamic>;
       
-      String tipoReal = (vData['TIPO'] ?? tipoSeccion).toString().toUpperCase();
-      String descripcionCompleta = "$tipoReal $patente";
-
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSubtituloUnidad(tipoSeccion, descripcionCompleta),
-          
+          _buildSubtituloUnidad("$tipoSeccion: $patente"),
           _buildCardVencimiento(
             titulo: "RTO", 
             fecha: vData['VENCIMIENTO_RTO'], 
             campo: "VENCIMIENTO_RTO", 
-            urlArchivo: vData['FOTO_VENCIMIENTO_RTO'],
+            urlArchivo: vData['ARCHIVO_RTO'],
             idDoc: patente,
             onUpload: () => _iniciarTramiteManual(
               etiqueta: "RTO", campo: "VENCIMIENTO_RTO", idDocumento: patente, 
-              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer, infoExtra: descripcionCompleta
+              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer, infoExtra: "$tipoSeccion $patente"
             )
           ),
           _buildCardVencimiento(
             titulo: "Póliza de Seguro", 
             fecha: vData['VENCIMIENTO_POLIZA'], 
             campo: "VENCIMIENTO_POLIZA", 
-            urlArchivo: vData['FOTO_VENCIMIENTO_POLIZA'],
+            urlArchivo: vData['ARCHIVO_POLIZA'], 
             idDoc: patente,
             onUpload: () => _iniciarTramiteManual(
               etiqueta: "PÓLIZA", campo: "VENCIMIENTO_POLIZA", idDocumento: patente, 
-              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer, infoExtra: descripcionCompleta
+              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer, infoExtra: "$tipoSeccion $patente"
             )
           ),
         ],
@@ -304,17 +285,29 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
     },
   );
 
-  Widget _buildTituloPrincipal(String titulo) => Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Text(titulo, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A3A5A))));
+  Widget _buildTituloPrincipal(String titulo) => Padding(
+    padding: const EdgeInsets.only(bottom: 12), 
+    child: Text(titulo, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueAccent, letterSpacing: 1.2))
+  );
 
-  Widget _buildSubtituloUnidad(String tipoSeccion, String descripcionCompleta) => Container(
-    margin: const EdgeInsets.symmetric(vertical: 5),
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+  Widget _buildSubtituloUnidad(String texto) => Container(
+    margin: const EdgeInsets.symmetric(vertical: 8), // CORRECCIÓN: Usamos symmetric para vertical
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    decoration: BoxDecoration(
+      color: Colors.white.withAlpha(20), 
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.white12)
+    ),
     width: double.infinity,
-    decoration: BoxDecoration(color: Colors.blueGrey.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blueGrey.shade100)),
-    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-      Text(tipoSeccion, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey, fontSize: 11)),
-      Text(descripcionCompleta, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A3A5A), fontSize: 13)),
-    ]),
+    child: Text(
+      texto, 
+      style: const TextStyle(
+        fontWeight: FontWeight.bold, 
+        color: Colors.white, 
+        fontSize: 12
+      ),
+      textAlign: TextAlign.left,
+    ),
   );
 
   Widget _buildCardVencimiento({
@@ -334,54 +327,38 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
       builder: (context, snapshot) {
         bool tieneRevisionPendiente = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
         int dias = AppFormatters.calcularDiasRestantes(fecha);
-        Color colorEstado = dias < 0 ? Colors.red : (dias < 15 ? Colors.orange : Colors.green);
-        
+        Color colorEstado = dias < 0 ? Colors.redAccent : (dias < 15 ? Colors.orangeAccent : Colors.greenAccent);
         bool hayArchivoDigital = urlArchivo != null && urlArchivo.isNotEmpty;
 
-        return Card(
-          elevation: 0.5,
+        return Container(
           margin: const EdgeInsets.symmetric(vertical: 4),
-          color: tieneRevisionPendiente ? Colors.blue.shade50 : Colors.white,
+          decoration: BoxDecoration(
+            color: tieneRevisionPendiente ? Colors.blue.withAlpha(40) : Colors.white.withAlpha(20),
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: tieneRevisionPendiente ? Colors.blue : Colors.white12),
+          ),
           child: ListTile(
             dense: true,
-            leading: tieneRevisionPendiente 
-              ? const Icon(Icons.history, color: Colors.blue, size: 20)
-              : Icon(Icons.circle, color: colorEstado, size: 10),
-            title: Row(
-              children: [
-                Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                if (tieneRevisionPendiente)
-                  Container(
-                    margin: const EdgeInsets.only(left: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.blue, borderRadius: BorderRadius.circular(4)),
-                    child: const Text("PENDIENTE", style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
-                  ),
-              ],
-            ),
+            leading: Icon(tieneRevisionPendiente ? Icons.history : Icons.circle, color: tieneRevisionPendiente ? Colors.blue : colorEstado, size: 14),
+            title: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
             subtitle: Text(
-              tieneRevisionPendiente ? "Verificación en curso..." : "Vence: ${AppFormatters.formatearFecha(fecha)}", 
-              style: TextStyle(fontSize: 11, color: tieneRevisionPendiente ? Colors.blue : (dias < 0 ? Colors.red : Colors.black54))
+              tieneRevisionPendiente ? "VERIFICACIÓN EN CURSO..." : "Vence: ${AppFormatters.formatearFecha(fecha)}", 
+              style: TextStyle(fontSize: 11, color: tieneRevisionPendiente ? Colors.blue : Colors.white70)
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // BOTÓN OJO: Ahora con color azul si hay archivo
                 IconButton(
-                  icon: Icon(Icons.visibility, 
-                    color: hayArchivoDigital ? Colors.blue : Colors.grey.shade300, 
-                    size: 22),
-                  onPressed: hayArchivoDigital ? () => _abrirArchivo(urlArchivo) : null,
-                  visualDensity: VisualDensity.compact,
+                  icon: Icon(Icons.visibility, color: hayArchivoDigital ? Colors.blueAccent : Colors.white10, size: 20),
+                  onPressed: hayArchivoDigital ? () => _abrirArchivo(urlArchivo, titulo) : null,
                 ),
-                
-                const SizedBox(width: 8),
-                if (!tieneRevisionPendiente)
-                  Text(dias < 0 ? "VENCIDO" : "$dias d.", style: TextStyle(color: colorEstado, fontWeight: FontWeight.bold, fontSize: 11)),
-                
+                if (!tieneRevisionPendiente) ...[
+                  const SizedBox(width: 4),
+                  Text(dias < 0 ? "VENCIDO" : "$dias d.", style: TextStyle(color: colorEstado, fontWeight: FontWeight.bold, fontSize: 10)),
+                ],
                 IconButton(
                   icon: Icon(tieneRevisionPendiente ? Icons.hourglass_top : Icons.upload_file, 
-                    color: tieneRevisionPendiente ? Colors.grey : Colors.blue, size: 22), 
+                    color: tieneRevisionPendiente ? Colors.white24 : Colors.orangeAccent, size: 20), 
                   onPressed: tieneRevisionPendiente ? null : onUpload
                 ),
               ],
@@ -392,7 +369,12 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
     );
   }
 
-  Widget _buildCardVacia(String mensaje) => Card(color: Colors.grey.shade50, child: ListTile(dense: true, title: Text(mensaje, style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 11))));
+  Widget _buildCardVacia(String mensaje) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(color: Colors.white.withAlpha(10), borderRadius: BorderRadius.circular(10)),
+    child: Text(mensaje, style: const TextStyle(color: Colors.white38, fontStyle: FontStyle.italic, fontSize: 12)),
+  );
 }
 
 class _FechaInputFormatter extends TextInputFormatter {

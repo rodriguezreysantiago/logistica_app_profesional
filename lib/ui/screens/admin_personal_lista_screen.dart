@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -57,15 +58,19 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     }
   }
 
-  // --- GESTIÓN DE FOTO DE PERFIL (CORREGIDO) ---
+  // --- GESTIÓN DE FOTO DE PERFIL ---
   Future<void> _gestionarFotoPerfil(String dni, String? urlActual) async {
     final ImagePicker picker = ImagePicker();
 
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.transparent,
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.9),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -86,10 +91,8 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
               leading: const Icon(Icons.camera_alt, color: Colors.orange),
               title: const Text("Subir/Cambiar Foto"),
               onTap: () async {
-                // Capturamos el messenger antes de los procesos asíncronos
                 final messenger = ScaffoldMessenger.of(context);
                 final navigator = Navigator.of(context);
-
                 navigator.pop(); 
 
                 final XFile? image = await picker.pickImage(
@@ -99,30 +102,18 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
 
                 if (image != null) {
                   try {
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text("Subiendo imagen..."), duration: Duration(seconds: 2)),
-                    );
-
+                    messenger.showSnackBar(const SnackBar(content: Text("Subiendo imagen...")));
                     File file = File(image.path);
                     String path = 'perfiles/$dni.jpg';
                     Reference ref = FirebaseStorage.instance.ref().child(path);
-                    
                     UploadTask uploadTask = ref.putFile(file);
                     TaskSnapshot snapshot = await uploadTask;
-
                     String downloadUrl = await snapshot.ref.getDownloadURL();
                     
-                    // Verificamos si el widget sigue vivo antes de llamar a _updateData o usar context
                     if (!mounted) return;
-                    await _updateData('EMPLEADOS', dni, 'FOTO_PERFIL', downloadUrl);
-
+                    await _updateData('EMPLEADOS', dni, 'ARCHIVO_PERFIL', downloadUrl);
                   } catch (e) {
-                    debugPrint("Error al subir foto: $e");
-                    if (mounted) {
-                      messenger.showSnackBar(
-                        const SnackBar(content: Text("Error al subir imagen"), backgroundColor: Colors.red),
-                      );
-                    }
+                    if (mounted) messenger.showSnackBar(const SnackBar(content: Text("Error al subir imagen"), backgroundColor: Colors.red));
                   }
                 }
               },
@@ -145,9 +136,13 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
   }) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.transparent,
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.9),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -185,11 +180,12 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
 
   // --- SELECCIONAR UNIDAD ---
   void _seleccionarUnidad(String dni, String campo, String patenteActual) {
-    List<String> tiposBuscados = (campo == 'TRACTOR') ? ['TRACTOR'] : ['BATEA', 'TOLVA'];
+    List<String> tiposBuscados = (campo == 'VEHICULO') ? ['TRACTOR'] : ['BATEA', 'TOLVA'];
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Colors.white.withValues(alpha: 0.95),
         title: Text("Asignar ${tiposBuscados.join('/')}"),
         content: SizedBox(
           width: double.maxFinite,
@@ -215,16 +211,11 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
                     title: const Text("SIN UNIDAD (LIBRE)", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                     onTap: () async {
                       final nav = Navigator.of(context);
-                      try {
-                        if (patenteActual.isNotEmpty && patenteActual != "-") {
-                          await FirebaseFirestore.instance.collection('VEHICULOS').doc(patenteActual).update({'ESTADO': 'LIBRE'});
-                        }
-                        await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: "-"});
-                        if (!mounted) return;
-                        nav.pop();
-                      } catch (e) {
-                        debugPrint("Error: $e");
+                      if (patenteActual.isNotEmpty && patenteActual != "-") {
+                        await FirebaseFirestore.instance.collection('VEHICULOS').doc(patenteActual).update({'ESTADO': 'LIBRE'});
                       }
+                      await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: "-"});
+                      nav.pop();
                     },
                   ),
                   const Divider(),
@@ -245,22 +236,16 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
                               color: seleccionada ? const Color(0xFF1A3A5A) : Colors.grey,
                             ),
                             title: Text(patente),
-                            subtitle: Text("Tipo: ${vData['TIPO']} - Estado: ${vData['ESTADO']}"),
+                            subtitle: Text("${vData['MARCA']} ${vData['MODELO']} - ${vData['ESTADO']}"),
                             trailing: seleccionada ? const Icon(Icons.check_circle, color: Colors.green) : null,
                             onTap: () async {
                               final nav = Navigator.of(context);
-                              try {
-                                if (patenteActual.isNotEmpty && patenteActual != "-" && !seleccionada) {
-                                  await FirebaseFirestore.instance.collection('VEHICULOS').doc(patenteActual).update({'ESTADO': 'LIBRE'});
-                                }
-                                await FirebaseFirestore.instance.collection('VEHICULOS').doc(patente).update({'ESTADO': 'OCUPADO'});
-                                await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: patente});
-                                
-                                if (!mounted) return;
-                                nav.pop();
-                              } catch (e) {
-                                debugPrint("Error: $e");
+                              if (patenteActual.isNotEmpty && patenteActual != "-" && !seleccionada) {
+                                await FirebaseFirestore.instance.collection('VEHICULOS').doc(patenteActual).update({'ESTADO': 'LIBRE'});
                               }
+                              await FirebaseFirestore.instance.collection('VEHICULOS').doc(patente).update({'ESTADO': 'OCUPADO'});
+                              await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: patente});
+                              nav.pop();
                             },
                           );
                         },
@@ -293,10 +278,20 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true, // El cuerpo se extiende detrás del AppBar
       appBar: AppBar(
         title: const Text("Gestión de Personal"),
-        backgroundColor: const Color(0xFF1A3A5A),
+        elevation: 0,
+        // Fondo del AppBar con tono azul institucional y transparencia
+        backgroundColor: const Color(0xFF1A3A5A).withValues(alpha: 0.85),
         foregroundColor: Colors.white,
+        flexibleSpace: ClipRect(
+          // Efecto de desenfoque en el AppBar
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Padding(
@@ -306,77 +301,79 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
               decoration: InputDecoration(
                 hintText: "Buscar por nombre o patente...",
                 prefixIcon: const Icon(Icons.search),
-                fillColor: Colors.white,
+                // Fondo del buscador casi opaco para lectura
+                fillColor: Colors.white.withValues(alpha: 0.9),
                 filled: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
               ),
             ),
           ),
         ),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('EMPLEADOS').orderBy('CHOFER').snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          
-          final empleados = snapshot.data!.docs.where((doc) {
-            var data = doc.data() as Map<String, dynamic>;
-            String nombre = (data['CHOFER'] as String? ?? '').toUpperCase();
-            String tractor = (data['TRACTOR'] as String? ?? '').toUpperCase();
-            String batea = (data['BATEA_TOLVA'] as String? ?? '').toUpperCase();
-            
-            return nombre.contains(_searchText) || 
-                    tractor.contains(_searchText) || 
-                    batea.contains(_searchText);
-          }).toList();
+      // Stack para poner la imagen de fondo detrás de todo
+      body: Stack(
+        children: [
+          // 1. IMAGEN DE FONDO (Igual que en Login)
+          Container(
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/images/fondo_login.jpg'), // Asegúrate que la ruta sea correcta
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          // 2. Capa de color azul muy translúcida para unificar con el AppBar si se desea, 
+          // o puedes dejar solo la imagen. Aquí ponemos una capa muy leve:
+          Container(color: const Color(0xFF1A3A5A).withValues(alpha: 0.3)),
 
-          return ListView.builder(
-            itemCount: empleados.length,
-            itemBuilder: (context, index) {
-              var data = empleados[index].data() as Map<String, dynamic>;
-              String dni = empleados[index].id;
+          // 3. CONTENIDO (StreamBuilder y ListView)
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('EMPLEADOS').orderBy('NOMBRE').snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.white));
               
-              bool coincideTractor = _searchText.isNotEmpty && (data['TRACTOR'] ?? '').toString().toUpperCase().contains(_searchText);
-              bool coincideBatea = _searchText.isNotEmpty && (data['BATEA_TOLVA'] ?? '').toString().toUpperCase().contains(_searchText);
+              final empleados = snapshot.data!.docs.where((doc) {
+                var data = doc.data() as Map<String, dynamic>;
+                String nombre = (data['NOMBRE'] as String? ?? '').toUpperCase();
+                String tractor = (data['VEHICULO'] as String? ?? '').toUpperCase();
+                String batea = (data['ENGANCHE'] as String? ?? '').toUpperCase();
+                return nombre.contains(_searchText) || tractor.contains(_searchText) || batea.contains(_searchText);
+              }).toList();
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: const Color(0xFF1A3A5A),
-                    backgroundImage: (data['FOTO_PERFIL'] != null && data['FOTO_PERFIL'] != "-") 
-                        ? NetworkImage(data['FOTO_PERFIL']) 
-                        : null,
-                    child: (data['FOTO_PERFIL'] == null || data['FOTO_PERFIL'] == "-") 
-                        ? const Icon(Icons.person, color: Colors.white) 
-                        : null,
-                  ),
-                  title: Text(data['CHOFER'] ?? 'Sin nombre', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Row(
-                    children: [
-                      Text("TRACTOR: ", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                      Text("${data['TRACTOR'] ?? '-'}", 
-                        style: TextStyle(
-                          fontWeight: coincideTractor ? FontWeight.bold : FontWeight.normal,
-                          color: coincideTractor ? Colors.blue[900] : Colors.black87
-                        )
+              return ListView.builder(
+                // Padding superior para no quedar debajo del AppBar
+                padding: const EdgeInsets.only(top: 140, bottom: 20),
+                itemCount: empleados.length,
+                itemBuilder: (context, index) {
+                  var data = empleados[index].data() as Map<String, dynamic>;
+                  String dni = empleados[index].id;
+                  return Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    // Fondo de tarjeta blanco con baja opacidad (efecto glass)
+                    color: Colors.white.withValues(alpha: 0.1),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        // Fondo del avatar translúcido
+                        backgroundColor: Colors.white.withValues(alpha: 0.2),
+                        backgroundImage: (data['ARCHIVO_PERFIL'] != null && data['ARCHIVO_PERFIL'] != "-") ? NetworkImage(data['ARCHIVO_PERFIL']) : null,
+                        child: (data['ARCHIVO_PERFIL'] == null || data['ARCHIVO_PERFIL'] == "-") ? const Icon(Icons.person, color: Colors.white) : null,
                       ),
-                      const Text(" | "),
-                      Text("ENGANCHE: ", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                      Text("${data['BATEA_TOLVA'] ?? '-'}",
-                        style: TextStyle(
-                          fontWeight: coincideBatea ? FontWeight.bold : FontWeight.normal,
-                          color: coincideBatea ? Colors.blue[900] : Colors.black87
-                        )
+                      title: Text(data['NOMBRE'] ?? 'Sin nombre', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                      subtitle: Text(
+                        "Tractor: ${data['VEHICULO'] ?? '-'} | Enganche: ${data['ENGANCHE'] ?? '-'}",
+                        style: const TextStyle(color: Colors.white70),
                       ),
-                    ],
-                  ),
-                  onTap: () => _mostrarDetalleChofer(context, dni),
-                ),
+                      trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+                      onTap: () => _mostrarDetalleChofer(context, dni),
+                    ),
+                  );
+                },
               );
             },
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -385,181 +382,122 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.transparent, // Transparente para ver el borde redondeado del Container
       builder: (context) => DraggableScrollableSheet(
         initialChildSize: 0.9,
         expand: false,
-        builder: (context, scrollController) => StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).snapshots(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-            if (!snapshot.data!.exists) return const Center(child: Text("Empleado no encontrado"));
-            var data = snapshot.data!.data() as Map<String, dynamic>;
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            // Fondo del detalle casi opaco para asegurar legibilidad
+            color: Colors.white.withValues(alpha: 0.95),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+          ),
+          child: StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+              var data = snapshot.data!.data() as Map<String, dynamic>;
 
-            return SingleChildScrollView(
-              controller: scrollController,
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(child: Container(width: 50, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)))),
-                  const SizedBox(height: 20),
-                  
-                  Center(
-                    child: Stack(
-                      children: [
-                        CircleAvatar(
-                          radius: 50,
-                          backgroundColor: const Color(0xFF1A3A5A),
-                          backgroundImage: (data['FOTO_PERFIL'] != null && data['FOTO_PERFIL'] != "-") 
-                              ? NetworkImage(data['FOTO_PERFIL']) 
-                              : null,
-                          child: (data['FOTO_PERFIL'] == null || data['FOTO_PERFIL'] == "-")
-                              ? const Icon(Icons.person, size: 50, color: Colors.white)
-                              : null,
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: GestureDetector(
-                            onTap: () => _gestionarFotoPerfil(dni, data['FOTO_PERFIL']),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: const BoxDecoration(color: Colors.orange, shape: BoxShape.circle),
-                              child: const Icon(Icons.edit, size: 20, color: Colors.white),
+              return SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(child: Container(width: 50, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)))),
+                    const SizedBox(height: 20),
+                    Center(
+                      child: Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 50,
+                            backgroundColor: const Color(0xFF1A3A5A),
+                            backgroundImage: (data['ARCHIVO_PERFIL'] != null && data['ARCHIVO_PERFIL'] != "-") ? NetworkImage(data['ARCHIVO_PERFIL']) : null,
+                            child: (data['ARCHIVO_PERFIL'] == null || data['ARCHIVO_PERFIL'] == "-") ? const Icon(Icons.person, size: 50, color: Colors.white) : null,
+                          ),
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: GestureDetector(
+                              onTap: () => _gestionarFotoPerfil(dni, data['ARCHIVO_PERFIL']),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: const BoxDecoration(color: Colors.orange, shape: BoxShape.circle),
+                                child: const Icon(Icons.edit, size: 20, color: Colors.white),
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 15),
-                  Center(
-                    child: Text(data['CHOFER'] ?? "Sin Nombre", 
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)
+                    const SizedBox(height: 15),
+                    Center(child: Text(data['NOMBRE'] ?? "Sin Nombre", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold))),
+                    const Divider(),
+
+                    _buildSeccionTitulo(Icons.badge, "Documentación Personal"),
+                    _buildDatoSimple("DNI", dni, (val) => _updateData('EMPLEADOS', dni, 'DNI', val)),
+                    _buildDatoSimple("CUIL", _formatearCUIL(data['CUIL'] ?? "-"), (val) => _updateData('EMPLEADOS', dni, 'CUIL', val.replaceAll(RegExp(r'[^0-9]'), ''))),
+                    _buildDatoEmpresaSeleccionable("Empresa", data['EMPRESA'] ?? "-", (val) => _updateData('EMPLEADOS', dni, 'EMPRESA', val)),
+                    
+                    const Divider(),
+                    
+                    _buildDatoEditableCompleto(
+                      "VENCIMIENTO LICENCIA DE CONDUCIR", 
+                      data['VENCIMIENTO_LICENCIA_DE_CONDUCIR'], 
+                      data['ARCHIVO_LICENCIA_DE_CONDUCIR'], 
+                      () => _gestionarDocumento(
+                        titulo: "LICENCIA DE CONDUCIR", 
+                        coleccion: 'EMPLEADOS', docId: dni,
+                        campoFecha: 'VENCIMIENTO_LICENCIA_DE_CONDUCIR', campoUrl: 'ARCHIVO_LICENCIA_DE_CONDUCIR', 
+                        fechaActual: data['VENCIMIENTO_LICENCIA_DE_CONDUCIR'], urlActual: data['ARCHIVO_LICENCIA_DE_CONDUCIR']
+                      )
                     ),
-                  ),
-                  const Divider(),
+                    _buildDatoEditableCompleto(
+                      "VENCIMIENTO CURSO MANEJO DEFENSIVO", 
+                      data['VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO'], 
+                      data['ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO'], 
+                      () => _gestionarDocumento(
+                        titulo: "CURSO DE MANEJO", 
+                        coleccion: 'EMPLEADOS', docId: dni,
+                        campoFecha: 'VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO', campoUrl: 'ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO', 
+                        fechaActual: data['VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO'], urlActual: data['ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO']
+                      )
+                    ),
+                    _buildDatoEditableCompleto(
+                      "VENCIMIENTO PSICOFISICO", 
+                      data['VENCIMIENTO_PSICOFISICO'], 
+                      data['ARCHIVO_PSICOFISICO'], 
+                      () => _gestionarDocumento(
+                        titulo: "PSICOFISICO", 
+                        coleccion: 'EMPLEADOS', docId: dni,
+                        campoFecha: 'VENCIMIENTO_PSICOFISICO', campoUrl: 'ARCHIVO_PSICOFISICO', 
+                        fechaActual: data['VENCIMIENTO_PSICOFISICO'], urlActual: data['ARCHIVO_PSICOFISICO']
+                      )
+                    ),
 
-                  _buildSeccionTitulo(Icons.badge, "Documentación Personal"),
-                  _buildDatoSimple("DNI", dni, (val) => _updateData('EMPLEADOS', dni, 'DNI', val)),
-                  _buildDatoSimple(
-                    "CUIL", 
-                    _formatearCUIL(data['CUIL'] ?? "-"), 
-                    (val) {
-                      String soloNumeros = val.replaceAll(RegExp(r'[^0-9]'), '');
-                      _updateData('EMPLEADOS', dni, 'CUIL', soloNumeros);
-                    }
-                  ),
-                  _buildDatoEmpresaSeleccionable("Empresa", data['EMPRESA'] ?? "-", (val) => _updateData('EMPLEADOS', dni, 'EMPRESA', val)),
-                  const Divider(),
-                  _buildDatoEditableCompleto("LICENCIA DE CONDUCIR", data['LIC_COND'], data['URL_LICENCIA'], 
-                    () => _gestionarDocumento(
-                      titulo: "LICENCIA DE CONDUCIR", coleccion: 'EMPLEADOS', docId: dni,
-                      campoFecha: 'LIC_COND', campoUrl: 'URL_LICENCIA', fechaActual: data['LIC_COND'], urlActual: data['URL_LICENCIA']
-                    )),
-                  _buildDatoEditableCompleto("CURSO DE MANEJO DEFENSIVO", data['CURSO_MANEJO'], data['URL_CURSO'], 
-                    () => _gestionarDocumento(
-                      titulo: "CURSO DE MANEJO DEFENSIVO", coleccion: 'EMPLEADOS', docId: dni,
-                      campoFecha: 'CURSO_MANEJO', campoUrl: 'URL_CURSO', fechaActual: data['CURSO_MANEJO'], urlActual: data['URL_CURSO']
-                    )),
-                  _buildDatoEditableCompleto("PREOCUPACIONAL", data['EPAP'], data['URL_EPAP'], 
-                    () => _gestionarDocumento(
-                      titulo: "PREOCUPACIONAL", coleccion: 'EMPLEADOS', docId: dni,
-                      campoFecha: 'EPAP', campoUrl: 'URL_EPAP', fechaActual: data['EPAP'], urlActual: data['URL_EPAP']
-                    )),
-                  const SizedBox(height: 20),
-                  _buildSeccionTitulo(Icons.local_shipping, "Unidades Asignadas"),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text("TRACTOR: ${data['TRACTOR'] ?? 'No asignado'}"),
-                    trailing: const Icon(Icons.edit, size: 20),
-                    onTap: () => _seleccionarUnidad(dni, 'TRACTOR', data['TRACTOR'] ?? ""),
-                  ),
-                  if (data['TRACTOR'] != null && data['TRACTOR'].toString().isNotEmpty && data['TRACTOR'] != "-")
-                    _buildStreamVehiculoEdicion(data['TRACTOR']),
-                  const SizedBox(height: 10),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text("ENGANCHE: ${data['BATEA_TOLVA'] ?? 'No asignada'}"),
-                    trailing: const Icon(Icons.edit, size: 20),
-                    onTap: () => _seleccionarUnidad(dni, 'BATEA_TOLVA', data['BATEA_TOLVA'] ?? ""),
-                  ),
-                  if (data['BATEA_TOLVA'] != null && data['BATEA_TOLVA'].toString().isNotEmpty && data['BATEA_TOLVA'] != "-")
-                    _buildStreamVehiculoEdicion(data['BATEA_TOLVA']),
-                ],
-              ),
-            );
-          }
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDatoEmpresaSeleccionable(String etiqueta, String valor, Function(String) onEdit) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      title: Text(etiqueta, style: const TextStyle(fontSize: 13, color: Colors.grey)),
-      subtitle: Text(valor, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.black)),
-      trailing: const Icon(Icons.business, size: 18),
-      onTap: () => _mostrarDialogoEmpresas(onEdit),
-    );
-  }
-
-  void _mostrarDialogoEmpresas(Function(String) onSave) {
-    final List<String> empresas = ["SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4", "VECCHI ARIEL Y VECCHI GRACIELA S.R.L CUIT: 30-70910015-3"]; 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Seleccionar Empresa"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: empresas.map((e) => ListTile(
-            title: Text(e),
-            onTap: () {
-              onSave(e);
-              Navigator.pop(context);
-            },
-          )).toList(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDatoSimple(String etiqueta, String valor, Function(String) onEdit) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      title: Text(etiqueta, style: const TextStyle(fontSize: 13, color: Colors.grey)),
-      subtitle: Text(valor, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.black)),
-      trailing: const Icon(Icons.edit, size: 18),
-      onTap: () => _mostrarDialogoTexto(etiqueta, valor, onEdit),
-    );
-  }
-
-  void _mostrarDialogoTexto(String titulo, String valorActual, Function(String) onSave) {
-    TextEditingController customController = TextEditingController(text: valorActual);
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Editar $titulo"),
-        content: TextField(
-          controller: customController, 
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-          textCapitalization: TextCapitalization.characters,
-          keyboardType: (titulo == "CUIL" || titulo == "DNI") ? TextInputType.number : TextInputType.text,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
-          ElevatedButton(
-            onPressed: () {
-              onSave(customController.text.trim().toUpperCase());
-              Navigator.pop(context);
-            },
-            child: const Text("Guardar"),
+                    const SizedBox(height: 20),
+                    _buildSeccionTitulo(Icons.local_shipping, "Unidades Asignadas"),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text("TRACTOR: ${data['VEHICULO'] ?? 'No asignado'}"),
+                      trailing: const Icon(Icons.edit, size: 20),
+                      onTap: () => _seleccionarUnidad(dni, 'VEHICULO', data['VEHICULO'] ?? ""),
+                    ),
+                    if (data['VEHICULO'] != null && data['VEHICULO'] != "-") _buildStreamVehiculoEdicion(data['VEHICULO']),
+                    
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text("ENGANCHE: ${data['ENGANCHE'] ?? 'No asignada'}"),
+                      trailing: const Icon(Icons.edit, size: 20),
+                      onTap: () => _seleccionarUnidad(dni, 'ENGANCHE', data['ENGANCHE'] ?? ""),
+                    ),
+                    if (data['ENGANCHE'] != null && data['ENGANCHE'] != "-") _buildStreamVehiculoEdicion(data['ENGANCHE']),
+                  ],
+                ),
+              );
+            }
           ),
-        ],
+        ),
       ),
     );
   }
@@ -572,19 +510,33 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
         var vData = snapshot.data!.data() as Map<String, dynamic>;
         return Container(
           padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(10)),
+          margin: const EdgeInsets.only(bottom: 10),
+          // Fondo de contenedor de vehículo levemente translúcido
+          decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10)),
           child: Column(
             children: [
-              _buildDatoEditableCompleto("VTV", vData['VENCIMIENTO_RTO'], vData['URL_RTO'], 
+              _buildDatoEditableCompleto(
+                "VENCIMIENTO RTO", 
+                vData['VENCIMIENTO_RTO'], 
+                vData['ARCHIVO_RTO'], 
                 () => _gestionarDocumento(
-                  titulo: "RTO - $patente", coleccion: 'VEHICULOS', docId: patente,
-                  campoFecha: 'VENCIMIENTO_RTO', campoUrl: 'URL_RTO', fechaActual: vData['VENCIMIENTO_RTO'], urlActual: vData['URL_RTO']
-                )),
-              _buildDatoEditableCompleto("SEGURO", vData['VENCIMIENTO_POLIZA'], vData['URL_POLIZA'], 
+                  titulo: "RTO - $patente", 
+                  coleccion: 'VEHICULOS', docId: patente,
+                  campoFecha: 'VENCIMIENTO_RTO', campoUrl: 'ARCHIVO_RTO', 
+                  fechaActual: vData['VENCIMIENTO_RTO'], urlActual: vData['ARCHIVO_RTO']
+                )
+              ),
+              _buildDatoEditableCompleto(
+                "VENCIMIENTO SEGURO", 
+                vData['VENCIMIENTO_SEGURO'], 
+                vData['ARCHIVO_SEGURO'], 
                 () => _gestionarDocumento(
-                  titulo: "Póliza - $patente", coleccion: 'VEHICULOS', docId: patente,
-                  campoFecha: 'VENCIMIENTO_POLIZA', campoUrl: 'URL_POLIZA', fechaActual: vData['VENCIMIENTO_POLIZA'], urlActual: vData['URL_POLIZA']
-                )),
+                  titulo: "Póliza - $patente", 
+                  coleccion: 'VEHICULOS', docId: patente,
+                  campoFecha: 'VENCIMIENTO_SEGURO', campoUrl: 'ARCHIVO_SEGURO', 
+                  fechaActual: vData['VENCIMIENTO_SEGURO'], urlActual: vData['ARCHIVO_SEGURO']
+                )
+              ),
             ],
           ),
         );
@@ -595,8 +547,6 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
   Widget _buildDatoEditableCompleto(String etiqueta, String? fecha, String? url, VoidCallback onTap) {
     int dias = AppFormatters.calcularDiasRestantes(fecha ?? "");
     Color colorSemaforo = dias < 0 ? Colors.red : (dias <= 30 ? Colors.orange : Colors.green);
-    bool tieneArchivo = url != null && url.isNotEmpty;
-
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -604,11 +554,7 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
         child: Row(
           children: [
             Expanded(child: Text(etiqueta, style: const TextStyle(fontSize: 13))),
-            if (tieneArchivo)
-              const Padding(
-                padding: EdgeInsets.only(right: 8.0),
-                child: Icon(Icons.image, size: 18, color: Colors.blue),
-              ),
+            if (url != null && url.isNotEmpty) const Padding(padding: EdgeInsets.only(right: 8), child: Icon(Icons.image, size: 18, color: Colors.blue)),
             Text(AppFormatters.formatearFecha(fecha ?? ""), style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(width: 8),
             Container(
@@ -620,6 +566,61 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildDatoSimple(String etiqueta, String valor, Function(String) onEdit) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(etiqueta, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+      subtitle: Text(valor, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+      trailing: const Icon(Icons.edit, size: 18),
+      onTap: () => _mostrarDialogoTexto(etiqueta, valor, onEdit),
+    );
+  }
+
+  void _mostrarDialogoTexto(String titulo, String valorActual, Function(String) onSave) {
+    TextEditingController controller = TextEditingController(text: valorActual);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white.withValues(alpha: 0.95),
+        title: Text("Editar $titulo"),
+        content: TextField(controller: controller, textCapitalization: TextCapitalization.characters),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+          ElevatedButton(onPressed: () { onSave(controller.text.trim().toUpperCase()); Navigator.pop(context); }, child: const Text("Guardar")),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDatoEmpresaSeleccionable(String etiqueta, String valor, Function(String) onEdit) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(etiqueta, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+      subtitle: Text(valor, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+      trailing: const Icon(Icons.business, size: 18),
+      onTap: () {
+        final List<String> empresas = [
+          "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4", 
+          "VECCHI ARIEL Y VECCHI GRACIELA S.R.L (30-70910015-3)"
+        ]; 
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: Colors.white.withValues(alpha: 0.95),
+            title: const Text("Empresa"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min, 
+              children: empresas.map((e) => ListTile(
+                title: Text(e, style: const TextStyle(fontSize: 12)), 
+                onTap: () { onEdit(e); Navigator.pop(context); }
+              )).toList()
+            ),
+          ),
+        );
+      },
     );
   }
 

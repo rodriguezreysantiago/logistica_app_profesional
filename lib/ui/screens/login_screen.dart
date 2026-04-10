@@ -37,30 +37,40 @@ class _LoginScreenState extends State<LoginScreen> {
       
       if (!mounted) return;
 
-      if (doc.exists && doc.data()!['CLAVE'].toString() == pass) {
-        Navigator.pushReplacementNamed(
-          context, 
-          '/home', 
-          arguments: {
-            'dni': dni,
-            'nombre': doc.data()!['CHOFER'] ?? "Usuario",
-            'rol': doc.data()!['ROL'] ?? "USUARIO",
-          },
-        );
+      if (doc.exists) {
+        final data = doc.data()!;
+        
+        // ACTUALIZACIÓN: Ahora validamos contra el campo 'CONTRASEÑA'
+        if (data['CONTRASEÑA'].toString() == pass) {
+          Navigator.pushReplacementNamed(
+            context, 
+            '/home', 
+            arguments: {
+              'dni': dni,
+              // ACTUALIZACIÓN: Ahora usamos 'NOMBRE' en lugar de 'CHOFER'
+              'nombre': data['NOMBRE'] ?? "Usuario",
+              'rol': data['ROL'] ?? "USUARIO",
+            },
+          );
+        } else {
+          _mostrarError("DNI o Contraseña incorrectos");
+        }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("DNI o Clave incorrectos"))
-        );
+        _mostrarError("El usuario no existe");
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error de conexión: $e"))
-        );
+        _mostrarError("Error de conexión: $e");
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _mostrarError(String mensaje) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(mensaje), backgroundColor: Colors.redAccent)
+    );
   }
 
   @override
@@ -68,11 +78,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final colorPrimario = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
-      // Evita que el fondo se deforme cuando aparece el teclado
       resizeToAvoidBottomInset: false, 
       body: Stack(
         children: [
-          // 1. Imagen de Fondo (Colores originales)
           Container(
             width: double.infinity,
             height: double.infinity,
@@ -84,23 +92,18 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           
-          // --- SE ELIMINÓ EL CONTAINER AZUL QUE MODIFICABA LOS COLORES ---
-
-          // 2. Formulario centralizado
           Center(
             child: SingleChildScrollView(
               child: Container(
                 width: 400,
-                // Margen para pantallas pequeñas
                 margin: const EdgeInsets.symmetric(horizontal: 20), 
                 padding: const EdgeInsets.all(30),
                 decoration: BoxDecoration(
-                  // Blanco con opacidad alta para no ensuciar la imagen de fondo
-                  color: Colors.white.withValues(alpha: 0.9), 
+                  color: Colors.white.withAlpha(230), 
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
+                      color: Colors.black.withAlpha(50),
                       blurRadius: 15,
                       offset: const Offset(0, 8),
                     )
@@ -124,7 +127,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 35),
                     
-                    // --- CAMPO DNI ---
                     TextField(
                       controller: _dniController,
                       focusNode: _dniFocus,
@@ -142,7 +144,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     
                     const SizedBox(height: 20),
                     
-                    // --- CAMPO CONTRASEÑA ---
                     TextField(
                       controller: _passController,
                       focusNode: _passFocus,
