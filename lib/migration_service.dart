@@ -2,68 +2,73 @@ import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MigrationService {
-  /// Ejecuta la migración masiva y limpieza de campos en EMPLEADOS.
+  /// Ejecuta la migración masiva y limpieza de campos en VEHICULOS.
+  /// Mantiene el nombre que pide tu admin_panel_screen.dart para evitar errores.
   static Future<void> ejecutarMigracionEmpleados() async {
-    final collection = FirebaseFirestore.instance.collection('EMPLEADOS');
+    final collection = FirebaseFirestore.instance.collection('VEHICULOS');
     
     try {
-      debugPrint("🚀 Iniciando limpieza y migración en EMPLEADOS...");
+      debugPrint("🚀 Iniciando limpieza profunda en VEHICULOS...");
       final snapshot = await collection.get();
 
       if (snapshot.docs.isEmpty) {
-        debugPrint("⚠️ No hay documentos para procesar.");
+        debugPrint("⚠️ No hay documentos en VEHICULOS.");
         return;
       }
 
       WriteBatch batch = FirebaseFirestore.instance.batch();
-      int contadorCambios = 0;
+      int contadorDocsEditados = 0;
+      int operacionesEnBatch = 0;
 
       for (var doc in snapshot.docs) {
         final data = doc.data();
         Map<String, dynamic> updates = {};
 
-        // 1. ELIMINAR NRO_TRAMITE_DNI (Directamente)
-        // Agregué ambas variantes por si acaso se llamó distinto en algún doc
-        if (data.containsKey('NRO_TRAMITE_DNI')) {
-          updates['NRO_TRAMITE_DNI'] = FieldValue.delete();
+        // 1. MIGRAR PÓLIZA -> SEGURO (Fecha y Archivo)
+        if (data.containsKey('VENCIMIENTO_POLIZA')) {
+          updates['VENCIMIENTO_SEGURO'] = data['VENCIMIENTO_POLIZA'];
+          updates['VENCIMIENTO_POLIZA'] = FieldValue.delete();
         }
-        if (data.containsKey('N_TRAMITE_DNI')) {
-          updates['N_TRAMITE_DNI'] = FieldValue.delete();
-        }
-
-        // 2. Renombrar FOTO_PERFIL a ARCHIVO_PERFIL
-        if (data.containsKey('CLAVE')) {
-          updates['CONTRASEÑA'] = data['CLAVE'];
-          updates['CLAVE'] = FieldValue.delete();
+        if (data.containsKey('ARCHIVO_POLIZA')) {
+          updates['ARCHIVO_SEGURO'] = data['ARCHIVO_POLIZA'];
+          updates['ARCHIVO_POLIZA'] = FieldValue.delete();
         }
 
-        // 3. Renombrar TRACTOR -> VEHICULO
-        if (data.containsKey('TRACTOR')) {
-          updates['VEHICULO'] = data['TRACTOR'];
-          updates['TRACTOR'] = FieldValue.delete();
+        // 2. ELIMINAR CAMPOS OBSOLETOS SOLICITADOS
+        // Eliminamos "FOTO" y "FOTO_VENCIMIENTO_RTO"
+        if (data.containsKey('FOTO')) {
+          updates['FOTO'] = FieldValue.delete();
+        }
+        if (data.containsKey('FOTO_VENCIMIENTO_RTO')) {
+          updates['FOTO_VENCIMIENTO_RTO'] = FieldValue.delete();
         }
 
-        // 4. Renombrar BATEA_TOLVA -> ENGANCHE
-        if (data.containsKey('BATEA_TOLVA')) {
-          updates['ENGANCHE'] = data['BATEA_TOLVA'];
-          updates['BATEA_TOLVA'] = FieldValue.delete();
-        }
+        // 3. LIMPIEZA ADICIONAL DE TRÁMITES (Si existieran)
+        if (data.containsKey('NRO_TRAMITE_DNI')) updates['NRO_TRAMITE_DNI'] = FieldValue.delete();
+        if (data.containsKey('N_TRAMITE_DNI')) updates['N_TRAMITE_DNI'] = FieldValue.delete();
 
         if (updates.isNotEmpty) {
           batch.update(doc.reference, updates);
-          contadorCambios++;
+          operacionesEnBatch++;
+          contadorDocsEditados++;
         }
 
-        // Límite de batch
-        if (contadorCambios >= 450) {
+        // Límite de Batch (500 operaciones máximo)
+        if (operacionesEnBatch >= 450) {
           await batch.commit();
+          debugPrint("📦 Bloque de 450 documentos procesado...");
           batch = FirebaseFirestore.instance.batch();
-          contadorCambios = 0;
+          operacionesEnBatch = 0;
         }
       }
 
-      await batch.commit();
-      debugPrint("✅ PROCESO COMPLETADO: Campos viejos eliminados y base de datos limpia.");
+      // Commit final
+      if (operacionesEnBatch > 0) {
+        await batch.commit();
+      }
+
+      debugPrint("✅ LIMPIEZA COMPLETADA.");
+      debugPrint("📊 Se limpiaron $contadorDocsEditados documentos en VEHICULOS.");
       
     } catch (e) {
       debugPrint("❌ ERROR EN MIGRACIÓN: $e");

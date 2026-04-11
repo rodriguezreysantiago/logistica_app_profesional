@@ -177,7 +177,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           itemBuilder: (context, index) {
             var data = lista[index].data() as Map<String, dynamic>;
             Color colorAlertaRTO = _getColorVencimiento(data['VENCIMIENTO_RTO']);
-            Color colorAlertaPoliza = _getColorVencimiento(data['VENCIMIENTO_POLIZA']);
+            Color colorAlertaPoliza = _getColorVencimiento(data['VENCIMIENTO_SEGURO']);
 
             IconData iconito;
             if (tipoVehiculo == "TRACTOR") {
@@ -265,7 +265,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                         ),
                         _filaDatoTransparente(
                           "Vence Seguro:", 
-                          _formatearFecha(data['VENCIMIENTO_POLIZA']), 
+                          _formatearFecha(data['VENCIMIENTO_SEGURO']), 
                           Icons.event_busy, 
                           colorAlertaPoliza,
                         ),

@@ -271,12 +271,12 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
           ),
           _buildCardVencimiento(
             titulo: "Póliza de Seguro", 
-            fecha: vData['VENCIMIENTO_POLIZA'], 
-            campo: "VENCIMIENTO_POLIZA", 
-            urlArchivo: vData['ARCHIVO_POLIZA'], 
+            fecha: vData['VENCIMIENTO_SEGURO'], 
+            campo: "VENCIMIENTO_SEGURO", 
+            urlArchivo: vData['ARCHIVO_SEGURO'], 
             idDoc: patente,
             onUpload: () => _iniciarTramiteManual(
-              etiqueta: "PÓLIZA", campo: "VENCIMIENTO_POLIZA", idDocumento: patente, 
+              etiqueta: "PÓLIZA", campo: "VENCIMIENTO_SEGURO", idDocumento: patente, 
               coleccion: 'VEHICULOS', nombreUsuario: nombreChofer, infoExtra: "$tipoSeccion $patente"
             )
           ),

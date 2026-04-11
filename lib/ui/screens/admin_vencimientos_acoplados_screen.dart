@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
@@ -13,11 +14,17 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text("Gestión Acoplados (60 días)"),
+        title: const Text("Gestión Acoplados / Tolvas"),
         centerTitle: true,
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xFF1A3A5A).withValues(alpha: 0.85),
         elevation: 0,
         foregroundColor: Colors.white,
+        flexibleSpace: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
       ),
       body: Stack(
         children: [
@@ -25,15 +32,11 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
             child: Image.asset(
               'assets/images/fondo_login.jpg',
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => 
-                  Container(color: Colors.blueGrey.shade900),
+              errorBuilder: (context, error, stackTrace) =>
+                  Container(color: const Color(0xFF0D1D2D)),
             ),
           ),
-          Positioned.fill(
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.65),
-            ),
-          ),
+          Container(color: const Color(0xFF1A3A5A).withValues(alpha: 0.5)),
           SafeArea(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('VEHICULOS').snapshots(),
@@ -44,18 +47,19 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(
-                    child: Text("No hay datos de unidades remolcadas.", style: TextStyle(color: Colors.white70))
-                  );
+                      child: Text("No hay datos de unidades.", style: TextStyle(color: Colors.white70)));
                 }
 
                 List<Map<String, dynamic>> alertasAcoplados = [];
 
                 for (var doc in snapshot.data!.docs) {
                   var data = doc.data() as Map<String, dynamic>;
-                  String patente = doc.id;
+                  String patente = doc.id; 
                   String tipoVehiculo = (data['TIPO'] ?? "").toString().toUpperCase();
 
+                  // Filtrado específico para unidades de enganche
                   if (tipoVehiculo == "BATEA" || tipoVehiculo == "TOLVA" || tipoVehiculo == "ACOPLADO") {
+                    
                     _verificarVencimiento(alertasAcoplados, patente, tipoVehiculo, "RTO", 
                         "RTO", data['VENCIMIENTO_RTO'], data['ARCHIVO_RTO']);
 
@@ -69,8 +73,7 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
 
                 if (alertasAcoplados.isEmpty) {
                   return const Center(
-                    child: Text("Sin vencimientos próximos (60 días)", style: TextStyle(color: Colors.white70))
-                  );
+                      child: Text("Sin vencimientos próximos (60 días)", style: TextStyle(color: Colors.white70)));
                 }
 
                 return ListView.builder(
@@ -85,9 +88,9 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: colorSemaforo.withValues(alpha: 0.3), width: 1),
+                        border: Border.all(color: colorSemaforo.withValues(alpha: 0.3)),
                       ),
                       child: ListTile(
                         onTap: () => _abrirEditorAcoplado(context, item),
@@ -102,7 +105,7 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                           "${item['doc_nombre']}: ${AppFormatters.formatearFecha(item['fecha'])}",
                           style: const TextStyle(color: Colors.white70),
                         ),
-                        trailing: const Icon(Icons.edit_square, color: Colors.blueAccent, size: 22),
+                        trailing: const Icon(Icons.edit_square, color: Colors.blueAccent),
                       ),
                     );
                   },
@@ -129,13 +132,11 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
     });
   }
 
-  Future<String?> _subirArchivoVehiculo(String patente, String campo, File archivo) async {
+  Future<String?> _subirArchivoAcoplado(String patente, String campo, File archivo) async {
     try {
       String extension = archivo.path.split('.').last;
-      // Nombre del archivo limpio para la carpeta VEHICULOS
       String nombreArchivo = "${patente}_VENCIMIENTO_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
       
-      // SUBIDA DIRECTA A LA CARPETA VEHICULOS
       Reference ref = FirebaseStorage.instance.ref().child('VEHICULOS/$nombreArchivo');
       UploadTask uploadTask = ref.putFile(archivo);
       TaskSnapshot snapshot = await uploadTask;
@@ -146,14 +147,14 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
   }
 
   void _abrirEditorAcoplado(BuildContext context, Map<String, dynamic> item) {
-    DateTime fechaSeleccionada = DateTime.parse(item['fecha']);
+    DateTime fechaSeleccionada = DateTime.tryParse(item['fecha']) ?? DateTime.now();
     File? archivoSeleccionado;
     bool subiendo = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.grey.shade900,
+      backgroundColor: const Color(0xFF0D1D2D),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => Padding(
@@ -165,9 +166,10 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
               Text("${item['tipo_v']} - ${item['patente']}", style: const TextStyle(color: Colors.white54)),
               const Divider(color: Colors.white12, height: 25),
+              
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text("Fecha Vencimiento", style: TextStyle(color: Colors.white)),
+                title: const Text("Vencimiento Documento", style: TextStyle(color: Colors.white)),
                 subtitle: Text(AppFormatters.formatearFecha(fechaSeleccionada.toString().split(' ')[0]),
                   style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold)),
                 trailing: const Icon(Icons.calendar_month, color: Colors.blueAccent),
@@ -182,6 +184,7 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 10),
+              
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -196,7 +199,7 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        archivoSeleccionado == null ? "Adjuntar PDF o Foto" : "Archivo listo",
+                        archivoSeleccionado == null ? "Adjuntar PDF o Foto" : "Archivo seleccionado",
                         style: const TextStyle(color: Colors.white70),
                       )
                     ),
@@ -210,6 +213,7 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                   ],
                 ),
               ),
+
               const SizedBox(height: 25),
               if (subiendo) 
                 const CircularProgressIndicator(color: Colors.orangeAccent)
@@ -229,15 +233,18 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
                         onPressed: () async {
                           setState(() => subiendo = true);
+                          
                           String? urlFinal = item['foto'];
                           if (archivoSeleccionado != null) {
-                            urlFinal = await _subirArchivoVehiculo(item['patente'], item['campo_base'], archivoSeleccionado!);
+                            urlFinal = await _subirArchivoAcoplado(item['patente'], item['campo_base'], archivoSeleccionado!);
                           }
+                          
                           String fechaString = fechaSeleccionada.toString().split(' ')[0];
                           
                           await FirebaseFirestore.instance.collection('VEHICULOS').doc(item['patente']).update({
                             "VENCIMIENTO_${item['campo_base']}": fechaString,
                             "ARCHIVO_${item['campo_base']}": urlFinal,
+                            "fecha_ultima_actualizacion": FieldValue.serverTimestamp(),
                           });
                           
                           if (context.mounted) Navigator.pop(context);

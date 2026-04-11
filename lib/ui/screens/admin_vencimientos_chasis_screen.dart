@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
@@ -13,11 +14,17 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text("Gestión Chasis (60 días)"),
+        title: const Text("Gestión Chasis / Tractores"),
         centerTitle: true,
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xFF1A3A5A).withValues(alpha: 0.85),
         elevation: 0,
         foregroundColor: Colors.white,
+        flexibleSpace: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
       ),
       body: Stack(
         children: [
@@ -25,15 +32,11 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
             child: Image.asset(
               'assets/images/fondo_login.jpg',
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => 
-                  Container(color: Colors.blueGrey.shade900),
+              errorBuilder: (context, error, stackTrace) =>
+                  Container(color: const Color(0xFF0D1D2D)),
             ),
           ),
-          Positioned.fill(
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.65),
-            ),
-          ),
+          Container(color: const Color(0xFF1A3A5A).withValues(alpha: 0.5)),
           SafeArea(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('VEHICULOS').snapshots(),
@@ -44,24 +47,22 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(
-                    child: Text("No hay datos de vehículos.", style: TextStyle(color: Colors.white70))
-                  );
+                      child: Text("No hay datos de vehículos.", style: TextStyle(color: Colors.white70)));
                 }
 
                 List<Map<String, dynamic>> alertasChasis = [];
 
                 for (var doc in snapshot.data!.docs) {
                   var data = doc.data() as Map<String, dynamic>;
-                  String patente = doc.id;
+                  String patente = doc.id; // O data['DOMINIO']
                   String tipoVehiculo = (data['TIPO'] ?? "").toString().toUpperCase();
 
                   if (tipoVehiculo == "CHASIS" || tipoVehiculo == "TRACTOR") {
-                    
-                    // RTO se mantiene igual
+                    // Verificación de RTO
                     _verificarVencimiento(alertasChasis, patente, tipoVehiculo, "RTO", 
                         "RTO", data['VENCIMIENTO_RTO'], data['ARCHIVO_RTO']);
 
-                    // CAMBIO REALIZADO: SEGURO en lugar de POLIZA
+                    // Verificación de SEGURO (Mapeado a tus campos VENCIMIENTO_SEGURO / ARCHIVO_SEGURO)
                     _verificarVencimiento(alertasChasis, patente, tipoVehiculo, "Seguro", 
                         "SEGURO", data['VENCIMIENTO_SEGURO'], data['ARCHIVO_SEGURO']);
                   }
@@ -72,8 +73,7 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
 
                 if (alertasChasis.isEmpty) {
                   return const Center(
-                    child: Text("Sin vencimientos próximos (60 días)", style: TextStyle(color: Colors.white70))
-                  );
+                      child: Text("Sin vencimientos próximos", style: TextStyle(color: Colors.white70)));
                 }
 
                 return ListView.builder(
@@ -81,7 +81,6 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
                   itemCount: alertasChasis.length,
                   itemBuilder: (context, index) {
                     final item = alertasChasis[index];
-                    
                     Color colorSemaforo = item['dias'] < 0 
                         ? Colors.redAccent 
                         : (item['dias'] <= 30 ? Colors.orangeAccent : Colors.greenAccent);
@@ -89,9 +88,9 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: colorSemaforo.withValues(alpha: 0.3), width: 1),
+                        border: Border.all(color: colorSemaforo.withValues(alpha: 0.3)),
                       ),
                       child: ListTile(
                         onTap: () => _abrirEditorVehiculo(context, item),
@@ -106,7 +105,7 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
                           "${item['doc_nombre']}: ${AppFormatters.formatearFecha(item['fecha'])}",
                           style: const TextStyle(color: Colors.white70),
                         ),
-                        trailing: const Icon(Icons.edit_square, color: Colors.blueAccent, size: 22),
+                        trailing: const Icon(Icons.edit_square, color: Colors.blueAccent),
                       ),
                     );
                   },
@@ -137,7 +136,6 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
     try {
       String extension = archivo.path.split('.').last;
       String nombreArchivo = "${patente}_VENCIMIENTO_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
-      
       Reference ref = FirebaseStorage.instance.ref().child('REVISIONES/$nombreArchivo');
       UploadTask uploadTask = ref.putFile(archivo);
       TaskSnapshot snapshot = await uploadTask;
@@ -148,14 +146,14 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
   }
 
   void _abrirEditorVehiculo(BuildContext context, Map<String, dynamic> item) {
-    DateTime fechaSeleccionada = DateTime.parse(item['fecha']);
+    DateTime fechaSeleccionada = DateTime.tryParse(item['fecha']) ?? DateTime.now();
     File? archivoSeleccionado;
     bool subiendo = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.grey.shade900,
+      backgroundColor: const Color(0xFF0D1D2D),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => Padding(
@@ -170,7 +168,7 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
               
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text("Fecha Vencimiento", style: TextStyle(color: Colors.white)),
+                title: const Text("Nueva Fecha Vencimiento", style: TextStyle(color: Colors.white)),
                 subtitle: Text(AppFormatters.formatearFecha(fechaSeleccionada.toString().split(' ')[0]),
                   style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold)),
                 trailing: const Icon(Icons.calendar_month, color: Colors.blueAccent),
@@ -200,7 +198,7 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        archivoSeleccionado == null ? "Adjuntar PDF o Foto" : "Archivo listo",
+                        archivoSeleccionado == null ? "Adjuntar PDF o Foto" : "Archivo listo para subir",
                         style: const TextStyle(color: Colors.white70),
                       )
                     ),
@@ -234,16 +232,18 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
                         onPressed: () async {
                           setState(() => subiendo = true);
+                          
                           String? urlFinal = item['foto'];
                           if (archivoSeleccionado != null) {
                             urlFinal = await _subirArchivoVehiculo(item['patente'], item['campo_base'], archivoSeleccionado!);
                           }
+                          
                           String fechaString = fechaSeleccionada.toString().split(' ')[0];
                           
-                          // MAPEADO A SEGURO Y RTO
                           await FirebaseFirestore.instance.collection('VEHICULOS').doc(item['patente']).update({
                             "VENCIMIENTO_${item['campo_base']}": fechaString,
                             "ARCHIVO_${item['campo_base']}": urlFinal,
+                            "ultima_revision_admin": FieldValue.serverTimestamp(),
                           });
                           
                           if (context.mounted) Navigator.pop(context);
