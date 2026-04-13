@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../widgets/preview_screen.dart';
 
 class AdminVehiculosListaScreen extends StatefulWidget {
   const AdminVehiculosListaScreen({super.key});
@@ -28,7 +29,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
     super.dispose();
   }
 
-  String _formatearFecha(String? fecha) {
+  String _aplicarFormatoFecha(String? fecha) {
     if (fecha == null || fecha == 'Sin fecha' || fecha.isEmpty) return 'Sin fecha';
     try {
       List<String> partes = fecha.split('-');
@@ -49,22 +50,29 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
       if (vencimiento.isBefore(hoy.add(const Duration(days: 30)))) {
         return Colors.redAccent;
       }
-      return Colors.greenAccent; 
+      return Colors.greenAccent;
     } catch (e) {
       return Colors.blueGrey;
     }
   }
 
-  // --- FUNCIÓN PARA VER EL ARCHIVO ---
-  void _verDocumento(String? url, String titulo) {
+  void _abrirDocumento(String? url, String nombreDocumento) {
     if (url == null || url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("No hay archivo adjunto para este documento.")),
+        SnackBar(content: Text("No hay archivo cargado para $nombreDocumento")),
       );
       return;
     }
-    // Aquí luego integrarás 'url_launcher' o una vista de imagen
-    debugPrint("Abriendo documento de $titulo: $url");
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PreviewScreen(
+          url: url,
+          titulo: nombreDocumento,
+        ),
+      ),
+    );
   }
 
   @override
@@ -72,11 +80,12 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        extendBodyBehindAppBar: true, 
+        // Mismo diseño de Scaffold que venimos usando
+        extendBodyBehindAppBar: true,
         appBar: AppBar(
           title: const Text("Gestión de Flota"),
           centerTitle: true,
-          backgroundColor: Colors.transparent, 
+          backgroundColor: Colors.transparent,
           elevation: 0,
           foregroundColor: Colors.white,
           bottom: PreferredSize(
@@ -89,7 +98,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                     controller: _searchController,
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
-                      hintText: "Buscar por patente (DOMINIO)...",
+                      hintText: "Buscar por patente...",
                       hintStyle: const TextStyle(color: Colors.white70),
                       prefixIcon: const Icon(Icons.search, color: Colors.white70),
                       fillColor: Colors.white.withValues(alpha: 0.15),
@@ -97,11 +106,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                       isDense: true,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+                        borderSide: BorderSide.none,
                       ),
                     ),
                   ),
@@ -123,8 +128,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
         body: Stack(
           children: [
             Container(
-              width: double.infinity,
-              height: double.infinity,
               decoration: const BoxDecoration(
                 image: DecorationImage(
                   image: AssetImage('assets/images/fondo_login.jpg'),
@@ -132,7 +135,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                 ),
               ),
             ),
-            Container(color: Colors.black.withValues(alpha: 0.45)),
+            Container(color: Colors.black.withValues(alpha: 0.5)),
             SafeArea(
               child: TabBarView(
                 children: [
@@ -167,26 +170,18 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           return patente.contains(_searchText);
         }).toList();
 
-        if (lista.isEmpty) {
-          return Center(child: Text("No se encontraron: $tipoVehiculo", style: const TextStyle(color: Colors.white70)));
-        }
-
         return ListView.builder(
           itemCount: lista.length,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
           itemBuilder: (context, index) {
             var data = lista[index].data() as Map<String, dynamic>;
-            Color colorAlertaRTO = _getColorVencimiento(data['VENCIMIENTO_RTO']);
-            Color colorAlertaPoliza = _getColorVencimiento(data['VENCIMIENTO_SEGURO']);
+            
+            String fechaRto = _aplicarFormatoFecha(data['VENCIMIENTO_RTO']);
+            String fechaSeguro = _aplicarFormatoFecha(data['VENCIMIENTO_SEGURO']);
 
-            IconData iconito;
-            if (tipoVehiculo == "TRACTOR") {
-              iconito = Icons.local_shipping;
-            } else if (tipoVehiculo == "BATEA") {
-              iconito = Icons.view_agenda_outlined;
-            } else {
-              iconito = Icons.agriculture;
-            }
+            // Lógica de color para el icono del ojo
+            String? urlRto = data['ARCHIVO_RTO'];
+            String? urlSeguro = data['ARCHIVO_SEGURO'];
 
             return Container(
               margin: const EdgeInsets.symmetric(vertical: 8),
@@ -194,27 +189,21 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                 color: Colors.white.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  )
-                ],
               ),
               child: ExpansionTile(
                 iconColor: Colors.white,
                 collapsedIconColor: Colors.white70,
-                tilePadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                leading: Icon(iconito, color: Colors.white, size: 30),
+                leading: Icon(
+                  tipoVehiculo == "TRACTOR" ? Icons.local_shipping : Icons.view_agenda_outlined, 
+                  color: Colors.white, size: 28
+                ),
                 title: Text(
                   "${data['DOMINIO'] ?? 'S/D'}",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold, 
-                    fontSize: 20, 
-                    letterSpacing: 1.2,
-                    color: Colors.white
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+                ),
+                subtitle: Text(
+                  "${data['MARCA'] ?? ''} ${data['MODELO'] ?? ''}",
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 children: [
                   Padding(
@@ -223,63 +212,54 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text("DETALLES TÉCNICOS", 
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white70, letterSpacing: 1)),
-                        const SizedBox(height: 12),
+                          style: TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 10),
                         
-                        _filaDatoTransparente("Marca:", data['MARCA'] ?? 'S/D', Icons.branding_watermark_outlined, Colors.blueAccent),
-                        _filaDatoTransparente("Modelo:", data['MODELO'] ?? 'S/D', Icons.directions_car_filled_outlined, Colors.indigoAccent),
-                        _filaDatoTransparente("Estado:", data['ESTADO'] ?? 'S/D', Icons.info_outline, Colors.orangeAccent),
-                        _filaDatoTransparente("Año:", data['AÑO'] ?? 'S/D', Icons.calendar_today, Colors.yellowAccent),
-                        _filaDatoTransparente("Empresa:", data['EMPRESA'] ?? 'S/D', Icons.business, Colors.brown.shade200),
-                        _filaDatoTransparente("Tipificada:", data['TIPIFICADA'] ?? 'S/D', Icons.scale, Colors.tealAccent),
+                        _filaInfo("Marca:", data['MARCA'] ?? 'S/D', Icons.branding_watermark_outlined, Colors.blueAccent),
+                        _filaInfo("Modelo:", data['MODELO'] ?? 'S/D', Icons.directions_car_filled_outlined, Colors.indigoAccent),
+                        _filaInfo("Año:", data['AÑO'] ?? 'S/D', Icons.calendar_today, Colors.yellowAccent),
+                        _filaInfo("Tipificada:", data['TIPIFICADA'] ?? 'S/D', Icons.scale, Colors.tealAccent),
+                        _filaInfo("Estado:", data['ESTADO'] ?? 'S/D', Icons.info_outline, data['ESTADO'] == 'OCUPADO' ? Colors.greenAccent : Colors.orangeAccent),
+                        _filaInfo("Empresa:", data['EMPRESA'] ?? 'S/D', Icons.business, Colors.brown.shade200),
                         
-                        Divider(height: 35, color: Colors.white.withValues(alpha: 0.2)),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 10),
+                          child: Divider(color: Colors.white12),
+                        ),
                         
                         const Text("DOCUMENTACIÓN", 
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white70, letterSpacing: 1)),
-                        const SizedBox(height: 12),
-
-                        // --- FILAS CON EL OJO PARA VER ARCHIVOS ---
-                        _filaDatoTransparente(
-                          "RTO Nro:", 
-                          data['RTO_NRO'] ?? 'S/D', 
-                          Icons.fact_check_outlined, 
-                          Colors.grey.shade300,
-                          onAction: () => _verDocumento(data['URL_RTO'], "RTO"),
-                        ),
-                        _filaDatoTransparente(
-                          "Vence RTO:", 
-                          _formatearFecha(data['VENCIMIENTO_RTO']), 
-                          Icons.event_available, 
-                          colorAlertaRTO,
-                        ),
-                        
+                          style: TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 10),
 
-                        _filaDatoTransparente(
-                          "Póliza Nro:", 
-                          data['POLIZA_NRO'] ?? 'S/D', 
+                        _filaInfo(
+                          "Vencimiento RTO:", 
+                          fechaRto, 
+                          Icons.event_available, 
+                          _getColorVencimiento(data['VENCIMIENTO_RTO']),
+                          // Color azul si el URL no es nulo ni está vacío
+                          colorIconoAccion: (urlRto != null && urlRto.isNotEmpty) ? Colors.blueAccent : Colors.white38,
+                          onAction: () => _abrirDocumento(urlRto, "RTO - ${data['DOMINIO']}"),
+                        ),
+                        
+                        _filaInfo(
+                          "Vencimiento Seguro:", 
+                          fechaSeguro, 
                           Icons.security, 
-                          Colors.grey.shade300,
-                          onAction: () => _verDocumento(data['URL_POLIZA'], "Póliza"),
+                          _getColorVencimiento(data['VENCIMIENTO_SEGURO']),
+                          // Color azul si el URL no es nulo ni está vacío
+                          colorIconoAccion: (urlSeguro != null && urlSeguro.isNotEmpty) ? Colors.blueAccent : Colors.white38,
+                          onAction: () => _abrirDocumento(urlSeguro, "Seguro - ${data['DOMINIO']}"),
                         ),
-                        _filaDatoTransparente(
-                          "Vence Seguro:", 
-                          _formatearFecha(data['VENCIMIENTO_SEGURO']), 
-                          Icons.event_busy, 
-                          colorAlertaPoliza,
-                        ),
-
-                        const SizedBox(height: 25),
+                        
+                        const SizedBox(height: 20),
                         Center(
-                          child: ElevatedButton.icon(
+                          child: OutlinedButton.icon(
                             onPressed: () {},
-                            icon: const Icon(Icons.edit, size: 18),
-                            label: const Text("EDITAR VEHÍCULO", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orangeAccent.withValues(alpha: 0.8),
+                            icon: const Icon(Icons.edit, size: 16),
+                            label: const Text("EDITAR VEHÍCULO"),
+                            style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 12),
+                              side: const BorderSide(color: Colors.orangeAccent),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                           ),
@@ -296,29 +276,31 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
     );
   }
 
-  // --- FILA DE DATOS CORREGIDA CON BOTÓN DE ACCIÓN (OJO) ---
-  Widget _filaDatoTransparente(String titulo, String valor, IconData icono, Color colorIcono, {VoidCallback? onAction}) {
+  Widget _filaInfo(String titulo, String valor, IconData icono, Color colorIcono, {VoidCallback? onAction, Color? colorIconoAccion}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icono, size: 17, color: colorIcono),
-          const SizedBox(width: 12),
-          Text(titulo, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white, fontSize: 13)),
-          const Spacer(),
-          Text(
-            valor, 
-            style: const TextStyle(color: Colors.white, fontSize: 13)
+          Icon(icono, size: 16, color: colorIcono),
+          const SizedBox(width: 10),
+          Text(titulo, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              valor, 
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.right,
+            ),
           ),
-          // Si pasamos una acción, mostramos el OJO
           if (onAction != null) ...[
-            const SizedBox(width: 5),
+            const SizedBox(width: 10),
             IconButton(
-              icon: const Icon(Icons.visibility_outlined, color: Colors.white70, size: 20),
+              // Usamos el color de acción dinámico pasado desde el constructor
+              icon: Icon(Icons.visibility_outlined, color: colorIconoAccion ?? Colors.white, size: 20),
               onPressed: onAction,
-              padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
-              tooltip: "Ver archivo",
+              padding: EdgeInsets.zero,
             ),
           ]
         ],
