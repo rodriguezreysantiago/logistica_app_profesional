@@ -53,7 +53,7 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
                 ),
                 _tile(
                   context, 
-                  "Revisiones de Choferes", 
+                  "REVISION DE SOLICITUDES DE PERSONAL", 
                   Icons.notification_important, 
                   '/admin_revisiones', 
                   colorIcon: Colors.orangeAccent
@@ -77,9 +77,9 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
                     )
                   ),
                 ),
-                _tile(context, "Vencimientos de Choferes", Icons.person_search, '/vencimientos_choferes'),
-                _tile(context, "Vencimientos de Chasis", Icons.engineering, '/vencimientos_chasis'),
-                _tile(context, "Vencimientos de Acoplados", Icons.ad_units, '/vencimientos_acoplados'),
+                _tile(context, "VENCIMIENTOS DE PERSONAL", Icons.person_search, '/vencimientos_choferes'),
+                _tile(context, "VENCIMIENTOS DE VEHICULOS", Icons.engineering, '/vencimientos_chasis'),
+                _tile(context, "VENCIMIENTOS DE ENGANCHES", Icons.ad_units, '/vencimientos_acoplados'),
               ],
             ),
           ),
