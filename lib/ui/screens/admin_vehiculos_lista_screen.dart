@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../widgets/preview_screen.dart';
+import 'admin_vehiculo_form_screen.dart'; 
 
 class AdminVehiculosListaScreen extends StatefulWidget {
   const AdminVehiculosListaScreen({super.key});
@@ -80,7 +81,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        // Mismo diseño de Scaffold que venimos usando
         extendBodyBehindAppBar: true,
         appBar: AppBar(
           title: const Text("Gestión de Flota"),
@@ -101,7 +101,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                       hintText: "Buscar por patente...",
                       hintStyle: const TextStyle(color: Colors.white70),
                       prefixIcon: const Icon(Icons.search, color: Colors.white70),
-                      fillColor: Colors.white.withValues(alpha: 0.15),
+                      fillColor: Colors.white.withAlpha(40), // Simplificado
                       filled: true,
                       isDense: true,
                       border: OutlineInputBorder(
@@ -125,17 +125,18 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
             ),
           ),
         ),
+        // Movimos el SafeArea fuera del Stack para evitar conflictos de gestos
         body: Stack(
           children: [
-            Container(
-              decoration: const BoxDecoration(
-                image: DecorationImage(
-                  image: AssetImage('assets/images/fondo_login.jpg'),
-                  fit: BoxFit.cover,
-                ),
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/fondo_login.jpg',
+                fit: BoxFit.cover,
               ),
             ),
-            Container(color: Colors.black.withValues(alpha: 0.5)),
+            Positioned.fill(
+              child: Container(color: Colors.black.withAlpha(130)),
+            ),
             SafeArea(
               child: TabBarView(
                 children: [
@@ -172,25 +173,26 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
 
         return ListView.builder(
           itemCount: lista.length,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
+          padding: const EdgeInsets.fromLTRB(10, 15, 10, 20),
           itemBuilder: (context, index) {
-            var data = lista[index].data() as Map<String, dynamic>;
+            var doc = lista[index];
+            var data = doc.data() as Map<String, dynamic>;
             
             String fechaRto = _aplicarFormatoFecha(data['VENCIMIENTO_RTO']);
             String fechaSeguro = _aplicarFormatoFecha(data['VENCIMIENTO_SEGURO']);
 
-            // Lógica de color para el icono del ojo
             String? urlRto = data['ARCHIVO_RTO'];
             String? urlSeguro = data['ARCHIVO_SEGURO'];
 
             return Container(
               margin: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.12),
+                color: Colors.white.withAlpha(30),
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                border: Border.all(color: Colors.white.withAlpha(40)),
               ),
               child: ExpansionTile(
+                key: PageStorageKey(doc.id), // Mantiene el estado del scroll
                 iconColor: Colors.white,
                 collapsedIconColor: Colors.white70,
                 leading: Icon(
@@ -236,7 +238,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                           fechaRto, 
                           Icons.event_available, 
                           _getColorVencimiento(data['VENCIMIENTO_RTO']),
-                          // Color azul si el URL no es nulo ni está vacío
                           colorIconoAccion: (urlRto != null && urlRto.isNotEmpty) ? Colors.blueAccent : Colors.white38,
                           onAction: () => _abrirDocumento(urlRto, "RTO - ${data['DOMINIO']}"),
                         ),
@@ -246,20 +247,33 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                           fechaSeguro, 
                           Icons.security, 
                           _getColorVencimiento(data['VENCIMIENTO_SEGURO']),
-                          // Color azul si el URL no es nulo ni está vacío
                           colorIconoAccion: (urlSeguro != null && urlSeguro.isNotEmpty) ? Colors.blueAccent : Colors.white38,
                           onAction: () => _abrirDocumento(urlSeguro, "Seguro - ${data['DOMINIO']}"),
                         ),
                         
                         const SizedBox(height: 20),
-                        Center(
+                        
+                        // CORRECCIÓN DEL BOTÓN: Usamos SizedBox para que el click sea más reactivo
+                        SizedBox(
+                          width: double.infinity,
                           child: OutlinedButton.icon(
-                            onPressed: () {},
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => AdminVehiculoFormScreen(
+                                    vehiculoId: doc.id,
+                                    datosIniciales: data,
+                                  ),
+                                ),
+                              );
+                            },
                             icon: const Icon(Icons.edit, size: 16),
-                            label: const Text("EDITAR VEHÍCULO"),
+                            label: const Text("EDITAR VEHÍCULO", style: TextStyle(fontWeight: FontWeight.bold)),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.white,
                               side: const BorderSide(color: Colors.orangeAccent),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                           ),
@@ -296,7 +310,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           if (onAction != null) ...[
             const SizedBox(width: 10),
             IconButton(
-              // Usamos el color de acción dinámico pasado desde el constructor
               icon: Icon(Icons.visibility_outlined, color: colorIconoAccion ?? Colors.white, size: 20),
               onPressed: onAction,
               constraints: const BoxConstraints(),
