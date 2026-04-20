@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/services/prefs_service.dart'; // <--- IMPORTANTE: TU NUEVO SERVICIO
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -40,14 +41,23 @@ class _LoginScreenState extends State<LoginScreen> {
       if (doc.exists) {
         final data = doc.data()!;
         
-        // ACTUALIZACIÓN: Ahora validamos contra el campo 'CONTRASEÑA'
+        // VALIDACIÓN CONTRA EL CAMPO 'CONTRASEÑA'
         if (data['CONTRASEÑA'].toString() == pass) {
+          
+          // --- NUEVO: GUARDAR SESIÓN LOCALMENTE ---
+          await PrefsService.guardarUsuario(
+            dni: dni,
+            nombre: data['NOMBRE'] ?? "Usuario",
+            rol: data['ROL'] ?? "USUARIO",
+          );
+
+          if (!mounted) return;
+
           Navigator.pushReplacementNamed(
             context, 
             '/home', 
             arguments: {
               'dni': dni,
-              // ACTUALIZACIÓN: Ahora usamos 'NOMBRE' en lugar de 'CHOFER'
               'nombre': data['NOMBRE'] ?? "Usuario",
               'rol': data['ROL'] ?? "USUARIO",
             },

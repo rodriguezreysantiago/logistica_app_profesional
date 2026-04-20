@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/services/prefs_service.dart'; // <--- IMPORTANTE: TU NUEVO SERVICIO
 
 class MainPanel extends StatefulWidget {
   final String dni;
@@ -33,7 +34,14 @@ class _MainPanelState extends State<MainPanel> {
           IconButton(
             icon: const Icon(Icons.logout_outlined),
             tooltip: 'Cerrar Sesión',
-            onPressed: () => Navigator.pushReplacementNamed(context, '/'),
+            onPressed: () async {
+              // --- NUEVO: LIMPIAR SESIÓN LOCAL AL SALIR ---
+              await PrefsService.clear();
+              if (!mounted) return;
+              
+              // VOLVEMOS AL LOGIN Y LIMPIAMOS EL HISTORIAL DE RUTAS
+              Navigator.pushReplacementNamed(context, '/');
+            },
           ),
         ],
       ),
@@ -102,7 +110,6 @@ class _MainPanelState extends State<MainPanel> {
                     crossAxisCount: 4, 
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
-                    // Aumentamos un poco la altura relativa para que no se pegue el texto al icono
                     childAspectRatio: 0.78, 
                     children: [
                       _buildMenuButton(
@@ -159,7 +166,6 @@ class _MainPanelState extends State<MainPanel> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // ICONO AGRANDADO de 28 a 38
             Icon(icono, color: color, size: 38), 
             const SizedBox(height: 10),
             Text(
@@ -167,7 +173,7 @@ class _MainPanelState extends State<MainPanel> {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 11, // Subimos un punto la fuente también
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
             ),

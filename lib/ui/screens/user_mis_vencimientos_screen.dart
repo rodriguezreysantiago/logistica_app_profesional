@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../ui/widgets/preview_screen.dart';
 import '../../core/services/firebase_service.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/services/notification_service.dart';
 
 class UserMisVencimientosScreen extends StatefulWidget {
   final String dniUser;
@@ -21,7 +22,7 @@ class UserMisVencimientosScreen extends StatefulWidget {
 class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
   final FirebaseService _firebaseService = FirebaseService();
 
-  // --- MANTENEMOS TU LÓGICA DE ARCHIVOS ---
+  // --- LÓGICA DE VISUALIZACIÓN DE ARCHIVOS ---
   void _abrirArchivo(String? url, String titulo) {
     if (url == null || url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -29,9 +30,13 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
       );
       return;
     }
-    Navigator.push(context, MaterialPageRoute(builder: (context) => PreviewScreen(url: url, titulo: titulo)));
+    // CORRECCIÓN MOUSE TRACKER PARA DESKTOP
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Navigator.push(context, MaterialPageRoute(builder: (context) => PreviewScreen(url: url, titulo: titulo)));
+    });
   }
 
+  // --- FUNCIÓN PARA TAREAS CON LOADING ---
   Future<void> _ejecutarTareaAsincrona({required Future<void> Function() tarea, required String mensajeExito}) async {
     showDialog(
       context: context,
@@ -50,98 +55,101 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
     }
   }
 
-  // --- MANTENEMOS TU LÓGICA DE TRÁMITES Y DIÁLOGOS ---
+  // --- TRÁMITE MANUAL: SELECCIÓN DE FECHA Y ARCHIVO ---
   void _iniciarTramiteManual({
     required String etiqueta, 
     required String campo, 
     required String idDocumento, 
     required String coleccion,
     required String nombreUsuario, 
-    String? infoExtra,            
   }) {
     final TextEditingController fechaCtrl = TextEditingController();
     final GlobalKey<FormState> formKey = GlobalKey<FormState>();
 
-    showDialog(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        backgroundColor: Colors.grey.shade900,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text("Actualizar: $etiqueta", style: const TextStyle(color: Colors.white, fontSize: 18)),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("Nueva fecha de vencimiento:", style: TextStyle(color: Colors.white70, fontSize: 13)),
-              const SizedBox(height: 15),
-              TextFormField(
-                controller: fechaCtrl,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 22, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
-                decoration: const InputDecoration(
-                  hintText: "DD/MM/AAAA",
-                  hintStyle: TextStyle(color: Colors.white24),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showDialog(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+          backgroundColor: const Color(0xFF0D1D2D),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text("Actualizar: $etiqueta", style: const TextStyle(color: Colors.white, fontSize: 18)),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("Nueva fecha de vencimiento:", style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 15),
+                TextFormField(
+                  controller: fechaCtrl,
+                  keyboardType: TextInputType.number,
+                  autofocus: true,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 22, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+                  decoration: const InputDecoration(
+                    hintText: "DD/MM/AAAA",
+                    hintStyle: TextStyle(color: Colors.white24),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                  ),
+                  maxLength: 10,
+                  inputFormatters: [_FechaInputFormatter()],
+                  validator: (value) => (value == null || value.length < 10) ? "Fecha incompleta" : null,
                 ),
-                maxLength: 10,
-                inputFormatters: [_FechaInputFormatter()],
-                validator: (value) => (value == null || value.length < 10) ? "Fecha incompleta" : null,
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("CANCELAR", style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  final partes = fechaCtrl.text.split('/');
+                  final fechaS = "${partes[2]}-${partes[1]}-${partes[0]}";
+                  Navigator.pop(dCtx);
+                  _mostrarSelectorArchivo(etiqueta, campo, fechaS, idDocumento, coleccion, nombreUsuario);
+                }
+              },
+              child: const Text("SIGUIENTE", style: TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  void _mostrarSelectorArchivo(String etiqueta, String campo, String fechaS, String id, String coleccion, String nombreUsuario) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF0D1D2D),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+        builder: (sCtx) => SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.orangeAccent),
+                title: const Text("Tomar Foto", style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70);
+                  if (img != null) _enviarRevision(etiqueta, campo, File(img.path), fechaS, id, coleccion, nombreUsuario);
+                  if (sCtx.mounted) Navigator.pop(sCtx);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
+                title: const Text("Subir Archivo / PDF", style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf', 'jpg', 'png']);
+                  if (res != null) _enviarRevision(etiqueta, campo, File(res.files.single.path!), fechaS, id, coleccion, nombreUsuario);
+                  if (sCtx.mounted) Navigator.pop(sCtx);
+                },
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("CANCELAR")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                final partes = fechaCtrl.text.split('/');
-                final fechaS = "${partes[2]}-${partes[1]}-${partes[0]}";
-                Navigator.pop(dCtx);
-                _mostrarSelectorArchivo(etiqueta, campo, fechaS, idDocumento, coleccion, nombreUsuario);
-              }
-            },
-            child: const Text("SIGUIENTE", style: TextStyle(color: Colors.black)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _mostrarSelectorArchivo(String etiqueta, String campo, String fechaS, String id, String coleccion, String nombreUsuario) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.grey.shade900,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sCtx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.orangeAccent),
-              title: const Text("Tomar Foto", style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70);
-                if (img != null) _enviarRevision(etiqueta, campo, File(img.path), fechaS, id, coleccion, nombreUsuario);
-                if (sCtx.mounted) Navigator.pop(sCtx);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
-              title: const Text("Subir Archivo / PDF", style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf', 'jpg', 'png']);
-                if (res != null) _enviarRevision(etiqueta, campo, File(res.files.single.path!), fechaS, id, coleccion, nombreUsuario);
-                if (sCtx.mounted) Navigator.pop(sCtx);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+      );
+    });
   }
 
   void _enviarRevision(String etiqueta, String campo, File archivo, String fecha, String id, String coleccion, String nombreUsuario) {
@@ -155,7 +163,7 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
         fechaS: fecha, 
         coleccionDestino: coleccion,
       ),
-      mensajeExito: "Solicitud enviada correctamente",
+      mensajeExito: "Solicitud de revisión enviada al administrador",
     );
   }
 
@@ -173,7 +181,7 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
       body: Stack(
         children: [
           Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
-          Positioned.fill(child: Container(color: Colors.black.withAlpha(180))),
+          Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
 
           SafeArea(
             child: StreamBuilder<DocumentSnapshot>(
@@ -182,7 +190,6 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
                 if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator(color: Colors.white));
 
                 var data = snapshot.data!.data() as Map<String, dynamic>;
-                
                 String nombreChofer = data['NOMBRE'] ?? "Sin Nombre";
                 String pVehiculo = data['VEHICULO'] ?? "";
                 String pEnganche = data['ENGANCHE'] ?? "";
@@ -221,6 +228,53 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
                       idDoc: widget.dniUser,
                       onUpload: () => _iniciarTramiteManual(
                         etiqueta: "PSICOFÍSICO", campo: "VENCIMIENTO_PSICOFISICO", idDocumento: widget.dniUser, 
+                        coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
+                      )
+                    ),
+
+                    const SizedBox(height: 30),
+                    _buildTituloPrincipal("DOCUMENTACIÓN LABORAL"),
+                    _buildCardVencimiento(
+                      titulo: "Comprobante ART", 
+                      fecha: data['VENCIMIENTO_ART'], 
+                      campo: "VENCIMIENTO_ART", 
+                      urlArchivo: data['ARCHIVO_ART'], 
+                      idDoc: widget.dniUser,
+                      onUpload: () => _iniciarTramiteManual(
+                        etiqueta: "ART", campo: "VENCIMIENTO_ART", idDocumento: widget.dniUser, 
+                        coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
+                      )
+                    ),
+                    _buildCardVencimiento(
+                      titulo: "Formulario 931 (AFIP)", 
+                      fecha: data['VENCIMIENTO_931'], 
+                      campo: "VENCIMIENTO_931", 
+                      urlArchivo: data['ARCHIVO_931'], 
+                      idDoc: widget.dniUser,
+                      onUpload: () => _iniciarTramiteManual(
+                        etiqueta: "F. 931", campo: "VENCIMIENTO_931", idDocumento: widget.dniUser, 
+                        coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
+                      )
+                    ),
+                    _buildCardVencimiento(
+                      titulo: "Seguro de Vida Obligatorio", 
+                      fecha: data['VENCIMIENTO_SEGURO_DE_VIDA'], 
+                      campo: "VENCIMIENTO_SEGURO_DE_VIDA", 
+                      urlArchivo: data['ARCHIVO_SEGURO_DE_VIDA'], 
+                      idDoc: widget.dniUser,
+                      onUpload: () => _iniciarTramiteManual(
+                        etiqueta: "SEGURO DE VIDA", campo: "VENCIMIENTO_SEGURO_DE_VIDA", idDocumento: widget.dniUser, 
+                        coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
+                      )
+                    ),
+                    _buildCardVencimiento(
+                      titulo: "Libre Deuda Sindical", 
+                      fecha: data['VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL'], 
+                      campo: "VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL", 
+                      urlArchivo: data['ARCHIVO_LIBRE_DE_DEUDA_SINDICAL'], 
+                      idDoc: widget.dniUser,
+                      onUpload: () => _iniciarTramiteManual(
+                        etiqueta: "LIBRE DEUDA SINDICAL", campo: "VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL", idDocumento: widget.dniUser, 
                         coleccion: 'EMPLEADOS', nombreUsuario: nombreChofer
                       )
                     ),
@@ -266,7 +320,7 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
             idDoc: patente,
             onUpload: () => _iniciarTramiteManual(
               etiqueta: "RTO", campo: "VENCIMIENTO_RTO", idDocumento: patente, 
-              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer, infoExtra: "$tipoSeccion $patente"
+              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer
             )
           ),
           _buildCardVencimiento(
@@ -277,7 +331,7 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
             idDoc: patente,
             onUpload: () => _iniciarTramiteManual(
               etiqueta: "PÓLIZA", campo: "VENCIMIENTO_SEGURO", idDocumento: patente, 
-              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer, infoExtra: "$tipoSeccion $patente"
+              coleccion: 'VEHICULOS', nombreUsuario: nombreChofer
             )
           ),
         ],
@@ -291,7 +345,7 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
   );
 
   Widget _buildSubtituloUnidad(String texto) => Container(
-    margin: const EdgeInsets.symmetric(vertical: 8), // CORRECCIÓN: Usamos symmetric para vertical
+    margin: const EdgeInsets.symmetric(vertical: 8), 
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
     decoration: BoxDecoration(
       color: Colors.white.withAlpha(20), 
@@ -299,15 +353,7 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
       border: Border.all(color: Colors.white12)
     ),
     width: double.infinity,
-    child: Text(
-      texto, 
-      style: const TextStyle(
-        fontWeight: FontWeight.bold, 
-        color: Colors.white, 
-        fontSize: 12
-      ),
-      textAlign: TextAlign.left,
-    ),
+    child: Text(texto, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12)),
   );
 
   Widget _buildCardVencimiento({
@@ -327,19 +373,54 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
       builder: (context, snapshot) {
         bool tieneRevisionPendiente = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
         int dias = AppFormatters.calcularDiasRestantes(fecha);
-        Color colorEstado = dias < 0 ? Colors.redAccent : (dias < 15 ? Colors.orangeAccent : Colors.greenAccent);
         bool hayArchivoDigital = urlArchivo != null && urlArchivo.isNotEmpty;
+
+        // --- LÓGICA DE SEMÁFORO UNIFICADA ---
+        Color colorEstado;
+        String emoji;
+        
+        if (dias < 0) {
+          colorEstado = Colors.red;         // ROJO: VENCIDO
+          emoji = "❌";
+        } else if (dias <= 14) {
+          colorEstado = Colors.yellow;      // AMARILLO: 0 a 14 DÍAS
+          emoji = "⚠️";
+        } else if (dias <= 30) {
+          colorEstado = Colors.greenAccent; // VERDE: 15 a 30 DÍAS
+          emoji = "✅";
+        } else {
+          colorEstado = Colors.blueAccent;  // AZUL: +30 DÍAS
+          emoji = "📄";
+        }
+
+        // --- DISPARAR NOTIFICACIÓN SI ES CRÍTICO (≤ 30 DÍAS) ---
+        if (!tieneRevisionPendiente && dias <= 30) {
+           NotificationService.mostrarAlertaVencimiento(
+             id: campo.hashCode + idDoc.hashCode,
+             titulo: "$emoji $titulo",
+             mensaje: dias < 0 
+                ? "¡VENCIDO! Regularizá tu situación ahora." 
+                : "Vence en $dias días. Por favor, cargá el nuevo archivo.",
+           );
+        }
 
         return Container(
           margin: const EdgeInsets.symmetric(vertical: 4),
           decoration: BoxDecoration(
             color: tieneRevisionPendiente ? Colors.blue.withAlpha(40) : Colors.white.withAlpha(20),
             borderRadius: BorderRadius.circular(15),
-            border: Border.all(color: tieneRevisionPendiente ? Colors.blue : Colors.white12),
+            border: Border.all(
+              color: tieneRevisionPendiente ? Colors.blue : colorEstado,
+              width: (dias <= 14) ? 2 : 1, 
+            ),
           ),
           child: ListTile(
             dense: true,
-            leading: Icon(tieneRevisionPendiente ? Icons.history : Icons.circle, color: tieneRevisionPendiente ? Colors.blue : colorEstado, size: 14),
+            leading: Icon(
+              tieneRevisionPendiente ? Icons.history : Icons.circle, 
+              color: tieneRevisionPendiente ? Colors.blue : colorEstado, 
+              size: 14
+            ),
             title: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
             subtitle: Text(
               tieneRevisionPendiente ? "VERIFICACIÓN EN CURSO..." : "Vence: ${AppFormatters.formatearFecha(fecha)}", 
@@ -354,11 +435,24 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
                 ),
                 if (!tieneRevisionPendiente) ...[
                   const SizedBox(width: 4),
-                  Text(dias < 0 ? "VENCIDO" : "$dias d.", style: TextStyle(color: colorEstado, fontWeight: FontWeight.bold, fontSize: 10)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colorEstado.withAlpha(40), 
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      dias < 0 ? "VENCIDO" : "$dias d.", 
+                      style: TextStyle(color: colorEstado, fontWeight: FontWeight.bold, fontSize: 10)
+                    ),
+                  ),
                 ],
                 IconButton(
-                  icon: Icon(tieneRevisionPendiente ? Icons.hourglass_top : Icons.upload_file, 
-                    color: tieneRevisionPendiente ? Colors.white24 : Colors.orangeAccent, size: 20), 
+                  icon: Icon(
+                    tieneRevisionPendiente ? Icons.hourglass_top : Icons.upload_file, 
+                    color: tieneRevisionPendiente ? Colors.white24 : Colors.orangeAccent, 
+                    size: 20
+                  ), 
                   onPressed: tieneRevisionPendiente ? null : onUpload
                 ),
               ],

@@ -30,13 +30,13 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     try {
       await tarea();
       if (!mounted) return;
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(); // Quitar loading
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(mensajeExito), backgroundColor: Colors.green),
       );
     } catch (e) {
       if (!mounted) return;
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(); // Quitar loading
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
       );
@@ -47,74 +47,105 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
   void _mostrarDialogoClave(String passwordActual) {
     final TextEditingController antCtrl = TextEditingController();
     final TextEditingController nvaCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        backgroundColor: Colors.grey.shade900,
-        title: const Text("Seguridad: Cambiar Contraseña", style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: antCtrl, 
-                obscureText: true, 
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(labelText: "Contraseña Anterior", labelStyle: TextStyle(color: Colors.white70))),
-            const SizedBox(height: 10),
-            TextField(
-                controller: nvaCtrl, 
-                obscureText: true, 
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(labelText: "Nueva Contraseña (mín. 4)", labelStyle: TextStyle(color: Colors.white70))),
+    
+    // CORRECCIÓN MOUSE TRACKER PARA WINDOWS
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showDialog(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+          backgroundColor: const Color(0xFF0D1D2D),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text("Seguridad: Cambiar Contraseña", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                  controller: antCtrl, 
+                  obscureText: true, 
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: "Contraseña Anterior", 
+                    labelStyle: TextStyle(color: Colors.white70),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24))
+                  )),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: nvaCtrl, 
+                  obscureText: true, 
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: "Nueva Contraseña (mín. 4)", 
+                    labelStyle: TextStyle(color: Colors.white70),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24))
+                  )),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("CANCELAR", style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),
+              onPressed: () {
+                if (antCtrl.text != passwordActual) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("La contraseña anterior es incorrecta")));
+                  return;
+                }
+                if (nvaCtrl.text.length < 4) {
+                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("La clave debe tener al menos 4 caracteres")));
+                   return;
+                }
+                Navigator.pop(dCtx);
+                _ejecutarTareaAsincrona(
+                  tarea: () async => await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({'CONTRASEÑA': nvaCtrl.text}),
+                  mensajeExito: "Contraseña actualizada correctamente",
+                );
+              },
+              child: const Text("GUARDAR"),
+            ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("CANCELAR")),
-          ElevatedButton(
-            onPressed: () {
-              if (antCtrl.text != passwordActual) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("La contraseña anterior es incorrecta")));
-                return;
-              }
-              if (nvaCtrl.text.length < 4) return;
-              Navigator.pop(dCtx);
-              _ejecutarTareaAsincrona(
-                // CAMBIO: Ahora actualiza el campo 'CONTRASEÑA'
-                tarea: () async => await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({'CONTRASEÑA': nvaCtrl.text}),
-                mensajeExito: "Contraseña actualizada",
-              );
-            },
-            child: const Text("GUARDAR"),
-          ),
-        ],
-      ),
-    );
+      );
+    });
   }
 
   // --- GESTIÓN FOTO PERFIL ---
   void _mostrarOpcionesFoto() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.grey.shade900,
-      builder: (ctx) => SafeArea(
-        child: Wrap(children: [
-          ListTile(leading: const Icon(Icons.camera_alt, color: Colors.white), title: const Text("Cámara", style: TextStyle(color: Colors.white)), onTap: () { Navigator.pop(ctx); _seleccionarImagen(ImageSource.camera); }),
-          ListTile(leading: const Icon(Icons.photo_library, color: Colors.white), title: const Text("Galería", style: TextStyle(color: Colors.white)), onTap: () { Navigator.pop(ctx); _seleccionarImagen(ImageSource.gallery); }),
-        ]),
-      ),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF0D1D2D),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+        builder: (ctx) => SafeArea(
+          child: Wrap(children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.white), 
+              title: const Text("Cámara", style: TextStyle(color: Colors.white)), 
+              onTap: () { Navigator.pop(ctx); _seleccionarImagen(ImageSource.camera); }
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.white), 
+              title: const Text("Galería", style: TextStyle(color: Colors.white)), 
+              onTap: () { Navigator.pop(ctx); _seleccionarImagen(ImageSource.gallery); }
+            ),
+          ]),
+        ),
+      );
+    });
   }
 
   Future<void> _seleccionarImagen(ImageSource source) async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: source, imageQuality: 50);
     if (image == null) return;
+    
     _ejecutarTareaAsincrona(
       tarea: () async {
-        String url = await _firebaseService.subirArchivoGenerico(archivo: File(image.path), rutaStorage: 'PERFILES/${widget.dni}.jpg');
+        String url = await _firebaseService.subirArchivoGenerico(
+          archivo: File(image.path), 
+          rutaStorage: 'PERFILES/${widget.dni}.jpg'
+        );
         await FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).update({'ARCHIVO_PERFIL': url});
       },
-      mensajeExito: "Foto actualizada",
+      mensajeExito: "Foto de perfil actualizada",
     );
   }
 
@@ -132,19 +163,20 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover),
+            child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover, 
+              errorBuilder: (context, error, stackTrace) => Container(color: const Color(0xFF0D1D2D))),
           ),
           Positioned.fill(
-            child: Container(color: Colors.black.withAlpha(180)),
+            child: Container(color: Colors.black.withAlpha(200)),
           ),
           
           StreamBuilder<DocumentSnapshot>(
             stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(widget.dni).snapshots(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData || !snapshot.data!.exists) return const Center(child: CircularProgressIndicator(color: Colors.white));
+              if (!snapshot.hasData || !snapshot.data!.exists) {
+                return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
+              }
               var data = snapshot.data!.data() as Map<String, dynamic>;
-              
-              // CAMBIO: Leemos 'CONTRASEÑA' del documento
               String passwordActual = data['CONTRASEÑA'] ?? "";
 
               return SafeArea(
@@ -159,9 +191,9 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
                     
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(20),
+                        color: Colors.white.withAlpha(15),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white12)
+                        border: Border.all(color: Colors.white10)
                       ),
                       child: Column(
                         children: [
@@ -179,7 +211,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
                       icon: const Icon(Icons.lock_reset),
                       label: const Text("CAMBIAR MI CONTRASEÑA"),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white.withAlpha(25), 
+                        backgroundColor: Colors.white.withAlpha(20), 
                         foregroundColor: Colors.white,
                         elevation: 0,
                         side: const BorderSide(color: Colors.white24),
@@ -187,7 +219,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 40),
                   ],
                 ),
               );
@@ -206,32 +238,43 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     return Column(children: [
       Stack(children: [
         CircleAvatar(
-          radius: 60, 
-          backgroundColor: Colors.white10, 
+          radius: 65, 
+          backgroundColor: Colors.white12, 
           backgroundImage: (fotoUrl != null && fotoUrl.isNotEmpty) ? NetworkImage(fotoUrl) : null, 
-          child: (fotoUrl == null || fotoUrl.isEmpty) ? const Icon(Icons.person, size: 60, color: Colors.white38) : null
+          child: (fotoUrl == null || fotoUrl.isEmpty) ? const Icon(Icons.person, size: 70, color: Colors.white38) : null
         ),
-        Positioned(bottom: 0, right: 0, child: GestureDetector(onTap: _mostrarOpcionesFoto, child: const CircleAvatar(radius: 20, backgroundColor: Colors.blueAccent, child: Icon(Icons.camera_alt, size: 20, color: Colors.white)))),
+        Positioned(
+          bottom: 0, 
+          right: 5, 
+          child: GestureDetector(
+            onTap: _mostrarOpcionesFoto, 
+            child: const CircleAvatar(radius: 22, backgroundColor: Colors.blueAccent, child: Icon(Icons.camera_alt, size: 20, color: Colors.white))
+          )
+        ),
       ]),
       const SizedBox(height: 15),
-      Text(nombreUsuario, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+      Text(nombreUsuario, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
       const Text("Personal de la Empresa", style: TextStyle(color: Colors.white54, fontSize: 14)),
     ]);
   }
 
   Widget _buildEquipoCard(Map<String, dynamic> data) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [Colors.blueAccent.withAlpha(50), Colors.transparent]),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.blueAccent.withAlpha(40), Colors.black26]
+        ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.blueAccent.withAlpha(75))
+        border: Border.all(color: Colors.blueAccent.withAlpha(60))
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround, 
         children: [
           _buildDatoUnidad("VEHÍCULO", data['VEHICULO'] ?? "---", Icons.local_shipping),
-          Container(width: 1, height: 40, color: Colors.white12),
+          Container(width: 1, height: 45, color: Colors.white12),
           _buildDatoUnidad("ENGANCHE", data['ENGANCHE'] ?? "---", Icons.grid_view),
         ]
       )
@@ -261,7 +304,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
   }
 
   Widget _buildDatoUnidad(String l, String v, IconData i) => Column(children: [
-    Icon(i, color: Colors.blueAccent, size: 28), 
+    Icon(i, color: Colors.blueAccent, size: 30), 
     const SizedBox(height: 5),
     Text(l, style: const TextStyle(fontSize: 10, color: Colors.white54, fontWeight: FontWeight.bold)), 
     Text(v, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16))

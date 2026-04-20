@@ -153,7 +153,7 @@ class AdminPanelScreen extends StatelessWidget {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               Navigator.pop(context);
-              await MigrationService.ejecutarMigracionEmpleados();
+                 await MigrationService.ejecutarMigracionCamposEmpleados();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text("Migración finalizada")),

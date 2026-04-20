@@ -14,7 +14,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text("Gestión: Vencimientos (60 días)"),
+        title: const Text("Auditoría: Personal (60 días)"),
         centerTitle: true,
         backgroundColor: const Color(0xFF1A3A5A).withValues(alpha: 0.85),
         elevation: 0,
@@ -58,22 +58,32 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                   String nombre = data['NOMBRE'] ?? "Sin Nombre";
                   String dni = doc.id;
 
-                  // Revisión de campos según tu estructura exacta
+                  // --- DOCUMENTACIÓN PERSONAL ---
                   _revisarFecha(criticos, dni, nombre, "Licencia", "LICENCIA_DE_CONDUCIR",
                       data['VENCIMIENTO_LICENCIA_DE_CONDUCIR'], data['ARCHIVO_LICENCIA_DE_CONDUCIR']);
                   _revisarFecha(criticos, dni, nombre, "Psicofísico", "PSICOFISICO",
                       data['VENCIMIENTO_PSICOFISICO'], data['ARCHIVO_PSICOFISICO']);
                   _revisarFecha(criticos, dni, nombre, "Manejo Defensivo", "CURSO_DE_MANEJO_DEFENSIVO",
                       data['VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO'], data['ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO']);
+
+                  // --- DOCUMENTACIÓN LABORAL (NUEVA) ---
+                  _revisarFecha(criticos, dni, nombre, "ART", "ART",
+                      data['VENCIMIENTO_ART'], data['ARCHIVO_ART']);
+                  _revisarFecha(criticos, dni, nombre, "F. 931", "931",
+                      data['VENCIMIENTO_931'], data['ARCHIVO_931']);
+                  _revisarFecha(criticos, dni, nombre, "Seguro de Vida", "SEGURO_DE_VIDA",
+                      data['VENCIMIENTO_SEGURO_DE_VIDA'], data['ARCHIVO_SEGURO_DE_VIDA']);
+                  _revisarFecha(criticos, dni, nombre, "Sindicato", "LIBRE_DE_DEUDA_SINDICAL",
+                      data['VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL'], data['ARCHIVO_LIBRE_DE_DEUDA_SINDICAL']);
                 }
 
-                // Filtrar por 60 días y ordenar
+                // Filtrar por 60 días y ordenar por urgencia
                 criticos = criticos.where((item) => item['dias'] <= 60).toList();
                 criticos.sort((a, b) => a['dias'].compareTo(b['dias']));
 
                 if (criticos.isEmpty) {
                   return const Center(
-                      child: Text("Sin vencimientos próximos",
+                      child: Text("Sin vencimientos próximos en el personal",
                           style: TextStyle(color: Colors.white70)));
                 }
 
@@ -82,9 +92,12 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                   itemCount: criticos.length,
                   itemBuilder: (context, index) {
                     final item = criticos[index];
-                    Color colorSemaforo = item['dias'] < 0
-                        ? Colors.redAccent
-                        : (item['dias'] <= 30 ? Colors.orangeAccent : Colors.greenAccent);
+                    
+                    // Lógica de colores: Rojo (Vencido), Naranja (<=15), Amarillo (<=30), Verde (<=60)
+                    int d = item['dias'];
+                    Color colorSemaforo = d < 0 ? Colors.redAccent 
+                        : (d <= 15 ? Colors.orangeAccent 
+                        : (d <= 30 ? Colors.yellowAccent : Colors.greenAccent));
 
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -142,7 +155,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
     try {
       String extension = archivo.path.split('.').last;
       String nombreArchivo =
-          "${dni}_VENCIMIENTO_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
+          "${dni}_AUDITORIA_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
       Reference ref = FirebaseStorage.instance.ref().child('REVISIONES/$nombreArchivo');
       UploadTask uploadTask = ref.putFile(archivo);
       TaskSnapshot snapshot = await uploadTask;
@@ -153,7 +166,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
   }
 
   void _abrirEditorDirecto(BuildContext context, Map<String, dynamic> item) {
-    DateTime fechaSeleccionada = DateTime.parse(item['fecha']);
+    DateTime fechaSeleccionada = DateTime.tryParse(item['fecha']) ?? DateTime.now();
     File? archivoSeleccionado;
     bool subiendo = false;
 
@@ -210,13 +223,16 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                         child: Text(
                       archivoSeleccionado == null
                           ? "Sin archivo seleccionado"
-                          : "Documento listo para subir",
+                          : "Nuevo documento listo",
                       style: const TextStyle(color: Colors.white70),
                     )),
                     IconButton(
                       icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.blueAccent),
                       onPressed: () async {
-                        FilePickerResult? result = await FilePicker.platform.pickFiles();
+                        FilePickerResult? result = await FilePicker.platform.pickFiles(
+                          type: FileType.custom,
+                          allowedExtensions: ['jpg', 'pdf', 'png', 'jpeg'],
+                        );
                         if (result != null) {
                           setState(() => archivoSeleccionado = File(result.files.single.path!));
                         }
@@ -255,18 +271,19 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
 
                           String fechaString = fechaSeleccionada.toString().split(' ')[0];
 
+                          // Actualización con la nueva lógica de nombres de campo
                           await FirebaseFirestore.instance
                               .collection('EMPLEADOS')
                               .doc(item['dni'])
                               .update({
                             "VENCIMIENTO_${item['campo_base']}": fechaString,
                             "ARCHIVO_${item['campo_base']}": urlFinal,
-                            "ultima_actualizacion_admin": FieldValue.serverTimestamp(),
+                            "ultima_auditoria_admin": FieldValue.serverTimestamp(),
                           });
 
                           if (context.mounted) Navigator.pop(context);
                         },
-                        child: const Text("GUARDAR"),
+                        child: const Text("GUARDAR CAMBIOS"),
                       ),
                     ),
                   ],

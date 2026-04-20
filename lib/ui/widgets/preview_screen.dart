@@ -9,39 +9,50 @@ class PreviewScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Verificamos si es PDF
     bool esPdf = url.toLowerCase().contains('.pdf');
 
     return Scaffold(
       appBar: AppBar(
         title: Text(titulo),
+        centerTitle: true,
         backgroundColor: const Color(0xFF1A3A5A),
         foregroundColor: Colors.white,
       ),
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.black, 
       body: Center(
         child: esPdf
             ? PdfViewer.uri(
                 Uri.parse(url),
-                // Eliminamos los builders que están dando problemas de versión
                 params: const PdfViewerParams(
-                  maxScale: 8.0,
+                  maxScale: 8.0, // Mantenemos el zoom alto para legibilidad
+                  // Se eliminó 'enableTextSelection' para evitar error de compilación
                 ),
               )
             : InteractiveViewer(
-                panEnabled: true,
+                panEnabled: true, 
                 minScale: 0.5,
-                maxScale: 4.0,
+                maxScale: 5.0, 
                 child: Image.network(
                   url,
                   fit: BoxFit.contain,
                   loadingBuilder: (context, child, progress) {
                     if (progress == null) return child;
-                    return const CircularProgressIndicator(color: Colors.white);
+                    return const Center(
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    );
                   },
-                  errorBuilder: (context, error, stackTrace) => const Icon(
-                    Icons.broken_image,
-                    color: Colors.white30,
-                    size: 50,
+                  errorBuilder: (context, error, stackTrace) => const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.broken_image, color: Colors.white30, size: 60),
+                      SizedBox(height: 10),
+                      Text("No se pudo cargar la imagen", 
+                        style: TextStyle(color: Colors.white30, fontSize: 12)),
+                    ],
                   ),
                 ),
               ),

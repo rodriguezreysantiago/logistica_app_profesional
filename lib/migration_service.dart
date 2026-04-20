@@ -2,17 +2,18 @@ import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MigrationService {
-  /// Ejecuta la migración masiva y limpieza de campos en VEHICULOS.
-  /// Incluye la eliminación de RTO_NRO y POLIZA_NRO.
-  static Future<void> ejecutarMigracionEmpleados() async {
-    final collection = FirebaseFirestore.instance.collection('VEHICULOS');
+  /// MIGRACIÓN Y LIMPIEZA DE EMPLEADOS
+  /// 1. Inicializa los 4 nuevos campos laborales (ART, 931, Seguro de Vida, Sindicato).
+  /// 2. Elimina campos obsoletos de fotos y URLs viejas.
+  static Future<void> ejecutarMigracionCamposEmpleados() async {
+    final collection = FirebaseFirestore.instance.collection('EMPLEADOS');
     
     try {
-      debugPrint("🚀 Iniciando limpieza profunda en VEHICULOS...");
+      debugPrint("🚀 Iniciando limpieza e inicialización en EMPLEADOS...");
       final snapshot = await collection.get();
 
       if (snapshot.docs.isEmpty) {
-        debugPrint("⚠️ No hay documentos en VEHICULOS.");
+        debugPrint("⚠️ No hay documentos en EMPLEADOS.");
         return;
       }
 
@@ -24,64 +25,63 @@ class MigrationService {
         final data = doc.data();
         Map<String, dynamic> updates = {};
 
-        // 1. MIGRAR PÓLIZA -> SEGURO (Fecha y Archivo)
-        if (data.containsKey('VENCIMIENTO_POLIZA')) {
-          updates['VENCIMIENTO_SEGURO'] = data['VENCIMIENTO_POLIZA'];
-          updates['VENCIMIENTO_POLIZA'] = FieldValue.delete();
-        }
-        if (data.containsKey('ARCHIVO_POLIZA')) {
-          updates['ARCHIVO_SEGURO'] = data['ARCHIVO_POLIZA'];
-          updates['ARCHIVO_POLIZA'] = FieldValue.delete();
+        // --- A. INICIALIZACIÓN DE CAMPOS NUEVOS (Si no existen) ---
+        // Esto asegura que el admin y el usuario vean strings vacíos en lugar de nulls
+        final nuevosCampos = [
+          'VENCIMIENTO_ART', 'ARCHIVO_ART',
+          'VENCIMIENTO_931', 'ARCHIVO_931',
+          'VENCIMIENTO_SEGURO_DE_VIDA', 'ARCHIVO_SEGURO_DE_VIDA',
+          'VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL', 'ARCHIVO_LIBRE_DE_DEUDA_SINDICAL'
+        ];
+
+        for (var campo in nuevosCampos) {
+          if (!data.containsKey(campo)) {
+            updates[campo] = ""; 
+          }
         }
 
-        // 2. ELIMINAR CAMPOS OBSOLETOS SOLICITADOS
-        if (data.containsKey('FOTO')) {
-          updates['FOTO'] = FieldValue.delete();
-        }
-        if (data.containsKey('FOTO_VENCIMIENTO_RTO')) {
-          updates['FOTO_VENCIMIENTO_RTO'] = FieldValue.delete();
+        // --- B. ELIMINACIÓN DE CAMPOS OBSOLETOS ---
+        // Borramos físicamente los campos que ya no se usan en la nueva versión
+        final camposAEliminar = [
+          'ULTIMA_MODIFICACION', 
+          'FOTO_CURSO_MANEJO', 
+          'FOTO_EPAP', 
+          'FOTO_LIC_COND', 
+          'FOTO_URL'
+        ];
+
+        for (var campo in camposAEliminar) {
+          if (data.containsKey(campo)) {
+            updates[campo] = FieldValue.delete();
+          }
         }
 
-        // --- NUEVAS ELIMINACIONES: RTO_NRO y POLIZA_NRO ---
-        if (data.containsKey('RTO_NRO')) {
-          updates['RTO_NRO'] = FieldValue.delete();
-        }
-        if (data.containsKey('POLIZA_NRO')) {
-          updates['POLIZA_NRO'] = FieldValue.delete();
-        }
-
-        // 3. LIMPIEZA ADICIONAL DE TRÁMITES
-        if (data.containsKey('NRO_TRAMITE_DNI')) updates['NRO_TRAMITE_DNI'] = FieldValue.delete();
-        if (data.containsKey('N_TRAMITE_DNI')) updates['N_TRAMITE_DNI'] = FieldValue.delete();
-        if (data.containsKey('FOTO_VENCIMIENTO_POLIZA')) updates['FOTO_VENCIMIENTO_POLIZA'] = FieldValue.delete();
-        if (data.containsKey('ultima_revision_admin')) updates['ultima_revision_admin'] = FieldValue.delete();
-        if (data.containsKey('ultima_revision')) updates['ultima_revision'] = FieldValue.delete(); 
-
+        // Si el documento necesitaba cambios, lo agregamos al batch
         if (updates.isNotEmpty) {
           batch.update(doc.reference, updates);
           operacionesEnBatch++;
           contadorDocsEditados++;
         }
 
-        // Límite de Batch (500 operaciones máximo de Firestore)
+        // Límite de Batch de Firestore (máximo 500 operaciones por commit)
         if (operacionesEnBatch >= 450) {
           await batch.commit();
-          debugPrint("📦 Bloque de 450 documentos procesado...");
+          debugPrint("📦 Bloque de 450 empleados procesado...");
           batch = FirebaseFirestore.instance.batch();
           operacionesEnBatch = 0;
         }
       }
 
-      // Commit final de los documentos restantesx|
+      // Procesar los documentos restantes
       if (operacionesEnBatch > 0) {
         await batch.commit();
       }
 
-      debugPrint("✅ LIMPIEZA COMPLETADA.");
-      debugPrint("📊 Se actualizaron/limpiaron $contadorDocsEditados documentos en VEHICULOS.");
+      debugPrint("✅ PROCESO COMPLETADO EXITOSAMENTE.");
+      debugPrint("📊 Se actualizaron/limpiaron $contadorDocsEditados documentos de empleados.");
       
     } catch (e) {
-      debugPrint("❌ ERROR EN MIGRACIÓN: $e");
+      debugPrint("❌ ERROR DURANTE LA OPERACIÓN: $e");
     }
   }
 }

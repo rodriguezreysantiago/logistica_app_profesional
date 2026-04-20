@@ -54,20 +54,20 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
 
                 for (var doc in snapshot.data!.docs) {
                   var data = doc.data() as Map<String, dynamic>;
-                  String patente = doc.id; // O data['DOMINIO']
+                  String patente = doc.id; 
                   String tipoVehiculo = (data['TIPO'] ?? "").toString().toUpperCase();
 
+                  // Filtramos solo por Tractores/Chasis
                   if (tipoVehiculo == "CHASIS" || tipoVehiculo == "TRACTOR") {
-                    // Verificación de RTO
                     _verificarVencimiento(alertasChasis, patente, tipoVehiculo, "RTO", 
                         "RTO", data['VENCIMIENTO_RTO'], data['ARCHIVO_RTO']);
 
-                    // Verificación de SEGURO (Mapeado a tus campos VENCIMIENTO_SEGURO / ARCHIVO_SEGURO)
                     _verificarVencimiento(alertasChasis, patente, tipoVehiculo, "Seguro", 
                         "SEGURO", data['VENCIMIENTO_SEGURO'], data['ARCHIVO_SEGURO']);
                   }
                 }
 
+                // Auditoría hasta 60 días
                 alertasChasis = alertasChasis.where((item) => item['dias'] <= 60).toList();
                 alertasChasis.sort((a, b) => a['dias'].compareTo(b['dias']));
 
@@ -81,23 +81,41 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
                   itemCount: alertasChasis.length,
                   itemBuilder: (context, index) {
                     final item = alertasChasis[index];
-                    Color colorSemaforo = item['dias'] < 0 
-                        ? Colors.redAccent 
-                        : (item['dias'] <= 30 ? Colors.orangeAccent : Colors.greenAccent);
+                    int d = item['dias'];
+
+                    // --- LÓGICA DE COLORES SOLICITADA ---
+                    Color colorSemaforo;
+                    if (d < 0) {
+                      colorSemaforo = Colors.redAccent;     // ROJO: VENCIDO
+                    } else if (d <= 14) {
+                      colorSemaforo = Colors.yellowAccent;  // AMARILLO: 0 a 14 días
+                    } else if (d <= 30) {
+                      colorSemaforo = Colors.greenAccent;   // VERDE: 15 a 30 días
+                    } else {
+                      colorSemaforo = Colors.blueAccent;    // AZUL: +30 días
+                    }
 
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: colorSemaforo.withValues(alpha: 0.3)),
+                        border: Border.all(
+                          color: colorSemaforo.withValues(alpha: 0.4),
+                          width: d <= 14 ? 2 : 1, // Resaltar borde si es urgente
+                        ),
                       ),
                       child: ListTile(
                         onTap: () => _abrirEditorVehiculo(context, item),
                         leading: CircleAvatar(
                           backgroundColor: colorSemaforo.withValues(alpha: 0.2),
                           child: Text("${item['dias']}d", 
-                            style: TextStyle(color: colorSemaforo, fontWeight: FontWeight.bold, fontSize: 11)),
+                            style: TextStyle(
+                              color: d <= 14 && d >= 0 ? Colors.black : colorSemaforo, // Texto negro en amarillo para leer mejor
+                              fontWeight: FontWeight.bold, 
+                              fontSize: 10
+                            )
+                          ),
                         ),
                         title: Text("${item['tipo_v']} - ${item['patente']}", 
                           style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)),
@@ -135,7 +153,7 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
   Future<String?> _subirArchivoVehiculo(String patente, String campo, File archivo) async {
     try {
       String extension = archivo.path.split('.').last;
-      String nombreArchivo = "${patente}_VENCIMIENTO_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
+      String nombreArchivo = "${patente}_AUDITORIA_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
       Reference ref = FirebaseStorage.instance.ref().child('REVISIONES/$nombreArchivo');
       UploadTask uploadTask = ref.putFile(archivo);
       TaskSnapshot snapshot = await uploadTask;
@@ -198,14 +216,17 @@ class AdminVencimientosChasisScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        archivoSeleccionado == null ? "Adjuntar PDF o Foto" : "Archivo listo para subir",
+                        archivoSeleccionado == null ? "Adjuntar PDF o Foto" : "Archivo listo",
                         style: const TextStyle(color: Colors.white70),
                       )
                     ),
                     IconButton(
                       icon: const Icon(Icons.add_a_photo_outlined, color: Colors.blueAccent),
                       onPressed: () async {
-                        FilePickerResult? result = await FilePicker.platform.pickFiles();
+                        FilePickerResult? result = await FilePicker.platform.pickFiles(
+                          type: FileType.custom,
+                          allowedExtensions: ['jpg', 'pdf', 'png', 'jpeg'],
+                        );
                         if (result != null) setState(() => archivoSeleccionado = File(result.files.single.path!));
                       },
                     )

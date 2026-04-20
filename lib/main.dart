@@ -3,6 +3,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'firebase_options.dart';
+import 'core/services/prefs_service.dart'; 
+import 'core/services/notification_service.dart'; 
 import 'ui/screens/login_screen.dart';
 import 'ui/screens/main_panel.dart';
 
@@ -18,16 +20,23 @@ import 'ui/screens/admin_vehiculos_lista_screen.dart';
 import 'ui/screens/admin_vencimientos_menu_screen.dart'; 
 import 'ui/screens/admin_revisiones_screen.dart'; 
 
-// --- NUEVAS IMPORTACIONES (AUDITORÍA) ---
+// Importaciones de pantallas de auditoría
 import 'ui/screens/admin_vencimientos_choferes_screen.dart';
 import 'ui/screens/admin_vencimientos_chasis_screen.dart';
 import 'ui/screens/admin_vencimientos_acoplados_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Inicialización de Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // --- INICIALIZAMOS LOS SERVICIOS LOCALES ---
+  await PrefsService.init();          // Persistencia de sesión
+  await NotificationService.init();   // Plugin de notificaciones locales
+
   runApp(const LogisticaApp());
 }
 
@@ -40,21 +49,36 @@ class LogisticaApp extends StatelessWidget {
       title: 'S.M.A.R.T. Logística',
       debugShowCheckedModeBanner: false,
       
+      // Configuración de idiomas para calendarios y formatos de fecha
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [
-        Locale('es', 'AR'),
+        Locale('es', 'AR'), // Español Argentina
+        Locale('es', 'ES'), // Español estándar
       ],
+      locale: const Locale('es', 'AR'),
       
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A3A5A)),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1A3A5A),
+          primary: const Color(0xFF1A3A5A),
+          secondary: Colors.orangeAccent,
+        ),
+        // Estilo global para botones y tarjetas para mantener la estética SMART
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+        ),
       ),
 
-      initialRoute: '/',
+      // --- LÓGICA DE RUTA INICIAL ---
+      // Si ya está logueado, va directo al MainPanel, sino al Login
+      initialRoute: PrefsService.isLoggedIn ? '/home' : '/',
+      
       routes: {
         '/': (context) => const LoginScreen(),
       },
@@ -63,32 +87,32 @@ class LogisticaApp extends StatelessWidget {
         // --- RUTAS COMUNES ---
         
         if (settings.name == '/home') {
-          final args = settings.arguments as Map<String, dynamic>? ?? {};
+          final args = settings.arguments as Map<String, dynamic>?;
           return MaterialPageRoute(
             builder: (context) => MainPanel(
-              dni: args['dni'] ?? '',
-              nombre: args['nombre'] ?? 'Usuario',
-              rol: args['rol'] ?? 'USER',
+              dni: args?['dni'] ?? PrefsService.dni,
+              nombre: args?['nombre'] ?? PrefsService.nombre,
+              rol: args?['rol'] ?? PrefsService.rol,
             ),
           );
         }
 
         if (settings.name == '/perfil') {
-          final dni = settings.arguments as String? ?? '';
+          final dni = settings.arguments as String? ?? PrefsService.dni;
           return MaterialPageRoute(
             builder: (context) => UserMiPerfilScreen(dni: dni),
           );
         }
 
         if (settings.name == '/equipo') {
-          final dni = settings.arguments as String? ?? '';
+          final dni = settings.arguments as String? ?? PrefsService.dni;
           return MaterialPageRoute(
             builder: (context) => UserMiEquipoScreen(dniUser: dni),
           );
         }
 
         if (settings.name == '/mis_vencimientos') {
-          final dni = settings.arguments as String? ?? '';
+          final dni = settings.arguments as String? ?? PrefsService.dni;
           return MaterialPageRoute(
             builder: (context) => UserMisVencimientosScreen(dniUser: dni),
           );
@@ -126,7 +150,7 @@ class LogisticaApp extends StatelessWidget {
           );
         }
 
-        // --- NUEVAS RUTAS DE AUDITORÍA REGISTRADAS ---
+        // --- RUTAS DE AUDITORÍA (Nuevas pantallas corregidas hoy) ---
 
         if (settings.name == '/vencimientos_choferes') {
           return MaterialPageRoute(

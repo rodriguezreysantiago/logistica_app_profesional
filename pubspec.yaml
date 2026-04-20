@@ -11,6 +11,9 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # --- LIBRERÍAS DE SISTEMA, PERSISTENCIA Y NOTIFICACIONES ---
+  shared_preferences: ^2.5.2
+  flutter_local_notifications: ^18.0.1  # <--- ESTA FALTABA
   cupertino_icons: ^1.0.8
   
   # Localización e Idiomas
@@ -42,4 +45,3 @@ flutter:
 
   assets:
     - assets/images/fondo_login.jpg
-    
