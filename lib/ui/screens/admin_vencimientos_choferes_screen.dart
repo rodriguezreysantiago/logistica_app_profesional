@@ -1,8 +1,7 @@
-import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:io';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../../core/utils/formatters.dart';
 
@@ -16,15 +15,9 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Auditoría: Personal (60 días)"),
         centerTitle: true,
-        backgroundColor: const Color(0xFF1A3A5A).withValues(alpha: 0.85),
+        backgroundColor: const Color(0xFF1A3A5A).withAlpha(220),
         elevation: 0,
         foregroundColor: Colors.white,
-        flexibleSpace: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(color: Colors.transparent),
-          ),
-        ),
       ),
       body: Stack(
         children: [
@@ -36,7 +29,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                   Container(color: const Color(0xFF0D1D2D)),
             ),
           ),
-          Container(color: const Color(0xFF1A3A5A).withValues(alpha: 0.5)),
+          Container(color: const Color(0xFF1A3A5A).withAlpha(130)),
           SafeArea(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('EMPLEADOS').snapshots(),
@@ -47,7 +40,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(
-                      child: Text("No hay datos de empleados",
+                      child: Text("No hay datos de empleados registrados.",
                           style: TextStyle(color: Colors.white70)));
                 }
 
@@ -56,23 +49,28 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                 for (var doc in snapshot.data!.docs) {
                   var data = doc.data() as Map<String, dynamic>;
                   String nombre = data['NOMBRE'] ?? "Sin Nombre";
-                  String dni = doc.id;
+                  String dni = doc.id.trim();
 
-                  // --- DOCUMENTACIÓN PERSONAL ---
+                  // --- DOCUMENTACIÓN PERSONAL (Pares VENCIMIENTO / ARCHIVO) ---
                   _revisarFecha(criticos, dni, nombre, "Licencia", "LICENCIA_DE_CONDUCIR",
                       data['VENCIMIENTO_LICENCIA_DE_CONDUCIR'], data['ARCHIVO_LICENCIA_DE_CONDUCIR']);
+                  
                   _revisarFecha(criticos, dni, nombre, "Psicofísico", "PSICOFISICO",
                       data['VENCIMIENTO_PSICOFISICO'], data['ARCHIVO_PSICOFISICO']);
+                  
                   _revisarFecha(criticos, dni, nombre, "Manejo Defensivo", "CURSO_DE_MANEJO_DEFENSIVO",
                       data['VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO'], data['ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO']);
 
-                  // --- DOCUMENTACIÓN LABORAL (NUEVA) ---
+                  // --- DOCUMENTACIÓN LABORAL ---
                   _revisarFecha(criticos, dni, nombre, "ART", "ART",
                       data['VENCIMIENTO_ART'], data['ARCHIVO_ART']);
+                  
                   _revisarFecha(criticos, dni, nombre, "F. 931", "931",
                       data['VENCIMIENTO_931'], data['ARCHIVO_931']);
+                  
                   _revisarFecha(criticos, dni, nombre, "Seguro de Vida", "SEGURO_DE_VIDA",
                       data['VENCIMIENTO_SEGURO_DE_VIDA'], data['ARCHIVO_SEGURO_DE_VIDA']);
+                  
                   _revisarFecha(criticos, dni, nombre, "Sindicato", "LIBRE_DE_DEUDA_SINDICAL",
                       data['VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL'], data['ARCHIVO_LIBRE_DE_DEUDA_SINDICAL']);
                 }
@@ -83,7 +81,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
 
                 if (criticos.isEmpty) {
                   return const Center(
-                      child: Text("Sin vencimientos próximos en el personal",
+                      child: Text("Personal con documentación al día",
                           style: TextStyle(color: Colors.white70)));
                 }
 
@@ -92,27 +90,34 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                   itemCount: criticos.length,
                   itemBuilder: (context, index) {
                     final item = criticos[index];
-                    
-                    // Lógica de colores: Rojo (Vencido), Naranja (<=15), Amarillo (<=30), Verde (<=60)
                     int d = item['dias'];
-                    Color colorSemaforo = d < 0 ? Colors.redAccent 
-                        : (d <= 15 ? Colors.orangeAccent 
-                        : (d <= 30 ? Colors.yellowAccent : Colors.greenAccent));
+                    
+                    // SEMÁFORO UNIFICADO S.M.A.R.T.
+                    Color colorSemaforo;
+                    if (d < 0) {
+                      colorSemaforo = Colors.red;
+                    } else if (d <= 14) {
+                      colorSemaforo = Colors.orange;
+                    } else if (d <= 30) {
+                      colorSemaforo = Colors.greenAccent;
+                    } else {
+                      colorSemaforo = Colors.blueAccent;
+                    }
 
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: Colors.white.withAlpha(25),
                         borderRadius: BorderRadius.circular(15),
-                        border: Border.all(color: colorSemaforo.withValues(alpha: 0.3)),
+                        border: Border.all(color: colorSemaforo.withAlpha(80), width: d <= 14 ? 1.5 : 0.5),
                       ),
                       child: ListTile(
                         onTap: () => _abrirEditorDirecto(context, item),
                         leading: CircleAvatar(
-                          backgroundColor: colorSemaforo.withValues(alpha: 0.2),
+                          backgroundColor: colorSemaforo.withAlpha(40),
                           child: Text("${item['dias']}d",
                               style: TextStyle(
-                                  color: colorSemaforo,
+                                  color: d <= 14 && d >= 0 ? Colors.orange : colorSemaforo,
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold)),
                         ),
@@ -121,9 +126,9 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                                 color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                         subtitle: Text(
                           "${item['tipo']}: ${AppFormatters.formatearFecha(item['fecha'])}",
-                          style: const TextStyle(color: Colors.white70),
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
                         ),
-                        trailing: const Icon(Icons.edit_note, color: Colors.blueAccent),
+                        trailing: const Icon(Icons.edit_calendar, color: Colors.orangeAccent, size: 20),
                       ),
                     );
                   },
@@ -154,12 +159,10 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
   Future<String?> _subirArchivo(String dni, String campo, File archivo) async {
     try {
       String extension = archivo.path.split('.').last;
-      String nombreArchivo =
-          "${dni}_AUDITORIA_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
-      Reference ref = FirebaseStorage.instance.ref().child('REVISIONES/$nombreArchivo');
-      UploadTask uploadTask = ref.putFile(archivo);
-      TaskSnapshot snapshot = await uploadTask;
-      return await snapshot.ref.getDownloadURL();
+      String nombreArchivo = "${dni}_ADMIN_AUDIT_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
+      Reference ref = FirebaseStorage.instance.ref().child('EMPLEADOS_DOCS/$nombreArchivo');
+      await ref.putFile(archivo);
+      return await ref.getDownloadURL();
     } catch (e) {
       return null;
     }
@@ -176,84 +179,79 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
       backgroundColor: const Color(0xFF0D1D2D),
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-              20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      builder: (bContext) => StatefulBuilder(
+        builder: (stContext, setState) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(stContext).viewInsets.bottom + 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text("Editar ${item['tipo']}",
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              Text("Actualizar ${item['tipo']}",
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
               Text(item['usuario'], style: const TextStyle(color: Colors.white54)),
               const Divider(color: Colors.white12, height: 25),
+              
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text("Nueva Fecha de Vencimiento",
-                    style: TextStyle(color: Colors.white)),
+                title: const Text("Fecha de Vencimiento", style: TextStyle(color: Colors.white, fontSize: 14)),
                 subtitle: Text(
                   AppFormatters.formatearFecha(fechaSeleccionada.toString().split(' ')[0]),
-                  style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 trailing: const Icon(Icons.calendar_month, color: Colors.blueAccent),
                 onTap: () async {
                   DateTime? picker = await showDatePicker(
-                    context: context,
+                    context: stContext,
                     initialDate: fechaSeleccionada,
                     firstDate: DateTime(2020),
-                    lastDate: DateTime(2035),
+                    lastDate: DateTime(2040),
                   );
                   if (picker != null) setState(() => fechaSeleccionada = picker);
                 },
               ),
+              
               const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: Colors.white10)),
-                child: Row(
-                  children: [
-                    Icon(archivoSeleccionado == null ? Icons.attach_file : Icons.check_circle,
-                        color: archivoSeleccionado == null ? Colors.white38 : Colors.greenAccent),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: Text(
-                      archivoSeleccionado == null
-                          ? "Sin archivo seleccionado"
-                          : "Nuevo documento listo",
-                      style: const TextStyle(color: Colors.white70),
-                    )),
-                    IconButton(
-                      icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.blueAccent),
-                      onPressed: () async {
-                        FilePickerResult? result = await FilePicker.platform.pickFiles(
-                          type: FileType.custom,
-                          allowedExtensions: ['jpg', 'pdf', 'png', 'jpeg'],
-                        );
-                        if (result != null) {
-                          setState(() => archivoSeleccionado = File(result.files.single.path!));
-                        }
-                      },
-                    )
-                  ],
+              InkWell(
+                onTap: () async {
+                  FilePickerResult? result = await FilePicker.platform.pickFiles(
+                    type: FileType.custom,
+                    allowedExtensions: ['jpg', 'pdf', 'png', 'jpeg'],
+                  );
+                  if (result != null) {
+                    setState(() => archivoSeleccionado = File(result.files.single.path!));
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(15),
+                  decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(10),
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: archivoSeleccionado == null ? Colors.white12 : Colors.greenAccent)),
+                  child: Row(
+                    children: [
+                      Icon(archivoSeleccionado == null ? Icons.upload_file : Icons.check_circle,
+                          color: archivoSeleccionado == null ? Colors.white38 : Colors.greenAccent),
+                      const SizedBox(width: 12),
+                      Expanded(
+                          child: Text(
+                        archivoSeleccionado == null ? "Cargar comprobante nuevo" : "Archivo adjuntado correctamente",
+                        style: const TextStyle(color: Colors.white70, fontSize: 13),
+                      )),
+                      const Icon(Icons.add_a_photo_outlined, color: Colors.blueAccent, size: 20)
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 25),
+
+              const SizedBox(height: 30),
               if (subiendo)
                 const CircularProgressIndicator(color: Colors.orangeAccent)
               else
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white70,
-                              side: const BorderSide(color: Colors.white24)),
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text("CANCELAR")),
+                      child: TextButton(
+                          onPressed: () => Navigator.pop(stContext),
+                          child: const Text("CANCELAR", style: TextStyle(color: Colors.white54))),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -265,13 +263,12 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                           
                           String? urlFinal = item['foto'];
                           if (archivoSeleccionado != null) {
-                            urlFinal = await _subirArchivo(
-                                item['dni'], item['campo_base'], archivoSeleccionado!);
+                            urlFinal = await _subirArchivo(item['dni'], item['campo_base'], archivoSeleccionado!);
                           }
 
                           String fechaString = fechaSeleccionada.toString().split(' ')[0];
 
-                          // Actualización con la nueva lógica de nombres de campo
+                          // ACTUALIZACIÓN SIGUIENDO LA LÓGICA DE PARES VENCIMIENTO/ARCHIVO
                           await FirebaseFirestore.instance
                               .collection('EMPLEADOS')
                               .doc(item['dni'])
@@ -281,7 +278,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                             "ultima_auditoria_admin": FieldValue.serverTimestamp(),
                           });
 
-                          if (context.mounted) Navigator.pop(context);
+                          if (stContext.mounted) Navigator.pop(stContext);
                         },
                         child: const Text("GUARDAR CAMBIOS"),
                       ),

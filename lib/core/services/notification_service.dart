@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:flutter/material.dart'; // <--- ESTA ES LA IMPORTACIÓN QUE FALTABA
+import 'package:flutter/material.dart'; 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
@@ -22,7 +22,8 @@ class NotificationService {
     const LinuxInitializationSettings initializationSettingsLinux =
         LinuxInitializationSettings(defaultActionName: 'Open');
 
-    final InitializationSettings initializationSettings = InitializationSettings(
+    // Se agrega 'const' aquí para optimizar la creación del objeto
+    const InitializationSettings initializationSettings = InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsIOS,
       linux: initializationSettingsLinux,
@@ -61,7 +62,11 @@ class NotificationService {
 
     const NotificationDetails platformDetails = NotificationDetails(
       android: androidDetails,
-      iOS: DarwinNotificationDetails(presentAlert: true, presentBadge: true, presentSound: true),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true, 
+        presentBadge: true, 
+        presentSound: true,
+      ),
     );
 
     await _notificationsPlugin.show(id, titulo, mensaje, platformDetails, payload: 'vencimiento');
@@ -72,13 +77,14 @@ class NotificationService {
     required String chofer,
     required String documento,
   }) async {
+    // Agregamos 'const' a los detalles de Android para limpiar los avisos del linter
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'admin_canal',
       'Avisos Administrativos',
       channelDescription: 'Notificaciones sobre nuevas revisiones pendientes',
       importance: Importance.max,
       priority: Priority.high,
-      color: Color(0xFF1A3A5A), // Ahora 'Color' sí será reconocido
+      color: Color(0xFF1A3A5A), 
       ledColor: Color(0xFFFF9800),
       ledOnMs: 1000,
       ledOffMs: 500,
@@ -86,7 +92,10 @@ class NotificationService {
 
     const NotificationDetails platformDetails = NotificationDetails(
       android: androidDetails,
-      iOS: DarwinNotificationDetails(presentAlert: true, presentSound: true),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true, 
+        presentSound: true,
+      ),
     );
 
     await _notificationsPlugin.show(

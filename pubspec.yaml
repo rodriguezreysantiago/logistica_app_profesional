@@ -1,7 +1,6 @@
 name: logistica_app_profesional
 description: "A new Flutter project for logistics management."
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -10,35 +9,40 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
-  # --- LIBRERÍAS DE SISTEMA, PERSISTENCIA Y NOTIFICACIONES ---
-  shared_preferences: ^2.5.2
-  flutter_local_notifications: ^18.0.1  # <--- ESTA FALTABA
   cupertino_icons: ^1.0.8
-  
-  # Localización e Idiomas
+
+  # --- RED Y APIs ---
+  dio: ^5.7.0
+  http: ^1.2.0
+
+  # --- SISTEMA Y PERSISTENCIA ---
+  shared_preferences: ^2.3.2
+  path_provider: ^2.1.5
+  url_launcher: ^6.3.1
+  file_picker: ^8.1.7
+
+  # --- NOTIFICACIONES LOCALES ---
+  flutter_local_notifications: ^17.2.1
+
+  # --- LOCALIZACIÓN ---
   flutter_localizations:
     sdk: flutter
-  intl: ^0.20.2
+  intl: any # <-- Cambiado a 'any' para evitar conflictos con Firebase
 
-  # Firebase
-  firebase_core: ^3.10.1
-  cloud_firestore: ^5.6.1
-  firebase_storage: ^12.4.10
-  
-  # Fotos y archivos
+  # --- FIREBASE ---
+  firebase_core: ^3.6.0
+  cloud_firestore: ^5.4.4
+  firebase_storage: ^12.3.2
+
+  # --- MANEJO DE ARCHIVOS Y PDF ---
   image_picker: ^1.1.2
-  path_provider: ^2.1.5
-  http: ^1.6.0
-  file_picker: ^10.3.10
-  url_launcher: ^6.3.2
-  flutter_pdfview: ^1.4.4
-  pdfrx: ^2.2.24
+  flutter_pdfview: ^1.3.2
+  pdfrx: ^1.0.10
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true

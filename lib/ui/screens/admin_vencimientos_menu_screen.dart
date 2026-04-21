@@ -6,80 +6,102 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true, // Para que el fondo llegue hasta arriba
+      extendBodyBehindAppBar: true, 
       appBar: AppBar(
-        title: const Text("Auditoría Crítica"),
+        title: const Text("Auditoría de Vencimientos"),
         centerTitle: true,
-        backgroundColor: Colors.transparent, // AppBar invisible
+        backgroundColor: Colors.transparent, 
         elevation: 0,
         foregroundColor: Colors.white,
       ),
       body: Stack(
         children: [
-          // 1. Imagen de fondo
+          // FONDO
           Positioned.fill(
             child: Image.asset(
               'assets/images/fondo_login.jpg',
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => 
-                  Container(color: Colors.blueGrey.shade900),
+                  Container(color: const Color(0xFF0D1D2D)),
             ),
           ),
           
-          // 2. Overlay oscuro
+          // CAPA OSCURA
           Positioned.fill(
             child: Container(
-              color: Colors.black.withValues(alpha: 0.65),
+              color: Colors.black.withAlpha(180),
             ),
           ),
 
-          // 3. Contenido
           SafeArea(
             child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: 10),
+              padding: const EdgeInsets.symmetric(vertical: 20),
               children: [
-                // SECCIÓN DE SOLICITUDES ENTRANTES
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 20, 16, 12),
-                  child: Text(
-                    "PENDIENTES DE APROBACIÓN", 
-                    style: TextStyle(
-                      fontSize: 13, 
-                      fontWeight: FontWeight.bold, 
-                      color: Colors.orangeAccent, // Resaltado para llamar la atención
-                      letterSpacing: 1.1
-                    )
-                  ),
-                ),
-                _tile(
-                  context, 
-                  "REVISION DE SOLICITUDES DE PERSONAL", 
-                  Icons.notification_important, 
-                  '/admin_revisiones', 
-                  colorIcon: Colors.orangeAccent
-                ),
-                
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                  child: Divider(color: Colors.white24),
-                ),
-
-                // SECCIÓN DE CONSULTA GENERAL
+                // CABECERA DE SECCIÓN
                 const Padding(
                   padding: EdgeInsets.fromLTRB(20, 10, 16, 12),
-                  child: Text(
-                    "AUDITORÍA GENERAL", 
-                    style: TextStyle(
-                      fontSize: 13, 
-                      fontWeight: FontWeight.bold, 
-                      color: Colors.white54,
-                      letterSpacing: 1.1
-                    )
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "AUDITORÍA PREVENTIVA (60 DÍAS)", 
+                        style: TextStyle(
+                          fontSize: 11, 
+                          fontWeight: FontWeight.bold, 
+                          color: Colors.orangeAccent,
+                          letterSpacing: 1.5
+                        )
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        "Control proactivo de documentación próxima a vencer.",
+                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                      ),
+                    ],
                   ),
                 ),
-                _tile(context, "VENCIMIENTOS DE PERSONAL", Icons.person_search, '/vencimientos_choferes'),
-                _tile(context, "VENCIMIENTOS DE VEHICULOS", Icons.engineering, '/vencimientos_chasis'),
-                _tile(context, "VENCIMIENTOS DE ENGANCHES", Icons.ad_units, '/vencimientos_acoplados'),
+
+                const SizedBox(height: 10),
+
+                // TILES DE AUDITORÍA
+                _tile(
+                  context, 
+                  "VENCIMIENTOS DE PERSONAL", 
+                  Icons.person_search, 
+                  '/vencimientos_choferes', 
+                  colorIcon: Colors.blueAccent,
+                  subtitulo: "Seguimiento de Carnets, LINTI y ART"
+                ),
+                
+                _tile(
+                  context, 
+                  "VENCIMIENTOS DE TRACTORES", 
+                  Icons.local_shipping, 
+                  '/vencimientos_chasis', 
+                  colorIcon: Colors.greenAccent,
+                  subtitulo: "Control de RTO y Seguros de Camiones"
+                ),
+                
+                _tile(
+                  context, 
+                  "VENCIMIENTOS DE ENGANCHES", 
+                  Icons.grid_view, 
+                  '/vencimientos_acoplados', 
+                  colorIcon: Colors.tealAccent,
+                  subtitulo: "Auditoría de Bateas, Tolvas y Acoplados"
+                ),
+
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 25, vertical: 30),
+                  child: Divider(color: Colors.white12),
+                ),
+
+                const Center(
+                  child: Text(
+                    "S.M.A.R.T. - Gestión de Flota",
+                    style: TextStyle(color: Colors.white10, fontSize: 10, letterSpacing: 1),
+                  ),
+                )
               ],
             ),
           ),
@@ -88,32 +110,41 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
     );
   }
 
-  Widget _tile(BuildContext context, String t, IconData i, String r, {Color colorIcon = Colors.redAccent}) {
+  Widget _tile(BuildContext context, String t, IconData i, String r, {Color colorIcon = Colors.redAccent, String? subtitulo}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1), // Transparencia del item
+        color: Colors.white.withAlpha(20),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        border: Border.all(color: Colors.white.withAlpha(30)),
       ),
       child: Material(
         color: Colors.transparent,
         child: ListTile(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           leading: Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: colorIcon.withValues(alpha: 0.15),
+              color: colorIcon.withAlpha(30),
               shape: BoxShape.circle,
             ),
-            child: Icon(i, color: colorIcon),
+            child: Icon(i, color: colorIcon, size: 24),
           ),
           title: Text(
             t, 
-            style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)
           ),
-          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white38),
-          onTap: () => Navigator.pushNamed(context, r),
+          subtitle: subtitulo != null 
+            ? Text(subtitulo, style: const TextStyle(color: Colors.white54, fontSize: 12)) 
+            : null,
+          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
+          onTap: () {
+            // BLINDAJE WINDOWS
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              Navigator.pushNamed(context, r);
+            });
+          },
         ),
       ),
     );

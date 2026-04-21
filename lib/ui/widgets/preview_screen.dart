@@ -9,12 +9,13 @@ class PreviewScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Verificamos si es PDF
-    bool esPdf = url.toLowerCase().contains('.pdf');
+    // Mejoramos la detección: verifica si contiene .pdf ignorando mayúsculas/minúsculas
+    // y considerando que puede haber tokens de Firebase después.
+    final bool esPdf = url.toLowerCase().contains('.pdf');
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(titulo),
+        title: Text(titulo, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: const Color(0xFF1A3A5A),
         foregroundColor: Colors.white,
@@ -25,8 +26,8 @@ class PreviewScreen extends StatelessWidget {
             ? PdfViewer.uri(
                 Uri.parse(url),
                 params: const PdfViewerParams(
-                  maxScale: 8.0, // Mantenemos el zoom alto para legibilidad
-                  // Se eliminó 'enableTextSelection' para evitar error de compilación
+                  maxScale: 8.0, // Zoom potente para ver letras chicas de pólizas
+                  backgroundColor: Colors.black,
                 ),
               )
             : InteractiveViewer(
@@ -38,9 +39,12 @@ class PreviewScreen extends StatelessWidget {
                   fit: BoxFit.contain,
                   loadingBuilder: (context, child, progress) {
                     if (progress == null) return child;
-                    return const Center(
+                    return Center(
                       child: CircularProgressIndicator(
-                        color: Colors.white,
+                        value: progress.expectedTotalBytes != null
+                            ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                            : null,
+                        color: Colors.orangeAccent,
                         strokeWidth: 2,
                       ),
                     );
@@ -48,10 +52,10 @@ class PreviewScreen extends StatelessWidget {
                   errorBuilder: (context, error, stackTrace) => const Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.broken_image, color: Colors.white30, size: 60),
+                      Icon(Icons.broken_image_outlined, color: Colors.white24, size: 50),
                       SizedBox(height: 10),
-                      Text("No se pudo cargar la imagen", 
-                        style: TextStyle(color: Colors.white30, fontSize: 12)),
+                      Text("Error al cargar el documento", 
+                        style: TextStyle(color: Colors.white24, fontSize: 13)),
                     ],
                   ),
                 ),

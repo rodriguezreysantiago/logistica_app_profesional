@@ -15,6 +15,7 @@ class Empleado {
     this.activo = true,
   });
 
+  // Convierte el Objeto a un Mapa para guardar en Firebase
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -24,5 +25,19 @@ class Empleado {
       'cuil': cuil,
       'activo': activo,
     };
+  }
+
+  // NUEVO: Crea un Objeto Empleado a partir de los datos de Firebase
+  factory Empleado.fromMap(Map<String, dynamic> map) {
+    return Empleado(
+      id: map['id'] ?? '',
+      nombre: map['nombre'] ?? '',
+      categoria: map['categoria'] ?? 'Chofer',
+      vencimientoLNH: map['vencimientoLNH'] != null 
+          ? DateTime.tryParse(map['vencimientoLNH']) 
+          : null,
+      cuil: map['cuil'] ?? '',
+      activo: map['activo'] ?? true,
+    );
   }
 }

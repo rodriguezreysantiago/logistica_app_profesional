@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../core/services/prefs_service.dart'; // <--- IMPORTANTE: TU NUEVO SERVICIO
+import '../../core/services/prefs_service.dart';
 
 class MainPanel extends StatefulWidget {
   final String dni;
@@ -20,7 +20,7 @@ class MainPanel extends StatefulWidget {
 class _MainPanelState extends State<MainPanel> {
   @override
   Widget build(BuildContext context) {
-    final bool isAdmin = widget.rol.toUpperCase() == 'ADMIN';
+    final bool isAdmin = widget.rol.trim().toUpperCase() == 'ADMIN';
 
     return Scaffold(
       extendBodyBehindAppBar: true, 
@@ -35,112 +35,136 @@ class _MainPanelState extends State<MainPanel> {
             icon: const Icon(Icons.logout_outlined),
             tooltip: 'Cerrar Sesión',
             onPressed: () async {
-              // --- NUEVO: LIMPIAR SESIÓN LOCAL AL SALIR ---
+              final navigator = Navigator.of(context);
               await PrefsService.clear();
               if (!mounted) return;
-              
-              // VOLVEMOS AL LOGIN Y LIMPIAMOS EL HISTORIAL DE RUTAS
-              Navigator.pushReplacementNamed(context, '/');
+              navigator.pushReplacementNamed('/');
             },
           ),
         ],
       ),
       body: Stack(
         children: [
-          // 1. Imagen de Fondo
-          Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/images/fondo_login.jpg'),
-                fit: BoxFit.cover,
-              ),
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/fondo_login.jpg',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => 
+                  Container(color: const Color(0xFF0D1D2D)),
             ),
           ),
-          
-          // 2. Capa de oscurecimiento
-          Container(color: Colors.black.withValues(alpha: 0.45)),
+          Positioned.fill(
+            child: Container(color: Colors.black.withAlpha(160)),
+          ),
 
-          // 3. Contenido Principal
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: kToolbarHeight + 40), 
-                
-                // Cabecera Bienvenida
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(15),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                  ),
+          SafeArea(
+            child: Center( // Center ayuda a que en Windows no se pegue a la izquierda
+              child: ConstrainedBox(
+                // LIMITADOR: En Windows no pasará de 600px, en celu usa el ancho disponible
+                constraints: const BoxConstraints(maxWidth: 600), 
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        "Bienvenido, ${widget.nombre}",
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      Text(
-                        "Gestión de flota y documentación",
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7), 
-                          fontSize: 14,
-                          letterSpacing: 0.5
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 30),
+                      const SizedBox(height: 20),
+                      
+                      _buildWelcomeHeader(),
+                      
+                      const SizedBox(height: 30),
 
-                // 4. Grid de Menú con ICONOS MÁS GRANDES
-                Expanded(
-                  child: GridView.count(
-                    crossAxisCount: 4, 
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                    childAspectRatio: 0.78, 
-                    children: [
-                      _buildMenuButton(
-                        titulo: "MI PERFIL",
-                        icono: Icons.person_outline,
-                        color: Colors.blueAccent,
-                        onTap: () => Navigator.pushNamed(context, '/perfil', arguments: widget.dni),
-                      ),
-                      _buildMenuButton(
-                        titulo: "MI EQUIPO",
-                        icono: Icons.local_shipping_outlined,
-                        color: Colors.orangeAccent,
-                        onTap: () => Navigator.pushNamed(context, '/equipo', arguments: widget.dni),
-                      ),
-                      _buildMenuButton(
-                        titulo: "MIS VENCIMIENTOS",
-                        icono: Icons.event_note_outlined,
-                        color: Colors.greenAccent,
-                        onTap: () => Navigator.pushNamed(context, '/mis_vencimientos', arguments: widget.dni),
-                      ),
-                      if (isAdmin)
-                        _buildMenuButton(
-                          titulo: "PANEL ADMINISTRADOR",
-                          icono: Icons.admin_panel_settings_outlined,
-                          color: Colors.redAccent,
-                          onTap: () => Navigator.pushNamed(context, '/admin_panel'),
+                      Expanded(
+                        child: GridView.count(
+                          // Mantenemos 2 columnas, pero al estar en un contenedor de 600px,
+                          // los botones ahora tendrán un tamaño humano en la PC.
+                          crossAxisCount: 2, 
+                          crossAxisSpacing: 15,
+                          mainAxisSpacing: 15,
+                          childAspectRatio: 1.2, 
+                          children: [
+                            _buildMenuButton(
+                              titulo: "MI PERFIL",
+                              icono: Icons.person_pin_outlined,
+                              color: Colors.blueAccent,
+                              onTap: () => Navigator.pushNamed(context, '/perfil', arguments: widget.dni),
+                            ),
+                            _buildMenuButton(
+                              titulo: "MI EQUIPO",
+                              icono: Icons.local_shipping_outlined,
+                              color: Colors.orangeAccent,
+                              onTap: () => Navigator.pushNamed(context, '/equipo', arguments: widget.dni),
+                            ),
+                            _buildMenuButton(
+                              titulo: "VENCIMIENTOS",
+                              icono: Icons.assignment_late_outlined,
+                              color: Colors.greenAccent,
+                              onTap: () => Navigator.pushNamed(context, '/mis_vencimientos', arguments: widget.dni),
+                            ),
+                            if (isAdmin)
+                              _buildMenuButton(
+                                titulo: "ADMINISTRACIÓN",
+                                icono: Icons.admin_panel_settings_sharp,
+                                color: Colors.redAccent,
+                                onTap: () => Navigator.pushNamed(context, '/admin_panel'),
+                              ),
+                          ],
                         ),
+                      ),
+                      
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 15),
+                          child: Text(
+                            "Legajo: ${widget.dni} | Rol: ${widget.rol}",
+                            style: const TextStyle(color: Colors.white38, fontSize: 10),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
-              ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWelcomeHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(30),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withAlpha(40)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_circle, color: Colors.white70, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                "BIENVENIDO",
+                style: TextStyle(
+                  color: Colors.white.withAlpha(180),
+                  letterSpacing: 2,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            widget.nombre.split(' ')[0],
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
           ),
         ],
@@ -154,30 +178,41 @@ class _MainPanelState extends State<MainPanel> {
     required Color color,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18), 
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icono, color: color, size: 38), 
-            const SizedBox(height: 10),
-            Text(
-              titulo,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => WidgetsBinding.instance.addPostFrameCallback((_) => onTap()),
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha(25), 
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withAlpha(30)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10), // Un poquito más chico el padding del icono
+                decoration: BoxDecoration(
+                  color: color.withAlpha(40),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icono, color: color, size: 28), // Icono de 28px en lugar de 32px
               ),
-            ),
-          ],
+              const SizedBox(height: 10),
+              Text(
+                titulo,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11, // Texto un punto más chico
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

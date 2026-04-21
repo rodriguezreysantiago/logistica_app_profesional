@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/utils/formatters.dart';
@@ -14,15 +13,9 @@ class AdminRevisionesScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Revisiones Pendientes"),
         centerTitle: true,
-        backgroundColor: const Color(0xFF1A3A5A).withValues(alpha: 0.85),
+        backgroundColor: const Color(0xFF1A3A5A).withAlpha(220),
         elevation: 0,
         foregroundColor: Colors.white,
-        flexibleSpace: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(color: Colors.transparent),
-          ),
-        ),
       ),
       body: Stack(
         children: [
@@ -34,7 +27,7 @@ class AdminRevisionesScreen extends StatelessWidget {
                   Container(color: const Color(0xFF0D1D2D)),
             ),
           ),
-          Container(color: const Color(0xFF1A3A5A).withValues(alpha: 0.4)),
+          Container(color: const Color(0xFF1A3A5A).withAlpha(100)),
 
           SafeArea(
             child: StreamBuilder<QuerySnapshot>(
@@ -53,10 +46,10 @@ class AdminRevisionesScreen extends StatelessWidget {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.done_all,
-                            size: 60, color: Colors.white.withValues(alpha: 0.5)),
+                        Icon(Icons.fact_check,
+                            size: 60, color: Colors.white.withAlpha(50)),
                         const SizedBox(height: 15),
-                        const Text("No hay pedidos pendientes.",
+                        const Text("No hay trámites pendientes.",
                             style: TextStyle(color: Colors.white70, fontSize: 16)),
                       ],
                     ),
@@ -66,7 +59,6 @@ class AdminRevisionesScreen extends StatelessWidget {
                 return ListView.builder(
                   itemCount: snapshot.data!.docs.length,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  physics: const BouncingScrollPhysics(),
                   itemBuilder: (context, index) {
                     var doc = snapshot.data!.docs[index];
                     var data = doc.data() as Map<String, dynamic>;
@@ -75,13 +67,11 @@ class AdminRevisionesScreen extends StatelessWidget {
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: Colors.white.withAlpha(25),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                        border: Border.all(color: Colors.white.withAlpha(30)),
                       ),
                       child: ListTile(
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         leading: CircleAvatar(
                           backgroundColor:
                               esVehiculo ? Colors.blueAccent : Colors.orangeAccent,
@@ -91,16 +81,15 @@ class AdminRevisionesScreen extends StatelessWidget {
                         title: Text(
                           data['nombre_usuario'] ?? "Usuario Desconocido",
                           style: const TextStyle(
-                              fontWeight: FontWeight.bold, color: Colors.white),
+                              fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14),
                         ),
                         subtitle: Text(
-                          "${data['etiqueta'] ?? 'S/D'}\nVence: ${AppFormatters.formatearFecha(data['fecha_vencimiento'])}",
-                          style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          "${data['etiqueta'] ?? 'Documento'}\nVence: ${AppFormatters.formatearFecha(data['fecha_vencimiento'])}",
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
                         ),
-                        trailing: const Icon(Icons.remove_red_eye_outlined,
-                            color: Colors.white54),
+                        trailing: const Icon(Icons.chevron_right, color: Colors.white54),
                         onTap: () {
-                          // CORRECCIÓN MOUSE TRACKER: Envolver en Frame Callback para Windows
+                          // Navegación segura para Windows Desktop
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             _mostrarDetalleRevision(context, doc.id, data);
                           });
@@ -117,8 +106,7 @@ class AdminRevisionesScreen extends StatelessWidget {
     );
   }
 
-  void _mostrarDetalleRevision(
-      BuildContext context, String idDoc, Map<String, dynamic> data) {
+  void _mostrarDetalleRevision(BuildContext context, String idDoc, Map<String, dynamic> data) {
     final String url = data['url_archivo'] ?? "";
     final String etiqueta = data['etiqueta'] ?? "Documento";
     final bool esPdf = url.toLowerCase().contains('.pdf');
@@ -126,89 +114,68 @@ class AdminRevisionesScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF0D1D2D).withValues(alpha: 0.95),
+        backgroundColor: const Color(0xFF0D1D2D),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(etiqueta, style: const TextStyle(color: Colors.white)),
-        // CORRECCIÓN 'isFinite': SizedBox con ancho definido para evitar error de renderizado
         content: SizedBox(
-          width: 450,
+          width: 400,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Text(etiqueta, style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 18)),
+                const SizedBox(height: 5),
                 Text("Solicitante: ${data['nombre_usuario'] ?? 'N/A'}",
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.white70)),
-                const SizedBox(height: 15),
+                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                const Divider(color: Colors.white12, height: 30),
+                
                 GestureDetector(
                   onTap: () {
                     if (url.isNotEmpty) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                PreviewScreen(url: url, titulo: etiqueta),
-                          ),
-                        );
-                      });
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => PreviewScreen(url: url, titulo: etiqueta),
+                      ));
                     }
                   },
                   child: esPdf
                       ? const Column(
                           children: [
-                            Icon(Icons.picture_as_pdf,
-                                size: 80, color: Colors.redAccent),
+                            Icon(Icons.picture_as_pdf, size: 70, color: Colors.redAccent),
                             SizedBox(height: 8),
-                            Text("VER PDF COMPLETO",
-                                style: TextStyle(
-                                    color: Colors.blueAccent,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12)),
+                            Text("PULSAR PARA VER PDF", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 11)),
                           ],
                         )
                       : ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: Image.network(
                             url,
-                            height: 250,
+                            height: 200,
                             width: double.infinity,
                             fit: BoxFit.cover,
                             loadingBuilder: (context, child, progress) {
                               if (progress == null) return child;
-                              return const SizedBox(
-                                  height: 250,
-                                  child: Center(child: CircularProgressIndicator()));
+                              return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator(color: Colors.orangeAccent)));
                             },
-                            errorBuilder: (c, e, s) => const SizedBox(
-                                height: 250,
-                                child: Icon(Icons.broken_image,
-                                    size: 50, color: Colors.white24)),
+                            errorBuilder: (context, error, stackTrace) => 
+                              const SizedBox(height: 200, child: Icon(Icons.broken_image, color: Colors.white24, size: 40)),
                           ),
                         ),
                 ),
                 const SizedBox(height: 20),
-                const Text("NUEVO VENCIMIENTO PROPUESTO:",
-                    style: TextStyle(color: Colors.white54, fontSize: 11)),
+                const Text("NUEVO VENCIMIENTO PROPUESTO:", style: TextStyle(color: Colors.white54, fontSize: 10)),
                 Text(AppFormatters.formatearFecha(data['fecha_vencimiento']),
-                    style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.orangeAccent)),
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
               ],
             ),
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => _procesarDecision(dialogContext, idDoc, false, data),
-            child:
-                const Text("RECHAZAR", style: TextStyle(color: Colors.redAccent)),
+            onPressed: () => _procesarDecision(context, idDoc, false, data),
+            child: const Text("RECHAZAR", style: TextStyle(color: Colors.redAccent)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green, foregroundColor: Colors.white),
-            onPressed: () => _procesarDecision(dialogContext, idDoc, true, data),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            onPressed: () => _procesarDecision(context, idDoc, true, data),
             child: const Text("APROBAR"),
           ),
         ],
@@ -216,91 +183,55 @@ class AdminRevisionesScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _procesarDecision(BuildContext context, String idSolicitud,
-      bool aprobado, Map<String, dynamic> data) async {
-    // Mostramos Loading con PostFrameCallback
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (c) =>
-            const Center(child: CircularProgressIndicator(color: Colors.orangeAccent)),
-      );
-    });
+  Future<void> _procesarDecision(BuildContext context, String idSolicitud, bool aprobado, Map<String, dynamic> data) async {
+    // 1. Cerramos el diálogo inmediatamente para dar respuesta visual en la PC
+    Navigator.of(context).pop();
 
     try {
       if (aprobado) {
         final String coleccion = data['coleccion_destino'] ?? 'EMPLEADOS';
-        // idDestino puede ser DNI (empleados) o Patente (vehículos)
-        final String idDestino =
-            data['dni']?.toString() ?? data['patente']?.toString() ?? "";
-        final String campoFecha = data['campo'] ?? '';
+        // Limpieza de ID (DNI o Patente)
+        final String idDestino = (data['dni'] ?? data['patente'] ?? "").toString().trim().toUpperCase();
+        final String campoVencimiento = data['campo'] ?? ''; 
         final String nuevaFecha = data['fecha_vencimiento'] ?? '';
         final String urlArchivo = data['url_archivo'] ?? '';
 
-        if (idDestino.isEmpty || campoFecha.isEmpty) {
-          throw "Datos de destino incompletos.";
+        if (idDestino.isNotEmpty && campoVencimiento.isNotEmpty) {
+          // LÓGICA DE PARES: VENCIMIENTO_ -> ARCHIVO_
+          String campoArchivo;
+          if (campoVencimiento.startsWith('VENCIMIENTO_')) {
+            campoArchivo = campoVencimiento.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
+          } else {
+            // Caso de seguridad: Si el campo no tiene prefijo, se lo agregamos al archivo
+            campoArchivo = 'ARCHIVO_$campoVencimiento';
+          }
+
+          // USAMOS UPDATE (Fire & Forget para Windows)
+          FirebaseFirestore.instance.collection(coleccion).doc(idDestino).update({
+            campoVencimiento: nuevaFecha,
+            campoArchivo: urlArchivo,
+            "fecha_ultima_actualizacion": FieldValue.serverTimestamp(),
+            "ultima_revision_admin": FieldValue.serverTimestamp(),
+          });
         }
-
-        // Lógica: Si el campo es VENCIMIENTO_ART, el archivo es ARCHIVO_ART
-        String nombreCampoArchivo = campoFecha.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
-
-        // Persistencia en Firestore
-        await FirebaseFirestore.instance
-            .collection(coleccion)
-            .doc(idDestino)
-            .set({
-          campoFecha: nuevaFecha,
-          nombreCampoArchivo: urlArchivo,
-          "ultima_revision_admin": FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
       }
 
-      // Eliminar solicitud de la lista de pendientes
-      await FirebaseFirestore.instance
-          .collection('REVISIONES')
-          .doc(idSolicitud)
-          .delete();
+      // Borramos de REVISIONES
+      FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud).delete();
 
-      if (!context.mounted) return;
+      _mostrarFeedback(context, aprobado);
 
-      // Cierre seguro de diálogos para evitar error de Mouse Tracker en Windows
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (Navigator.of(context).canPop()) Navigator.pop(context); // Cierra Loading
-        if (Navigator.of(context).canPop()) Navigator.pop(context); // Cierra Detalle
-        _mostrarResultado(context, aprobado);
-      });
     } catch (e) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (Navigator.of(context).canPop()) Navigator.pop(context); // Cierra Loading
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
-      });
+      debugPrint("Error en proceso de aprobación: $e");
     }
   }
 
-  void _mostrarResultado(BuildContext context, bool aprobado) {
-    final Color color = aprobado ? Colors.greenAccent : Colors.redAccent;
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        backgroundColor: const Color(0xFF0D1D2D),
-        title: Text(aprobado ? "¡APROBADO!" : "RECHAZADO",
-            style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-        content: Text(
-          aprobado
-              ? "Los datos se han persistido en el registro oficial."
-              : "La solicitud ha sido eliminada sin cambios.",
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: color, foregroundColor: Colors.black),
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text("OK"),
-          )
-        ],
+  void _mostrarFeedback(BuildContext context, bool aprobado) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(aprobado ? "Ficha actualizada correctamente" : "Solicitud descartada"),
+        backgroundColor: aprobado ? Colors.green : Colors.redAccent,
+        duration: const Duration(seconds: 2),
       ),
     );
   }

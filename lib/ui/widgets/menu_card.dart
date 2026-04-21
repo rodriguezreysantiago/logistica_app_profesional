@@ -16,24 +16,29 @@ class MenuCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(15), // Para que el efecto "ripple" sea redondeado
-      child: Card(
-        elevation: 6,
-        color: color,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+    return Card(
+      elevation: 6,
+      color: color,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: InkWell(
+        // BLINDAJE PARA WINDOWS: Evita conflictos de navegación y gestos
+        onTap: () {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            onTap();
+          });
+        },
+        borderRadius: BorderRadius.circular(15),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Sombra suave al icono para que resalte
+            // Icono con sombra suave para profundidad
             Icon(
               icono, 
               size: 55, 
               color: Colors.white,
               shadows: [
                 Shadow(
-                  color: Colors.black.withValues(alpha:0.3),
+                  color: Colors.black.withAlpha(75),
                   blurRadius: 10,
                   offset: const Offset(2, 2),
                 ),
@@ -48,7 +53,7 @@ class MenuCard extends StatelessWidget {
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
-                  fontSize: 15,
+                  fontSize: 14, // Ajustado para que quepan títulos largos
                   letterSpacing: 1.1,
                 ),
               ),
