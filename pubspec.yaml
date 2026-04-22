@@ -15,21 +15,26 @@ dependencies:
   dio: ^5.7.0
   http: ^1.2.0
 
-  # --- SISTEMA Y PERSISTENCIA ---
+  # --- SISTEMA Y PERSISTENCIA (Optimizado para Windows) ---
   shared_preferences: ^2.3.2
   path_provider: ^2.1.5
   url_launcher: ^6.3.1
   file_picker: ^8.1.7
+  
+  # 🔥 VITAL PARA WINDOWS: Manejo de hilos y comunicación nativa C++
+  ffi: ^2.1.2
+  win32: ^5.5.4
 
-  # --- NOTIFICACIONES LOCALES ---
+  # --- NOTIFICACIONES Y COMPARTIR ---
   flutter_local_notifications: ^17.2.1
+  share_plus: ^7.2.2 
 
   # --- LOCALIZACIÓN ---
   flutter_localizations:
     sdk: flutter
-  intl: any # <-- Cambiado a 'any' para evitar conflictos con Firebase
+  intl: ^0.20.2
 
-  # --- FIREBASE ---
+  # --- FIREBASE (Versiones estables para Desktop) ---
   firebase_core: ^3.6.0
   cloud_firestore: ^5.4.4
   firebase_storage: ^12.3.2
@@ -49,3 +54,4 @@ flutter:
 
   assets:
     - assets/images/fondo_login.jpg
+    # Si tenés otras imágenes o fuentes, agregalas acá abajo

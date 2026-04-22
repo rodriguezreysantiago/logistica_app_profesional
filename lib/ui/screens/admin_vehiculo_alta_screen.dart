@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// El nombre es único: AdminVehiculoAltaScreen
 class AdminVehiculoAltaScreen extends StatefulWidget {
   const AdminVehiculoAltaScreen({super.key});
 
@@ -16,8 +15,25 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
   final TextEditingController _marcaCtrl = TextEditingController();
   final TextEditingController _modeloCtrl = TextEditingController();
   final TextEditingController _anioCtrl = TextEditingController();
+  final TextEditingController _vinCtrl = TextEditingController(); // <--- AGREGADO
 
   String _tipoSeleccionado = 'TRACTOR';
+  String _empresaSeleccionada = "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4";
+
+  final List<String> _empresas = [
+    "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4",
+    "VECCHI ARIEL Y VECCHI GRACIELA S.R.L (30-70910015-3)"
+  ];
+
+  @override
+  void dispose() {
+    _patenteCtrl.dispose();
+    _marcaCtrl.dispose();
+    _modeloCtrl.dispose();
+    _anioCtrl.dispose();
+    _vinCtrl.dispose(); // <--- AGREGADO
+    super.dispose();
+  }
 
   Future<void> _guardarVehiculo() async {
     if (!_formKey.currentState!.validate()) return;
@@ -40,8 +56,11 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
         'TIPO': _tipoSeleccionado,
         'MARCA': _marcaCtrl.text.trim().toUpperCase(),
         'MODELO': _modeloCtrl.text.trim().toUpperCase(),
-        'ANIO': _anioCtrl.text.trim(),
+        'ANIO': int.tryParse(_anioCtrl.text.trim()) ?? 0, // Guardado como número
+        'VIN': _vinCtrl.text.trim().toUpperCase(), // <--- SE GUARDA EL VIN AQUÍ
+        'EMPRESA': _empresaSeleccionada, // <--- AGREGADO
         'ESTADO': 'LIBRE', 
+        'KM_ACTUAL': '0',
         'fecha_alta': FieldValue.serverTimestamp(),
         'ARCHIVO_RTO': '-',
         'ARCHIVO_SEGURO': '-',
@@ -88,6 +107,20 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
               _buildInput("Marca", _marcaCtrl, Icons.factory),
               _buildInput("Modelo", _modeloCtrl, Icons.commute),
               _buildInput("Año (Modelo)", _anioCtrl, Icons.calendar_today, isNumeric: true),
+              
+              // CAMPO VIN NUEVO
+              _buildInput(
+                "Código VIN", 
+                _vinCtrl, 
+                Icons.fingerprint, 
+                hint: "Obligatorio para Volvo (17 caracteres)",
+                esOpcional: _tipoSeleccionado != 'TRACTOR' // Opcional si no es camión
+              ),
+
+              const Text("Empresa Propietaria", style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const SizedBox(height: 10),
+              _buildEmpresaDropdown(),
+
               const SizedBox(height: 40),
               SizedBox(
                 width: double.infinity,
@@ -99,7 +132,7 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.greenAccent,
                     foregroundColor: Colors.black,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
               )
@@ -110,7 +143,7 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
     );
   }
 
-  Widget _buildInput(String label, TextEditingController ctrl, IconData icon, {bool isNumeric = false, String? hint}) {
+  Widget _buildInput(String label, TextEditingController ctrl, IconData icon, {bool isNumeric = false, String? hint, bool esOpcional = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: TextFormField(
@@ -127,7 +160,10 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white24)),
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.greenAccent)),
         ),
-        validator: (value) => (value == null || value.isEmpty) ? "Campo obligatorio" : null,
+        validator: (value) {
+          if (esOpcional) return null;
+          return (value == null || value.isEmpty) ? "Campo obligatorio" : null;
+        },
       ),
     );
   }
@@ -152,6 +188,27 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
           selectedForegroundColor: Colors.black,
           side: const BorderSide(color: Colors.white24),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmpresaDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white24)
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _empresaSeleccionada,
+          isExpanded: true,
+          dropdownColor: const Color(0xFF1A3A5A),
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          items: _empresas.map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis))).toList(),
+          onChanged: (val) => setState(() => _empresaSeleccionada = val!),
         ),
       ),
     );

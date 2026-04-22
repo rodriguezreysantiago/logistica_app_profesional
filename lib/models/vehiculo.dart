@@ -1,10 +1,11 @@
 class Vehiculo {
-  final String dominio; // La patente es el ID
+  final String dominio; // El ID en Firestore
   final String marca;
   final String modelo;
   final int anio;
-  final String tipo; // TRACTOR, BATEA, TOLVA, etc.
+  final String tipo; 
   final String empresa;
+  final String? vin; // <--- NUEVO CAMPO AGREGADO
   final DateTime? vencimientoRto;
   final DateTime? vencimientoSeguro;
   final String? urlPdfRto;
@@ -17,6 +18,7 @@ class Vehiculo {
     required this.anio,
     required this.tipo,
     required this.empresa,
+    this.vin, // Agregado al constructor
     this.vencimientoRto,
     this.vencimientoSeguro,
     this.urlPdfRto,
@@ -32,7 +34,8 @@ class Vehiculo {
       'AÑO': anio,
       'TIPO': tipo.toUpperCase(),
       'EMPRESA': empresa.toUpperCase(),
-      'VENCIMIENTO_RTO': vencimientoRto?.toIso8601String().split('T')[0], // YYYY-MM-DD
+      'VIN': vin?.toUpperCase(), // <--- Guardamos el VIN
+      'VENCIMIENTO_RTO': vencimientoRto?.toIso8601String().split('T')[0], 
       'VENCIMIENTO_SEGURO': vencimientoSeguro?.toIso8601String().split('T')[0],
       'ARCHIVO_RTO': urlPdfRto,
       'ESTADO': enServicio ? 'LIBRE' : 'TALLER',
@@ -45,9 +48,11 @@ class Vehiculo {
       dominio: id,
       marca: map['MARCA'] ?? 'S/D',
       modelo: map['MODELO'] ?? 'S/D',
-      anio: map['AÑO'] ?? 0,
+      // Convertimos a int por si en Firebase está como String
+      anio: map['AÑO'] is int ? map['AÑO'] : int.tryParse(map['AÑO'].toString()) ?? 0,
       tipo: map['TIPO'] ?? 'TRACTOR',
       empresa: map['EMPRESA'] ?? 'PROPIA',
+      vin: map['VIN'], // <--- Leemos el VIN de Firestore
       vencimientoRto: map['VENCIMIENTO_RTO'] != null 
           ? DateTime.tryParse(map['VENCIMIENTO_RTO']) 
           : null,

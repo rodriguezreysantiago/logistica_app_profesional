@@ -24,6 +24,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   late TextEditingController _modeloController;
   late TextEditingController _anioController;
   late TextEditingController _empresaController;
+  late TextEditingController _vinController; // <--- AGREGADO
 
   String? _fechaRto;
   String? _fechaSeguro;
@@ -33,9 +34,9 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     super.initState();
     _marcaController = TextEditingController(text: widget.datosIniciales['MARCA'] ?? '');
     _modeloController = TextEditingController(text: widget.datosIniciales['MODELO'] ?? '');
-    // Corregimos 'AÑO' por 'ANIO' si es necesario para evitar caracteres especiales en llaves
     _anioController = TextEditingController(text: (widget.datosIniciales['ANIO'] ?? widget.datosIniciales['AÑO'])?.toString() ?? '');
     _empresaController = TextEditingController(text: widget.datosIniciales['EMPRESA'] ?? '');
+    _vinController = TextEditingController(text: widget.datosIniciales['VIN'] ?? ''); // <--- AGREGADO
     _fechaRto = widget.datosIniciales['VENCIMIENTO_RTO'];
     _fechaSeguro = widget.datosIniciales['VENCIMIENTO_SEGURO'];
   }
@@ -46,6 +47,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     _modeloController.dispose();
     _anioController.dispose();
     _empresaController.dispose();
+    _vinController.dispose(); // <--- AGREGADO
     super.dispose();
   }
 
@@ -61,7 +63,6 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   Future<void> _seleccionarFecha(BuildContext context, bool esRto) async {
     final DateTime initialDate = esRto ? _parseFecha(_fechaRto) : _parseFecha(_fechaSeguro);
 
-    // Ajuste para evitar errores de contexto en Windows
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
@@ -84,7 +85,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
     if (picked != null && mounted) {
       setState(() {
-        String fechaFormateada = picked.toString().split(' ')[0]; // YYYY-MM-DD
+        String fechaFormateada = picked.toString().split(' ')[0];
         if (esRto) {
           _fechaRto = fechaFormateada;
         } else {
@@ -135,7 +136,6 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Usamos el ID del vehículo limpio (Patente)
       final String idLimpio = widget.vehiculoId.trim().toUpperCase();
 
       await FirebaseFirestore.instance
@@ -144,8 +144,9 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
           .update({
         'MARCA': _marcaController.text.trim().toUpperCase(),
         'MODELO': _modeloController.text.trim().toUpperCase(),
-        'ANIO': int.parse(_anioController.text.trim()), // Guardamos como ANIO para evitar problemas con la Ñ
+        'ANIO': int.parse(_anioController.text.trim()),
         'EMPRESA': _empresaController.text.trim().toUpperCase(),
+        'VIN': _vinController.text.trim().toUpperCase(), // <--- GUARDAMOS EL VIN
         'VENCIMIENTO_RTO': _fechaRto,
         'VENCIMIENTO_SEGURO': _fechaSeguro,
         'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
@@ -194,12 +195,10 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
                   _buildSectionTitle("INFORMACIÓN DE UNIDAD"),
                   _buildTextField(_marcaController, "Marca / Fabricante", Icons.branding_watermark),
                   _buildTextField(_modeloController, "Modelo / Descripción", Icons.info_outline),
-                  _buildTextField(
-                    _anioController,
-                    "Año (Modelo)",
-                    Icons.calendar_today,
-                    isNumber: true,
-                  ),
+                  _buildTextField(_anioController, "Año (Modelo)", Icons.calendar_today, isNumber: true),
+                  
+                  // CAMPO VIN (Especial para tractores Volvo)
+                  _buildTextField(_vinController, "Código VIN (17 caracteres)", Icons.fingerprint, isVin: true),
                   
                   const SizedBox(height: 10),
                   _buildEmpresaTile(),
@@ -251,7 +250,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool isNumber = false}) {
+  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool isNumber = false, bool isVin = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: TextFormField(
@@ -268,6 +267,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
         ),
         validator: (value) {
+          if (isVin) return null; // El VIN es opcional (solo para Volvo)
           if (value == null || value.isEmpty) return "Campo requerido";
           if (isNumber) {
             final n = int.tryParse(value);

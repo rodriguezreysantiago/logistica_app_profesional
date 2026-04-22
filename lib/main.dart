@@ -26,19 +26,21 @@ import 'ui/screens/admin_vencimientos_chasis_screen.dart';
 import 'ui/screens/admin_vencimientos_acoplados_screen.dart';
 
 void main() async {
-  // 1. Asegura que el motor de Flutter esté vinculado al hilo principal de Windows
+  // 1. Vincula el motor de Flutter al sistema operativo (Android/iOS/PC)
+  // Es fundamental que esto esté antes de cualquier plugin.
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 2. Inicialización blindada de Firebase
+  // 2. Inicialización de Firebase
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    debugPrint("🔥 Firebase conectado correctamente");
   } catch (e) {
-    debugPrint("Error crítico al iniciar Firebase: $e");
+    debugPrint("🚨 Error crítico al iniciar Firebase: $e");
   }
 
-  // 3. Inicialización de servicios de persistencia y alertas
+  // 3. Inicialización de servicios (Carga de memoria local y notificaciones)
   await PrefsService.init();          
   await NotificationService.init();   
 
@@ -54,7 +56,7 @@ class LogisticaApp extends StatelessWidget {
       title: 'S.M.A.R.T. Logística',
       debugShowCheckedModeBanner: false,
       
-      // Localización al español (Argentina) para calendarios y formatos
+      // Localización al español (Argentina)
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -80,7 +82,7 @@ class LogisticaApp extends StatelessWidget {
         ),
       ),
 
-      // LÓGICA DE AUTO-LOGUEO: Verifica si hay sesión guardada en la PC
+      // LÓGICA DE AUTO-LOGUEO
       initialRoute: PrefsService.isLoggedIn ? '/home' : '/',
       
       routes: {
@@ -88,7 +90,6 @@ class LogisticaApp extends StatelessWidget {
       },
       
       onGenerateRoute: (settings) {
-        // Constructor de rutas con settings para pasar argumentos correctamente
         MaterialPageRoute buildRoute(Widget screen) => MaterialPageRoute(
           builder: (_) => screen, 
           settings: settings

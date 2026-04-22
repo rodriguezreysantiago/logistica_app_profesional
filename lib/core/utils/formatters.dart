@@ -1,35 +1,59 @@
 class AppFormatters {
-  // --- FUNCIONES DE LÓGICA (Todas estáticas para acceso directo) ---
+  // --- NUEVA: FORMATEAR KILOMETRAJE (1.232.232,0) ---
+  static String formatearKilometraje(dynamic valor) {
+    if (valor == null || valor == 0 || valor == "0" || valor == "") return "0,0";
+    
+    try {
+      // Limpiamos el valor por si viene como String con puntos
+      double numero = double.parse(valor.toString().replaceAll(',', ''));
+      
+      // 1. Convertimos a String con 1 decimal y cambiamos punto por coma
+      String fixed = numero.toStringAsFixed(1).replaceAll('.', ',');
+      
+      // 2. Separamos la parte entera de la decimal
+      List<String> partes = fixed.split(',');
+      String entera = partes[0];
+      String decimal = partes[1];
 
+      // 3. Agregamos los puntos de miles a la parte entera usando Regex
+      final reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+      entera = entera.replaceAllMapped(reg, (Match m) => '${m[1]}.');
+
+      return "$entera,$decimal";
+    } catch (e) {
+      return "0,0";
+    }
+  }
+
+  // --- FORMATEAR DNI (XX.XXX.XXX) ---
   static String formatearDNI(dynamic dni) {
-    final String s = dni?.toString() ?? "";
+    final String s = dni?.toString().replaceAll(RegExp(r'[^0-9]'), '') ?? "";
     if (s.length < 7 || s.length > 8) return s;
     return s.length == 7 
         ? "${s.substring(0, 1)}.${s.substring(1, 4)}.${s.substring(4)}"
         : "${s.substring(0, 2)}.${s.substring(2, 5)}.${s.substring(5)}";
   }
 
+  // --- FORMATEAR CUIL (XX-XXXXXXXX-X) ---
   static String formatearCUIL(dynamic cuil) {
-    final String s = cuil?.toString() ?? "";
+    final String s = cuil?.toString().replaceAll(RegExp(r'[^0-9]'), '') ?? "";
     if (s.length != 11) return s;
-    // Formato: 20-12345678-9
     return "${s.substring(0, 2)}-${s.substring(2, 10)}-${s.substring(10)}";
   }
 
+  // --- FORMATEAR FECHA (DD/MM/YYYY) ---
   static String formatearFecha(String? fecha) {
     if (fecha == null || fecha.isEmpty || fecha == "---" || fecha == "nan") {
       return "Sin datos";
     }
     try {
-      final String f = fecha.replaceAll('/', '-');
+      final String f = fecha.replaceAll('/', '-').trim();
       final List<String> partes = f.split('-');
       if (partes.length == 3) {
-        // Si viene YYYY-MM-DD lo pasa a DD/MM/YYYY
-        if (partes[0].length == 4) {
-          return "${partes[2]}/${partes[1]}/${partes[0]}";
+        if (partes[0].length == 4) { // YYYY-MM-DD
+          return "${partes[2].padLeft(2, '0')}/${partes[1].padLeft(2, '0')}/${partes[0]}";
         }
-        // Si ya viene DD-MM-YYYY solo cambia el separador
-        return "${partes[0]}/${partes[1]}/${partes[2]}";
+        return "${partes[0].padLeft(2, '0')}/${partes[1].padLeft(2, '0')}/${partes[2]}";
       }
       return fecha;
     } catch (e) { 
@@ -37,23 +61,26 @@ class AppFormatters {
     }
   }
 
+  // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
   static int calcularDiasRestantes(String? fecha) {
     if (fecha == null || fecha.isEmpty || fecha == "---" || fecha == "nan") {
       return 999;
     }
     try {
-      final String f = fecha.replaceAll('/', '-');
+      final String f = fecha.replaceAll('/', '-').trim();
       final List<String> partes = f.split('-');
       DateTime fVto;
       
       if (partes[0].length == 4) {
         fVto = DateTime.parse(f);
       } else {
-        // Ajusta formato DD-MM-YYYY a objeto DateTime
-        fVto = DateTime.parse("${partes[2]}-${partes[1].padLeft(2,'0')}-${partes[0].padLeft(2,'0')}");
+        fVto = DateTime(
+          int.parse(partes[2]), 
+          int.parse(partes[1]), 
+          int.parse(partes[0])
+        );
       }
       
-      // Calculamos la diferencia con el día de hoy
       final hoy = DateTime.now();
       final soloFechaHoy = DateTime(hoy.year, hoy.month, hoy.day);
       return fVto.difference(soloFechaHoy).inDays;

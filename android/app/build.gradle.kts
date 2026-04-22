@@ -1,10 +1,8 @@
 plugins {
     id("com.android.application")
-    // START: FlutterFire Configuration
-    id("com.google.gms.google-services")
-    // END: FlutterFire Configuration
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // El plugin de Google Services debe ir después de los de Android/Kotlin
+    id("com.google.gms.google-services")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -14,6 +12,7 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Mantenemos 17 pero aseguramos la compatibilidad
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -23,25 +22,35 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.logistica_app_profesional"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        
+        // 🔥 FORZAMOS minSdk a 23 para evitar errores de compatibilidad con Firebase
+        minSdk = 23 
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 🔥 ACTIVAMOS MULTIDEX: Vital para que no choquen los hilos en apps grandes
+        multiDexEnabled = true
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Signing with the debug keys for now
             signingConfig = signingConfigs.getByName("debug")
+            
+            // Sugerencia: optimización de recursos
+            minifyEnabled = false
+            shrinkResources = false
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Agregamos la dependencia de multidex explícita por seguridad
+    implementation("androidx.multidex:multidex:2.0.1")
 }
