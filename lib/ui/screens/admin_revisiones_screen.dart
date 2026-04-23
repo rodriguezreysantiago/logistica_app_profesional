@@ -37,8 +37,7 @@ class AdminRevisionesScreen extends StatelessWidget {
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                      child: CircularProgressIndicator(color: Colors.orangeAccent));
+                  return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
                 }
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -46,11 +45,9 @@ class AdminRevisionesScreen extends StatelessWidget {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.fact_check,
-                            size: 60, color: Colors.white.withAlpha(50)),
+                        Icon(Icons.fact_check, size: 60, color: Colors.white.withAlpha(50)),
                         const SizedBox(height: 15),
-                        const Text("No hay trámites pendientes.",
-                            style: TextStyle(color: Colors.white70, fontSize: 16)),
+                        const Text("No hay trámites pendientes.", style: TextStyle(color: Colors.white70, fontSize: 16)),
                       ],
                     ),
                   );
@@ -62,38 +59,38 @@ class AdminRevisionesScreen extends StatelessWidget {
                   itemBuilder: (context, index) {
                     var doc = snapshot.data!.docs[index];
                     var data = doc.data() as Map<String, dynamic>;
+                    
                     bool esVehiculo = data['coleccion_destino'] == 'VEHICULOS';
+                    bool esCambioEquipo = data['tipo_solicitud'] == 'CAMBIO_EQUIPO';
+                    String idAfectado = (data['dni'] ?? data['patente'] ?? "N/A").toString().toUpperCase();
 
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(25),
+                        color: esCambioEquipo ? Colors.orangeAccent.withAlpha(40) : Colors.white.withAlpha(25),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white.withAlpha(30)),
+                        border: Border.all(color: esCambioEquipo ? Colors.orangeAccent : Colors.white.withAlpha(30)),
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor:
-                              esVehiculo ? Colors.blueAccent : Colors.orangeAccent,
-                          child: Icon(esVehiculo ? Icons.local_shipping : Icons.person,
-                              color: Colors.white, size: 20),
+                          backgroundColor: esCambioEquipo ? Colors.orangeAccent : (esVehiculo ? Colors.blueAccent : Colors.greenAccent),
+                          child: Icon(
+                            esCambioEquipo ? Icons.swap_horiz : (esVehiculo ? Icons.local_shipping : Icons.person), 
+                            color: Colors.white, size: 20
+                          ),
                         ),
                         title: Text(
-                          data['nombre_usuario'] ?? "Usuario Desconocido",
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14),
+                          "${data['nombre_usuario'] ?? 'Usuario'} -> $idAfectado",
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
                         ),
                         subtitle: Text(
-                          "${data['etiqueta'] ?? 'Documento'}\nVence: ${AppFormatters.formatearFecha(data['fecha_vencimiento'])}",
+                          esCambioEquipo 
+                            ? "SOLICITA: ${data['patente']}\n(Sueltas: ${data['unidad_actual'] ?? '-'})"
+                            : "${data['etiqueta'] ?? 'Documento'}\nVence: ${AppFormatters.formatearFecha(data['fecha_vencimiento'])}",
                           style: const TextStyle(color: Colors.white70, fontSize: 12),
                         ),
                         trailing: const Icon(Icons.chevron_right, color: Colors.white54),
-                        onTap: () {
-                          // Navegación segura para Windows Desktop
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            _mostrarDetalleRevision(context, doc.id, data);
-                          });
-                        },
+                        onTap: () => _mostrarDetalleRevision(context, doc.id, data),
                       ),
                     );
                   },
@@ -107,9 +104,10 @@ class AdminRevisionesScreen extends StatelessWidget {
   }
 
   void _mostrarDetalleRevision(BuildContext context, String idDoc, Map<String, dynamic> data) {
+    bool esCambioEquipo = data['tipo_solicitud'] == 'CAMBIO_EQUIPO';
     final String url = data['url_archivo'] ?? "";
     final String etiqueta = data['etiqueta'] ?? "Documento";
-    final bool esPdf = url.toLowerCase().contains('.pdf');
+    final String idAfectado = (data['dni'] ?? data['patente'] ?? "N/A").toString().toUpperCase();
 
     showDialog(
       context: context,
@@ -124,46 +122,38 @@ class AdminRevisionesScreen extends StatelessWidget {
               children: [
                 Text(etiqueta, style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 18)),
                 const SizedBox(height: 5),
-                Text("Solicitante: ${data['nombre_usuario'] ?? 'N/A'}",
-                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                Text("Solicitante: ${data['nombre_usuario'] ?? 'N/A'}", style: const TextStyle(color: Colors.white54, fontSize: 12)),
                 const Divider(color: Colors.white12, height: 30),
                 
-                GestureDetector(
-                  onTap: () {
-                    if (url.isNotEmpty) {
-                      Navigator.push(context, MaterialPageRoute(
-                        builder: (context) => PreviewScreen(url: url, titulo: etiqueta),
-                      ));
-                    }
-                  },
-                  child: esPdf
-                      ? const Column(
-                          children: [
-                            Icon(Icons.picture_as_pdf, size: 70, color: Colors.redAccent),
-                            SizedBox(height: 8),
-                            Text("PULSAR PARA VER PDF", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 11)),
-                          ],
-                        )
-                      : ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            url,
-                            height: 200,
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, progress) {
-                              if (progress == null) return child;
-                              return const SizedBox(height: 200, child: Center(child: CircularProgressIndicator(color: Colors.orangeAccent)));
-                            },
-                            errorBuilder: (context, error, stackTrace) => 
-                              const SizedBox(height: 200, child: Icon(Icons.broken_image, color: Colors.white24, size: 40)),
-                          ),
-                        ),
-                ),
-                const SizedBox(height: 20),
-                const Text("NUEVO VENCIMIENTO PROPUESTO:", style: TextStyle(color: Colors.white54, fontSize: 10)),
-                Text(AppFormatters.formatearFecha(data['fecha_vencimiento']),
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
+                if (esCambioEquipo) ...[
+                  const Icon(Icons.swap_vert_circle, size: 80, color: Colors.orangeAccent),
+                  const SizedBox(height: 15),
+                  _buildFilaDialogo("SUELTA:", data['unidad_actual'] ?? "NINGUNA", Colors.redAccent),
+                  const SizedBox(height: 10),
+                  _buildFilaDialogo("SOLICITA:", data['patente'] ?? "S/D", Colors.greenAccent),
+                ] else ...[
+                  GestureDetector(
+                    onTap: () {
+                      if (url.isNotEmpty) {
+                        Navigator.push(context, MaterialPageRoute(
+                          builder: (context) => PreviewScreen(url: url, titulo: "$etiqueta - $idAfectado"),
+                        ));
+                      }
+                    },
+                    child: url.toLowerCase().contains('.pdf')
+                        ? const Column(
+                            children: [
+                              Icon(Icons.picture_as_pdf, size: 70, color: Colors.redAccent),
+                              Text("VER PDF", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+                            ],
+                          )
+                        : Image.network(url, height: 200, fit: BoxFit.contain),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text("NUEVO VENCIMIENTO PROPUESTO:", style: TextStyle(color: Colors.white54, fontSize: 10)),
+                  Text(AppFormatters.formatearFecha(data['fecha_vencimiento']),
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
+                ],
               ],
             ),
           ),
@@ -184,55 +174,78 @@ class AdminRevisionesScreen extends StatelessWidget {
   }
 
   Future<void> _procesarDecision(BuildContext context, String idSolicitud, bool aprobado, Map<String, dynamic> data) async {
-    // 1. Cerramos el diálogo inmediatamente para dar respuesta visual en la PC
     Navigator.of(context).pop();
+    final bool esCambioEquipo = data['tipo_solicitud'] == 'CAMBIO_EQUIPO';
 
     try {
       if (aprobado) {
-        final String coleccion = data['coleccion_destino'] ?? 'EMPLEADOS';
-        // Limpieza de ID (DNI o Patente)
-        final String idDestino = (data['dni'] ?? data['patente'] ?? "").toString().trim().toUpperCase();
-        final String campoVencimiento = data['campo'] ?? ''; 
-        final String nuevaFecha = data['fecha_vencimiento'] ?? '';
-        final String urlArchivo = data['url_archivo'] ?? '';
+        if (esCambioEquipo) {
+          // ✅ LÓGICA DE BATCH PARA CAMBIO DE EQUIPO (Efectivo e instantáneo)
+          final batch = FirebaseFirestore.instance.batch();
+          final String dni = data['dni'];
+          final String nueva = data['patente'];
+          final String actual = data['unidad_actual'];
+          final bool esTractor = data['campo'] == 'SOLICITUD_VEHICULO';
 
-        if (idDestino.isNotEmpty && campoVencimiento.isNotEmpty) {
-          // LÓGICA DE PARES: VENCIMIENTO_ -> ARCHIVO_
-          String campoArchivo;
-          if (campoVencimiento.startsWith('VENCIMIENTO_')) {
-            campoArchivo = campoVencimiento.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
-          } else {
-            // Caso de seguridad: Si el campo no tiene prefijo, se lo agregamos al archivo
-            campoArchivo = 'ARCHIVO_$campoVencimiento';
+          // 1. Actualizar Empleado
+          batch.update(FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni), {
+            esTractor ? 'VEHICULO' : 'ENGANCHE': nueva,
+            'ultima_actualizacion': FieldValue.serverTimestamp(),
+          });
+
+          // 2. Liberar unidad vieja
+          if (actual.isNotEmpty && actual != "-" && actual != "SIN ASIGNAR") {
+            batch.update(FirebaseFirestore.instance.collection('VEHICULOS').doc(actual), {'ESTADO': 'LIBRE'});
           }
 
-          // USAMOS UPDATE (Fire & Forget para Windows)
-          FirebaseFirestore.instance.collection(coleccion).doc(idDestino).update({
-            campoVencimiento: nuevaFecha,
-            campoArchivo: urlArchivo,
-            "fecha_ultima_actualizacion": FieldValue.serverTimestamp(),
-            "ultima_revision_admin": FieldValue.serverTimestamp(),
-          });
+          // 3. Ocupar unidad nueva
+          batch.update(FirebaseFirestore.instance.collection('VEHICULOS').doc(nueva), {'ESTADO': 'OCUPADO'});
+
+          // 4. Borrar solicitud
+          batch.delete(FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud));
+
+          await batch.commit();
+        } else {
+          // ✅ LÓGICA PARA PAPELES (RTO, CARNET, ETC)
+          final String coleccion = data['coleccion_destino'] ?? 'EMPLEADOS';
+          final String idDestino = (data['dni'] ?? data['patente'] ?? "").toString().trim().toUpperCase();
+          final String campoVencimiento = data['campo'] ?? ''; 
+          final String urlArchivo = data['url_archivo'] ?? '';
+
+          if (idDestino.isNotEmpty && campoVencimiento.isNotEmpty) {
+            String campoArchivo = campoVencimiento.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
+            await FirebaseFirestore.instance.collection(coleccion).doc(idDestino).update({
+              campoVencimiento: data['fecha_vencimiento'],
+              campoArchivo: urlArchivo,
+              "ultima_actualizacion_sistema": FieldValue.serverTimestamp(),
+            });
+          }
+          await FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud).delete();
         }
+      } else {
+        // Si se rechaza, solo borramos la solicitud
+        await FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud).delete();
       }
 
-      // Borramos de REVISIONES
-      FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud).delete();
-
-      _mostrarFeedback(context, aprobado);
-
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(aprobado ? "Operación exitosa" : "Solicitud descartada"),
+          backgroundColor: aprobado ? Colors.green : Colors.redAccent,
+        ),
+      );
     } catch (e) {
-      debugPrint("Error en proceso de aprobación: $e");
+      debugPrint("Error en proceso: $e");
     }
   }
 
-  void _mostrarFeedback(BuildContext context, bool aprobado) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(aprobado ? "Ficha actualizada correctamente" : "Solicitud descartada"),
-        backgroundColor: aprobado ? Colors.green : Colors.redAccent,
-        duration: const Duration(seconds: 2),
-      ),
+  Widget _buildFilaDialogo(String label, String valor, Color color) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        Text(valor, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
+      ],
     );
   }
 }

@@ -22,15 +22,13 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
   final FirebaseService _firebaseService = FirebaseService();
 
   void _abrirArchivo(String? url, String titulo) {
-    if (url == null || url.isEmpty) {
+    if (url == null || url.isEmpty || url == "-") {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("No hay un archivo digital cargado."), backgroundColor: Colors.orange),
       );
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Navigator.push(context, MaterialPageRoute(builder: (context) => PreviewScreen(url: url, titulo: titulo)));
-    });
+    Navigator.push(context, MaterialPageRoute(builder: (context) => PreviewScreen(url: url, titulo: titulo)));
   }
 
   Future<void> _ejecutarTareaAsincrona({required Future<void> Function() tarea, required String mensajeExito}) async {
@@ -339,7 +337,6 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
     String? urlArchivo, 
   }) {
     return StreamBuilder<QuerySnapshot>(
-      // Filtramos las revisiones específicas para este documento y este campo
       stream: FirebaseFirestore.instance
           .collection('REVISIONES')
           .where('dni', isEqualTo: idDoc)
@@ -359,36 +356,79 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
         return Container(
           margin: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
-            color: enRevision ? Colors.blue.withAlpha(40) : Colors.white.withAlpha(20),
-            borderRadius: BorderRadius.circular(16),
+            color: enRevision ? Colors.blue.withAlpha(30) : Colors.white.withAlpha(15),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: enRevision ? Colors.blueAccent : colorEstado.withAlpha(100),
               width: (dias <= 14 && !enRevision) ? 1.5 : 0.8, 
             ),
           ),
           child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+            // ✅ Toque en la tarjeta abre el archivo si existe
             onTap: tieneArchivo ? () => _abrirArchivo(urlArchivo, titulo) : null,
-            leading: Icon(enRevision ? Icons.history_edu : Icons.lens, color: enRevision ? Colors.blueAccent : colorEstado, size: 14),
-            title: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
-            subtitle: Text(
-              enRevision ? "VALIDACIÓN PENDIENTE..." : "Vencimiento: ${AppFormatters.formatearFecha(fecha)}", 
-              style: TextStyle(fontSize: 11, color: enRevision ? Colors.blueAccent : Colors.white60, fontWeight: enRevision ? FontWeight.bold : FontWeight.normal)
+            
+            // ✅ ICONO DEL OJO (Lógica azul/gris)
+            leading: Icon(
+              enRevision ? Icons.history_toggle_off : Icons.visibility_outlined, 
+              color: enRevision 
+                  ? Colors.blueAccent 
+                  : (tieneArchivo ? Colors.blueAccent : Colors.white12), 
+              size: 28
             ),
+
+            title: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+            
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                enRevision ? "VALIDACIÓN PENDIENTE..." : "Vencimiento: ${AppFormatters.formatearFecha(fecha)}", 
+                style: TextStyle(
+                  fontSize: 11, 
+                  color: enRevision ? Colors.blueAccent : Colors.white60, 
+                  fontWeight: enRevision ? FontWeight.bold : FontWeight.normal
+                )
+              ),
+            ),
+
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (!enRevision) ...[
-                  Text(
-                    dias < 0 ? "VENCIDO" : "${dias}d", 
-                    style: TextStyle(color: colorEstado, fontWeight: FontWeight.bold, fontSize: 12)
+                // ✅ CAJITA DE DÍAS (Igual que en Mi Equipo)
+                if (!enRevision)
+                  Container(
+                    width: 45,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    decoration: BoxDecoration(
+                      color: colorEstado.withAlpha(30),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: colorEstado.withAlpha(100))
+                    ),
+                    child: Center(
+                      child: Text("${dias}d", style: TextStyle(color: colorEstado, fontWeight: FontWeight.bold, fontSize: 10)),
+                    ),
                   ),
-                  const SizedBox(width: 10),
-                ],
-                IconButton(
-                  icon: Icon(enRevision ? Icons.hourglass_top : Icons.add_a_photo, 
-                             color: enRevision ? Colors.white24 : Colors.orangeAccent, size: 22),
-                  onPressed: enRevision ? null : onUpload,
-                ),
+                const SizedBox(width: 12),
+                
+                // ✅ BOTÓN ACTUALIZAR GRANDE
+                if (enRevision)
+                  const Icon(Icons.hourglass_top, color: Colors.white24, size: 20)
+                else
+                  ElevatedButton(
+                    onPressed: onUpload,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white.withAlpha(20),
+                      foregroundColor: Colors.orangeAccent,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(80, 32),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: const BorderSide(color: Colors.orangeAccent, width: 0.5)
+                      )
+                    ),
+                    child: const Text("ACTUALIZAR", style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                  ),
               ],
             ),
           ),
