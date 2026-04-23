@@ -18,11 +18,11 @@ class _AdminPersonalFormScreenState extends State<AdminPersonalFormScreen> {
   final TextEditingController _passCtrl = TextEditingController();
   
   String _rolSeleccionado = 'USER';
-  String _empresaSeleccionada = "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4";
+  String _empresaSeleccionada = "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)";
 
   final List<String> _empresas = [
-    "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4", 
-    "VECCHI ARIEL Y VECCHI GRACIELA S.R.L (30-70910015-3)"
+    "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)", 
+    "SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)"
   ];
 
   Future<void> _guardarNuevoChofer() async {

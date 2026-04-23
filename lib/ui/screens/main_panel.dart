@@ -95,7 +95,7 @@ class _MainPanelState extends State<MainPanel> {
                               onTap: () => Navigator.pushNamed(context, '/equipo', arguments: widget.dni),
                             ),
                             _buildMenuButton(
-                              titulo: "VENCIMIENTOS",
+                              titulo: "MIS VENCIMIENTOS",
                               icono: Icons.assignment_late_outlined,
                               color: Colors.greenAccent,
                               onTap: () => Navigator.pushNamed(context, '/mis_vencimientos', arguments: widget.dni),

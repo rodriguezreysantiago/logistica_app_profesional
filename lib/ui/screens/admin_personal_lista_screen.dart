@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../../core/utils/formatters.dart';
-import 'admin_personal_form_screen.dart'; // Asegurate de que la ruta sea correcta
+import 'admin_personal_form_screen.dart'; 
 
 class AdminPersonalListaScreen extends StatefulWidget {
   const AdminPersonalListaScreen({super.key});
@@ -40,7 +40,6 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     return cuil;
   }
 
-  // --- MÉTODO CENTRAL DE ACTUALIZACIÓN (BLINDADO) ---
   Future<void> _updateData(String coleccion, String docId, String campo, dynamic valor) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -210,7 +209,6 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
           ),
         ),
       ),
-      // --- BOTÓN FLOTANTE PARA ALTA ---
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           Navigator.push(
@@ -240,7 +238,7 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
               }).toList();
 
               return ListView.builder(
-                padding: const EdgeInsets.only(top: 150, bottom: 80), // Más padding abajo por el FAB
+                padding: const EdgeInsets.only(top: 150, bottom: 80),
                 itemCount: empleados.length,
                 itemBuilder: (context, index) {
                   var data = empleados[index].data() as Map<String, dynamic>;
@@ -409,6 +407,7 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     );
   }
 
+  // ✅ VERSIÓN FINAL BLINDADA: Maneja unidades inexistentes sin colgarse
   void _seleccionarUnidad(String dni, String campo, String patenteActual) {
     List<String> tipos = (campo == 'VEHICULO') ? ['TRACTOR'] : ['BATEA', 'TOLVA', 'ACOPLADO'];
     final navigator = Navigator.of(context);
@@ -419,7 +418,7 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
         title: Text("Asignar ${campo == 'VEHICULO' ? 'Tractor' : 'Enganche'}"),
         content: SizedBox(
           width: double.maxFinite,
-          height: 300,
+          height: 350,
           child: StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', whereIn: tipos).snapshots(),
             builder: (context, snapshot) {
@@ -428,36 +427,57 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
               return ListView.builder(
                 itemCount: unidades.length + 1,
                 itemBuilder: (context, index) {
+                  
+                  // LOGICA DE TAP (Tanto para quitar como para asignar nueva)
+                  Future<void> procesarCambio(String? patenteNueva) async {
+                    try {
+                      String cleanActual = patenteActual.trim();
+                      
+                      // 1. Intentar liberar la vieja (SI EXISTE EL DOCUMENTO)
+                      if (cleanActual.isNotEmpty && cleanActual != "-" && cleanActual != "S/D") {
+                        var docOld = await FirebaseFirestore.instance.collection('VEHICULOS').doc(cleanActual).get();
+                        if (docOld.exists) {
+                          await FirebaseFirestore.instance.collection('VEHICULOS').doc(cleanActual).update({'ESTADO': 'LIBRE'});
+                        }
+                      }
+
+                      // 2. Si asignamos una nueva
+                      if (patenteNueva != null && patenteNueva != "-") {
+                        await FirebaseFirestore.instance.collection('VEHICULOS').doc(patenteNueva).update({'ESTADO': 'OCUPADO'});
+                        await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: patenteNueva});
+                      } else {
+                        // Si es Quitar Asignación
+                        await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: "-"});
+                      }
+                    } catch (e) {
+                      debugPrint("⚠️ Error controlado: $e");
+                      // Si falla por no encontrar la unidad vieja, igual limpiamos al chofer
+                      if (e.toString().contains('not-found')) {
+                        await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: patenteNueva ?? "-"});
+                      }
+                    }
+                    if (mounted) navigator.pop();
+                  }
+
+                  // OPCIÓN PARA QUITAR ASIGNACIÓN
                   if (index == 0) {
                     return ListTile(
                       leading: const Icon(Icons.not_interested, color: Colors.red),
-                      title: const Text("SIN UNIDAD", style: TextStyle(color: Colors.red)),
-                      onTap: () async {
-                        if (patenteActual.isNotEmpty && patenteActual != "-") {
-                          await FirebaseFirestore.instance.collection('VEHICULOS').doc(patenteActual).update({'ESTADO': 'LIBRE'});
-                        }
-                        await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: "-"});
-                        if (!mounted) return;
-                        navigator.pop();
-                      },
+                      title: const Text("QUITAR ASIGNACIÓN", style: TextStyle(color: Colors.red)),
+                      onTap: () => procesarCambio(null),
                     );
                   }
-                  var vData = unidades[index - 1].data() as Map<String, dynamic>;
-                  String patente = unidades[index - 1].id;
-                  if (vData['ESTADO'] == 'OCUPADO' && patente != patenteActual) return const SizedBox();
+
+                  var vDoc = unidades[index - 1];
+                  var vData = vDoc.data() as Map<String, dynamic>;
+                  String patenteItem = vDoc.id.trim();
+                  
+                  if (vData['ESTADO'] == 'OCUPADO' && patenteItem != patenteActual.trim()) return const SizedBox();
                   
                   return ListTile(
-                    title: Text(patente),
-                    trailing: patente == patenteActual ? const Icon(Icons.check, color: Colors.green) : null,
-                    onTap: () async {
-                      if (patenteActual.isNotEmpty && patenteActual != "-") {
-                        await FirebaseFirestore.instance.collection('VEHICULOS').doc(patenteActual).update({'ESTADO': 'LIBRE'});
-                      }
-                      await FirebaseFirestore.instance.collection('VEHICULOS').doc(patente).update({'ESTADO': 'OCUPADO'});
-                      await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).update({campo: patente});
-                      if (!mounted) return;
-                      navigator.pop();
-                    },
+                    title: Text(patenteItem),
+                    trailing: patenteItem == patenteActual.trim() ? const Icon(Icons.check, color: Colors.green) : null,
+                    onTap: () => procesarCambio(patenteItem),
                   );
                 },
               );
@@ -500,8 +520,8 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
 
   void _mostrarDialogoEmpresa(String etiqueta, String valor, Function(String) onEdit) {
     final List<String> empresas = [
-      "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4", 
-      "VECCHI ARIEL Y VECCHI GRACIELA S.R.L (30-70910015-3)"
+      "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)", 
+      "SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)"
     ];
     final navigator = Navigator.of(context);
 

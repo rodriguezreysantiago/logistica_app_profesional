@@ -1,6 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/services/volvo_api_service.dart';
 
 class AdminVehiculoFormScreen extends StatefulWidget {
   final String vehiculoId;
@@ -19,15 +24,19 @@ class AdminVehiculoFormScreen extends StatefulWidget {
 class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isSaving = false;
+  bool _isSyncing = false;
 
   late TextEditingController _marcaController;
   late TextEditingController _modeloController;
   late TextEditingController _anioController;
   late TextEditingController _empresaController;
-  late TextEditingController _vinController; // <--- AGREGADO
+  late TextEditingController _vinController;
+  late TextEditingController _kmController;
 
   String? _fechaRto;
   String? _fechaSeguro;
+  String? _urlRto;
+  String? _urlSeguro;
 
   @override
   void initState() {
@@ -36,9 +45,12 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     _modeloController = TextEditingController(text: widget.datosIniciales['MODELO'] ?? '');
     _anioController = TextEditingController(text: (widget.datosIniciales['ANIO'] ?? widget.datosIniciales['AÑO'])?.toString() ?? '');
     _empresaController = TextEditingController(text: widget.datosIniciales['EMPRESA'] ?? '');
-    _vinController = TextEditingController(text: widget.datosIniciales['VIN'] ?? ''); // <--- AGREGADO
+    _vinController = TextEditingController(text: widget.datosIniciales['VIN'] ?? '');
+    _kmController = TextEditingController(text: widget.datosIniciales['KM_ACTUAL']?.toString() ?? '0');
     _fechaRto = widget.datosIniciales['VENCIMIENTO_RTO'];
     _fechaSeguro = widget.datosIniciales['VENCIMIENTO_SEGURO'];
+    _urlRto = widget.datosIniciales['ARCHIVO_RTO'];
+    _urlSeguro = widget.datosIniciales['ARCHIVO_SEGURO'];
   }
 
   @override
@@ -47,21 +59,121 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     _modeloController.dispose();
     _anioController.dispose();
     _empresaController.dispose();
-    _vinController.dispose(); // <--- AGREGADO
+    _vinController.dispose();
+    _kmController.dispose();
     super.dispose();
   }
 
-  DateTime _parseFecha(String? fecha) {
-    if (fecha == null || fecha.isEmpty) return DateTime.now();
+  Future<void> _subirDocumento(String campoUrl, String tipoDoc) async {
+    File? fileToUpload;
+    String fileName = "";
+
+    final int? source = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: const Color(0xFF1A3A5A),
+      builder: (bCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.orangeAccent),
+              title: const Text("Tomar Foto", style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(context, 1),
+            ),
+            ListTile(
+              leading: const Icon(Icons.file_present, color: Colors.blueAccent),
+              title: const Text("Seleccionar Archivo (PDF/Imagen)", style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(context, 2),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == 1) {
+      final XFile? photo = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 50);
+      if (photo != null) {
+        fileToUpload = File(photo.path);
+        fileName = "${tipoDoc}_${DateTime.now().millisecondsSinceEpoch}.jpg";
+      }
+    } else if (source == 2) {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+      if (result != null) {
+        fileToUpload = File(result.files.single.path!);
+        fileName = result.files.single.name;
+      }
+    }
+
+    if (fileToUpload != null) {
+      setState(() => _isSaving = true);
+      try {
+        String path = "vehiculos/${widget.vehiculoId.trim()}/$fileName";
+        Reference ref = FirebaseStorage.instance.ref().child(path);
+        await ref.putFile(fileToUpload);
+        String downloadUrl = await ref.getDownloadURL();
+
+        setState(() {
+          if (tipoDoc == 'RTO') {
+            _urlRto = downloadUrl;
+          }
+          if (tipoDoc == 'SEGURO') {
+            _urlSeguro = downloadUrl;
+          }
+          _isSaving = false;
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Documento $tipoDoc cargado."), backgroundColor: Colors.blue),
+          );
+        }
+      } catch (e) {
+        setState(() => _isSaving = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+        }
+      }
+    }
+  }
+
+  Future<void> _sincronizarConVolvoManual() async {
+    if (_vinController.text.length < 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Se requiere un VIN válido"), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+    setState(() => _isSyncing = true);
     try {
-      return DateTime.parse(fecha);
-    } catch (_) {
-      return DateTime.now();
+      final metros = await VolvoApiService().traerKilometrajeCualquierVia(_vinController.text);
+      if (!mounted) {
+        return;
+      }
+      if (metros != null && metros > 0) {
+        final double kmReal = metros / 1000;
+        setState(() => _kmController.text = kmReal.toStringAsFixed(0));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("¡Sincronizado! KM Actualizado."), backgroundColor: Colors.green),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Unidad en reposo (Sin corriente)"), backgroundColor: Colors.orange),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error sincro: $e");
+    } finally {
+      if (mounted) {
+        setState(() => _isSyncing = false);
+      }
     }
   }
 
   Future<void> _seleccionarFecha(BuildContext context, bool esRto) async {
-    final DateTime initialDate = esRto ? _parseFecha(_fechaRto) : _parseFecha(_fechaSeguro);
+    final String? fechaActual = esRto ? _fechaRto : _fechaSeguro;
+    final DateTime initialDate = (fechaActual != null && fechaActual.isNotEmpty) 
+        ? DateTime.parse(fechaActual) 
+        : DateTime.now();
 
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -85,11 +197,11 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
     if (picked != null && mounted) {
       setState(() {
-        String fechaFormateada = picked.toString().split(' ')[0];
+        String f = picked.toString().split(' ')[0];
         if (esRto) {
-          _fechaRto = fechaFormateada;
+          _fechaRto = f;
         } else {
-          _fechaSeguro = fechaFormateada;
+          _fechaSeguro = f;
         }
       });
     }
@@ -97,10 +209,9 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
   void _mostrarSelectorEmpresa() {
     final List<String> empresas = [
-      "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4",
-      "VECCHI ARIEL Y VECCHI GRACIELA S.R.L (30-70910015-3)"
+      "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)",
+      "SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)"
     ];
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -122,117 +233,113 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   }
 
   Future<void> _guardarCambios() async {
-    if (!_formKey.currentState!.validate()) return;
-    
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
     if (_fechaRto == null || _fechaSeguro == null) {
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(content: Text("Faltan fechas de vencimiento"), backgroundColor: Colors.orange),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Faltan fechas"), backgroundColor: Colors.orange));
       return;
     }
 
     setState(() => _isSaving = true);
-
     try {
       final String idLimpio = widget.vehiculoId.trim().toUpperCase();
-
-      await FirebaseFirestore.instance
-          .collection('VEHICULOS')
-          .doc(idLimpio)
-          .update({
+      await FirebaseFirestore.instance.collection('VEHICULOS').doc(idLimpio).update({
         'MARCA': _marcaController.text.trim().toUpperCase(),
         'MODELO': _modeloController.text.trim().toUpperCase(),
-        'ANIO': int.parse(_anioController.text.trim()),
+        'ANIO': int.tryParse(_anioController.text.trim()) ?? 0,
         'EMPRESA': _empresaController.text.trim().toUpperCase(),
-        'VIN': _vinController.text.trim().toUpperCase(), // <--- GUARDAMOS EL VIN
+        'VIN': _vinController.text.trim().toUpperCase(),
+        'KM_ACTUAL': double.tryParse(_kmController.text) ?? 0.0,
         'VENCIMIENTO_RTO': _fechaRto,
         'VENCIMIENTO_SEGURO': _fechaSeguro,
+        'ARCHIVO_RTO': _urlRto,
+        'ARCHIVO_SEGURO': _urlSeguro,
         'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
       });
-
-      if (!mounted) return;
-
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(content: Text("Unidad actualizada correctamente"), backgroundColor: Colors.green),
-      );
+      if (!mounted) {
+        return;
+      }
       Navigator.pop(context);
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _isSaving = false);
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    bool esVolvo = _marcaController.text.toUpperCase().contains("VOLVO");
+
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: Text("Ficha Técnica: ${widget.vehiculoId}"),
-        centerTitle: true,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.white,
-      ),
+      appBar: AppBar(title: Text("Ficha: ${widget.vehiculoId}"), centerTitle: true, backgroundColor: Colors.transparent, elevation: 0, foregroundColor: Colors.white),
       body: Stack(
         children: [
-          Positioned.fill(
-            child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover),
-          ),
-          Positioned.fill(
-            child: Container(color: Colors.black.withAlpha(200)),
-          ),
+          Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
+          Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
           SafeArea(
             child: Form(
               key: _formKey,
               child: ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
-                  _buildSectionTitle("INFORMACIÓN DE UNIDAD"),
-                  _buildTextField(_marcaController, "Marca / Fabricante", Icons.branding_watermark),
-                  _buildTextField(_modeloController, "Modelo / Descripción", Icons.info_outline),
-                  _buildTextField(_anioController, "Año (Modelo)", Icons.calendar_today, isNumber: true),
+                  _buildSectionTitle("INFORMACIÓN TÉCNICA"),
                   
-                  // CAMPO VIN (Especial para tractores Volvo)
-                  _buildTextField(_vinController, "Código VIN (17 caracteres)", Icons.fingerprint, isVin: true),
+                  // SEPARADOS: Marca y Modelo con iconos distintos
+                  _buildTextField(_marcaController, "Marca del Fabricante", Icons.branding_watermark),
+                  _buildTextField(_modeloController, "Modelo de la Unidad", Icons.directions_car),
                   
+                  _buildTextField(_anioController, "Año de Fabricación", Icons.calendar_today, isNumber: true),
+                  
+                  if (esVolvo) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: Colors.blue.withAlpha(20), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blueAccent.withAlpha(50))),
+                      child: Column(children: [
+                        _buildTextField(_vinController, "Código VIN", Icons.fingerprint),
+                        const SizedBox(height: 10),
+                        _isSyncing 
+                          ? const CircularProgressIndicator(color: Colors.blueAccent) 
+                          : TextButton.icon(
+                              onPressed: _sincronizarConVolvoManual, 
+                              icon: const Icon(Icons.sync, color: Colors.blueAccent), 
+                              label: const Text("SINCRONIZAR VOLVO", style: TextStyle(color: Colors.blueAccent, fontSize: 11, fontWeight: FontWeight.bold))
+                            ),
+                      ]),
+                    ),
+                  ],
+
+                  _buildTextField(_kmController, "Kilometraje Actual", Icons.speed, isNumber: true),
                   const SizedBox(height: 10),
                   _buildEmpresaTile(),
 
                   const SizedBox(height: 30),
-                  _buildSectionTitle("AUDITORÍA DE VENCIMIENTOS"),
+                  _buildSectionTitle("AUDITORÍA DE VENCIMIENTOS Y DOCUMENTACIÓN"),
 
                   _buildDatePickerTile(
-                    "Vencimiento RTO",
-                    _fechaRto,
+                    "Vencimiento RTO", _fechaRto, _urlRto,
                     () => _seleccionarFecha(context, true),
+                    () => _subirDocumento('ARCHIVO_RTO', 'RTO'),
                   ),
                   const Divider(color: Colors.white10, height: 1),
                   _buildDatePickerTile(
-                    "Vencimiento Póliza Seguro",
-                    _fechaSeguro,
+                    "Póliza de Seguro", _fechaSeguro, _urlSeguro,
                     () => _seleccionarFecha(context, false),
+                    () => _subirDocumento('ARCHIVO_SEGURO', 'SEGURO'),
                   ),
 
-                  const SizedBox(height: 60),
-
-                  _isSaving
-                      ? const Center(child: CircularProgressIndicator(color: Colors.orangeAccent))
-                      : ElevatedButton.icon(
-                          onPressed: _guardarCambios,
-                          icon: const Icon(Icons.save_outlined),
-                          label: const Text("GUARDAR FICHA", style: TextStyle(fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orangeAccent,
-                            foregroundColor: Colors.black,
-                            minimumSize: const Size(double.infinity, 55),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
+                  const SizedBox(height: 40),
+                  _isSaving 
+                    ? const Center(child: CircularProgressIndicator(color: Colors.orangeAccent)) 
+                    : ElevatedButton.icon(
+                        onPressed: _guardarCambios, 
+                        icon: const Icon(Icons.save), 
+                        label: const Text("GUARDAR CAMBIOS"), 
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black, minimumSize: const Size(double.infinity, 55), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))
+                      ),
                   const SizedBox(height: 20),
                 ],
               ),
@@ -244,13 +351,10 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   }
 
   Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 15, left: 5),
-      child: Text(title, style: const TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 2)),
-    );
+    return Padding(padding: const EdgeInsets.only(bottom: 15, left: 5), child: Text(title, style: const TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 2)));
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool isNumber = false, bool isVin = false}) {
+  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool isNumber = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: TextFormField(
@@ -264,73 +368,53 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
           prefixIcon: Icon(icon, color: Colors.orangeAccent, size: 18),
           filled: true,
           fillColor: Colors.white.withAlpha(20),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
         ),
         validator: (value) {
-          if (isVin) return null; // El VIN es opcional (solo para Volvo)
-          if (value == null || value.isEmpty) return "Campo requerido";
-          if (isNumber) {
-            final n = int.tryParse(value);
-            if (n == null) return "Número inválido";
-            if (n < 1950 || n > 2030) return "Año fuera de rango";
+          if (value == null || value.isEmpty) {
+            return "Campo requerido";
           }
           return null;
-        },
-      ),
+        }
+      )
     );
   }
 
   Widget _buildEmpresaTile() {
-    return InkWell(
-      onTap: _mostrarSelectorEmpresa,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white.withAlpha(20), borderRadius: BorderRadius.circular(12)),
-        child: Row(
-          children: [
-            const Icon(Icons.business, color: Colors.orangeAccent, size: 20),
-            const SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("Razón Social Titular", style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 2),
-                  Text(
-                    _empresaController.text.isEmpty ? "Tocar para seleccionar..." : _empresaController.text,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.white24),
-          ],
-        ),
-      ),
-    );
+    return InkWell(onTap: _mostrarSelectorEmpresa, borderRadius: BorderRadius.circular(12), child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white.withAlpha(20), borderRadius: BorderRadius.circular(12)), child: Row(children: [const Icon(Icons.business, color: Colors.orangeAccent), const SizedBox(width: 15), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text("Empresa Titular", style: TextStyle(color: Colors.white54, fontSize: 10)), Text(_empresaController.text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))])), const Icon(Icons.chevron_right, color: Colors.white24)])));
   }
 
-  Widget _buildDatePickerTile(String label, String? fecha, VoidCallback onTap) {
+  Widget _buildDatePickerTile(String label, String? fecha, String? urlActual, VoidCallback onTapDate, VoidCallback onTapFile) {
     int dias = AppFormatters.calcularDiasRestantes(fecha ?? "");
     Color colorSemaforo = dias < 0 ? Colors.red : (dias <= 14 ? Colors.orange : (dias <= 30 ? Colors.greenAccent : Colors.blueAccent));
 
     return ListTile(
-      onTap: onTap,
+      onTap: onTapDate,
       contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-      leading: Icon(Icons.edit_calendar, color: colorSemaforo, size: 22),
+      leading: Icon(Icons.edit_calendar, color: colorSemaforo, size: 24),
       title: Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
       subtitle: Text(AppFormatters.formatearFecha(fecha ?? ""), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: colorSemaforo.withAlpha(40), 
-          borderRadius: BorderRadius.circular(6), 
-          border: Border.all(color: colorSemaforo.withAlpha(100))
-        ),
-        child: Text("${dias}d", style: TextStyle(color: colorSemaforo, fontWeight: FontWeight.bold, fontSize: 11)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), 
+            decoration: BoxDecoration(
+              color: colorSemaforo.withAlpha(40), 
+              borderRadius: BorderRadius.circular(6), 
+              border: Border.all(color: colorSemaforo.withAlpha(100))
+            ), 
+            child: Text("${dias}d", style: TextStyle(color: colorSemaforo, fontWeight: FontWeight.bold, fontSize: 11))
+          ),
+          const SizedBox(width: 10),
+          IconButton(
+            icon: Icon(
+              urlActual != null ? Icons.file_download_done : Icons.upload_file, 
+              color: urlActual != null ? Colors.blueAccent : Colors.orangeAccent
+            ),
+            onPressed: onTapFile,
+          ),
+        ],
       ),
     );
   }

@@ -44,22 +44,19 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
       final datos = await api.traerDatosFlota();
       if (mounted) {
         setState(() => _cacheVolvo = datos);
-        debugPrint("📦 Memoria Volvo actualizada: ${_cacheVolvo.length} unidades.");
+        debugPrint("📦 Memoria Volvo: ${_cacheVolvo.length} unidades listas.");
       }
     } catch (e) {
-      debugPrint("❌ Error cargando memoria Volvo: $e");
+      debugPrint("📡 [INFO] Sin conexión a la red de Volvo.");
     }
   }
 
-  // ✅ SOLUCIÓN DEFINITIVA PARA WINDOWS: Separación de hilos
   void _sincronizarUnidadIndividual(String patente, String vin) {
     final String cleanVin = vin.trim().toUpperCase();
 
-    // 1. Iniciamos el proceso asíncrono sin bloquear el hilo principal de Windows
     Future(() async {
       double? metros;
       try {
-        // Buscamos en caché primero
         final infoEnCache = _cacheVolvo.firstWhere(
           (v) => v['vin'].toString().toUpperCase() == cleanVin,
           orElse: () => null,
@@ -70,34 +67,29 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                     infoEnCache['lastKnownOdometer'] ?? 0).toDouble();
         } 
 
-        // Si no hay, rescate profundo vía API
         if (metros == null || metros <= 0) {
-          debugPrint("🔍 [Windows] Rescate profundo para $patente");
           final api = VolvoApiService();
           metros = await api.traerKilometrajeCualquierVia(cleanVin);
         }
 
-        // 2. ACTUALIZACIÓN SEGURA: "Disparar y olvidar"
         if (metros != null && metros > 0 && mounted) {
           final double kmReal = metros / 1000;
 
-          // 🔥 LA CLAVE: No usamos 'await' aquí. 
-          // Dejamos que Firestore maneje su propio hilo de C++ independientemente.
           FirebaseFirestore.instance
               .collection('VEHICULOS')
               .doc(patente)
               .update({
             'KM_ACTUAL': kmReal,
             'ULTIMA_SINCRO': FieldValue.serverTimestamp(),
-            'SINCRO_TIPO': 'WINDOWS_STABLE_V1',
+            'SINCRO_TIPO': 'AUTOMATIC_LIVE',
           }).then((_) {
-            debugPrint("💾 [OK] $patente actualizado a $kmReal KM");
-          }).catchError((err) {
-            debugPrint("❌ Error Firestore Windows en $patente: $err");
-          });
+            debugPrint("✅ $patente: Sincronizado.");
+          }).catchError((_) {}); 
+        } else {
+          debugPrint("💤 $patente: En reposo.");
         }
       } catch (e) {
-        debugPrint("🚨 Error en proceso de sincronización: $e");
+        debugPrint("ℹ️ $patente: No disponible.");
       }
     });
   }
@@ -149,12 +141,9 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
             IconButton(
               icon: const Icon(Icons.file_download, color: Colors.greenAccent),
               onPressed: () async {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Generando reporte de flota...")),
-                );
-                await ReportGenerator.generarYCompartirReporte(_cacheVolvo);
+                await ReportGenerator.mostrarOpcionesYGenerar(context, _cacheVolvo);
               },
-              tooltip: "Descargar Reporte CSV",
+              tooltip: "Configurar y Descargar Reporte",
             ),
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.orangeAccent),
@@ -276,15 +265,33 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                     padding: const EdgeInsets.all(15),
                     child: Column(
                       children: [
-                        _filaInfo("Kilometraje:", "${AppFormatters.formatearKilometraje(vData['KM_ACTUAL'])} KM", Icons.speed, Colors.orangeAccent),
-                        if (vData['VIN'] != null && vData['VIN'] != "") _filaInfo("VIN:", vData['VIN'], Icons.fingerprint, Colors.white60),
+                        _filaInfo("Kilometraje Actual:", "${AppFormatters.formatearKilometraje(vData['KM_ACTUAL'])} KM", Icons.speed, Colors.orangeAccent),
+                        if (vData['VIN'] != null && vData['VIN'] != "") _filaInfo("Nro. Chasis (VIN):", vData['VIN'], Icons.fingerprint, Colors.white60),
                         const Divider(color: Colors.white10),
-                        _filaInfo("Marca/Modelo:", "${vData['MARCA'] ?? ''} ${vData['MODELO'] ?? ''}", Icons.info_outline, Colors.blueAccent),
-                        _filaInfo("Año:", "${vData['AÑO'] ?? vData['ANIO'] ?? 'S/D'}", Icons.calendar_today, Colors.white60),
-                        _filaInfo("Empresa:", vData['EMPRESA'] ?? 'S/D', Icons.business, Colors.white60),
+                        
+                        _filaInfo("Marca:", vData['MARCA'] ?? 'S/D', Icons.branding_watermark_outlined, Colors.blueAccent),
+                        _filaInfo("Modelo:", vData['MODELO'] ?? 'S/D', Icons.directions_car_outlined, Colors.blueAccent),
+                        
+                        _filaInfo("Año Unidad:", "${vData['AÑO'] ?? vData['ANIO'] ?? 'S/D'}", Icons.calendar_today, Colors.white60),
+                        _filaInfo("Titular / Empresa:", vData['EMPRESA'] ?? 'S/D', Icons.business, Colors.white60),
                         const Divider(color: Colors.white10, height: 20),
-                        _filaInfo("Vencimiento RTO:", AppFormatters.formatearFecha(vData['VENCIMIENTO_RTO']), Icons.fact_check, _getColorVencimiento(vData['VENCIMIENTO_RTO']), onAction: () => _abrirDocumento(vData['ARCHIVO_RTO'], "RTO - $patenteId")),
-                        _filaInfo("Póliza Seguro:", AppFormatters.formatearFecha(vData['VENCIMIENTO_SEGURO']), Icons.security, _getColorVencimiento(vData['VENCIMIENTO_SEGURO']), onAction: () => _abrirDocumento(vData['ARCHIVO_SEGURO'], "Seguro - $patenteId")),
+                        
+                        _filaInfo(
+                          "Vencimiento RTO:", 
+                          AppFormatters.formatearFecha(vData['VENCIMIENTO_RTO']), 
+                          Icons.fact_check, 
+                          _getColorVencimiento(vData['VENCIMIENTO_RTO']), 
+                          onAction: () => _abrirDocumento(vData['ARCHIVO_RTO'], "RTO - $patenteId"),
+                          urlArchivo: vData['ARCHIVO_RTO'], // ✅ Semáforo de color
+                        ),
+                        _filaInfo(
+                          "Póliza Seguro:", 
+                          AppFormatters.formatearFecha(vData['VENCIMIENTO_SEGURO']), 
+                          Icons.security, 
+                          _getColorVencimiento(vData['VENCIMIENTO_SEGURO']), 
+                          onAction: () => _abrirDocumento(vData['ARCHIVO_SEGURO'], "Seguro - $patenteId"),
+                          urlArchivo: vData['ARCHIVO_SEGURO'], // ✅ Semáforo de color
+                        ),
                         const SizedBox(height: 15),
                         SizedBox(
                           width: double.infinity,
@@ -309,7 +316,9 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
     );
   }
 
-  Widget _filaInfo(String titulo, String valor, IconData icono, Color color, {VoidCallback? onAction}) {
+  Widget _filaInfo(String titulo, String valor, IconData icono, Color color, {VoidCallback? onAction, String? urlArchivo}) {
+    bool tieneArchivo = urlArchivo != null && urlArchivo.isNotEmpty && urlArchivo != "-";
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -318,10 +327,20 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           const SizedBox(width: 10),
           Text(titulo, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const Spacer(),
-          Text(valor, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text(valor.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
           if (onAction != null) ...[
             const SizedBox(width: 10),
-            IconButton(icon: const Icon(Icons.visibility, color: Colors.blueAccent, size: 18), onPressed: onAction, constraints: const BoxConstraints(), padding: EdgeInsets.zero),
+            IconButton(
+              icon: Icon(
+                Icons.visibility, 
+                color: tieneArchivo ? Colors.blueAccent : Colors.white24, // ✅ Gris si no hay nada, Azul si hay algo
+                size: 18
+              ), 
+              onPressed: onAction, 
+              constraints: const BoxConstraints(), 
+              padding: EdgeInsets.zero,
+              tooltip: tieneArchivo ? "Ver documento" : "Sin documento cargado",
+            ),
           ]
         ],
       ),

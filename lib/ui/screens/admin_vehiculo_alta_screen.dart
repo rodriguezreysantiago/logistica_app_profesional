@@ -10,19 +10,22 @@ class AdminVehiculoAltaScreen extends StatefulWidget {
 
 class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
   final _formKey = GlobalKey<FormState>();
+  bool _isLoading = false;
   
   final TextEditingController _patenteCtrl = TextEditingController();
   final TextEditingController _marcaCtrl = TextEditingController();
   final TextEditingController _modeloCtrl = TextEditingController();
   final TextEditingController _anioCtrl = TextEditingController();
-  final TextEditingController _vinCtrl = TextEditingController(); // <--- AGREGADO
+  final TextEditingController _vinCtrl = TextEditingController();
 
   String _tipoSeleccionado = 'TRACTOR';
-  String _empresaSeleccionada = "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4";
+  
+  // ✅ CAMBIO: Empresa Ariel por defecto
+  String _empresaSeleccionada = "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)";
 
   final List<String> _empresas = [
-    "SUCESION DE VECCHI CARLOS LUIS CUIT: 20-08569424-4",
-    "VECCHI ARIEL Y VECCHI GRACIELA S.R.L (30-70910015-3)"
+    "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)",
+    "SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)"
   ];
 
   @override
@@ -31,23 +34,26 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
     _marcaCtrl.dispose();
     _modeloCtrl.dispose();
     _anioCtrl.dispose();
-    _vinCtrl.dispose(); // <--- AGREGADO
+    _vinCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _guardarVehiculo() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final messenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
+    setState(() => _isLoading = true);
     final String patente = _patenteCtrl.text.trim().toUpperCase();
 
     try {
       final doc = await FirebaseFirestore.instance.collection('VEHICULOS').doc(patente).get();
+      
+      if (!mounted) return;
+
       if (doc.exists) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text("Error: Esta patente ya existe"), backgroundColor: Colors.red)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Error: Esta patente ya está registrada"), backgroundColor: Colors.red)
         );
+        setState(() => _isLoading = false);
         return;
       }
 
@@ -56,11 +62,11 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
         'TIPO': _tipoSeleccionado,
         'MARCA': _marcaCtrl.text.trim().toUpperCase(),
         'MODELO': _modeloCtrl.text.trim().toUpperCase(),
-        'ANIO': int.tryParse(_anioCtrl.text.trim()) ?? 0, // Guardado como número
-        'VIN': _vinCtrl.text.trim().toUpperCase(), // <--- SE GUARDA EL VIN AQUÍ
-        'EMPRESA': _empresaSeleccionada, // <--- AGREGADO
+        'ANIO': int.tryParse(_anioCtrl.text.trim()) ?? 0,
+        'VIN': _vinCtrl.text.trim().toUpperCase(),
+        'EMPRESA': _empresaSeleccionada,
         'ESTADO': 'LIBRE', 
-        'KM_ACTUAL': '0',
+        'KM_ACTUAL': 0,
         'fecha_alta': FieldValue.serverTimestamp(),
         'ARCHIVO_RTO': '-',
         'ARCHIVO_SEGURO': '-',
@@ -69,14 +75,16 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
       });
 
       if (!mounted) return;
-      messenger.showSnackBar(
+      
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Unidad registrada con éxito"), backgroundColor: Colors.green)
       );
-      navigator.pop();
+      Navigator.of(context).pop();
 
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red)
       );
     }
@@ -88,6 +96,7 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
       backgroundColor: const Color(0xFF0D1D2D),
       appBar: AppBar(
         title: const Text("Alta de Nueva Unidad"),
+        centerTitle: true,
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -99,43 +108,36 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildInput("Patente / Dominio", _patenteCtrl, Icons.pin, hint: "Ej: AA123BB o ABC123"),
-              const Text("Tipo de Unidad", style: TextStyle(color: Colors.white70, fontSize: 12)),
+              _buildInput("Patente / Dominio", _patenteCtrl, Icons.pin, hint: "Ej: AA123BB"),
+              const Text("Tipo de Unidad", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               _buildTipoSelector(),
               const SizedBox(height: 25),
               _buildInput("Marca", _marcaCtrl, Icons.factory),
               _buildInput("Modelo", _modeloCtrl, Icons.commute),
               _buildInput("Año (Modelo)", _anioCtrl, Icons.calendar_today, isNumeric: true),
-              
-              // CAMPO VIN NUEVO
-              _buildInput(
-                "Código VIN", 
-                _vinCtrl, 
-                Icons.fingerprint, 
-                hint: "Obligatorio para Volvo (17 caracteres)",
-                esOpcional: _tipoSeleccionado != 'TRACTOR' // Opcional si no es camión
-              ),
-
-              const Text("Empresa Propietaria", style: TextStyle(color: Colors.white70, fontSize: 12)),
+              _buildInput("Código VIN", _vinCtrl, Icons.fingerprint, hint: "17 caracteres (Volvo Connect)", esOpcional: _tipoSeleccionado != 'TRACTOR'),
+              const Text("Empresa Propietaria", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               _buildEmpresaDropdown(),
-
               const SizedBox(height: 40),
-              SizedBox(
-                width: double.infinity,
-                height: 55,
-                child: ElevatedButton.icon(
-                  onPressed: _guardarVehiculo,
-                  icon: const Icon(Icons.cloud_upload),
-                  label: const Text("REGISTRAR EN FLOTA", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.greenAccent,
-                    foregroundColor: Colors.black,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              _isLoading 
+                ? const Center(child: CircularProgressIndicator(color: Colors.greenAccent))
+                : SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: ElevatedButton.icon(
+                      onPressed: _guardarVehiculo,
+                      icon: const Icon(Icons.cloud_upload),
+                      label: const Text("REGISTRAR EN FLOTA", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.greenAccent,
+                        foregroundColor: Colors.black,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
                   ),
-                ),
-              )
+              const SizedBox(height: 30),
             ],
           ),
         ),
@@ -149,15 +151,17 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
       child: TextFormField(
         controller: ctrl,
         keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
-        style: const TextStyle(color: Colors.white),
+        style: const TextStyle(color: Colors.white, fontSize: 14),
         textCapitalization: TextCapitalization.characters,
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
-          hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-          labelStyle: const TextStyle(color: Colors.white60),
+          hintStyle: const TextStyle(color: Colors.white24, fontSize: 11),
+          labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
           prefixIcon: Icon(icon, color: Colors.greenAccent, size: 20),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white24)),
+          filled: true,
+          fillColor: Colors.white.withAlpha(5),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white10)),
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.greenAccent)),
         ),
         validator: (value) {
@@ -173,9 +177,9 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
       width: double.infinity,
       child: SegmentedButton<String>(
         segments: const [
-          ButtonSegment(value: 'TRACTOR', label: Text('Tractor'), icon: Icon(Icons.local_shipping, size: 16)),
-          ButtonSegment(value: 'BATEA', label: Text('Batea'), icon: Icon(Icons.view_agenda, size: 16)),
-          ButtonSegment(value: 'TOLVA', label: Text('Tolva'), icon: Icon(Icons.difference, size: 16)),
+          ButtonSegment(value: 'TRACTOR', label: Text('Tractor', style: TextStyle(fontSize: 12)), icon: Icon(Icons.local_shipping, size: 16)),
+          ButtonSegment(value: 'BATEA', label: Text('Batea', style: TextStyle(fontSize: 12)), icon: Icon(Icons.view_agenda, size: 16)),
+          ButtonSegment(value: 'TOLVA', label: Text('Tolva', style: TextStyle(fontSize: 12)), icon: Icon(Icons.difference, size: 16)),
         ],
         selected: {_tipoSeleccionado},
         onSelectionChanged: (Set<String> newSelection) {
@@ -186,7 +190,7 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
           foregroundColor: Colors.white,
           selectedBackgroundColor: Colors.greenAccent,
           selectedForegroundColor: Colors.black,
-          side: const BorderSide(color: Colors.white24),
+          side: const BorderSide(color: Colors.white10),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
@@ -196,17 +200,13 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
   Widget _buildEmpresaDropdown() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(10),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white24)
-      ),
+      decoration: BoxDecoration(color: Colors.white.withAlpha(10), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: _empresaSeleccionada,
           isExpanded: true,
           dropdownColor: const Color(0xFF1A3A5A),
-          style: const TextStyle(color: Colors.white, fontSize: 13),
+          style: const TextStyle(color: Colors.white, fontSize: 12),
           items: _empresas.map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis))).toList(),
           onChanged: (val) => setState(() => _empresaSeleccionada = val!),
         ),

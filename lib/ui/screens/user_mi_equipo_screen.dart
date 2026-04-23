@@ -1,11 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/utils/formatters.dart';
+import '../widgets/preview_screen.dart'; // ✅ Importamos el visor interno
 
 class UserMiEquipoScreen extends StatelessWidget {
   final String dniUser;
 
   const UserMiEquipoScreen({super.key, required this.dniUser});
+
+  // --- SOLICITAR CAMBIO ---
+  Future<void> _solicitarCambioUnidad(BuildContext context, String tipo, String patenteActual) async {
+    try {
+      await FirebaseFirestore.instance.collection('SOLICITUDES').add({
+        'dni_empleado': dniUser,
+        'tipo_solicitud': 'CAMBIO_UNIDAD',
+        'detalle': 'Solicita cambio de $tipo (Actual: $patenteActual)',
+        'fecha': FieldValue.serverTimestamp(),
+        'estado': 'PENDIENTE',
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Solicitud enviada a la oficina técnica."), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Error al enviar solicitud"), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // --- ABRIR DOCUMENTO (VISOR INTERNO) ---
+  void _abrirDocumento(BuildContext context, String? url, String titulo) {
+    if (url == null || url.isEmpty || url == "-") {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Documento no disponible"), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+    // ✅ Ahora usa el PreviewScreen para no salir de la app
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PreviewScreen(url: url, titulo: titulo),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,7 +62,6 @@ class UserMiEquipoScreen extends StatelessWidget {
       ),
       body: Stack(
         children: [
-          // 1. Fondo de pantalla
           Positioned.fill(
             child: Image.asset(
               'assets/images/fondo_login.jpg', 
@@ -36,31 +77,29 @@ class UserMiEquipoScreen extends StatelessWidget {
             child: FutureBuilder<DocumentSnapshot>(
               future: FirebaseFirestore.instance.collection('EMPLEADOS').doc(dniUser).get(),
               builder: (context, empleadoSnapshot) {
-                if (empleadoSnapshot.hasError) return const Center(child: Text("Error de conexión con el servidor", style: TextStyle(color: Colors.white70)));
+                if (empleadoSnapshot.hasError) return const Center(child: Text("Error de conexión", style: TextStyle(color: Colors.white70)));
                 if (empleadoSnapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
                 }
 
                 if (!empleadoSnapshot.hasData || !empleadoSnapshot.data!.exists) {
-                  return const Center(child: Text("Datos de legajo no disponibles", style: TextStyle(color: Colors.white70)));
+                  return const Center(child: Text("Datos no disponibles", style: TextStyle(color: Colors.white70)));
                 }
 
                 var empleadoData = empleadoSnapshot.data!.data() as Map<String, dynamic>;
-                
-                // Limpiamos las patentes para evitar errores de búsqueda en Firestore
                 String patenteVehiculo = (empleadoData['VEHICULO'] ?? "").toString().trim();
                 String patenteEnganche = (empleadoData['ENGANCHE'] ?? "").toString().trim();
 
                 return ListView(
                   padding: const EdgeInsets.all(20),
                   children: [
-                    _buildSeccionUnidad("TRACTOR / CHASIS", patenteVehiculo, Icons.local_shipping_outlined),
+                    _buildSeccionUnidad(context, "TRACTOR / CHASIS", patenteVehiculo, Icons.local_shipping_outlined),
                     const SizedBox(height: 30),
-                    _buildSeccionUnidad("ENGANCHE (Batea/Tolva)", patenteEnganche, Icons.grid_view_rounded),
+                    _buildSeccionUnidad(context, "ENGANCHE (Batea/Tolva)", patenteEnganche, Icons.grid_view_rounded),
                     const SizedBox(height: 40),
                     const Center(
                       child: Text(
-                        "Cualquier error en las patentes asignadas,\ncomunicarse con la oficina técnica.",
+                        "Para cambios permanentes o errores,\nuse el botón de solicitar cambio.",
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.white24, fontSize: 11),
                       ),
@@ -75,23 +114,29 @@ class UserMiEquipoScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSeccionUnidad(String titulo, String patente, IconData icono) {
+  Widget _buildSeccionUnidad(BuildContext context, String titulo, String patente, IconData icono) {
     bool estaVacia = patente.isEmpty || patente == "-" || patente == "SIN ASIGNAR";
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 8, bottom: 10),
-          child: Text(
-            titulo, 
-            style: const TextStyle(
-              fontSize: 11, 
-              fontWeight: FontWeight.bold, 
-              color: Colors.orangeAccent,
-              letterSpacing: 2
-            )
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 10),
+              child: Text(
+                titulo, 
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orangeAccent, letterSpacing: 2)
+              ),
+            ),
+            if (!estaVacia)
+              TextButton.icon(
+                onPressed: () => _solicitarCambioUnidad(context, titulo, patente),
+                icon: const Icon(Icons.swap_horiz, size: 14, color: Colors.orangeAccent),
+                label: const Text("SOLICITAR CAMBIO", style: TextStyle(color: Colors.orangeAccent, fontSize: 10)),
+              ),
+          ],
         ),
         if (estaVacia) 
           _cardGlass(
@@ -104,20 +149,14 @@ class UserMiEquipoScreen extends StatelessWidget {
           StreamBuilder<DocumentSnapshot>(
             stream: FirebaseFirestore.instance.collection('VEHICULOS').doc(patente).snapshots(),
             builder: (context, vehiculoSnapshot) {
-              if (vehiculoSnapshot.hasError) return _cardGlass(child: const ListTile(title: Text("Error al cargar unidad", style: TextStyle(color: Colors.redAccent))));
-              
               if (!vehiculoSnapshot.hasData || !vehiculoSnapshot.data!.exists) {
                 return _cardGlass(child: ListTile(title: Text("Buscando $patente...", style: const TextStyle(color: Colors.white54))));
               }
 
               var v = vehiculoSnapshot.data!.data() as Map<String, dynamic>;
               
-              // Lógica de Semáforo Unificada (S.M.A.R.T. Logic)
               int diasRto = AppFormatters.calcularDiasRestantes(v['VENCIMIENTO_RTO'] ?? "");
-              Color colorRto = _getSemaforoColor(diasRto);
-
               int diasSeg = AppFormatters.calcularDiasRestantes(v['VENCIMIENTO_SEGURO'] ?? "");
-              Color colorSeg = _getSemaforoColor(diasSeg);
 
               return _cardGlass(
                 child: Column(
@@ -126,24 +165,58 @@ class UserMiEquipoScreen extends StatelessWidget {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       leading: Container(
                         padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withAlpha(20),
-                          shape: BoxShape.circle
-                        ),
+                        decoration: BoxDecoration(color: Colors.white.withAlpha(20), shape: BoxShape.circle),
                         child: Icon(icono, color: Colors.white, size: 28),
                       ),
                       title: Text(
                         patente.toUpperCase(), 
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24, letterSpacing: 2)
                       ),
-                      subtitle: Text(
-                        "${v['MARCA'] ?? 'S/D'} ${v['MODELO'] ?? ''}",
-                        style: const TextStyle(color: Colors.white70, fontSize: 14),
+                      // ✅ MARCA Y MODELO SEPARADOS COMO EN LOS OTROS MENÚS
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Text("MARCA: ", style: TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                                Text(v['MARCA'] ?? 'S/D', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                const Text("MODELO: ", style: TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                                Text(v['MODELO'] ?? 'S/D', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const Divider(color: Colors.white10, height: 1),
-                    _buildFilaVencimiento("Vto. RTO / VTV", v['VENCIMIENTO_RTO'], colorRto, diasRto),
-                    _buildFilaVencimiento("Vto. SEGURO", v['VENCIMIENTO_SEGURO'], colorSeg, diasSeg),
+                    
+                    // RTO
+                    _buildFilaVencimientoConArchivo(
+                      context,
+                      "RTO / VTV", 
+                      v['VENCIMIENTO_RTO'], 
+                      _getSemaforoColor(diasRto), 
+                      diasRto,
+                      v['ARCHIVO_RTO'], // Pasamos la URL para el color del icono
+                      () => _abrirDocumento(context, v['ARCHIVO_RTO'], "RTO $patente")
+                    ),
+                    
+                    // SEGURO
+                    _buildFilaVencimientoConArchivo(
+                      context,
+                      "Póliza Seguro", 
+                      v['VENCIMIENTO_SEGURO'], 
+                      _getSemaforoColor(diasSeg), 
+                      diasSeg,
+                      v['ARCHIVO_SEGURO'], // Pasamos la URL para el color del icono
+                      () => _abrirDocumento(context, v['ARCHIVO_SEGURO'], "Seguro $patente")
+                    ),
                     const SizedBox(height: 12),
                   ],
                 ),
@@ -161,19 +234,37 @@ class UserMiEquipoScreen extends StatelessWidget {
     return Colors.blueAccent;
   }
 
-  Widget _buildFilaVencimiento(String etiqueta, String? fecha, Color color, int dias) {
+  Widget _buildFilaVencimientoConArchivo(BuildContext context, String etiqueta, String? fecha, Color color, int dias, String? urlArchivo, VoidCallback onVerPdf) {
+    // ✅ SEMÁFORO DE COLOR: Azul si hay archivo, Gris si no
+    bool tieneArchivo = urlArchivo != null && urlArchivo.isNotEmpty && urlArchivo != "-";
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
         children: [
           Expanded(
-            child: Text(etiqueta, style: const TextStyle(color: Colors.white60, fontSize: 13)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(etiqueta, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                Text(
+                  AppFormatters.formatearFecha(fecha ?? ""),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
           ),
-          Text(
-            AppFormatters.formatearFecha(fecha ?? ""),
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          // ✅ BOTÓN PDF CON COLOR INTELIGENTE
+          IconButton(
+            onPressed: onVerPdf,
+            icon: Icon(
+              Icons.picture_as_pdf_outlined, 
+              color: tieneArchivo ? Colors.blueAccent : Colors.white24, // Azul si existe, Gris si no
+              size: 22
+            ),
+            tooltip: tieneArchivo ? "Ver Documento" : "Sin archivo cargado",
           ),
-          const SizedBox(width: 15),
+          const SizedBox(width: 10),
           Container(
             width: 45,
             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -183,10 +274,7 @@ class UserMiEquipoScreen extends StatelessWidget {
               border: Border.all(color: color.withAlpha(100))
             ),
             child: Center(
-              child: Text(
-                "${dias}d",
-                style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11),
-              ),
+              child: Text("${dias}d", style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11)),
             ),
           ),
         ],
