@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart'; // ✅ Mentora: Necesario para kIsWeb
 import 'package:flutter/material.dart'; 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -22,7 +23,6 @@ class NotificationService {
     const LinuxInitializationSettings initializationSettingsLinux =
         LinuxInitializationSettings(defaultActionName: 'Open');
 
-    // Se agrega 'const' aquí para optimizar la creación del objeto
     const InitializationSettings initializationSettings = InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsIOS,
@@ -36,8 +36,8 @@ class NotificationService {
       },
     );
 
-    // PERMISOS ESPECÍFICOS PARA ANDROID 13+
-    if (Platform.isAndroid) {
+    // ✅ Mentora: Blindaje Web. Si estamos en el navegador, ignoramos la validación de Android.
+    if (!kIsWeb && Platform.isAndroid) {
       await _notificationsPlugin
           .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
@@ -50,19 +50,20 @@ class NotificationService {
     required String titulo,
     required String mensaje,
   }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+    // ✅ Mentora: Quitamos el 'const' porque 'mensaje' es variable, y se lo pasamos al BigText
+    AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'vencimientos_canal',
       'Alertas de Vencimientos',
       channelDescription: 'Notificaciones sobre documentos próximos a vencer',
       importance: Importance.max,
       priority: Priority.high,
       showWhen: true,
-      styleInformation: BigTextStyleInformation(''), 
+      styleInformation: BigTextStyleInformation(mensaje), 
     );
 
-    const NotificationDetails platformDetails = NotificationDetails(
+    NotificationDetails platformDetails = NotificationDetails(
       android: androidDetails,
-      iOS: DarwinNotificationDetails(
+      iOS: const DarwinNotificationDetails(
         presentAlert: true, 
         presentBadge: true, 
         presentSound: true,
@@ -77,7 +78,6 @@ class NotificationService {
     required String chofer,
     required String documento,
   }) async {
-    // Agregamos 'const' a los detalles de Android para limpiar los avisos del linter
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'admin_canal',
       'Avisos Administrativos',
@@ -98,8 +98,11 @@ class NotificationService {
       ),
     );
 
+    // ✅ Mentora: Creamos un ID dinámico para que no se pisen las notificaciones del admin
+    final int idDinamico = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+
     await _notificationsPlugin.show(
-      999, 
+      idDinamico, 
       "Nueva Revisión Pendiente",
       "$chofer subió: $documento",
       platformDetails,

@@ -156,22 +156,23 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
     });
   }
 
+  // ✅ Mentora: Le quitamos el try/catch. El error debe subir para no guardar un null en la BD.
   Future<String?> _subirArchivo(String dni, String campo, File archivo) async {
-    try {
-      String extension = archivo.path.split('.').last;
-      String nombreArchivo = "${dni}_ADMIN_AUDIT_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
-      Reference ref = FirebaseStorage.instance.ref().child('EMPLEADOS_DOCS/$nombreArchivo');
-      await ref.putFile(archivo);
-      return await ref.getDownloadURL();
-    } catch (e) {
-      return null;
-    }
+    String extension = archivo.path.split('.').last;
+    String nombreArchivo = "${dni}_ADMIN_AUDIT_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
+    Reference ref = FirebaseStorage.instance.ref().child('EMPLEADOS_DOCS/$nombreArchivo');
+    await ref.putFile(archivo);
+    return await ref.getDownloadURL();
   }
 
   void _abrirEditorDirecto(BuildContext context, Map<String, dynamic> item) {
     DateTime fechaSeleccionada = DateTime.tryParse(item['fecha']) ?? DateTime.now();
     File? archivoSeleccionado;
     bool subiendo = false;
+
+    // ✅ Mentora: Capturamos el context seguro desde la pantalla base
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
 
     showModalBottomSheet(
       context: context,
@@ -205,7 +206,10 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                     firstDate: DateTime(2020),
                     lastDate: DateTime(2040),
                   );
-                  if (picker != null) setState(() => fechaSeleccionada = picker);
+                  // ✅ Mentora: Evitamos crasheos
+                  if (picker != null && stContext.mounted) {
+                    setState(() => fechaSeleccionada = picker);
+                  }
                 },
               ),
               
@@ -216,7 +220,7 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                     type: FileType.custom,
                     allowedExtensions: ['jpg', 'pdf', 'png', 'jpeg'],
                   );
-                  if (result != null) {
+                  if (result != null && stContext.mounted) {
                     setState(() => archivoSeleccionado = File(result.files.single.path!));
                   }
                 },
@@ -236,7 +240,8 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                         archivoSeleccionado == null ? "Cargar comprobante nuevo" : "Archivo adjuntado correctamente",
                         style: const TextStyle(color: Colors.white70, fontSize: 13),
                       )),
-                      const Icon(Icons.add_a_photo_outlined, color: Colors.blueAccent, size: 20)
+                      if (archivoSeleccionado == null)
+                        const Icon(Icons.add_a_photo_outlined, color: Colors.blueAccent, size: 20)
                     ],
                   ),
                 ),
@@ -261,24 +266,37 @@ class AdminVencimientosChoferesScreen extends StatelessWidget {
                         onPressed: () async {
                           setState(() => subiendo = true);
                           
-                          String? urlFinal = item['foto'];
-                          if (archivoSeleccionado != null) {
-                            urlFinal = await _subirArchivo(item['dni'], item['campo_base'], archivoSeleccionado!);
+                          try {
+                            String? urlFinal = item['foto'];
+                            
+                            if (archivoSeleccionado != null) {
+                              urlFinal = await _subirArchivo(item['dni'], item['campo_base'], archivoSeleccionado!);
+                            }
+
+                            String fechaString = fechaSeleccionada.toString().split(' ')[0];
+
+                            // ACTUALIZACIÓN SIGUIENDO LA LÓGICA DE PARES VENCIMIENTO/ARCHIVO
+                            await FirebaseFirestore.instance
+                                .collection('EMPLEADOS')
+                                .doc(item['dni'])
+                                .update({
+                              "VENCIMIENTO_${item['campo_base']}": fechaString,
+                              "ARCHIVO_${item['campo_base']}": urlFinal,
+                              "ultima_auditoria_admin": FieldValue.serverTimestamp(),
+                            });
+
+                            messenger.showSnackBar(
+                              SnackBar(content: Text("${item['tipo']} actualizado con éxito"), backgroundColor: Colors.green)
+                            );
+                            navigator.pop(); // Usamos la referencia segura
+                          } catch (e) {
+                            messenger.showSnackBar(
+                              SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red)
+                            );
+                            if (stContext.mounted) {
+                              setState(() => subiendo = false);
+                            }
                           }
-
-                          String fechaString = fechaSeleccionada.toString().split(' ')[0];
-
-                          // ACTUALIZACIÓN SIGUIENDO LA LÓGICA DE PARES VENCIMIENTO/ARCHIVO
-                          await FirebaseFirestore.instance
-                              .collection('EMPLEADOS')
-                              .doc(item['dni'])
-                              .update({
-                            "VENCIMIENTO_${item['campo_base']}": fechaString,
-                            "ARCHIVO_${item['campo_base']}": urlFinal,
-                            "ultima_auditoria_admin": FieldValue.serverTimestamp(),
-                          });
-
-                          if (stContext.mounted) Navigator.pop(stContext);
                         },
                         child: const Text("GUARDAR CAMBIOS"),
                       ),

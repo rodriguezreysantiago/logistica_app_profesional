@@ -31,7 +31,11 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
     Navigator.push(context, MaterialPageRoute(builder: (context) => PreviewScreen(url: url, titulo: titulo)));
   }
 
+  // ✅ Mentora: Motor asíncrono blindado (Contextos capturados al inicio)
   Future<void> _ejecutarTareaAsincrona({required Future<void> Function() tarea, required String mensajeExito}) async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -39,13 +43,11 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
     );
     try {
       await tarea();
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensajeExito), backgroundColor: Colors.green));
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(content: Text(mensajeExito), backgroundColor: Colors.green));
     } catch (e) {
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
     }
   }
 
@@ -128,8 +130,9 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
               title: const Text("Tomar con la Cámara", style: TextStyle(color: Colors.white)),
               onTap: () async {
                 final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 50);
-                if (img != null) _enviarRevision(etiqueta, campo, File(img.path), fechaS, id, coleccion, nombreUsuario);
+                // ✅ Mentora: Cerramos el BottomSheet PRIMERO para no entorpecer el loader
                 if (sCtx.mounted) Navigator.pop(sCtx);
+                if (img != null) _enviarRevision(etiqueta, campo, File(img.path), fechaS, id, coleccion, nombreUsuario);
               },
             ),
             ListTile(
@@ -137,8 +140,9 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
               title: const Text("Cargar Foto o PDF", style: TextStyle(color: Colors.white)),
               onTap: () async {
                 final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf', 'jpg', 'png', 'jpeg']);
-                if (res != null) _enviarRevision(etiqueta, campo, File(res.files.single.path!), fechaS, id, coleccion, nombreUsuario);
+                // ✅ Mentora: Cerramos el BottomSheet PRIMERO
                 if (sCtx.mounted) Navigator.pop(sCtx);
+                if (res != null) _enviarRevision(etiqueta, campo, File(res.files.single.path!), fechaS, id, coleccion, nombreUsuario);
               },
             ),
             const SizedBox(height: 20),
@@ -365,10 +369,8 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
           ),
           child: ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-            // ✅ Toque en la tarjeta abre el archivo si existe
             onTap: tieneArchivo ? () => _abrirArchivo(urlArchivo, titulo) : null,
             
-            // ✅ ICONO DEL OJO (Lógica azul/gris)
             leading: Icon(
               enRevision ? Icons.history_toggle_off : Icons.visibility_outlined, 
               color: enRevision 
@@ -394,7 +396,6 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ✅ CAJITA DE DÍAS (Igual que en Mi Equipo)
                 if (!enRevision)
                   Container(
                     width: 45,
@@ -410,7 +411,6 @@ class _UserMisVencimientosScreenState extends State<UserMisVencimientosScreen> {
                   ),
                 const SizedBox(width: 12),
                 
-                // ✅ BOTÓN ACTUALIZAR GRANDE
                 if (enRevision)
                   const Icon(Icons.hourglass_top, color: Colors.white24, size: 20)
                 else

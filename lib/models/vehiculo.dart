@@ -5,11 +5,11 @@ class Vehiculo {
   final int anio;
   final String tipo; 
   final String empresa;
-  final String? vin; // <--- NUEVO CAMPO AGREGADO
+  final String? vin; 
   final DateTime? vencimientoRto;
   final DateTime? vencimientoSeguro;
   final String? urlPdfRto;
-  final bool enServicio;
+  final String estado; // ✅ Mentora: Cambiamos el bool por el String de estado real
 
   Vehiculo({
     required this.dominio,
@@ -18,11 +18,11 @@ class Vehiculo {
     required this.anio,
     required this.tipo,
     required this.empresa,
-    this.vin, // Agregado al constructor
+    this.vin, 
     this.vencimientoRto,
     this.vencimientoSeguro,
     this.urlPdfRto,
-    this.enServicio = true,
+    this.estado = 'LIBRE', // Estado por defecto
   });
 
   // Para subir datos a Firebase
@@ -34,11 +34,12 @@ class Vehiculo {
       'AÑO': anio,
       'TIPO': tipo.toUpperCase(),
       'EMPRESA': empresa.toUpperCase(),
-      'VIN': vin?.toUpperCase(), // <--- Guardamos el VIN
+      'VIN': vin?.toUpperCase(), 
       'VENCIMIENTO_RTO': vencimientoRto?.toIso8601String().split('T')[0], 
       'VENCIMIENTO_SEGURO': vencimientoSeguro?.toIso8601String().split('T')[0],
       'ARCHIVO_RTO': urlPdfRto,
-      'ESTADO': enServicio ? 'LIBRE' : 'TALLER',
+      // ✅ Mentora: Guardamos el estado exacto que ya tenía, sin forzarlo a LIBRE
+      'ESTADO': estado.toUpperCase(), 
     };
   }
 
@@ -48,11 +49,10 @@ class Vehiculo {
       dominio: id,
       marca: map['MARCA'] ?? 'S/D',
       modelo: map['MODELO'] ?? 'S/D',
-      // Convertimos a int por si en Firebase está como String
       anio: map['AÑO'] is int ? map['AÑO'] : int.tryParse(map['AÑO'].toString()) ?? 0,
       tipo: map['TIPO'] ?? 'TRACTOR',
       empresa: map['EMPRESA'] ?? 'PROPIA',
-      vin: map['VIN'], // <--- Leemos el VIN de Firestore
+      vin: map['VIN'], 
       vencimientoRto: map['VENCIMIENTO_RTO'] != null 
           ? DateTime.tryParse(map['VENCIMIENTO_RTO']) 
           : null,
@@ -60,7 +60,8 @@ class Vehiculo {
           ? DateTime.tryParse(map['VENCIMIENTO_SEGURO']) 
           : null,
       urlPdfRto: map['ARCHIVO_RTO'],
-      enServicio: map['ESTADO'] != 'TALLER',
+      // ✅ Mentora: Leemos el estado real del camión
+      estado: map['ESTADO'] ?? 'LIBRE',
     );
   }
 }

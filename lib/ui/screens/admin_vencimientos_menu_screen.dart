@@ -140,10 +140,8 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
             : null,
           trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
           onTap: () {
-            // BLINDAJE WINDOWS
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              Navigator.pushNamed(context, r);
-            });
+            // ✅ Mentora: El onTap ya es seguro por naturaleza, no necesita blindaje extra.
+            Navigator.pushNamed(context, r);
           },
         ),
       ),

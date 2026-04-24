@@ -29,20 +29,22 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    // Limpieza de DNI: quitamos puntos o espacios por si acaso
-    final String dni = _dniController.text.trim().replaceAll('.', '');
+    // ✅ Mentora: Capturamos Navigator y Messenger ANTES de cualquier asincronía
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    // ✅ Mentora: Limpieza avanzada. Nos quedamos SOLO con números.
+    final String dni = _dniController.text.replaceAll(RegExp(r'[^0-9]'), '');
     final String pass = _passController.text.trim();
     
     if (dni.isEmpty || pass.isEmpty) {
-      _mostrarError("Completá todos los campos para ingresar");
+      _mostrarError(messenger, "Completá todos los campos para ingresar");
       return;
     }
 
-    if (!mounted) return;
     setState(() => _isLoading = true);
     
     try {
-      // Buscamos el legajo por DNI (que es el ID del documento)
       final doc = await FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).get();
       
       if (!mounted) return;
@@ -50,13 +52,11 @@ class _LoginScreenState extends State<LoginScreen> {
       if (doc.exists) {
         final data = doc.data()!;
         
-        // VALIDACIÓN DE CONTRASEÑA (Soporta número o texto en Firebase)
         if (data['CONTRASEÑA'].toString() == pass) {
           
           final String nombre = data['NOMBRE'] ?? "Usuario";
           final String rol = data['ROL'] ?? "USUARIO";
 
-          // --- GUARDAR SESIÓN LOCALMENTE ---
           await PrefsService.guardarUsuario(
             dni: dni,
             nombre: nombre,
@@ -65,9 +65,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
           if (!mounted) return;
 
-          // NAVEGACIÓN REEMPLAZANDO LA PILA (Para que no puedan volver atrás al login)
-          Navigator.pushReplacementNamed(
-            context, 
+          // ✅ Mentora: Usamos el navigator capturado
+          navigator.pushReplacementNamed(
             '/home', 
             arguments: {
               'dni': dni,
@@ -76,22 +75,23 @@ class _LoginScreenState extends State<LoginScreen> {
             },
           );
         } else {
-          _mostrarError("Contraseña incorrecta. Verificá los datos.");
+          _mostrarError(messenger, "Contraseña incorrecta. Verificá los datos.");
         }
       } else {
-        _mostrarError("El DNI ingresado no está registrado en el sistema");
+        _mostrarError(messenger, "El DNI ingresado no está registrado en el sistema");
       }
     } catch (e) {
       if (mounted) {
-        _mostrarError("Fallo de conexión o error de sistema: $e");
+        _mostrarError(messenger, "Fallo de conexión o error de sistema: $e");
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _mostrarError(String mensaje) {
-    ScaffoldMessenger.of(context).showSnackBar(
+  // ✅ Mentora: Recibimos el messenger como parámetro para no depender del context global
+  void _mostrarError(ScaffoldMessengerState messenger, String mensaje) {
+    messenger.showSnackBar(
       SnackBar(
         content: Text(mensaje), 
         backgroundColor: Colors.redAccent,
@@ -128,7 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 25),
               child: Container(
-                width: 420, // Ajuste para pantallas Desktop (Windows)
+                width: 420, 
                 padding: const EdgeInsets.all(35),
                 decoration: BoxDecoration(
                   color: Colors.white.withAlpha(245), 

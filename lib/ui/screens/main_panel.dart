@@ -35,6 +35,7 @@ class _MainPanelState extends State<MainPanel> {
             icon: const Icon(Icons.logout_outlined),
             tooltip: 'Cerrar Sesión',
             onPressed: () async {
+              // ✅ Mentora: ¡Excelente captura del navigator!
               final navigator = Navigator.of(context);
               await PrefsService.clear();
               if (!mounted) return;
@@ -58,9 +59,8 @@ class _MainPanelState extends State<MainPanel> {
           ),
 
           SafeArea(
-            child: Center( // Center ayuda a que en Windows no se pegue a la izquierda
+            child: Center(
               child: ConstrainedBox(
-                // LIMITADOR: En Windows no pasará de 600px, en celu usa el ancho disponible
                 constraints: const BoxConstraints(maxWidth: 600), 
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20.0),
@@ -75,8 +75,6 @@ class _MainPanelState extends State<MainPanel> {
 
                       Expanded(
                         child: GridView.count(
-                          // Mantenemos 2 columnas, pero al estar en un contenedor de 600px,
-                          // los botones ahora tendrán un tamaño humano en la PC.
                           crossAxisCount: 2, 
                           crossAxisSpacing: 15,
                           mainAxisSpacing: 15,
@@ -181,7 +179,8 @@ class _MainPanelState extends State<MainPanel> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => WidgetsBinding.instance.addPostFrameCallback((_) => onTap()),
+        // ✅ Mentora: Limpieza del callback innecesario
+        onTap: onTap,
         borderRadius: BorderRadius.circular(22),
         child: Container(
           decoration: BoxDecoration(
@@ -193,12 +192,12 @@ class _MainPanelState extends State<MainPanel> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(10), // Un poquito más chico el padding del icono
+                padding: const EdgeInsets.all(10), 
                 decoration: BoxDecoration(
                   color: color.withAlpha(40),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icono, color: color, size: 28), // Icono de 28px en lugar de 32px
+                child: Icon(icono, color: color, size: 28), 
               ),
               const SizedBox(height: 10),
               Text(
@@ -206,7 +205,7 @@ class _MainPanelState extends State<MainPanel> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 11, // Texto un punto más chico
+                  fontSize: 11, 
                   fontWeight: FontWeight.bold,
                   letterSpacing: 0.5
                 ),

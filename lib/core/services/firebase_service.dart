@@ -30,7 +30,7 @@ class FirebaseService {
   
   Future<void> registrarSolicitudRevision({
     required String dni,
-    required String nombreUsuario, // <-- NUEVO: Recibimos el nombre
+    required String nombreUsuario, 
     required String etiqueta,
     required String campo,
     required File archivo,
@@ -49,7 +49,7 @@ class FirebaseService {
 
       await _db.collection('REVISIONES').add({
         'dni': dni.trim(),
-        'nombre_usuario': nombreUsuario, // <-- NUEVO: Guardamos el nombre en Firestore
+        'nombre_usuario': nombreUsuario, 
         'campo': campo,
         'coleccion_destino': coleccionDestino,
         'etiqueta': etiqueta,
@@ -90,13 +90,37 @@ class FirebaseService {
         String colDestino = datos['coleccion_destino'];
         String idDoc = datos['dni'];
         String campoAct = datos['campo'];
-        String nuevaF = datos['fecha_vencimiento'];
-
+        
         DocumentReference destinoRef = _db.collection(colDestino).doc(idDoc);
-        batch.update(destinoRef, {campoAct: nuevaF});
+        Map<String, dynamic> camposAActualizar = {};
+
+        // ✅ Mentora: Lógica inteligente de enrutamiento de datos
+        if (campoAct.startsWith('VENCIMIENTO_')) {
+          // Trámite de Papeles: Guardamos la fecha Y la URL del archivo
+          String campoArchivo = campoAct.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
+          camposAActualizar[campoAct] = datos['fecha_vencimiento'];
+          camposAActualizar[campoArchivo] = datos['url_archivo'];
+          camposAActualizar['ultima_auditoria'] = FieldValue.serverTimestamp();
+          
+        } else if (campoAct == 'SOLICITUD_VEHICULO') {
+          // Trámite de Mi Equipo (Tractor)
+          camposAActualizar['VEHICULO'] = datos['patente'];
+          
+        } else if (campoAct == 'SOLICITUD_ENGANCHE') {
+          // Trámite de Mi Equipo (Batea/Tolva)
+          camposAActualizar['ENGANCHE'] = datos['patente'];
+          
+        } else {
+          // Fallback de seguridad
+          camposAActualizar[campoAct] = datos['fecha_vencimiento'];
+        }
+
+        batch.update(destinoRef, camposAActualizar);
       } 
       
-      if (!aprobado && datos != null && datos['path_storage'] != null) {
+      // ✅ Mentora: Borramos el archivo del Storage solo si se RECHAZA. 
+      // Si se aprueba, lo necesitamos alojado para verlo en los perfiles.
+      if (!aprobado && datos != null && datos['path_storage'] != null && datos['path_storage'].toString().isNotEmpty) {
         try {
           await _storage.ref().child(datos['path_storage']).delete();
         } catch (e) {
@@ -104,6 +128,7 @@ class FirebaseService {
         }
       }
 
+      // Borramos la solicitud
       DocumentReference solicitudRef = _db.collection('REVISIONES').doc(idSolicitud);
       batch.delete(solicitudRef);
 

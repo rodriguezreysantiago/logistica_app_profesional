@@ -47,51 +47,53 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
         debugPrint("📦 Memoria Volvo: ${_cacheVolvo.length} unidades listas.");
       }
     } catch (e) {
-      debugPrint("📡 [INFO] Sin conexión a la red de Volvo.");
+      debugPrint("📡 [INFO] Sin conexión a la red de Volvo: $e");
     }
   }
 
-  void _sincronizarUnidadIndividual(String patente, String vin) {
+  // ✅ Mentora: Función asíncrona "fire-and-forget" bien estructurada
+  Future<void> _sincronizarUnidadIndividual(String patente, String vin) async {
     final String cleanVin = vin.trim().toUpperCase();
 
-    Future(() async {
+    try {
       double? metros;
-      try {
-        final infoEnCache = _cacheVolvo.firstWhere(
-          (v) => v['vin'].toString().toUpperCase() == cleanVin,
-          orElse: () => null,
-        );
+      
+      // 1. Buscamos en el caché rápido
+      final infoEnCache = _cacheVolvo.firstWhere(
+        (v) => v['vin'].toString().toUpperCase() == cleanVin,
+        orElse: () => null,
+      );
 
-        if (infoEnCache != null) {
-          metros = (infoEnCache['hrTotalVehicleDistance'] ?? 
-                    infoEnCache['lastKnownOdometer'] ?? 0).toDouble();
-        } 
+      if (infoEnCache != null) {
+        metros = (infoEnCache['hrTotalVehicleDistance'] ?? 
+                  infoEnCache['lastKnownOdometer'] ?? 0).toDouble();
+      } 
 
-        if (metros == null || metros <= 0) {
-          final api = VolvoApiService();
-          metros = await api.traerKilometrajeCualquierVia(cleanVin);
-        }
-
-        if (metros != null && metros > 0 && mounted) {
-          final double kmReal = metros / 1000;
-
-          FirebaseFirestore.instance
-              .collection('VEHICULOS')
-              .doc(patente)
-              .update({
-            'KM_ACTUAL': kmReal,
-            'ULTIMA_SINCRO': FieldValue.serverTimestamp(),
-            'SINCRO_TIPO': 'AUTOMATIC_LIVE',
-          }).then((_) {
-            debugPrint("✅ $patente: Sincronizado.");
-          }).catchError((_) {}); 
-        } else {
-          debugPrint("💤 $patente: En reposo.");
-        }
-      } catch (e) {
-        debugPrint("ℹ️ $patente: No disponible.");
+      // 2. Si no estaba en caché, le pegamos a la API individual
+      if (metros == null || metros <= 0) {
+        final api = VolvoApiService();
+        metros = await api.traerKilometrajeCualquierVia(cleanVin);
       }
-    });
+
+      // 3. Si conseguimos datos reales, actualizamos Firebase
+      if (metros != null && metros > 0) {
+        final double kmReal = metros / 1000;
+
+        await FirebaseFirestore.instance
+            .collection('VEHICULOS')
+            .doc(patente)
+            .update({
+          'KM_ACTUAL': kmReal,
+          'ULTIMA_SINCRO': FieldValue.serverTimestamp(),
+          'SINCRO_TIPO': 'AUTOMATIC_LIVE',
+        });
+        debugPrint("✅ $patente: Sincronizado ($kmReal km).");
+      } else {
+        debugPrint("💤 $patente: En reposo.");
+      }
+    } catch (e) {
+      debugPrint("ℹ️ $patente: No disponible ($e).");
+    }
   }
 
   IconData _getIconoPorTipo(String tipo) {
@@ -132,7 +134,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
       child: Scaffold(
         extendBodyBehindAppBar: true,
         appBar: AppBar(
-          title: const Text("Gestión de Flota"),
+          title: const Text("Gestión de Flota", style: TextStyle(fontWeight: FontWeight.bold)),
           centerTitle: true,
           backgroundColor: const Color(0xFF1A3A5A).withAlpha(220),
           elevation: 0,
@@ -143,12 +145,17 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
               onPressed: () async {
                 await ReportGenerator.mostrarOpcionesYGenerar(context, _cacheVolvo);
               },
-              tooltip: "Configurar y Descargar Reporte",
+              tooltip: "Descargar Reporte",
             ),
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.orangeAccent),
-              onPressed: _precargarDatosVolvo,
-              tooltip: "Refrescar datos de Volvo",
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Refrescando datos desde Volvo..."), duration: Duration(seconds: 1)),
+                );
+                _precargarDatosVolvo();
+              },
+              tooltip: "Refrescar Volvo",
             )
           ],
           bottom: PreferredSize(
@@ -250,7 +257,10 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                 iconColor: Colors.orangeAccent,
                 collapsedIconColor: Colors.white70,
                 onExpansionChanged: (isExpanded) {
+                  // ✅ Mentora: Trigger de la sincronización silenciosa
                   if (isExpanded && vData['MARCA'] == 'VOLVO' && vData['VIN'] != null) {
+                    // Solo llamamos a la función, no le ponemos 'await' porque no queremos 
+                    // que la interfaz se trabe esperando. "Fire and forget".
                     _sincronizarUnidadIndividual(patenteId, vData['VIN']);
                   }
                 },
@@ -282,7 +292,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                           Icons.fact_check, 
                           _getColorVencimiento(vData['VENCIMIENTO_RTO']), 
                           onAction: () => _abrirDocumento(vData['ARCHIVO_RTO'], "RTO - $patenteId"),
-                          urlArchivo: vData['ARCHIVO_RTO'], // ✅ Semáforo de color
+                          urlArchivo: vData['ARCHIVO_RTO'], 
                         ),
                         _filaInfo(
                           "Póliza Seguro:", 
@@ -290,7 +300,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                           Icons.security, 
                           _getColorVencimiento(vData['VENCIMIENTO_SEGURO']), 
                           onAction: () => _abrirDocumento(vData['ARCHIVO_SEGURO'], "Seguro - $patenteId"),
-                          urlArchivo: vData['ARCHIVO_SEGURO'], // ✅ Semáforo de color
+                          urlArchivo: vData['ARCHIVO_SEGURO'], 
                         ),
                         const SizedBox(height: 15),
                         SizedBox(
@@ -327,13 +337,15 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           const SizedBox(width: 10),
           Text(titulo, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const Spacer(),
-          Text(valor.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          Expanded( // ✅ Mentora: Agregado para que textos largos (como empresas) no rompan la pantalla
+            child: Text(valor.toUpperCase(), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
           if (onAction != null) ...[
             const SizedBox(width: 10),
             IconButton(
               icon: Icon(
                 Icons.visibility, 
-                color: tieneArchivo ? Colors.blueAccent : Colors.white24, // ✅ Gris si no hay nada, Azul si hay algo
+                color: tieneArchivo ? Colors.blueAccent : Colors.white24, 
                 size: 18
               ), 
               onPressed: onAction, 

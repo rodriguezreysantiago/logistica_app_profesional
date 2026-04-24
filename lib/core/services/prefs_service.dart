@@ -28,6 +28,11 @@ class PrefsService {
 
   // CERRAR SESIÓN
   static Future<void> clear() async {
-    await _prefs.clear();
+    // ✅ Mentora: Eliminación quirúrgica. Solo borramos los datos del usuario.
+    // Así preservamos otras futuras configuraciones (ej: themeMode, notificaciones).
+    await _prefs.remove('dni');
+    await _prefs.remove('nombre');
+    await _prefs.remove('rol');
+    await _prefs.setBool('isLoggedIn', false); 
   }
 }

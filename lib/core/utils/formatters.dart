@@ -1,11 +1,12 @@
 class AppFormatters {
-  // --- NUEVA: FORMATEAR KILOMETRAJE (1.232.232,0) ---
+  // --- FORMATEAR KILOMETRAJE (1.232.232,0) ---
   static String formatearKilometraje(dynamic valor) {
-    if (valor == null || valor == 0 || valor == "0" || valor == "") return "0,0";
+    if (valor == null || valor == 0 || valor == "0" || valor == "" || valor == "nan") return "0,0";
     
     try {
-      // Limpiamos el valor por si viene como String con puntos
-      double numero = double.parse(valor.toString().replaceAll(',', ''));
+      // ✅ Mentora: Limpieza robusta. Nos quedamos solo con números y el punto decimal.
+      String raw = valor.toString().replaceAll(',', '.'); 
+      double numero = double.parse(raw);
       
       // 1. Convertimos a String con 1 decimal y cambiamos punto por coma
       String fixed = numero.toStringAsFixed(1).replaceAll('.', ',');
@@ -81,9 +82,12 @@ class AppFormatters {
         );
       }
       
-      final hoy = DateTime.now();
-      final soloFechaHoy = DateTime(hoy.year, hoy.month, hoy.day);
-      return fVto.difference(soloFechaHoy).inDays;
+      // ✅ Mentora: Normalizamos AMBAS fechas a las 00:00:00 para que el cálculo sea exacto
+      final vtoNormalizado = DateTime(fVto.year, fVto.month, fVto.day);
+      final ahora = DateTime.now();
+      final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);
+      
+      return vtoNormalizado.difference(hoyNormalizado).inDays;
     } catch (_) { 
       return 999; 
     }

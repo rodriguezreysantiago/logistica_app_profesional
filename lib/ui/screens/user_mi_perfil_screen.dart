@@ -21,6 +21,10 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     required Future<void> Function() tarea,
     required String mensajeExito,
   }) async {
+    // ✅ Mentora: Capturamos Navigator y Messenger en la línea 1.
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -29,15 +33,14 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
 
     try {
       await tarea();
-      if (!mounted) return;
-      Navigator.of(context).pop(); // Cierra Loading
-      ScaffoldMessenger.of(context).showSnackBar(
+      // ✅ Mentora: Usamos las referencias seguras sin consultar al context nuevamente.
+      navigator.pop(); // Cierra Loading
+      messenger.showSnackBar(
         SnackBar(content: Text(mensajeExito), backgroundColor: Colors.green),
       );
     } catch (e) {
-      if (!mounted) return;
-      Navigator.of(context).pop(); // Cierra Loading
-      ScaffoldMessenger.of(context).showSnackBar(
+      navigator.pop(); // Cierra Loading
+      messenger.showSnackBar(
         SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
       );
     }

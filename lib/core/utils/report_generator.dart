@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' as ex; // ✅ Prefijo para evitar conflictos con Flutter
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +7,9 @@ import 'package:intl/intl.dart';
 
 class ReportGenerator {
   static Future<void> mostrarOpcionesYGenerar(BuildContext context, List<dynamic> cacheVolvo) async {
+    // ✅ Mentora: Capturamos el messenger ANTES del await para evitar el error de context asíncrono
+    final messenger = ScaffoldMessenger.of(context);
+    
     Map<String, bool> opciones = {
       "TIPO": true,
       "MARCA": true,
@@ -57,6 +60,8 @@ class ReportGenerator {
     );
 
     if (confirmar == true) {
+      // ✅ Mentora: Usamos el messenger capturado para que no chille el Linter
+      messenger.showSnackBar(const SnackBar(content: Text("Generando Excel...")));
       await _ejecutarGeneracion(opciones, cacheVolvo);
     }
   }
@@ -64,15 +69,27 @@ class ReportGenerator {
   static Future<void> _ejecutarGeneracion(Map<String, bool> filtros, List<dynamic> cacheVolvo) async {
     try {
       final snapshot = await FirebaseFirestore.instance.collection('VEHICULOS').get();
-      var excel = Excel.createExcel();
+      var excel = ex.Excel.createExcel(); 
       String sheetName = "REPORTE";
       excel.rename('Sheet1', sheetName);
-      Sheet sheetObject = excel[sheetName];
+      ex.Sheet sheetObject = excel[sheetName];
 
-      // Formato para números (Miles y Decimales)
-      var numStyle = CellStyle(numberFormat: NumFormat.standard_4); 
+      // ✅ Mentora: Estilos corregidos. Definimos bordes de forma segura para la librería
+      var borderThin = ex.Border(borderStyle: ex.BorderStyle.Thin);
+      var borderMedium = ex.Border(borderStyle: ex.BorderStyle.Medium);
+
+      var headerStyle = ex.CellStyle(
+        bold: true, 
+        backgroundColorHex: ex.ExcelColor.fromHexString("#D3D3D3"),
+        horizontalAlign: ex.HorizontalAlign.Center,
+        bottomBorder: borderMedium,
+        topBorder: borderThin,
+        leftBorder: borderThin,
+        rightBorder: borderThin,
+      );
+
+      var numStyle = ex.CellStyle(numberFormat: ex.NumFormat.standard_4); 
       
-      // Función para convertir YYYY-MM-DD a DD/MM/AAAA
       String formatearFecha(dynamic fecha) {
         if (fecha == null || fecha.toString().isEmpty || fecha == '-') return '-';
         try {
@@ -86,16 +103,15 @@ class ReportGenerator {
       List<String> titulos = ["PATENTE"];
       filtros.forEach((key, val) { if (val) titulos.add(key); });
 
-      // Cabecera
+      // Escribir Cabecera
       for (var i = 0; i < titulos.length; i++) {
-        var cell = sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
-        cell.value = TextCellValue(titulos[i]);
-        cell.cellStyle = CellStyle(bold: true, backgroundColorHex: ExcelColor.fromHexString("#D3D3D3"));
+        var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+        cell.value = ex.TextCellValue(titulos[i]);
+        cell.cellStyle = headerStyle;
       }
 
       int row = 1;
       for (var doc in snapshot.docs) {
-        // ✅ CORRECCIÓN: Definimos data una sola vez para evitar el unnecessary_cast
         final Map<String, dynamic> data = doc.data();
         final String patente = doc.id;
         final String vin = (data['VIN'] ?? '').toString().trim().toUpperCase();
@@ -108,23 +124,19 @@ class ReportGenerator {
         int col = 0;
         String limpiar(dynamic val) => val?.toString().replaceAll(',', '').replaceAll(':', '') ?? '';
 
-        // Escribir Patente (Columna fija 0)
-        sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(patente);
+        // Patente
+        sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(patente);
 
-        if (filtros["TIPO"]!) { sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(limpiar(data['TIPO'])); }
-        if (filtros["MARCA"]!) { sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(limpiar(data['MARCA'])); }
-        if (filtros["MODELO"]!) { sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(limpiar(data['MODELO'])); }
-        if (filtros["EMPRESA"]!) { sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(limpiar(data['EMPRESA'])); }
-        if (filtros["VIN"]!) { sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(vin.isEmpty ? "-" : vin); }
+        if (filtros["TIPO"]!) { sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(limpiar(data['TIPO'])); }
+        if (filtros["MARCA"]!) { sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(limpiar(data['MARCA'])); }
+        if (filtros["MODELO"]!) { sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(limpiar(data['MODELO'])); }
+        if (filtros["EMPRESA"]!) { sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(limpiar(data['EMPRESA'])); }
+        if (filtros["VIN"]!) { sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(vin.isEmpty ? "-" : vin); }
 
-        // KM ACTUAL con formato de miles y decimal
         if (filtros["KM ACTUAL"]!) {
-          double kmValue = 0.0;
-          if (data['KM_ACTUAL'] is num) {
-            kmValue = (data['KM_ACTUAL']).toDouble();
-          }
-          var cell = sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row));
-          cell.value = DoubleCellValue(kmValue);
+          double kmValue = (data['KM_ACTUAL'] is num) ? (data['KM_ACTUAL']).toDouble() : 0.0;
+          var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row));
+          cell.value = ex.DoubleCellValue(kmValue);
           cell.cellStyle = numStyle;
         }
 
@@ -134,45 +146,51 @@ class ReportGenerator {
         }
 
         if (filtros["CONSUMO (L)"]!) {
-          var cell = sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row));
-          cell.value = DoubleCellValue(litros);
+          var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row));
+          cell.value = ex.DoubleCellValue(litros);
           cell.cellStyle = numStyle;
         }
         
         if (filtros["PROMEDIO KM/L"]!) {
           double kmValue = (data['KM_ACTUAL'] is num) ? (data['KM_ACTUAL']).toDouble() : 0.0;
-          double promedio = (litros > 0 && kmValue > 0) ? double.parse((kmValue / litros).toStringAsFixed(2)) : 0.0;
-          var cell = sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row));
-          cell.value = DoubleCellValue(promedio);
+          double promedio = (litros > 0) ? (kmValue / litros) : 0.0;
+          var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row));
+          cell.value = ex.DoubleCellValue(double.parse(promedio.toStringAsFixed(2)));
           cell.cellStyle = numStyle;
         }
 
         if (filtros["VENCIMIENTO RTO"]!) {
-          sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(formatearFecha(data['VENCIMIENTO_RTO']));
+          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(formatearFecha(data['VENCIMIENTO_RTO']));
         }
         if (filtros["VENCIMIENTO SEGURO"]!) {
-          sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(formatearFecha(data['VENCIMIENTO_SEGURO']));
+          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(formatearFecha(data['VENCIMIENTO_SEGURO']));
         }
         
         if (filtros["ESTADO CONEXION"]!) {
-          sheetObject.cell(CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = TextCellValue(volvoData != null ? "CONECTADO" : "OFFLINE");
+          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(volvoData != null ? "CONECTADO" : "OFFLINE");
         }
 
         row++;
       }
 
       for (var i = 0; i < titulos.length; i++) {
-        sheetObject.setColumnWidth(i, 32.0);
+        sheetObject.setColumnWidth(i, 22.0); 
       }
 
       final now = DateTime.now();
-      final path = "${(await getApplicationDocumentsDirectory()).path}/REPORTE_${now.day}_${now.hour}${now.minute}.xlsx";
+      final String timestamp = "${now.day}_${now.month}_${now.hour}${now.minute}";
+      final directory = await getApplicationDocumentsDirectory();
+      final path = "${directory.path}/Reporte_Flota_$timestamp.xlsx";
+      
       final fileBytes = excel.save();
       if (fileBytes != null) {
-        File(path)..createSync(recursive: true)..writeAsBytesSync(fileBytes);
-      }
-      if (Platform.isWindows) {
-        await Process.run('explorer.exe', [path]);
+        File(path)
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(fileBytes);
+        
+        if (Platform.isWindows) {
+          await Process.run('cmd', ['/c', 'start', '', path]);
+        }
       }
     } catch (e) {
       debugPrint("❌ Error Reporte: $e");

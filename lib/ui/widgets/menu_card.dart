@@ -21,12 +21,8 @@ class MenuCard extends StatelessWidget {
       color: color,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       child: InkWell(
-        // BLINDAJE PARA WINDOWS: Evita conflictos de navegación y gestos
-        onTap: () {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            onTap();
-          });
-        },
+        // ✅ Mentora: Asignación directa y limpia. El InkWell ya es seguro por naturaleza.
+        onTap: onTap,
         borderRadius: BorderRadius.circular(15),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -53,7 +49,7 @@ class MenuCard extends StatelessWidget {
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
-                  fontSize: 14, // Ajustado para que quepan títulos largos
+                  fontSize: 14, 
                   letterSpacing: 1.1,
                 ),
               ),

@@ -9,9 +9,10 @@ class PreviewScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Mejoramos la detección: verifica si contiene .pdf ignorando mayúsculas/minúsculas
-    // y considerando que puede haber tokens de Firebase después.
-    final bool esPdf = url.toLowerCase().contains('.pdf');
+    // ✅ Mentora: Detección a prueba de balas. 
+    // Ignoramos los tokens de Firebase cortando desde el '?' y verificamos la extensión real.
+    final urlSinParametros = url.split('?').first.toLowerCase();
+    final bool esPdf = urlSinParametros.endsWith('.pdf');
 
     return Scaffold(
       appBar: AppBar(

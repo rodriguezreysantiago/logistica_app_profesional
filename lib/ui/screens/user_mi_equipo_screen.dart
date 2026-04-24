@@ -74,29 +74,32 @@ class UserMiEquipoScreen extends StatelessWidget {
 
   // --- ENVÍO DE SOLICITUD A "REVISIONES" (UNIFICADO) ---
   Future<void> _enviarSolicitudCambio(BuildContext context, String tipo, String actual, String nueva, String nombre) async {
+    // ✅ Mentora: Capturamos el messenger en la línea 1 para evitar crasheos al cerrar el modal
+    final messenger = ScaffoldMessenger.of(context);
+
     try {
-      // ✅ Guardamos en REVISIONES para que Ariel lo vea junto con los carnets
       await FirebaseFirestore.instance.collection('REVISIONES').add({
         'dni': dniUser,
         'nombre_usuario': nombre,
         'etiqueta': 'CAMBIO DE ${tipo.contains("TRACTOR") ? "UNIDAD" : "EQUIPO"}',
         'campo': tipo.contains("TRACTOR") ? 'SOLICITUD_VEHICULO' : 'SOLICITUD_ENGANCHE',
-        'patente': nueva, // Patente solicitada
-        'unidad_actual': actual, // Patente que suelta
-        'fecha_vencimiento': '2026-12-31', // Dummy para el orderby
-        'tipo_solicitud': 'CAMBIO_EQUIPO', // Flag para el diálogo del admin
+        'patente': nueva, 
+        'unidad_actual': actual, 
+        'fecha_vencimiento': '2026-12-31', 
+        'tipo_solicitud': 'CAMBIO_EQUIPO', 
         'coleccion_destino': 'EMPLEADOS',
         'url_archivo': '', 
         'fecha_solicitud': FieldValue.serverTimestamp(),
       });
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Solicitud enviada. Aguarde aprobación de oficina."), backgroundColor: Colors.orange),
-        );
-      }
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Solicitud enviada. Aguarde aprobación de oficina."), backgroundColor: Colors.orange),
+      );
     } catch (e) {
       debugPrint("Error Solicitud: $e");
+      messenger.showSnackBar(
+        SnackBar(content: Text("Error al enviar solicitud: $e"), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -158,7 +161,6 @@ class UserMiEquipoScreen extends StatelessWidget {
   }
 
   Widget _buildSeccionUnidad(BuildContext context, String titulo, String patente, IconData icono, List<QueryDocumentSnapshot> solicitudes, String claveSoli, String nombreChofer) {
-    // Buscamos si existe la revisión pendiente por el campo específico
     var solicitudPendiente = solicitudes.where((s) {
       var d = s.data() as Map<String, dynamic>;
       return d['campo'] == claveSoli;

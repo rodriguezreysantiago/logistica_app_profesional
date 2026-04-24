@@ -146,23 +146,23 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
     });
   }
 
+  // ✅ Mentora: Le quitamos el try/catch. Queremos que el error "suba" y aborte el guardado si falla.
   Future<String?> _subirArchivoAcoplado(String patente, String campo, File archivo) async {
-    try {
-      String extension = archivo.path.split('.').last;
-      // Ruta organizada en Storage para auditoría administrativa
-      String nombreArchivo = "${patente}_ADMIN_UPDATE_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
-      Reference ref = FirebaseStorage.instance.ref().child('VEHICULOS_DOCS/$nombreArchivo');
-      await ref.putFile(archivo);
-      return await ref.getDownloadURL();
-    } catch (e) {
-      return null;
-    }
+    String extension = archivo.path.split('.').last;
+    String nombreArchivo = "${patente}_ADMIN_UPDATE_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension";
+    Reference ref = FirebaseStorage.instance.ref().child('VEHICULOS_DOCS/$nombreArchivo');
+    await ref.putFile(archivo);
+    return await ref.getDownloadURL();
   }
 
   void _abrirEditorAcoplado(BuildContext context, Map<String, dynamic> item) {
     DateTime fechaSeleccionada = DateTime.tryParse(item['fecha']) ?? DateTime.now();
     File? archivoSeleccionado;
     bool subiendo = false;
+
+    // ✅ Mentora: Capturamos el context seguro desde la pantalla base, no desde el modal
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
 
     showModalBottomSheet(
       context: context,
@@ -193,7 +193,10 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                     firstDate: DateTime(2020),
                     lastDate: DateTime(2040),
                   );
-                  if (picker != null) setState(() => fechaSeleccionada = picker);
+                  // ✅ Mentora: Evitamos crasheos si el usuario cierra el modal rápido
+                  if (picker != null && stContext.mounted) {
+                    setState(() => fechaSeleccionada = picker);
+                  }
                 },
               ),
               const SizedBox(height: 10),
@@ -204,7 +207,9 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                     type: FileType.custom,
                     allowedExtensions: ['jpg', 'pdf', 'png', 'jpeg'],
                   );
-                  if (result != null) setState(() => archivoSeleccionado = File(result.files.single.path!));
+                  if (result != null && stContext.mounted) {
+                    setState(() => archivoSeleccionado = File(result.files.single.path!));
+                  }
                 },
                 child: Container(
                   padding: const EdgeInsets.all(15),
@@ -249,21 +254,36 @@ class AdminVencimientosAcopladosScreen extends StatelessWidget {
                         onPressed: () async {
                           setState(() => subiendo = true);
                           
-                          String? urlFinal = item['foto'];
-                          if (archivoSeleccionado != null) {
-                            urlFinal = await _subirArchivoAcoplado(item['patente'], item['campo_base'], archivoSeleccionado!);
+                          try {
+                            String? urlFinal = item['foto'];
+                            
+                            // Si hay archivo nuevo, lo subimos. Si esto falla, saltamos al catch 
+                            // y NO actualizamos Firebase, evitando borrar la foto anterior.
+                            if (archivoSeleccionado != null) {
+                              urlFinal = await _subirArchivoAcoplado(item['patente'], item['campo_base'], archivoSeleccionado!);
+                            }
+                            
+                            String fechaString = fechaSeleccionada.toString().split(' ')[0];
+                            
+                            await FirebaseFirestore.instance.collection('VEHICULOS').doc(item['patente']).update({
+                              "VENCIMIENTO_${item['campo_base']}": fechaString,
+                              "ARCHIVO_${item['campo_base']}": urlFinal,
+                              "admin_audit_date": FieldValue.serverTimestamp(),
+                            });
+                            
+                            messenger.showSnackBar(
+                              SnackBar(content: Text("${item['doc_nombre']} actualizado con éxito"), backgroundColor: Colors.green)
+                            );
+                            navigator.pop(); // Usamos la referencia capturada al inicio
+
+                          } catch (e) {
+                            messenger.showSnackBar(
+                              SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red)
+                            );
+                            if (stContext.mounted) {
+                              setState(() => subiendo = false);
+                            }
                           }
-                          
-                          String fechaString = fechaSeleccionada.toString().split(' ')[0];
-                          
-                          // ACTUALIZACIÓN SIGUIENDO LA LÓGICA DE PARES
-                          await FirebaseFirestore.instance.collection('VEHICULOS').doc(item['patente']).update({
-                            "VENCIMIENTO_${item['campo_base']}": fechaString,
-                            "ARCHIVO_${item['campo_base']}": urlFinal,
-                            "admin_audit_date": FieldValue.serverTimestamp(),
-                          });
-                          
-                          if (stContext.mounted) Navigator.pop(stContext);
                         },
                         child: const Text("GUARDAR"),
                       ),

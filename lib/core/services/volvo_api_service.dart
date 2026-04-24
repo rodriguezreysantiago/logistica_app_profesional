@@ -7,9 +7,8 @@ class VolvoApiService {
   final String clientSecret = 'yeBgBh3of3';
   final String baseUrl = 'https://api.volvotrucks.com';
   
-  // ✅ AJUSTE DE RESILIENCIA: Bajamos a 3 segundos. 
-  // Si el camión tiene corriente, la API de Volvo responde en < 1s. 
-  // Si no responde en 3s, asumimos que está "cortado" en el depósito.
+  // ✅ AJUSTE DE RESILIENCIA: 3 segundos. 
+  // Si el camión tiene corriente, la API de Volvo responde rápido.
   final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 3),
@@ -44,7 +43,7 @@ class VolvoApiService {
     }
   }
 
-  // ✅ MÉTODO DE RASTREO PROFUNDO: Ahora mucho más rápido y silencioso
+  // ✅ MÉTODO DE RASTREO PROFUNDO
   Future<double?> traerKilometrajeCualquierVia(String vin) async {
     final String cleanVin = vin.trim().toUpperCase();
     
@@ -88,8 +87,7 @@ class VolvoApiService {
       }
     } catch (_) {}
 
-    // --- INTENTO 3: UTILIZATION (Basado en el a16.html que pasaste) ---
-    // Agregamos este intento porque los datos de utilización suelen estar más disponibles
+    // --- INTENTO 3: UTILIZATION ---
     try {
       final res = await _dio.get(
         '$baseUrl/vehicle/vehicles/$cleanVin/utilization',
@@ -102,8 +100,11 @@ class VolvoApiService {
         ),
       );
       if (res.statusCode == 200 && res.data != null) {
-         // Según a16.html, el totalDistance está en metros
-         return double.tryParse(res.data['totalDistance'].toString());
+         // ✅ Mentora: Dividimos por 1000 para pasar de metros a kilómetros
+         final double? metros = double.tryParse(res.data['totalDistance'].toString());
+         if (metros != null) {
+           return metros / 1000;
+         }
       }
     } catch (_) {}
 

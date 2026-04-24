@@ -10,7 +10,6 @@ class AdminVehiculoAltaScreen extends StatefulWidget {
 
 class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
   final _formKey = GlobalKey<FormState>();
-  bool _isLoading = false;
   
   final TextEditingController _patenteCtrl = TextEditingController();
   final TextEditingController _marcaCtrl = TextEditingController();
@@ -20,7 +19,6 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
 
   String _tipoSeleccionado = 'TRACTOR';
   
-  // ✅ CAMBIO: Empresa Ariel por defecto
   String _empresaSeleccionada = "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)";
 
   final List<String> _empresas = [
@@ -41,19 +39,27 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
   Future<void> _guardarVehiculo() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    // ✅ Mentora: Capturamos el contexto asíncrono
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    // ✅ Mentora: Usamos el Diálogo Modal de carga unificado (Bloquea la pantalla)
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(child: CircularProgressIndicator(color: Colors.greenAccent)),
+    );
+
     final String patente = _patenteCtrl.text.trim().toUpperCase();
 
     try {
       final doc = await FirebaseFirestore.instance.collection('VEHICULOS').doc(patente).get();
       
-      if (!mounted) return;
-
       if (doc.exists) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        if (mounted) navigator.pop(); // Cierra el loader
+        messenger.showSnackBar(
           const SnackBar(content: Text("Error: Esta patente ya está registrada"), backgroundColor: Colors.red)
         );
-        setState(() => _isLoading = false);
         return;
       }
 
@@ -75,16 +81,18 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
       });
 
       if (!mounted) return;
+      navigator.pop(); // Cierra el loader
       
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text("Unidad registrada con éxito"), backgroundColor: Colors.green)
       );
-      Navigator.of(context).pop();
+      
+      navigator.pop(); // Cierra la pantalla de formulario
 
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
+      navigator.pop(); // Cierra el loader
+      messenger.showSnackBar(
         SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red)
       );
     }
@@ -115,28 +123,28 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
               const SizedBox(height: 25),
               _buildInput("Marca", _marcaCtrl, Icons.factory),
               _buildInput("Modelo", _modeloCtrl, Icons.commute),
-              _buildInput("Año (Modelo)", _anioCtrl, Icons.calendar_today, isNumeric: true),
-              _buildInput("Código VIN", _vinCtrl, Icons.fingerprint, hint: "17 caracteres (Volvo Connect)", esOpcional: _tipoSeleccionado != 'TRACTOR'),
+              _buildInput("Año (Modelo)", _anioCtrl, Icons.calendar_today, isNumeric: true, maxLength: 4),
+              // ✅ Mentora: Validación forzada a 17 caracteres para el VIN si es Tractor
+              _buildInput("Código VIN", _vinCtrl, Icons.fingerprint, hint: "Obligatorio (17 caracteres)", esOpcional: _tipoSeleccionado != 'TRACTOR', isVin: true),
               const Text("Empresa Propietaria", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               _buildEmpresaDropdown(),
               const SizedBox(height: 40),
-              _isLoading 
-                ? const Center(child: CircularProgressIndicator(color: Colors.greenAccent))
-                : SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton.icon(
-                      onPressed: _guardarVehiculo,
-                      icon: const Icon(Icons.cloud_upload),
-                      label: const Text("REGISTRAR EN FLOTA", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.greenAccent,
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
+              
+              SizedBox(
+                width: double.infinity,
+                height: 55,
+                child: ElevatedButton.icon(
+                  onPressed: _guardarVehiculo,
+                  icon: const Icon(Icons.cloud_upload),
+                  label: const Text("REGISTRAR EN FLOTA", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.greenAccent,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
+                ),
+              ),
               const SizedBox(height: 30),
             ],
           ),
@@ -145,15 +153,18 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
     );
   }
 
-  Widget _buildInput(String label, TextEditingController ctrl, IconData icon, {bool isNumeric = false, String? hint, bool esOpcional = false}) {
+  // ✅ Mentora: Agregué 'maxLength' y 'isVin' para personalizar la validación
+  Widget _buildInput(String label, TextEditingController ctrl, IconData icon, {bool isNumeric = false, String? hint, bool esOpcional = false, int? maxLength, bool isVin = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: TextFormField(
         controller: ctrl,
         keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
+        maxLength: maxLength,
         style: const TextStyle(color: Colors.white, fontSize: 14),
         textCapitalization: TextCapitalization.characters,
         decoration: InputDecoration(
+          counterStyle: const TextStyle(color: Colors.white24),
           labelText: label,
           hintText: hint,
           hintStyle: const TextStyle(color: Colors.white24, fontSize: 11),
@@ -165,8 +176,14 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.greenAccent)),
         ),
         validator: (value) {
-          if (esOpcional) return null;
-          return (value == null || value.isEmpty) ? "Campo obligatorio" : null;
+          if (esOpcional && (value == null || value.isEmpty)) return null;
+          if (!esOpcional && (value == null || value.isEmpty)) return "Campo obligatorio";
+          
+          // ✅ Mentora: Validación estricta del VIN
+          if (isVin && value != null && value.trim().length != 17) {
+            return "El VIN debe tener exactamente 17 caracteres";
+          }
+          return null;
         },
       ),
     );
@@ -183,7 +200,13 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
         ],
         selected: {_tipoSeleccionado},
         onSelectionChanged: (Set<String> newSelection) {
-          setState(() => _tipoSeleccionado = newSelection.first);
+          setState(() {
+             _tipoSeleccionado = newSelection.first;
+             // ✅ Mentora: Si cambiamos a Batea/Tolva, limpiamos el VIN para evitar datos basura
+             if (_tipoSeleccionado != 'TRACTOR') {
+               _vinCtrl.clear();
+             }
+          });
         },
         style: SegmentedButton.styleFrom(
           backgroundColor: Colors.white.withAlpha(10),

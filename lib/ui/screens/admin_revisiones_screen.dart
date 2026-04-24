@@ -147,7 +147,29 @@ class AdminRevisionesScreen extends StatelessWidget {
                               Text("VER PDF", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
                             ],
                           )
-                        : Image.network(url, height: 200, fit: BoxFit.contain),
+                        // ✅ Mentora: Manejo profesional de imágenes de red.
+                        : Image.network(
+                            url, 
+                            height: 200, 
+                            fit: BoxFit.contain,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return const SizedBox(
+                                height: 200,
+                                child: Center(child: CircularProgressIndicator(color: Colors.orangeAccent)),
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) => const SizedBox(
+                              height: 150,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.broken_image, color: Colors.white24, size: 50),
+                                  Text("Error al cargar imagen", style: TextStyle(color: Colors.white54)),
+                                ],
+                              ),
+                            ),
+                          ),
                   ),
                   const SizedBox(height: 20),
                   const Text("NUEVO VENCIMIENTO PROPUESTO:", style: TextStyle(color: Colors.white54, fontSize: 10)),
@@ -174,13 +196,18 @@ class AdminRevisionesScreen extends StatelessWidget {
   }
 
   Future<void> _procesarDecision(BuildContext context, String idSolicitud, bool aprobado, Map<String, dynamic> data) async {
-    Navigator.of(context).pop();
+    // ✅ Mentora: Guardamos referencias ANTES de la operación asíncrona.
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    // Cerramos el diálogo inmediatamente para dar feedback de rapidez al usuario
+    navigator.pop();
+    
     final bool esCambioEquipo = data['tipo_solicitud'] == 'CAMBIO_EQUIPO';
 
     try {
       if (aprobado) {
         if (esCambioEquipo) {
-          // ✅ LÓGICA DE BATCH PARA CAMBIO DE EQUIPO (Efectivo e instantáneo)
           final batch = FirebaseFirestore.instance.batch();
           final String dni = data['dni'];
           final String nueva = data['patente'];
@@ -206,7 +233,7 @@ class AdminRevisionesScreen extends StatelessWidget {
 
           await batch.commit();
         } else {
-          // ✅ LÓGICA PARA PAPELES (RTO, CARNET, ETC)
+          // Lógica para papeles
           final String coleccion = data['coleccion_destino'] ?? 'EMPLEADOS';
           final String idDestino = (data['dni'] ?? data['patente'] ?? "").toString().trim().toUpperCase();
           final String campoVencimiento = data['campo'] ?? ''; 
@@ -223,12 +250,12 @@ class AdminRevisionesScreen extends StatelessWidget {
           await FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud).delete();
         }
       } else {
-        // Si se rechaza, solo borramos la solicitud
+        // Rechazado: Solo borramos la solicitud
         await FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud).delete();
       }
 
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      // ✅ Mentora: Usamos la referencia guardada, 100% seguro contra crasheos.
+      messenger.showSnackBar(
         SnackBar(
           content: Text(aprobado ? "Operación exitosa" : "Solicitud descartada"),
           backgroundColor: aprobado ? Colors.green : Colors.redAccent,
@@ -236,6 +263,9 @@ class AdminRevisionesScreen extends StatelessWidget {
       );
     } catch (e) {
       debugPrint("Error en proceso: $e");
+      messenger.showSnackBar(
+        SnackBar(content: Text("Ocurrió un error: $e"), backgroundColor: Colors.red),
+      );
     }
   }
 

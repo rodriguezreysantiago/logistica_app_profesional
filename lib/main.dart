@@ -14,7 +14,7 @@ import 'ui/screens/user_mi_perfil_screen.dart';
 import 'ui/screens/user_mis_vencimientos_screen.dart'; 
 
 // Pantallas de administrador
-import 'ui/screens/admin_panel_screen.dart';           
+import 'ui/screens/admin_panel_screen.dart';            
 import 'ui/screens/admin_personal_lista_screen.dart';  
 import 'ui/screens/admin_vehiculos_lista_screen.dart'; 
 import 'ui/screens/admin_vencimientos_menu_screen.dart'; 
@@ -138,8 +138,34 @@ class LogisticaApp extends StatelessWidget {
             return buildRoute(const AdminVencimientosAcopladosScreen());
 
           default:
-            return null;
+            return null; // Si no la encuentra, salta a onUnknownRoute
         }
+      },
+      
+      // ✅ Mentora: El salvavidas para rutas rotas (Error 404)
+      onUnknownRoute: (settings) {
+        return MaterialPageRoute(
+          builder: (context) => Scaffold(
+            backgroundColor: const Color(0xFF0D1D2D),
+            appBar: AppBar(title: const Text("Error de Navegación")),
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.broken_image_outlined, color: Colors.white24, size: 60),
+                  const SizedBox(height: 20),
+                  const Text("La pantalla solicitada no existe.", style: TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black),
+                    onPressed: () => Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false),
+                    child: const Text("VOLVER AL INICIO"),
+                  )
+                ],
+              ),
+            ),
+          ),
+        );
       },
     );
   }
