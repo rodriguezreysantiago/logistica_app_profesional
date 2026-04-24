@@ -14,11 +14,13 @@ import 'ui/screens/user_mi_perfil_screen.dart';
 import 'ui/screens/user_mis_vencimientos_screen.dart'; 
 
 // Pantallas de administrador
-import 'ui/screens/admin_panel_screen.dart';            
+import 'ui/screens/admin_panel_screen.dart';             
 import 'ui/screens/admin_personal_lista_screen.dart';  
 import 'ui/screens/admin_vehiculos_lista_screen.dart'; 
 import 'ui/screens/admin_vencimientos_menu_screen.dart'; 
 import 'ui/screens/admin_revisiones_screen.dart'; 
+// ✅ AGREGADO: Import de la nueva pantalla de reportes
+import 'ui/screens/admin_reports_screen.dart'; 
 
 // Pantallas de auditoría
 import 'ui/screens/admin_vencimientos_choferes_screen.dart';
@@ -26,11 +28,8 @@ import 'ui/screens/admin_vencimientos_chasis_screen.dart';
 import 'ui/screens/admin_vencimientos_acoplados_screen.dart';
 
 void main() async {
-  // 1. Vincula el motor de Flutter al sistema operativo (Android/iOS/PC)
-  // Es fundamental que esto esté antes de cualquier plugin.
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 2. Inicialización de Firebase
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -40,7 +39,6 @@ void main() async {
     debugPrint("🚨 Error crítico al iniciar Firebase: $e");
   }
 
-  // 3. Inicialización de servicios (Carga de memoria local y notificaciones)
   await PrefsService.init();          
   await NotificationService.init();   
 
@@ -56,7 +54,6 @@ class LogisticaApp extends StatelessWidget {
       title: 'S.M.A.R.T. Logística',
       debugShowCheckedModeBanner: false,
       
-      // Localización al español (Argentina)
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -82,7 +79,6 @@ class LogisticaApp extends StatelessWidget {
         ),
       ),
 
-      // LÓGICA DE AUTO-LOGUEO
       initialRoute: PrefsService.isLoggedIn ? '/home' : '/',
       
       routes: {
@@ -128,6 +124,10 @@ class LogisticaApp extends StatelessWidget {
           case '/admin_revisiones':
             return buildRoute(const AdminRevisionesScreen());
 
+          // ✅ AGREGADO: Ruta para el Centro de Reportes
+          case '/admin_reportes':
+            return buildRoute(const AdminReportsScreen());
+
           case '/vencimientos_choferes':
             return buildRoute(const AdminVencimientosChoferesScreen());
 
@@ -138,11 +138,10 @@ class LogisticaApp extends StatelessWidget {
             return buildRoute(const AdminVencimientosAcopladosScreen());
 
           default:
-            return null; // Si no la encuentra, salta a onUnknownRoute
+            return null; 
         }
       },
       
-      // ✅ Mentora: El salvavidas para rutas rotas (Error 404)
       onUnknownRoute: (settings) {
         return MaterialPageRoute(
           builder: (context) => Scaffold(

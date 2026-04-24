@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/services/volvo_api_service.dart'; 
-import '../../core/utils/report_generator.dart';
 import '../widgets/preview_screen.dart';
 import 'admin_vehiculo_form_screen.dart'; 
 import 'admin_vehiculo_alta_screen.dart'; 
@@ -29,6 +28,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
         });
       }
     });
+    // ✅ Se mantiene la precarga inicial para que el caché esté listo
     _precargarDatosVolvo();
   }
 
@@ -51,14 +51,12 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
     }
   }
 
-  // ✅ Mentora: Función asíncrona "fire-and-forget" bien estructurada
   Future<void> _sincronizarUnidadIndividual(String patente, String vin) async {
     final String cleanVin = vin.trim().toUpperCase();
 
     try {
       double? metros;
       
-      // 1. Buscamos en el caché rápido
       final infoEnCache = _cacheVolvo.firstWhere(
         (v) => v['vin'].toString().toUpperCase() == cleanVin,
         orElse: () => null,
@@ -69,13 +67,11 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                   infoEnCache['lastKnownOdometer'] ?? 0).toDouble();
       } 
 
-      // 2. Si no estaba en caché, le pegamos a la API individual
       if (metros == null || metros <= 0) {
         final api = VolvoApiService();
         metros = await api.traerKilometrajeCualquierVia(cleanVin);
       }
 
-      // 3. Si conseguimos datos reales, actualizamos Firebase
       if (metros != null && metros > 0) {
         final double kmReal = metros / 1000;
 
@@ -88,8 +84,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           'SINCRO_TIPO': 'AUTOMATIC_LIVE',
         });
         debugPrint("✅ $patente: Sincronizado ($kmReal km).");
-      } else {
-        debugPrint("💤 $patente: En reposo.");
       }
     } catch (e) {
       debugPrint("ℹ️ $patente: No disponible ($e).");
@@ -139,25 +133,8 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           backgroundColor: const Color(0xFF1A3A5A).withAlpha(220),
           elevation: 0,
           foregroundColor: Colors.white,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.file_download, color: Colors.greenAccent),
-              onPressed: () async {
-                await ReportGenerator.mostrarOpcionesYGenerar(context, _cacheVolvo);
-              },
-              tooltip: "Descargar Reporte",
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.orangeAccent),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Refrescando datos desde Volvo..."), duration: Duration(seconds: 1)),
-                );
-                _precargarDatosVolvo();
-              },
-              tooltip: "Refrescar Volvo",
-            )
-          ],
+          // ✅ Botón de refresco ELIMINADO de los actions
+          actions: const [], 
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(110),
             child: Column(
@@ -257,10 +234,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                 iconColor: Colors.orangeAccent,
                 collapsedIconColor: Colors.white70,
                 onExpansionChanged: (isExpanded) {
-                  // ✅ Mentora: Trigger de la sincronización silenciosa
                   if (isExpanded && vData['MARCA'] == 'VOLVO' && vData['VIN'] != null) {
-                    // Solo llamamos a la función, no le ponemos 'await' porque no queremos 
-                    // que la interfaz se trabe esperando. "Fire and forget".
                     _sincronizarUnidadIndividual(patenteId, vData['VIN']);
                   }
                 },
@@ -337,7 +311,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           const SizedBox(width: 10),
           Text(titulo, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const Spacer(),
-          Expanded( // ✅ Mentora: Agregado para que textos largos (como empresas) no rompan la pantalla
+          Expanded(
             child: Text(valor.toUpperCase(), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
           ),
           if (onAction != null) ...[

@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// ✅ Mentora: Mantené siempre estas rutas organizadas
-import '../../core/services/volvo_api_service.dart'; 
 import '../../core/services/notification_service.dart';
 
 class AdminPanelScreen extends StatefulWidget {
@@ -14,7 +12,6 @@ class AdminPanelScreen extends StatefulWidget {
 
 class _AdminPanelScreenState extends State<AdminPanelScreen> {
   StreamSubscription? _revisionesSubscription;
-  bool _estaCargandoVolvo = false; 
 
   @override
   void initState() {
@@ -24,15 +21,12 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 
   @override
   void dispose() {
-    // ✅ Mentora: Obligatorio para no fugar memoria
     _revisionesSubscription?.cancel();
     super.dispose();
   }
 
   void _activarEscuchaRevisiones() {
-    // Primero cancelamos por si quedó alguna previa colgada
     _revisionesSubscription?.cancel();
-
     _revisionesSubscription = FirebaseFirestore.instance
         .collection('REVISIONES')
         .snapshots()
@@ -40,9 +34,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added) {
           try {
-            // ✅ CORRECCIÓN: Eliminado el cast innecesario (as Map...)
             final data = change.doc.data();
-            
             if (data != null) {
               NotificationService.mostrarAvisoAdmin(
                 chofer: data['nombre_usuario'] ?? "Un chofer",
@@ -87,12 +79,11 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               children: [
                 const SizedBox(height: 10),
                 
-                // --- BOTÓN DE REVISIONES ---
+                // --- REVISIONES PENDIENTES ---
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance.collection('REVISIONES').snapshots(),
                   builder: (context, snap) {
                     int pendientes = snap.hasData ? snap.data!.docs.length : 0;
-                    
                     return _buildOption(
                       context,
                       "REVISIONES PENDIENTES",
@@ -111,14 +102,25 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                 _buildOption(context, "GESTIÓN DE FLOTA", "Control de camiones y acoplados", Icons.local_shipping_outlined, Colors.purpleAccent, '/admin_vehiculos_lista'),
                 const SizedBox(height: 15),
                 _buildOption(context, "AUDITORÍA DE VENCIMIENTOS", "Alertas críticas de documentos", Icons.assignment_late_outlined, Colors.redAccent, '/admin_vencimientos_menu'),
+                const SizedBox(height: 15),
                 
-                const SizedBox(height: 40),
-                _buildVolvoTestButton(context),
+                // --- CENTRO DE REPORTES ---
+                _buildOption(
+                  context, 
+                  "CENTRO DE REPORTES", 
+                  "Exportar Excel y analítica de flota", 
+                  Icons.analytics_outlined, 
+                  Colors.amberAccent, 
+                  '/admin_reportes'
+                ),
+
+                const SizedBox(height: 30),
                 
+                // Pie de página
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 20),
                   child: Center(
-                    child: Text("v 1.0.4 - Bahía Blanca", 
+                    child: Text("v 1.0.6 - Bahía Blanca", 
                       style: TextStyle(color: Colors.white24, fontSize: 10))
                   ),
                 )
@@ -136,7 +138,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
       decoration: BoxDecoration(
         color: Colors.white.withAlpha(20),
         borderRadius: BorderRadius.circular(22),
-        // ✅ Mentora: Si hay pendientes, el borde brilla más. Pequeños detalles que hacen la App "pro".
         border: Border.all(color: color.withAlpha(badgeCount > 0 ? 180 : 40), width: badgeCount > 0 ? 1.5 : 0.8),
       ),
       child: ListTile(
@@ -165,56 +166,5 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         onTap: () => Navigator.pushNamed(context, ruta),
       ),
     );
-  }
-
-  Widget _buildVolvoTestButton(BuildContext context) {
-    return Opacity(
-      opacity: _estaCargandoVolvo ? 0.6 : 1.0,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.blue.withAlpha(20),
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: Colors.blueAccent.withAlpha(80)),
-        ),
-        child: ListTile(
-          onTap: _estaCargandoVolvo ? null : () => _ejecutarTestVolvo(context),
-          leading: _estaCargandoVolvo 
-            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blueAccent))
-            : const Icon(Icons.cloud_sync_outlined, color: Colors.blueAccent),
-          title: const Text("TEST API VOLVO CONNECT", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 13)),
-          subtitle: const Text("Sincronizar datos de la flota en tiempo real", style: TextStyle(color: Colors.white54, fontSize: 11)),
-          trailing: const Icon(Icons.play_arrow_rounded, color: Colors.blueAccent),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _ejecutarTestVolvo(BuildContext context) async {
-    // ✅ Mentora: Manejo de estado para evitar spam de clics
-    setState(() => _estaCargandoVolvo = true);
-    final messenger = ScaffoldMessenger.of(context);
-    
-    messenger.showSnackBar(const SnackBar(content: Text("Conectando con Volvo Cloud..."), backgroundColor: Colors.blueAccent, duration: Duration(seconds: 1)));
-
-    try {
-      final service = VolvoApiService();
-      final unidades = await service.traerDatosFlota();
-
-      if (!mounted) return;
-
-      if (unidades.isNotEmpty) {
-        messenger.showSnackBar(
-          SnackBar(content: Text("¡Conexión Exitosa! ${unidades.length} camiones detectados."), backgroundColor: Colors.green),
-        );
-      } else {
-        messenger.showSnackBar(const SnackBar(content: Text("Sin unidades reportadas en Volvo."), backgroundColor: Colors.orange));
-      }
-    } catch (e) {
-      if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text("Error de conexión: $e"), backgroundColor: Colors.red));
-      }
-    } finally {
-      if (mounted) setState(() => _estaCargandoVolvo = false);
-    }
   }
 }
