@@ -20,6 +20,7 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
   String _tipoSeleccionado = 'TRACTOR';
   
   String _empresaSeleccionada = "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)";
+  bool _guardando = false; // ✅ ESCUDO: Estado para bloquear doble clicks
 
   final List<String> _empresas = [
     "VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)",
@@ -38,28 +39,25 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
 
   Future<void> _guardarVehiculo() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_guardando) return; // ✅ ESCUDO: Si ya está guardando, aborta el click extra
 
-    // ✅ Mentora: Capturamos el contexto asíncrono
+    setState(() => _guardando = true);
+
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    // ✅ Mentora: Usamos el Diálogo Modal de carga unificado (Bloquea la pantalla)
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (c) => const Center(child: CircularProgressIndicator(color: Colors.greenAccent)),
-    );
-
-    final String patente = _patenteCtrl.text.trim().toUpperCase();
+    // ✅ NORMALIZACIÓN CRÍTICA: Mayúsculas, sin espacios adelante/atrás, y sin espacios en el medio.
+    final String patente = _patenteCtrl.text.trim().toUpperCase().replaceAll(' ', '');
 
     try {
       final doc = await FirebaseFirestore.instance.collection('VEHICULOS').doc(patente).get();
       
       if (doc.exists) {
-        if (mounted) navigator.pop(); // Cierra el loader
+        if (!mounted) return;
         messenger.showSnackBar(
           const SnackBar(content: Text("Error: Esta patente ya está registrada"), backgroundColor: Colors.red)
         );
+        setState(() => _guardando = false);
         return;
       }
 
@@ -81,20 +79,18 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
       });
 
       if (!mounted) return;
-      navigator.pop(); // Cierra el loader
-      
       messenger.showSnackBar(
         const SnackBar(content: Text("Unidad registrada con éxito"), backgroundColor: Colors.green)
       );
       
-      navigator.pop(); // Cierra la pantalla de formulario
+      navigator.pop(); // Cierra la pantalla de formulario exitosamente
 
     } catch (e) {
       if (!mounted) return;
-      navigator.pop(); // Cierra el loader
       messenger.showSnackBar(
         SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red)
       );
+      setState(() => _guardando = false); // Reactivamos el botón si falla
     }
   }
 
@@ -124,23 +120,29 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
               _buildInput("Marca", _marcaCtrl, Icons.factory),
               _buildInput("Modelo", _modeloCtrl, Icons.commute),
               _buildInput("Año (Modelo)", _anioCtrl, Icons.calendar_today, isNumeric: true, maxLength: 4),
-              // ✅ Mentora: Validación forzada a 17 caracteres para el VIN si es Tractor
               _buildInput("Código VIN", _vinCtrl, Icons.fingerprint, hint: "Obligatorio (17 caracteres)", esOpcional: _tipoSeleccionado != 'TRACTOR', isVin: true),
               const Text("Empresa Propietaria", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               _buildEmpresaDropdown(),
               const SizedBox(height: 40),
               
+              // ✅ BOTÓN INTELIGENTE: Cambia su diseño y se bloquea si está cargando
               SizedBox(
                 width: double.infinity,
                 height: 55,
                 child: ElevatedButton.icon(
-                  onPressed: _guardarVehiculo,
-                  icon: const Icon(Icons.cloud_upload),
-                  label: const Text("REGISTRAR EN FLOTA", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  onPressed: _guardando ? null : _guardarVehiculo,
+                  icon: _guardando 
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black54, strokeWidth: 2))
+                      : const Icon(Icons.cloud_upload),
+                  label: Text(
+                    _guardando ? "REGISTRANDO..." : "REGISTRAR EN FLOTA", 
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.greenAccent,
                     foregroundColor: Colors.black,
+                    disabledBackgroundColor: Colors.greenAccent.withAlpha(100),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
@@ -153,7 +155,6 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
     );
   }
 
-  // ✅ Mentora: Agregué 'maxLength' y 'isVin' para personalizar la validación
   Widget _buildInput(String label, TextEditingController ctrl, IconData icon, {bool isNumeric = false, String? hint, bool esOpcional = false, int? maxLength, bool isVin = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
@@ -179,7 +180,6 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
           if (esOpcional && (value == null || value.isEmpty)) return null;
           if (!esOpcional && (value == null || value.isEmpty)) return "Campo obligatorio";
           
-          // ✅ Mentora: Validación estricta del VIN
           if (isVin && value != null && value.trim().length != 17) {
             return "El VIN debe tener exactamente 17 caracteres";
           }
@@ -202,7 +202,6 @@ class _AdminVehiculoAltaScreenState extends State<AdminVehiculoAltaScreen> {
         onSelectionChanged: (Set<String> newSelection) {
           setState(() {
              _tipoSeleccionado = newSelection.first;
-             // ✅ Mentora: Si cambiamos a Batea/Tolva, limpiamos el VIN para evitar datos basura
              if (_tipoSeleccionado != 'TRACTOR') {
                _vinCtrl.clear();
              }

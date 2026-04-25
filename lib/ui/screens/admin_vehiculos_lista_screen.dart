@@ -28,7 +28,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
         });
       }
     });
-    // ✅ Se mantiene la precarga inicial para que el caché esté listo
     _precargarDatosVolvo();
   }
 
@@ -133,7 +132,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
           backgroundColor: const Color(0xFF1A3A5A).withAlpha(220),
           elevation: 0,
           foregroundColor: Colors.white,
-          // ✅ Botón de refresco ELIMINADO de los actions
           actions: const [], 
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(110),
@@ -234,8 +232,10 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                 iconColor: Colors.orangeAccent,
                 collapsedIconColor: Colors.white70,
                 onExpansionChanged: (isExpanded) {
-                  if (isExpanded && vData['MARCA'] == 'VOLVO' && vData['VIN'] != null) {
-                    _sincronizarUnidadIndividual(patenteId, vData['VIN']);
+                  // ✅ CORRECCIÓN: Verificamos que el VIN no sea un String vacío
+                  final String vinClean = vData['VIN']?.toString().trim() ?? '';
+                  if (isExpanded && vData['MARCA'] == 'VOLVO' && vinClean.isNotEmpty) {
+                    _sincronizarUnidadIndividual(patenteId, vinClean);
                   }
                 },
                 leading: CircleAvatar(

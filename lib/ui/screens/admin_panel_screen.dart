@@ -12,6 +12,7 @@ class AdminPanelScreen extends StatefulWidget {
 
 class _AdminPanelScreenState extends State<AdminPanelScreen> {
   StreamSubscription? _revisionesSubscription;
+  bool _esPrimeraCarga = true; // ✅ ESCUDO ANTI-SPAM
 
   @override
   void initState() {
@@ -31,6 +32,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         .collection('REVISIONES')
         .snapshots()
         .listen((snapshot) {
+      
+      // ✅ Si es la primera vez que carga, marcamos false y abortamos.
+      // Así evitamos que salten notificaciones por trámites viejos.
+      if (_esPrimeraCarga) {
+        _esPrimeraCarga = false;
+        return;
+      }
+
       for (var change in snapshot.docChanges) {
         if (change.type == DocumentChangeType.added) {
           try {
@@ -79,7 +88,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               children: [
                 const SizedBox(height: 10),
                 
-                // --- REVISIONES PENDIENTES ---
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance.collection('REVISIONES').snapshots(),
                   builder: (context, snap) {
@@ -104,7 +112,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                 _buildOption(context, "AUDITORÍA DE VENCIMIENTOS", "Alertas críticas de documentos", Icons.assignment_late_outlined, Colors.redAccent, '/admin_vencimientos_menu'),
                 const SizedBox(height: 15),
                 
-                // --- CENTRO DE REPORTES ---
                 _buildOption(
                   context, 
                   "CENTRO DE REPORTES", 
@@ -116,11 +123,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 
                 const SizedBox(height: 30),
                 
-                // Pie de página
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 20),
                   child: Center(
-                    child: Text("v 1.0.6 - Bahía Blanca", 
+                    child: Text("v 1.0.7 - Flete MB", 
                       style: TextStyle(color: Colors.white24, fontSize: 10))
                   ),
                 )
