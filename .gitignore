@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Entorno y Seguridad S.M.A.R.T. Logística
+serviceAccountKey.json
+*.jks
+*.p12
+*.key
+.env
