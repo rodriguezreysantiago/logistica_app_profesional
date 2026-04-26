@@ -15,7 +15,7 @@ class FirebaseService {
   }) async {
     try {
       String extension = archivo.path.split('.').last.toLowerCase();
-      String contentType = (extension == 'pdf') ? 'application/pdf' : 'image/jpeg';
+      String contentType = _obtenerContentType(extension);
 
       final ref = _storage.ref().child(rutaStorage);
       await ref.putFile(archivo, SettableMetadata(contentType: contentType));
@@ -39,7 +39,7 @@ class FirebaseService {
   }) async {
     try {
       String extension = archivo.path.split('.').last.toLowerCase();
-      String contentType = extension == 'pdf' ? 'application/pdf' : 'image/jpeg';
+      String contentType = _obtenerContentType(extension);
 
       final String nombreArchivo = 'REVISIONES/${dni}_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension';
       
@@ -62,6 +62,13 @@ class FirebaseService {
     } catch (e) {
       throw Exception("Error al registrar solicitud: $e");
     }
+  }
+
+  // --- Helper para Content-Type ---
+  String _obtenerContentType(String extension) {
+    if (extension == 'pdf') return 'application/pdf';
+    if (extension == 'png') return 'image/png';
+    return 'image/jpeg'; // Fallback por defecto para jpg/jpeg
   }
 
   // --- 3. GESTIÓN DE USUARIOS / EMPLEADOS ---
@@ -94,7 +101,6 @@ class FirebaseService {
         DocumentReference destinoRef = _db.collection(colDestino).doc(idDoc);
         Map<String, dynamic> camposAActualizar = {};
 
-        // ✅ Mentora: Lógica inteligente de enrutamiento de datos
         if (campoAct.startsWith('VENCIMIENTO_')) {
           // Trámite de Papeles: Guardamos la fecha Y la URL del archivo
           String campoArchivo = campoAct.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
@@ -102,13 +108,24 @@ class FirebaseService {
           camposAActualizar[campoArchivo] = datos['url_archivo'];
           camposAActualizar['ultima_auditoria'] = FieldValue.serverTimestamp();
           
-        } else if (campoAct == 'SOLICITUD_VEHICULO') {
-          // Trámite de Mi Equipo (Tractor)
-          camposAActualizar['VEHICULO'] = datos['patente'];
+        } else if (campoAct == 'SOLICITUD_VEHICULO' || campoAct == 'SOLICITUD_ENGANCHE') {
+          // ✅ MENTOR: Lógica corregida para la rotación de flota
+          String campoDestino = campoAct == 'SOLICITUD_VEHICULO' ? 'VEHICULO' : 'ENGANCHE';
+          String nuevaUnidad = datos['patente'] ?? '';
+          String unidadActual = datos['unidad_actual'] ?? '';
           
-        } else if (campoAct == 'SOLICITUD_ENGANCHE') {
-          // Trámite de Mi Equipo (Batea/Tolva)
-          camposAActualizar['ENGANCHE'] = datos['patente'];
+          camposAActualizar[campoDestino] = nuevaUnidad;
+          
+          // Ocupamos la nueva unidad
+          if (nuevaUnidad.isNotEmpty && nuevaUnidad != "-") {
+            DocumentReference vehiculoNuevoRef = _db.collection('VEHICULOS').doc(nuevaUnidad);
+            batch.update(vehiculoNuevoRef, {'ESTADO': 'ASIGNADO'});
+          }
+          // Liberamos la unidad vieja
+          if (unidadActual.isNotEmpty && unidadActual != "-" && unidadActual != "SIN ASIGNAR") {
+            DocumentReference vehiculoViejoRef = _db.collection('VEHICULOS').doc(unidadActual);
+            batch.update(vehiculoViejoRef, {'ESTADO': 'LIBRE'});
+          }
           
         } else {
           // Fallback de seguridad
@@ -118,8 +135,7 @@ class FirebaseService {
         batch.update(destinoRef, camposAActualizar);
       } 
       
-      // ✅ Mentora: Borramos el archivo del Storage solo si se RECHAZA. 
-      // Si se aprueba, lo necesitamos alojado para verlo en los perfiles.
+      // Borramos el archivo del Storage solo si se RECHAZA. 
       if (!aprobado && datos != null && datos['path_storage'] != null && datos['path_storage'].toString().isNotEmpty) {
         try {
           await _storage.ref().child(datos['path_storage']).delete();

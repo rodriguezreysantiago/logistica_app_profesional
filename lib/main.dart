@@ -5,6 +5,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'firebase_options.dart';
 import 'core/services/prefs_service.dart'; 
 import 'core/services/notification_service.dart'; 
+
+// Pantallas de inicio y menú
 import 'ui/screens/login_screen.dart';
 import 'ui/screens/main_panel.dart';
 
@@ -19,7 +21,6 @@ import 'ui/screens/admin_personal_lista_screen.dart';
 import 'ui/screens/admin_vehiculos_lista_screen.dart'; 
 import 'ui/screens/admin_vencimientos_menu_screen.dart'; 
 import 'ui/screens/admin_revisiones_screen.dart'; 
-// ✅ AGREGADO: Import de la nueva pantalla de reportes
 import 'ui/screens/admin_reports_screen.dart'; 
 
 // Pantallas de auditoría
@@ -28,6 +29,7 @@ import 'ui/screens/admin_vencimientos_chasis_screen.dart';
 import 'ui/screens/admin_vencimientos_acoplados_screen.dart';
 
 void main() async {
+  // Asegura que los bindings de Flutter estén listos antes de ejecutar código nativo
   WidgetsFlutterBinding.ensureInitialized();
   
   try {
@@ -39,6 +41,7 @@ void main() async {
     debugPrint("🚨 Error crítico al iniciar Firebase: $e");
   }
 
+  // ✅ MENTOR: Excelente práctica inicializar servicios clave antes del runApp
   await PrefsService.init();          
   await NotificationService.init();   
 
@@ -64,18 +67,46 @@ class LogisticaApp extends StatelessWidget {
       ],
       locale: const Locale('es', 'AR'),
       
+      // ✅ MENTOR: Aquí inyectamos el "Cerebro Visual" moderno
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1A3A5A),
-          primary: const Color(0xFF1A3A5A),
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF09141F), // Azul noche profundo
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.greenAccent,
           secondary: Colors.orangeAccent,
+          surface: Color(0xFF132538), // Color base para tarjetas y campos
         ),
         appBarTheme: const AppBarTheme(
-          centerTitle: true,
+          backgroundColor: Colors.transparent,
           elevation: 0,
-          backgroundColor: Color(0xFF1A3A5A),
-          foregroundColor: Colors.white,
+          centerTitle: true,
+          titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: Colors.white),
+          iconTheme: IconThemeData(color: Colors.greenAccent),
+        ),
+        // Centralizamos el diseño de todos los campos de texto
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF132538),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.greenAccent, width: 1.5)),
+          errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.redAccent, width: 1)),
+          labelStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+          hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+        ),
+        // Centralizamos el diseño de los botones principales
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.greenAccent,
+            foregroundColor: Colors.black,
+            elevation: 6,
+            shadowColor: Colors.greenAccent.withAlpha(100), // Resplandor neón
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+            textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
         ),
       ),
 
@@ -85,6 +116,7 @@ class LogisticaApp extends StatelessWidget {
         '/': (context) => const LoginScreen(),
       },
       
+      // Manejo de rutas dinámicas con paso de argumentos
       onGenerateRoute: (settings) {
         MaterialPageRoute buildRoute(Widget screen) => MaterialPageRoute(
           builder: (_) => screen, 
@@ -99,64 +131,49 @@ class LogisticaApp extends StatelessWidget {
               nombre: args?['nombre'] ?? PrefsService.nombre,
               rol: args?['rol'] ?? PrefsService.rol,
             ));
-
           case '/perfil':
             return buildRoute(UserMiPerfilScreen(dni: settings.arguments as String? ?? PrefsService.dni));
-
           case '/equipo':
             return buildRoute(UserMiEquipoScreen(dniUser: settings.arguments as String? ?? PrefsService.dni));
-
           case '/mis_vencimientos':
             return buildRoute(UserMisVencimientosScreen(dniUser: settings.arguments as String? ?? PrefsService.dni));
-
           case '/admin_panel':
             return buildRoute(const AdminPanelScreen());
-
           case '/admin_personal_lista':
             return buildRoute(const AdminPersonalListaScreen());
-
           case '/admin_vehiculos_lista':
             return buildRoute(const AdminVehiculosListaScreen());
-
           case '/admin_vencimientos_menu':
             return buildRoute(const AdminVencimientosMenuScreen());
-
           case '/admin_revisiones':
             return buildRoute(const AdminRevisionesScreen());
-
-          // ✅ AGREGADO: Ruta para el Centro de Reportes
           case '/admin_reportes':
             return buildRoute(const AdminReportsScreen());
-
           case '/vencimientos_choferes':
             return buildRoute(const AdminVencimientosChoferesScreen());
-
           case '/vencimientos_chasis':
             return buildRoute(const AdminVencimientosChasisScreen());
-
           case '/vencimientos_acoplados':
             return buildRoute(const AdminVencimientosAcopladosScreen());
-
           default:
             return null; 
         }
       },
       
+      // ✅ MENTOR: Simplificamos la pantalla de error para que herede el tema global
       onUnknownRoute: (settings) {
         return MaterialPageRoute(
           builder: (context) => Scaffold(
-            backgroundColor: const Color(0xFF0D1D2D),
-            appBar: AppBar(title: const Text("Error de Navegación")),
+            appBar: AppBar(title: const Text("Ruta No Encontrada")),
             body: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.broken_image_outlined, color: Colors.white24, size: 60),
+                  const Icon(Icons.broken_image_outlined, color: Colors.white24, size: 80),
                   const SizedBox(height: 20),
-                  const Text("La pantalla solicitada no existe.", style: TextStyle(color: Colors.white70)),
-                  const SizedBox(height: 20),
+                  const Text("La pantalla solicitada no existe o fue movida.", style: TextStyle(color: Colors.white70, fontSize: 16)),
+                  const SizedBox(height: 30),
                   ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black),
                     onPressed: () => Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false),
                     child: const Text("VOLVER AL INICIO"),
                   )

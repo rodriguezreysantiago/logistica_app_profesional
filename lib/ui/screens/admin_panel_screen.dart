@@ -12,11 +12,20 @@ class AdminPanelScreen extends StatefulWidget {
 
 class _AdminPanelScreenState extends State<AdminPanelScreen> {
   StreamSubscription? _revisionesSubscription;
-  bool _esPrimeraCarga = true; // ✅ ESCUDO ANTI-SPAM
+  bool _esPrimeraCarga = true; 
+  
+  // ✅ MENTOR: Stream en caché, excelente práctica.
+  late Stream<QuerySnapshot> _pendientesStream;
 
   @override
   void initState() {
     super.initState();
+    
+    _pendientesStream = FirebaseFirestore.instance
+        .collection('REVISIONES')
+        .where('estado', isEqualTo: 'PENDIENTE') 
+        .snapshots();
+
     _activarEscuchaRevisiones();
   }
 
@@ -28,13 +37,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 
   void _activarEscuchaRevisiones() {
     _revisionesSubscription?.cancel();
+    
     _revisionesSubscription = FirebaseFirestore.instance
         .collection('REVISIONES')
+        .where('estado', isEqualTo: 'PENDIENTE')
         .snapshots()
         .listen((snapshot) {
       
-      // ✅ Si es la primera vez que carga, marcamos false y abortamos.
-      // Así evitamos que salten notificaciones por trámites viejos.
       if (_esPrimeraCarga) {
         _esPrimeraCarga = false;
         return;
@@ -55,6 +64,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           }
         }
       }
+    }, onError: (error) {
+      debugPrint("Error en el stream de revisiones: $error");
     });
   }
 
@@ -77,10 +88,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               'assets/images/fondo_login.jpg',
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => 
-                  Container(color: const Color(0xFF0D1D2D)),
+                  Container(color: Theme.of(context).scaffoldBackgroundColor), 
             ),
           ),
-          Positioned.fill(child: Container(color: Colors.black.withAlpha(180))),
+          Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
           
           SafeArea(
             child: ListView(
@@ -89,9 +100,35 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                 const SizedBox(height: 10),
                 
                 StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('REVISIONES').snapshots(),
+                  stream: _pendientesStream,
                   builder: (context, snap) {
-                    int pendientes = snap.hasData ? snap.data!.docs.length : 0;
+                    
+                    if (snap.hasError) {
+                      return _buildOption(
+                        context,
+                        "REVISIONES PENDIENTES",
+                        "Error de conexión",
+                        Icons.error_outline,
+                        Colors.redAccent,
+                        '/admin_revisiones',
+                        badgeCount: 0,
+                      );
+                    }
+
+                    if (snap.connectionState == ConnectionState.waiting) {
+                       return _buildOption(
+                        context,
+                        "REVISIONES PENDIENTES",
+                        "Sincronizando...",
+                        Icons.sync,
+                        Theme.of(context).colorScheme.primary,
+                        '/admin_revisiones',
+                        badgeCount: 0,
+                      );
+                    }
+
+                    int pendientes = snap.data?.docs.length ?? 0;
+                    
                     return _buildOption(
                       context,
                       "REVISIONES PENDIENTES",
@@ -105,7 +142,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                 ),
                 
                 const SizedBox(height: 15),
-                _buildOption(context, "GESTIÓN DE PERSONAL", "Lista de legajos y choferes", Icons.badge_outlined, Colors.blue.shade400, '/admin_personal_lista'),
+                _buildOption(context, "GESTIÓN DE PERSONAL", "Lista de legajos y choferes", Icons.badge_outlined, Colors.blueAccent, '/admin_personal_lista'),
                 const SizedBox(height: 15),
                 _buildOption(context, "GESTIÓN DE FLOTA", "Control de camiones y acoplados", Icons.local_shipping_outlined, Colors.purpleAccent, '/admin_vehiculos_lista'),
                 const SizedBox(height: 15),
@@ -126,8 +163,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 20),
                   child: Center(
-                    child: Text("v 1.0.7 - Flete MB", 
-                      style: TextStyle(color: Colors.white24, fontSize: 10))
+                    child: Text("v 1.0.7 - Base Operativa", 
+                      style: TextStyle(color: Colors.white24, fontSize: 11, letterSpacing: 1))
                   ),
                 )
               ],
@@ -138,38 +175,59 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     );
   }
 
+  // ✅ MENTOR: Ajuste estético para heredar el Theme y perfeccionar el Ripple Effect
   Widget _buildOption(BuildContext context, String titulo, String subtitulo, IconData icono, Color color, String ruta, {int badgeCount = 0}) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 4),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(20),
+        color: Theme.of(context).colorScheme.surface, // Cristal oscuro global
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: color.withAlpha(badgeCount > 0 ? 180 : 40), width: badgeCount > 0 ? 1.5 : 0.8),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        leading: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            CircleAvatar(
-              backgroundColor: color.withAlpha(40), 
-              child: Icon(icono, color: color)
-            ),
-            if (badgeCount > 0)
-              Positioned(
-                right: -4, top: -4,
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                  child: Text("$badgeCount", style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-              ),
-          ],
+        border: Border.all(
+          color: badgeCount > 0 ? color.withAlpha(150) : Colors.white.withAlpha(15), 
+          width: badgeCount > 0 ? 1.5 : 1
         ),
-        title: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 15)),
-        subtitle: Text(subtitulo, style: const TextStyle(color: Colors.white60, fontSize: 12)),
-        trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white24, size: 16),
-        onTap: () => Navigator.pushNamed(context, ruta),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: () => Navigator.pushNamed(context, ruta),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            leading: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: color.withAlpha(25),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icono, color: color, size: 26),
+                ),
+                if (badgeCount > 0)
+                  Positioned(
+                    right: -4, top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent, 
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Theme.of(context).colorScheme.surface, width: 2)
+                      ),
+                      child: Text("$badgeCount", style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+              ],
+            ),
+            title: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14, letterSpacing: 0.5)),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(subtitulo, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+            ),
+            trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white24, size: 16),
+          ),
+        ),
       ),
     );
   }

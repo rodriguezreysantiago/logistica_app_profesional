@@ -9,7 +9,8 @@ class Vehiculo {
   final DateTime? vencimientoRto;
   final DateTime? vencimientoSeguro;
   final String? urlPdfRto;
-  final String estado; // ✅ Mentora: Cambiamos el bool por el String de estado real
+  final String? urlPdfSeguro; // ✅ MENTOR: Agregado para coincidir con la UI
+  final String estado;
 
   Vehiculo({
     required this.dominio,
@@ -22,7 +23,8 @@ class Vehiculo {
     this.vencimientoRto,
     this.vencimientoSeguro,
     this.urlPdfRto,
-    this.estado = 'LIBRE', // Estado por defecto
+    this.urlPdfSeguro, // ✅ MENTOR: Inicializado
+    this.estado = 'LIBRE', 
   });
 
   // Para subir datos a Firebase
@@ -38,7 +40,7 @@ class Vehiculo {
       'VENCIMIENTO_RTO': vencimientoRto?.toIso8601String().split('T')[0], 
       'VENCIMIENTO_SEGURO': vencimientoSeguro?.toIso8601String().split('T')[0],
       'ARCHIVO_RTO': urlPdfRto,
-      // ✅ Mentora: Guardamos el estado exacto que ya tenía, sin forzarlo a LIBRE
+      'ARCHIVO_SEGURO': urlPdfSeguro, // ✅ MENTOR: Mapeado para la subida
       'ESTADO': estado.toUpperCase(), 
     };
   }
@@ -60,7 +62,7 @@ class Vehiculo {
           ? DateTime.tryParse(map['VENCIMIENTO_SEGURO']) 
           : null,
       urlPdfRto: map['ARCHIVO_RTO'],
-      // ✅ Mentora: Leemos el estado real del camión
+      urlPdfSeguro: map['ARCHIVO_SEGURO'], // ✅ MENTOR: Mapeado para la lectura
       estado: map['ESTADO'] ?? 'LIBRE',
     );
   }

@@ -1,6 +1,6 @@
 class ChecklistData {
   // ==========================================
-  // CHECK IN TRACTOR (60 ÍTEMS TOTAL)
+  // CHECK IN TRACTOR (61 ÍTEMS TOTAL)
   // ==========================================
   static const Map<String, List<String>> itemsTractor = {
     "EXTERIOR": [
@@ -29,8 +29,8 @@ class ChecklistData {
       "21. ENGANCHE",
       "22. LLAVE RUEDA",
       "23. CRIQUET",
-      "24. MANGERA DE AIRE",
-      "25. MANGERA DE ENGRASE",
+      "24. MANGUERA DE AIRE",
+      "25. MANGUERA DE ENGRASE",
       "26. CAJA HERRAMIENTAS",
       "27. ESCALERAS ACCESO",
       "28. PASARELAS"
@@ -65,7 +65,7 @@ class ChecklistData {
       "51. VERIFICACION GENERAL PLATO DE ENGANCHE",
       "52. DEPOSITO LIQUIDO HIDRAULICO(MOCHILA)",
       "53. CONECTORES HIDRAULICOS",
-      "54. CONECTORES MANGERA DE AIRE",
+      "54. CONECTORES MANGUERA DE AIRE",
       "55. ABS"
     ],
     "NEUMATICOS": [
@@ -73,7 +73,8 @@ class ChecklistData {
       "57. GOMAS DIRECCION LADO IZQUIERDO",
       "58. GOMAS TRACCION LADO DERECHO",
       "59. GOMAS TRACCION LADO IZQUIERDO",
-      "60. GOMA 3º EJE LADO DERECHO"
+      "60. GOMA 3º EJE LADO DERECHO",
+      "61. GOMA 3º EJE LADO IZQUIERDO" // ✅ MENTOR: Agregada la rueda faltante
     ]
   };
 
@@ -123,13 +124,13 @@ class ChecklistData {
       "33. PULMON FRENO",
       "34. SISTEMA HIDRAULICO (MANGUERAS, CONECTORES)",
       "35. CONTROL DE VALVULA FINAL DE CARRERA",
-      "36. CINLINDRO LEVANTA BATEA",
+      "36. CILINDRO LEVANTA BATEA",
       "37. CONTROL DE BALDE DE CARGA",
       "38. SISTEMA DE VIGIA",
       "39. CONECTORES A CUBIERTA",
       "40. CAÑERIA INTERIOR BATEA",
       "41. BAJADA, ROTORES",
-      "42. LLANTAS, SUGECION A MASA, TUERCAS",
+      "42. LLANTAS, SUJECIÓN A MASA, TUERCAS",
       "43. MASA CONTROL DE JUEGO",
       "44. PERDIDAS DE GRASA, ZUMBIDO DE BOLLERO"
     ],

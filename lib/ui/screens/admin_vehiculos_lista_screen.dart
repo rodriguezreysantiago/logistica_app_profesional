@@ -17,17 +17,35 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchText = "";
   List<dynamic> _cacheVolvo = [];
+  
+  // ✅ MENTOR: Candado de memoria para evitar saturar la API de Volvo si el usuario hace doble clic rápido.
+  final Set<String> _sincronizando = {};
+
+  // ✅ MENTOR: Guardamos los canales de comunicación con Firebase en memoria.
+  // Esto evita que se reconstruyan (y cobren lecturas) cada vez que el usuario presiona una tecla en el buscador.
+  late final Map<String, Stream<QuerySnapshot>> _streamsFijos;
 
   @override
   void initState() {
     super.initState();
+    
+    // Inicializamos las conexiones UNA SOLA VEZ.
+    _streamsFijos = {
+      "TRACTOR": FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', isEqualTo: 'TRACTOR').snapshots(),
+      "BATEA": FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', isEqualTo: 'BATEA').snapshots(),
+      "TOLVA": FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', isEqualTo: 'TOLVA').snapshots(),
+    };
+
     _searchController.addListener(() {
       if (mounted) {
+        // Al teclear, solo actualizamos el texto. El StreamBuilder abajo ya no vuelve a conectarse a internet,
+        // simplemente filtra la lista que ya tiene en memoria.
         setState(() {
           _searchText = _searchController.text.toUpperCase();
         });
       }
     });
+    
     _precargarDatosVolvo();
   }
 
@@ -51,6 +69,10 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
   }
 
   Future<void> _sincronizarUnidadIndividual(String patente, String vin) async {
+    // ✅ MENTOR: Si esta patente ya está en proceso de sincronización, abortamos para no duplicar peticiones.
+    if (_sincronizando.contains(patente)) return;
+    
+    _sincronizando.add(patente); // Ponemos el candado
     final String cleanVin = vin.trim().toUpperCase();
 
     try {
@@ -85,7 +107,10 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
         debugPrint("✅ $patente: Sincronizado ($kmReal km).");
       }
     } catch (e) {
-      debugPrint("ℹ️ $patente: No disponible ($e).");
+      debugPrint("ℹ️ $patente: Sincronización no disponible ($e).");
+    } finally {
+      // ✅ MENTOR: Pase lo que pase (éxito o error), liberamos el candado al terminar.
+      _sincronizando.remove(patente);
     }
   }
 
@@ -101,8 +126,8 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
   Color _getColorVencimiento(String? fecha) {
     if (fecha == null || fecha.isEmpty) return Colors.grey;
     int dias = AppFormatters.calcularDiasRestantes(fecha);
-    if (dias < 0) return Colors.red;
-    if (dias <= 14) return Colors.orange;
+    if (dias < 0) return Colors.redAccent;
+    if (dias <= 14) return Colors.orangeAccent;
     if (dias <= 30) return Colors.greenAccent;
     return Colors.blueAccent;
   }
@@ -110,7 +135,7 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
   void _abrirDocumento(String? url, String nombreDocumento) {
     if (url == null || url.isEmpty || url == "-") {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("No hay archivo digital para $nombreDocumento"), backgroundColor: Colors.orange),
+        SnackBar(content: Text("No hay archivo digital para $nombreDocumento"), backgroundColor: Colors.orangeAccent),
       );
       return;
     }
@@ -122,73 +147,69 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        extendBodyBehindAppBar: true,
-        appBar: AppBar(
-          title: const Text("Gestión de Flota", style: TextStyle(fontWeight: FontWeight.bold)),
-          centerTitle: true,
-          backgroundColor: const Color(0xFF1A3A5A).withAlpha(220),
-          elevation: 0,
-          foregroundColor: Colors.white,
-          actions: const [], 
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(110),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                  child: TextField(
-                    controller: _searchController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: "Buscar patente...",
-                      hintStyle: const TextStyle(color: Colors.white70),
-                      prefixIcon: const Icon(Icons.search, color: Colors.white70),
-                      fillColor: Colors.white.withAlpha(40),
-                      filled: true,
-                      isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+    // ✅ MENTOR: GestureDetector en la base de la pantalla para ocultar el teclado si el usuario toca afuera del buscador.
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          extendBodyBehindAppBar: true,
+          appBar: AppBar(
+            title: const Text("Gestión de Flota"),
+            // ✅ MENTOR: Dejamos que el Theme de main.dart pinte la AppBar. Eliminamos los colores rígidos.
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(110),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
+                    child: TextField(
+                      controller: _searchController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        hintText: "Buscar patente...",
+                        prefixIcon: Icon(Icons.search, color: Colors.greenAccent),
+                        // El resto del estilo lo maneja el Theme Global
+                      ),
                     ),
                   ),
-                ),
-                const TabBar(
-                  indicatorColor: Colors.orangeAccent,
-                  labelColor: Colors.orangeAccent,
-                  unselectedLabelColor: Colors.white,
-                  tabs: [
-                    Tab(icon: Icon(Icons.local_shipping), text: "TRACTORES"),
-                    Tab(icon: Icon(Icons.view_agenda_outlined), text: "BATEAS"),
-                    Tab(icon: Icon(Icons.difference_outlined), text: "TOLVAS"),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: () {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => const AdminVehiculoAltaScreen()));
-          },
-          backgroundColor: Colors.orangeAccent,
-          icon: const Icon(Icons.add_box_outlined, color: Colors.black),
-          label: const Text("NUEVA UNIDAD", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-        ),
-        body: Stack(
-          children: [
-            Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
-            Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
-            SafeArea(
-              child: TabBarView(
-                children: [
-                  _buildListaFiltrada("TRACTOR"),
-                  _buildListaFiltrada("BATEA"),
-                  _buildListaFiltrada("TOLVA"),
+                  const TabBar(
+                    indicatorColor: Colors.greenAccent,
+                    labelColor: Colors.greenAccent,
+                    unselectedLabelColor: Colors.white54,
+                    tabs: [
+                      Tab(icon: Icon(Icons.local_shipping), text: "TRACTORES"),
+                      Tab(icon: Icon(Icons.view_agenda_outlined), text: "BATEAS"),
+                      Tab(icon: Icon(Icons.difference_outlined), text: "TOLVAS"),
+                    ],
+                  ),
                 ],
               ),
             ),
-          ],
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const AdminVehiculoAltaScreen()));
+            },
+            backgroundColor: Colors.greenAccent,
+            icon: const Icon(Icons.add_box_outlined, color: Colors.black),
+            label: const Text("NUEVA UNIDAD", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+          body: Stack(
+            children: [
+              Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
+              Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
+              SafeArea(
+                child: TabBarView(
+                  children: [
+                    _buildListaFiltrada("TRACTOR"),
+                    _buildListaFiltrada("BATEA"),
+                    _buildListaFiltrada("TOLVA"),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -196,14 +217,15 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
 
   Widget _buildListaFiltrada(String tipoVehiculo) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('VEHICULOS')
-          .where('TIPO', isEqualTo: tipoVehiculo)
-          .snapshots(),
+      // ✅ MENTOR: Usamos el stream que precargamos en memoria. No disparamos nuevas peticiones de red.
+      stream: _streamsFijos[tipoVehiculo],
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
+        if (snapshot.hasError) return const Center(child: Text("Error al cargar la flota", style: TextStyle(color: Colors.redAccent)));
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.greenAccent));
 
         final docs = snapshot.data!.docs;
+        
+        // El filtro se hace de forma local, gratis y a la velocidad de la luz.
         final lista = docs.where((doc) {
           final patenteDoc = doc.id.toUpperCase();
           final patenteCampo = (doc['DOMINIO'] as String? ?? '').toUpperCase();
@@ -223,23 +245,22 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
             return Container(
               margin: const EdgeInsets.symmetric(vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha(20),
+                color: const Color(0xFF132538).withAlpha(200), // Usamos el color 'surface' del theme
                 borderRadius: BorderRadius.circular(15),
-                border: Border.all(color: Colors.white.withAlpha(30)),
+                border: Border.all(color: Colors.white.withAlpha(15)),
               ),
               child: ExpansionTile(
                 key: PageStorageKey(patenteId),
-                iconColor: Colors.orangeAccent,
-                collapsedIconColor: Colors.white70,
+                iconColor: Colors.greenAccent,
+                collapsedIconColor: Colors.white54,
                 onExpansionChanged: (isExpanded) {
-                  // ✅ CORRECCIÓN: Verificamos que el VIN no sea un String vacío
                   final String vinClean = vData['VIN']?.toString().trim() ?? '';
                   if (isExpanded && vData['MARCA'] == 'VOLVO' && vinClean.isNotEmpty) {
                     _sincronizarUnidadIndividual(patenteId, vinClean);
                   }
                 },
                 leading: CircleAvatar(
-                  backgroundColor: vData['ESTADO'] == 'LIBRE' ? Colors.green.withAlpha(40) : Colors.white.withAlpha(10),
+                  backgroundColor: vData['ESTADO'] == 'LIBRE' ? Colors.greenAccent.withAlpha(40) : Colors.white.withAlpha(10),
                   child: Icon(_getIconoPorTipo(tipoVehiculo), color: vData['ESTADO'] == 'LIBRE' ? Colors.greenAccent : Colors.white70, size: 20),
                 ),
                 title: Text(patenteId, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.2)),
@@ -249,8 +270,9 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                     padding: const EdgeInsets.all(15),
                     child: Column(
                       children: [
-                        _filaInfo("Kilometraje Actual:", "${AppFormatters.formatearKilometraje(vData['KM_ACTUAL'])} KM", Icons.speed, Colors.orangeAccent),
-                        if (vData['VIN'] != null && vData['VIN'] != "") _filaInfo("Nro. Chasis (VIN):", vData['VIN'], Icons.fingerprint, Colors.white60),
+                        _filaInfo("Kilometraje Actual:", "${AppFormatters.formatearKilometraje(vData['KM_ACTUAL'])} KM", Icons.speed, Colors.greenAccent),
+                        if (vData['VIN'] != null && vData['VIN'] != "" && vData['VIN'] != "-") 
+                          _filaInfo("Nro. Chasis (VIN):", vData['VIN'], Icons.fingerprint, Colors.white60),
                         const Divider(color: Colors.white10),
                         
                         _filaInfo("Marca:", vData['MARCA'] ?? 'S/D', Icons.branding_watermark_outlined, Colors.blueAccent),
@@ -285,7 +307,6 @@ class _AdminVehiculosListaScreenState extends State<AdminVehiculosListaScreen> {
                             },
                             icon: const Icon(Icons.edit, size: 16),
                             label: const Text("EDITAR FICHA TÉCNICA"),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                           ),
                         )
                       ],

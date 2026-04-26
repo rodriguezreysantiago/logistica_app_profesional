@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../core/services/prefs_service.dart';
 
-class MainPanel extends StatefulWidget {
+// ✅ MENTOR: Cambiado a StatelessWidget. Al no haber variables mutables, ahorramos memoria y recursos.
+class MainPanel extends StatelessWidget {
   final String dni;
   final String nombre;
   final String rol;
@@ -14,31 +15,21 @@ class MainPanel extends StatefulWidget {
   });
 
   @override
-  State<MainPanel> createState() => _MainPanelState();
-}
-
-class _MainPanelState extends State<MainPanel> {
-  @override
   Widget build(BuildContext context) {
-    final bool isAdmin = widget.rol.trim().toUpperCase() == 'ADMIN';
+    final bool isAdmin = rol.trim().toUpperCase() == 'ADMIN';
 
     return Scaffold(
       extendBodyBehindAppBar: true, 
       appBar: AppBar(
-        title: const Text('S.M.A.R.T. Logística'),
-        centerTitle: true,
-        backgroundColor: Colors.transparent, 
-        elevation: 0,
-        foregroundColor: Colors.white,
+        title: const Text('S.M.A.R.T. Logística', style: TextStyle(letterSpacing: 1.2)),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout_outlined),
             tooltip: 'Cerrar Sesión',
             onPressed: () async {
-              // ✅ Mentora: ¡Excelente captura del navigator!
               final navigator = Navigator.of(context);
               await PrefsService.clear();
-              if (!mounted) return;
+              if (!context.mounted) return;
               navigator.pushReplacementNamed('/');
             },
           ),
@@ -46,16 +37,17 @@ class _MainPanelState extends State<MainPanel> {
       ),
       body: Stack(
         children: [
+          // Fondo base unificado
           Positioned.fill(
             child: Image.asset(
               'assets/images/fondo_login.jpg',
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => 
-                  Container(color: const Color(0xFF0D1D2D)),
+                  Container(color: Theme.of(context).scaffoldBackgroundColor),
             ),
           ),
           Positioned.fill(
-            child: Container(color: Colors.black.withAlpha(160)),
+            child: Container(color: Colors.black.withAlpha(180)),
           ),
 
           SafeArea(
@@ -69,7 +61,7 @@ class _MainPanelState extends State<MainPanel> {
                     children: [
                       const SizedBox(height: 20),
                       
-                      _buildWelcomeHeader(),
+                      _buildWelcomeHeader(context),
                       
                       const SizedBox(height: 30),
 
@@ -81,25 +73,29 @@ class _MainPanelState extends State<MainPanel> {
                           childAspectRatio: 1.2, 
                           children: [
                             _buildMenuButton(
+                              context,
                               titulo: "MI PERFIL",
                               icono: Icons.person_pin_outlined,
                               color: Colors.blueAccent,
-                              onTap: () => Navigator.pushNamed(context, '/perfil', arguments: widget.dni),
+                              onTap: () => Navigator.pushNamed(context, '/perfil', arguments: dni),
                             ),
                             _buildMenuButton(
-                              titulo: "MI EQUIPO",
+                              context,
+                              titulo: "MI UNIDAD",
                               icono: Icons.local_shipping_outlined,
                               color: Colors.orangeAccent,
-                              onTap: () => Navigator.pushNamed(context, '/equipo', arguments: widget.dni),
+                              onTap: () => Navigator.pushNamed(context, '/equipo', arguments: dni),
                             ),
                             _buildMenuButton(
+                              context,
                               titulo: "MIS VENCIMIENTOS",
                               icono: Icons.assignment_late_outlined,
                               color: Colors.greenAccent,
-                              onTap: () => Navigator.pushNamed(context, '/mis_vencimientos', arguments: widget.dni),
+                              onTap: () => Navigator.pushNamed(context, '/mis_vencimientos', arguments: dni),
                             ),
                             if (isAdmin)
                               _buildMenuButton(
+                                context,
                                 titulo: "ADMINISTRACIÓN",
                                 icono: Icons.admin_panel_settings_sharp,
                                 color: Colors.redAccent,
@@ -111,10 +107,10 @@ class _MainPanelState extends State<MainPanel> {
                       
                       Center(
                         child: Padding(
-                          padding: const EdgeInsets.only(bottom: 15),
+                          padding: const EdgeInsets.only(bottom: 20),
                           child: Text(
-                            "Legajo: ${widget.dni} | Rol: ${widget.rol}",
-                            style: const TextStyle(color: Colors.white38, fontSize: 10),
+                            "Legajo: $dni | Rol: $rol",
+                            style: const TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 1),
                           ),
                         ),
                       ),
@@ -129,38 +125,39 @@ class _MainPanelState extends State<MainPanel> {
     );
   }
 
-  Widget _buildWelcomeHeader() {
+  Widget _buildWelcomeHeader(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(25),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(30),
+        color: Theme.of(context).colorScheme.surface, // ✅ MENTOR: Diseño acoplado al Theme
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withAlpha(40)),
+        border: Border.all(color: Colors.white.withAlpha(20)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.account_circle, color: Colors.white70, size: 20),
+              const Icon(Icons.account_circle, color: Colors.greenAccent, size: 18),
               const SizedBox(width: 8),
               Text(
                 "BIENVENIDO",
                 style: TextStyle(
-                  color: Colors.white.withAlpha(180),
+                  color: Colors.white.withAlpha(150),
                   letterSpacing: 2,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold
+                  fontSize: 11,
+                  fontWeight: 
+                  FontWeight.bold
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 8),
           Text(
-            widget.nombre.split(' ')[0],
+            nombre.split(' ')[0], // Muestra solo el primer nombre
             style: const TextStyle(
-              fontSize: 28,
+              fontSize: 32,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
@@ -170,42 +167,42 @@ class _MainPanelState extends State<MainPanel> {
     );
   }
 
-  Widget _buildMenuButton({
+  // ✅ MENTOR: Estructura corregida para que el "Ripple Effect" (la onda táctil) funcione perfecto
+  Widget _buildMenuButton(BuildContext context, {
     required String titulo,
     required IconData icono,
     required Color color,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        // ✅ Mentora: Limpieza del callback innecesario
-        onTap: onTap,
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface, 
         borderRadius: BorderRadius.circular(22),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withAlpha(25), 
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white.withAlpha(30)),
-          ),
+        border: Border.all(color: Colors.white.withAlpha(15)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(22),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(10), 
+                padding: const EdgeInsets.all(12), 
                 decoration: BoxDecoration(
-                  color: color.withAlpha(40),
+                  color: color.withAlpha(25),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icono, color: color, size: 28), 
+                child: Icon(icono, color: color, size: 30), 
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Text(
                 titulo,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 11, 
+                  fontSize: 12, 
                   fontWeight: FontWeight.bold,
                   letterSpacing: 0.5
                 ),

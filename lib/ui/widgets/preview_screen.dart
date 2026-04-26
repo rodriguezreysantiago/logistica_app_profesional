@@ -9,26 +9,29 @@ class PreviewScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Mentora: Detección a prueba de balas. 
-    // Ignoramos los tokens de Firebase cortando desde el '?' y verificamos la extensión real.
+    // ✅ MENTOR: Excelente barrera de seguridad contra los tokens largos de Firebase.
     final urlSinParametros = url.split('?').first.toLowerCase();
     final bool esPdf = urlSinParametros.endsWith('.pdf');
 
     return Scaffold(
+      extendBodyBehindAppBar: true, // ✅ MENTOR: Look inmersivo de pantalla completa
       appBar: AppBar(
-        title: Text(titulo, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        title: Text(titulo, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
         centerTitle: true,
-        backgroundColor: const Color(0xFF1A3A5A),
+        backgroundColor: Colors.black.withAlpha(150), // Cristal oscuro para no tapar el documento
+        elevation: 0,
         foregroundColor: Colors.white,
       ),
-      backgroundColor: Colors.black, 
+      backgroundColor: Colors.black, // Fondo puro, ideal para lectura
       body: Center(
         child: esPdf
-            ? PdfViewer.uri(
-                Uri.parse(url),
-                params: const PdfViewerParams(
-                  maxScale: 8.0, // Zoom potente para ver letras chicas de pólizas
-                  backgroundColor: Colors.black,
+            ? SafeArea(
+                child: PdfViewer.uri(
+                  Uri.parse(url),
+                  params: const PdfViewerParams(
+                    maxScale: 8.0, 
+                    backgroundColor: Colors.black,
+                  ),
                 ),
               )
             : InteractiveViewer(
@@ -45,7 +48,7 @@ class PreviewScreen extends StatelessWidget {
                         value: progress.expectedTotalBytes != null
                             ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
                             : null,
-                        color: Colors.orangeAccent,
+                        color: Theme.of(context).colorScheme.primary, // Alineado al color principal de tu app
                         strokeWidth: 2,
                       ),
                     );
@@ -54,9 +57,9 @@ class PreviewScreen extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.broken_image_outlined, color: Colors.white24, size: 50),
-                      SizedBox(height: 10),
-                      Text("Error al cargar el documento", 
-                        style: TextStyle(color: Colors.white24, fontSize: 13)),
+                      SizedBox(height: 15),
+                      Text("El documento no está disponible", 
+                        style: TextStyle(color: Colors.white54, fontSize: 13)),
                     ],
                   ),
                 ),

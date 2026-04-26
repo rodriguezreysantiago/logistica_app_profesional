@@ -18,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final FocusNode _passFocus = FocusNode();
   
   bool _isLoading = false;
+  bool _obscurePass = true; // ✅ MENTOR: Variable para controlar la visibilidad de la contraseña
 
   @override
   void dispose() {
@@ -29,11 +30,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    // ✅ Mentora: Capturamos Navigator y Messenger ANTES de cualquier asincronía
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    // ✅ Mentora: Limpieza avanzada. Nos quedamos SOLO con números.
     final String dni = _dniController.text.replaceAll(RegExp(r'[^0-9]'), '');
     final String pass = _passController.text.trim();
     
@@ -65,7 +64,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
           if (!mounted) return;
 
-          // ✅ Mentora: Usamos el navigator capturado
           navigator.pushReplacementNamed(
             '/home', 
             arguments: {
@@ -89,11 +87,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ✅ Mentora: Recibimos el messenger como parámetro para no depender del context global
   void _mostrarError(ScaffoldMessengerState messenger, String mensaje) {
     messenger.showSnackBar(
       SnackBar(
-        content: Text(mensaje), 
+        content: Text(mensaje, style: const TextStyle(fontWeight: FontWeight.bold)), 
         backgroundColor: Colors.redAccent,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -105,127 +102,136 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final colorPrimario = Theme.of(context).colorScheme.primary;
 
-    return Scaffold(
-      resizeToAvoidBottomInset: true, 
-      body: Stack(
-        children: [
-          // IMAGEN DE FONDO
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/fondo_login.jpg',
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => 
-                  Container(color: const Color(0xFF0D1D2D)),
+    // ✅ MENTOR: GestureDetector envuelve el Scaffold para ocultar el teclado al tocar fuera
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        resizeToAvoidBottomInset: true, 
+        body: Stack(
+          children: [
+            // IMAGEN DE FONDO
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/fondo_login.jpg',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => 
+                    Container(color: Theme.of(context).scaffoldBackgroundColor),
+              ),
             ),
-          ),
-          
-          // OVERLAY OSCURO
-          Positioned.fill(
-            child: Container(color: Colors.black.withAlpha(140)),
-          ),
+            
+            // OVERLAY OSCURO
+            Positioned.fill(
+              child: Container(color: Colors.black.withAlpha(180)), // Un poco más oscuro para mejor contraste
+            ),
 
-          Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 25),
-              child: Container(
-                width: 420, 
-                padding: const EdgeInsets.all(35),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha(245), 
-                  borderRadius: BorderRadius.circular(25),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withAlpha(100),
-                      blurRadius: 25,
-                      offset: const Offset(0, 15),
-                    )
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // LOGOTIPO S.M.A.R.T.
-                    Text(
-                      "S.M.A.R.T.",
-                      style: TextStyle(
-                        fontSize: 38, 
-                        fontWeight: FontWeight.bold, 
-                        color: colorPrimario,
-                        letterSpacing: 6
-                      ),
-                    ),
-                    const Text(
-                      "CONTROL DE LOGÍSTICA PROFESIONAL", 
-                      style: TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold, fontSize: 11),
-                    ),
-                    const SizedBox(height: 45),
-                    
-                    // CAMPO DNI (ID DE DOCUMENTO)
-                    TextField(
-                      controller: _dniController,
-                      focusNode: _dniFocus,
-                      autofocus: true, 
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      decoration: InputDecoration(
-                        labelText: "DNI (Usuario)",
-                        prefixIcon: const Icon(Icons.person_outline),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        filled: true,
-                        fillColor: Colors.grey.shade50,
-                      ),
-                      onSubmitted: (_) => FocusScope.of(context).requestFocus(_passFocus),
-                    ),
-                    
-                    const SizedBox(height: 20),
-                    
-                    // CAMPO CONTRASEÑA
-                    TextField(
-                      controller: _passController,
-                      focusNode: _passFocus,
-                      obscureText: true,
-                      style: const TextStyle(fontSize: 18),
-                      decoration: InputDecoration(
-                        labelText: "Contraseña",
-                        prefixIcon: const Icon(Icons.lock_person_outlined),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        filled: true,
-                        fillColor: Colors.grey.shade50,
-                      ),
-                      onSubmitted: (_) => _login(),
-                    ),
-                    
-                    const SizedBox(height: 40),
-                    
-                    // BOTÓN DE ACCESO BLINDADO
-                    _isLoading 
-                    ? const CircularProgressIndicator()
-                    : ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 60),
-                          backgroundColor: colorPrimario,
-                          foregroundColor: Colors.white,
-                          elevation: 8,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                        ),
-                        onPressed: _login,
-                        child: const Text(
-                          "INICIAR SESIÓN", 
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 25),
+                child: Container(
+                  width: 420, 
+                  padding: const EdgeInsets.all(35),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface, // ✅ MENTOR: Adaptado al tema oscuro
+                    borderRadius: BorderRadius.circular(25),
+                    border: Border.all(color: colorPrimario.withAlpha(30)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(150),
+                        blurRadius: 25,
+                        offset: const Offset(0, 15),
+                      )
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // LOGOTIPO S.M.A.R.T.
+                      Text(
+                        "S.M.A.R.T.",
+                        style: TextStyle(
+                          fontSize: 38, 
+                          fontWeight: FontWeight.bold, 
+                          color: colorPrimario,
+                          letterSpacing: 6
                         ),
                       ),
-                    const SizedBox(height: 15),
-                    const Text(
-                      "v2.0.26 - Bahía Blanca, Argentina",
-                      style: TextStyle(color: Colors.grey, fontSize: 10),
-                    )
-                  ],
+                      const Text(
+                        "CONTROL DE LOGÍSTICA PROFESIONAL", 
+                        style: TextStyle(color: Colors.white54, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.2),
+                      ),
+                      const SizedBox(height: 45),
+                      
+                      // CAMPO DNI (ID DE DOCUMENTO)
+                      TextField(
+                        controller: _dniController,
+                        focusNode: _dniFocus,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                        decoration: InputDecoration(
+                          labelText: "DNI (Usuario)",
+                          prefixIcon: Icon(Icons.person_outline, color: colorPrimario),
+                        ),
+                        onSubmitted: (_) => FocusScope.of(context).requestFocus(_passFocus),
+                      ),
+                      
+                      const SizedBox(height: 25),
+                      
+                      // CAMPO CONTRASEÑA
+                      TextField(
+                        controller: _passController,
+                        focusNode: _passFocus,
+                        obscureText: _obscurePass, // ✅ MENTOR: Estado de visibilidad
+                        style: const TextStyle(fontSize: 18, color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: "Contraseña",
+                          prefixIcon: Icon(Icons.lock_outline, color: colorPrimario),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePass ? Icons.visibility_off : Icons.visibility,
+                              color: Colors.white38,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePass = !_obscurePass;
+                              });
+                            },
+                          ),
+                        ),
+                        onSubmitted: (_) => _login(),
+                      ),
+                      
+                      const SizedBox(height: 40),
+                      
+                      // BOTÓN DE ACCESO BLINDADO
+                      _isLoading 
+                      ? CircularProgressIndicator(color: colorPrimario)
+                      : ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 60),
+                            backgroundColor: colorPrimario,
+                            foregroundColor: Colors.black, // Contraste oscuro sobre verde/naranja
+                            elevation: 8,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                          ),
+                          onPressed: _login,
+                          child: const Text(
+                            "INICIAR SESIÓN", 
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)
+                          ),
+                        ),
+                      const SizedBox(height: 25),
+                      const Text(
+                        "v2.0.26 - Bahía Blanca, Argentina",
+                        style: TextStyle(color: Colors.white24, fontSize: 10),
+                      )
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

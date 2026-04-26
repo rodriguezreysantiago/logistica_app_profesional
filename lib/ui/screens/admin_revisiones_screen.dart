@@ -3,8 +3,26 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/utils/formatters.dart';
 import '../widgets/preview_screen.dart';
 
-class AdminRevisionesScreen extends StatelessWidget {
+// ✅ MENTOR: Transformado a StatefulWidget para proteger el Stream de lecturas duplicadas
+class AdminRevisionesScreen extends StatefulWidget {
   const AdminRevisionesScreen({super.key});
+
+  @override
+  State<AdminRevisionesScreen> createState() => _AdminRevisionesScreenState();
+}
+
+class _AdminRevisionesScreenState extends State<AdminRevisionesScreen> {
+  late final Stream<QuerySnapshot> _revisionesStream;
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ MENTOR: La conexión se inicializa UNA sola vez.
+    _revisionesStream = FirebaseFirestore.instance
+        .collection('REVISIONES')
+        .orderBy('fecha_vencimiento', descending: false)
+        .snapshots();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,10 +30,6 @@ class AdminRevisionesScreen extends StatelessWidget {
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text("Revisiones Pendientes"),
-        centerTitle: true,
-        backgroundColor: const Color(0xFF1A3A5A).withAlpha(220),
-        elevation: 0,
-        foregroundColor: Colors.white,
       ),
       body: Stack(
         children: [
@@ -24,20 +38,17 @@ class AdminRevisionesScreen extends StatelessWidget {
               'assets/images/fondo_login.jpg',
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) =>
-                  Container(color: const Color(0xFF0D1D2D)),
+                  Container(color: Theme.of(context).scaffoldBackgroundColor),
             ),
           ),
-          Container(color: const Color(0xFF1A3A5A).withAlpha(100)),
+          Container(color: Colors.black.withAlpha(200)),
 
           SafeArea(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('REVISIONES')
-                  .orderBy('fecha_vencimiento', descending: false)
-                  .snapshots(),
+              stream: _revisionesStream, // Usamos el stream anclado en memoria
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
+                  return const Center(child: CircularProgressIndicator(color: Colors.greenAccent));
                 }
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -45,7 +56,7 @@ class AdminRevisionesScreen extends StatelessWidget {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.fact_check, size: 60, color: Colors.white.withAlpha(50)),
+                        Icon(Icons.fact_check, size: 70, color: Colors.greenAccent.withAlpha(50)),
                         const SizedBox(height: 15),
                         const Text("No hay trámites pendientes.", style: TextStyle(color: Colors.white70, fontSize: 16)),
                       ],
@@ -55,7 +66,7 @@ class AdminRevisionesScreen extends StatelessWidget {
 
                 return ListView.builder(
                   itemCount: snapshot.data!.docs.length,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   itemBuilder: (context, index) {
                     var doc = snapshot.data!.docs[index];
                     var data = doc.data() as Map<String, dynamic>;
@@ -67,30 +78,43 @@ class AdminRevisionesScreen extends StatelessWidget {
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: esCambioEquipo ? Colors.orangeAccent.withAlpha(40) : Colors.white.withAlpha(25),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: esCambioEquipo ? Colors.orangeAccent : Colors.white.withAlpha(30)),
+                        color: esCambioEquipo ? Colors.orangeAccent.withAlpha(20) : Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: esCambioEquipo ? Colors.orangeAccent.withAlpha(100) : Colors.white.withAlpha(15)),
                       ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: esCambioEquipo ? Colors.orangeAccent : (esVehiculo ? Colors.blueAccent : Colors.greenAccent),
-                          child: Icon(
-                            esCambioEquipo ? Icons.swap_horiz : (esVehiculo ? Icons.local_shipping : Icons.person), 
-                            color: Colors.white, size: 20
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => _mostrarDetalleRevision(context, doc.id, data),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: esCambioEquipo ? Colors.orangeAccent.withAlpha(40) : (esVehiculo ? Colors.blueAccent.withAlpha(40) : Colors.greenAccent.withAlpha(40)),
+                                child: Icon(
+                                  esCambioEquipo ? Icons.swap_horiz : (esVehiculo ? Icons.local_shipping : Icons.person), 
+                                  color: esCambioEquipo ? Colors.orangeAccent : (esVehiculo ? Colors.blueAccent : Colors.greenAccent), 
+                                  size: 22
+                                ),
+                              ),
+                              title: Text(
+                                "${data['nombre_usuario'] ?? 'Usuario'} -> $idAfectado",
+                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14),
+                              ),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  esCambioEquipo 
+                                    ? "SOLICITA: ${data['patente']}\n(Sueltas: ${data['unidad_actual'] ?? '-'})"
+                                    : "${data['etiqueta'] ?? 'Documento'}\nVence: ${AppFormatters.formatearFecha(data['fecha_vencimiento'])}",
+                                  style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.3),
+                                ),
+                              ),
+                              trailing: const Icon(Icons.chevron_right, color: Colors.white24),
+                            ),
                           ),
                         ),
-                        title: Text(
-                          "${data['nombre_usuario'] ?? 'Usuario'} -> $idAfectado",
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
-                        ),
-                        subtitle: Text(
-                          esCambioEquipo 
-                            ? "SOLICITA: ${data['patente']}\n(Sueltas: ${data['unidad_actual'] ?? '-'})"
-                            : "${data['etiqueta'] ?? 'Documento'}\nVence: ${AppFormatters.formatearFecha(data['fecha_vencimiento'])}",
-                          style: const TextStyle(color: Colors.white70, fontSize: 12),
-                        ),
-                        trailing: const Icon(Icons.chevron_right, color: Colors.white54),
-                        onTap: () => _mostrarDetalleRevision(context, doc.id, data),
                       ),
                     );
                   },
@@ -112,24 +136,27 @@ class AdminRevisionesScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF0D1D2D),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: Theme.of(context).colorScheme.surface, // ✅ MENTOR: Diseño centralizado
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withAlpha(20))
+        ),
         content: SizedBox(
           width: 400,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(etiqueta, style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 18)),
+                Text(etiqueta.toUpperCase(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 5),
-                Text("Solicitante: ${data['nombre_usuario'] ?? 'N/A'}", style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                const Divider(color: Colors.white12, height: 30),
+                Text("Solicitante: ${data['nombre_usuario'] ?? 'N/A'}", style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                const Divider(color: Colors.white10, height: 30),
                 
                 if (esCambioEquipo) ...[
-                  const Icon(Icons.swap_vert_circle, size: 80, color: Colors.orangeAccent),
-                  const SizedBox(height: 15),
+                  const Icon(Icons.swap_vert_circle, size: 70, color: Colors.orangeAccent),
+                  const SizedBox(height: 25),
                   _buildFilaDialogo("SUELTA:", data['unidad_actual'] ?? "NINGUNA", Colors.redAccent),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   _buildFilaDialogo("SOLICITA:", data['patente'] ?? "S/D", Colors.greenAccent),
                 ] else ...[
                   GestureDetector(
@@ -141,67 +168,94 @@ class AdminRevisionesScreen extends StatelessWidget {
                       }
                     },
                     child: url.toLowerCase().contains('.pdf')
-                        ? const Column(
-                            children: [
-                              Icon(Icons.picture_as_pdf, size: 70, color: Colors.redAccent),
-                              Text("VER PDF", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
-                            ],
+                        ? Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(15)),
+                            child: const Column(
+                              children: [
+                                Icon(Icons.picture_as_pdf, size: 60, color: Colors.redAccent),
+                                SizedBox(height: 10),
+                                Text("TOCAR PARA VER PDF", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                              ],
+                            ),
                           )
-                        // ✅ Mentora: Manejo profesional de imágenes de red.
-                        : Image.network(
-                            url, 
-                            height: 200, 
-                            fit: BoxFit.contain,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return const SizedBox(
-                                height: 200,
-                                child: Center(child: CircularProgressIndicator(color: Colors.orangeAccent)),
-                              );
-                            },
-                            errorBuilder: (context, error, stackTrace) => const SizedBox(
-                              height: 150,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.broken_image, color: Colors.white24, size: 50),
-                                  Text("Error al cargar imagen", style: TextStyle(color: Colors.white54)),
-                                ],
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(
+                              url, 
+                              height: 200, 
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return const SizedBox(
+                                  height: 200,
+                                  child: Center(child: CircularProgressIndicator(color: Colors.greenAccent)),
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                height: 150,
+                                color: Colors.black12,
+                                child: const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.broken_image, color: Colors.white24, size: 50),
+                                    SizedBox(height: 10),
+                                    Text("Error al cargar imagen", style: TextStyle(color: Colors.white54)),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text("NUEVO VENCIMIENTO PROPUESTO:", style: TextStyle(color: Colors.white54, fontSize: 10)),
+                  const SizedBox(height: 25),
+                  const Text("NUEVO VENCIMIENTO PROPUESTO:", style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 5),
                   Text(AppFormatters.formatearFecha(data['fecha_vencimiento']),
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
                 ],
               ],
             ),
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         actions: [
-          TextButton(
-            onPressed: () => _procesarDecision(context, idDoc, false, data),
-            child: const Text("RECHAZAR", style: TextStyle(color: Colors.redAccent)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-            onPressed: () => _procesarDecision(context, idDoc, true, data),
-            child: const Text("APROBAR"),
-          ),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.redAccent),
+                    padding: const EdgeInsets.symmetric(vertical: 14)
+                  ),
+                  onPressed: () => _procesarDecision(context, idDoc, false, data),
+                  child: const Text("RECHAZAR", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green, 
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14)
+                  ),
+                  onPressed: () => _procesarDecision(context, idDoc, true, data),
+                  child: const Text("APROBAR", style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          )
         ],
       ),
     );
   }
 
   Future<void> _procesarDecision(BuildContext context, String idSolicitud, bool aprobado, Map<String, dynamic> data) async {
-    // ✅ Mentora: Guardamos referencias ANTES de la operación asíncrona.
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    // Cerramos el diálogo inmediatamente para dar feedback de rapidez al usuario
-    navigator.pop();
+    navigator.pop(); // Feedback inmediato
     
     final bool esCambioEquipo = data['tipo_solicitud'] == 'CAMBIO_EQUIPO';
 
@@ -254,28 +308,34 @@ class AdminRevisionesScreen extends StatelessWidget {
         await FirebaseFirestore.instance.collection('REVISIONES').doc(idSolicitud).delete();
       }
 
-      // ✅ Mentora: Usamos la referencia guardada, 100% seguro contra crasheos.
       messenger.showSnackBar(
         SnackBar(
-          content: Text(aprobado ? "Operación exitosa" : "Solicitud descartada"),
+          content: Text(aprobado ? "Operación aprobada y guardada" : "Solicitud rechazada y eliminada", style: const TextStyle(fontWeight: FontWeight.bold)),
           backgroundColor: aprobado ? Colors.green : Colors.redAccent,
         ),
       );
     } catch (e) {
       debugPrint("Error en proceso: $e");
       messenger.showSnackBar(
-        SnackBar(content: Text("Ocurrió un error: $e"), backgroundColor: Colors.red),
+        SnackBar(content: Text("Ocurrió un error en la base de datos: $e"), backgroundColor: Colors.redAccent),
       );
     }
   }
 
   Widget _buildFilaDialogo(String label, String valor, Color color) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white38, fontSize: 12)),
-        Text(valor, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black12,
+        borderRadius: BorderRadius.circular(8)
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text(valor, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
+        ],
+      ),
     );
   }
 }

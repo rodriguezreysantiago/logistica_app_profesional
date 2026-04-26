@@ -9,27 +9,21 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
       extendBodyBehindAppBar: true, 
       appBar: AppBar(
         title: const Text("Auditoría de Vencimientos"),
-        centerTitle: true,
-        backgroundColor: Colors.transparent, 
-        elevation: 0,
-        foregroundColor: Colors.white,
       ),
       body: Stack(
         children: [
-          // FONDO
           Positioned.fill(
             child: Image.asset(
               'assets/images/fondo_login.jpg',
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => 
-                  Container(color: const Color(0xFF0D1D2D)),
+                  Container(color: Theme.of(context).scaffoldBackgroundColor),
             ),
           ),
           
-          // CAPA OSCURA
           Positioned.fill(
             child: Container(
-              color: Colors.black.withAlpha(180),
+              color: Colors.black.withAlpha(200), // Oscurecemos un poco más para resaltar los botones
             ),
           ),
 
@@ -37,7 +31,6 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 20),
               children: [
-                // CABECERA DE SECCIÓN
                 const Padding(
                   padding: EdgeInsets.fromLTRB(20, 10, 16, 12),
                   child: Column(
@@ -48,14 +41,14 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11, 
                           fontWeight: FontWeight.bold, 
-                          color: Colors.orangeAccent,
+                          color: Colors.greenAccent, // Alineado al color primario del Theme
                           letterSpacing: 1.5
                         )
                       ),
                       SizedBox(height: 4),
                       Text(
                         "Control proactivo de documentación próxima a vencer.",
-                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
                       ),
                     ],
                   ),
@@ -78,7 +71,7 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
                   "VENCIMIENTOS DE TRACTORES", 
                   Icons.local_shipping, 
                   '/vencimientos_chasis', 
-                  colorIcon: Colors.greenAccent,
+                  colorIcon: Colors.orangeAccent,
                   subtitulo: "Control de RTO y Seguros de Camiones"
                 ),
                 
@@ -93,13 +86,13 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
 
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 25, vertical: 30),
-                  child: Divider(color: Colors.white12),
+                  child: Divider(color: Colors.white10),
                 ),
 
                 const Center(
                   child: Text(
                     "S.M.A.R.T. - Gestión de Flota",
-                    style: TextStyle(color: Colors.white10, fontSize: 10, letterSpacing: 1),
+                    style: TextStyle(color: Colors.white24, fontSize: 10, letterSpacing: 1),
                   ),
                 )
               ],
@@ -110,39 +103,53 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
     );
   }
 
-  Widget _tile(BuildContext context, String t, IconData i, String r, {Color colorIcon = Colors.redAccent, String? subtitulo}) {
+  // ✅ MENTOR: El Tile ahora usa el Theme Global y tiene un efecto táctil perfecto
+  Widget _tile(BuildContext context, String titulo, IconData icono, String ruta, {required Color colorIcon, String? subtitulo}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(20),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withAlpha(30)),
+        color: Theme.of(context).colorScheme.surface, // Extrae el color de main.dart
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withAlpha(15)),
       ),
       child: Material(
         color: Colors.transparent,
-        child: ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          leading: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: colorIcon.withAlpha(30),
-              shape: BoxShape.circle,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16), // Asegura que el click respete la curva
+          onTap: () => Navigator.pushNamed(context, ruta),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: colorIcon.withAlpha(30),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icono, color: colorIcon, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        titulo, 
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)
+                      ),
+                      if (subtitulo != null) ...[
+                        const SizedBox(height: 4),
+                        Text(subtitulo, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                      ]
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.white24),
+              ],
             ),
-            child: Icon(i, color: colorIcon, size: 24),
           ),
-          title: Text(
-            t, 
-            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14)
-          ),
-          subtitle: subtitulo != null 
-            ? Text(subtitulo, style: const TextStyle(color: Colors.white54, fontSize: 12)) 
-            : null,
-          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
-          onTap: () {
-            // ✅ Mentora: El onTap ya es seguro por naturaleza, no necesita blindaje extra.
-            Navigator.pushNamed(context, r);
-          },
         ),
       ),
     );

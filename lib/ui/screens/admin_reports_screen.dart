@@ -1,3 +1,4 @@
+import 'dart:ui'; // ✅ MENTOR: Necesario para el efecto BackdropFilter (Blur)
 import 'package:flutter/material.dart';
 import '../../core/utils/report_checklist.dart'; 
 import '../../core/utils/report_flota.dart'; 
@@ -13,102 +14,21 @@ class AdminReportsScreen extends StatefulWidget {
 class _AdminReportsScreenState extends State<AdminReportsScreen> {
   bool _generando = false;
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D1D2D),
-      appBar: AppBar(
-        title: const Text("CENTRO DE REPORTES", 
-          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-        centerTitle: true,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.white,
-      ),
-      body: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "INFORMES ESTRATÉGICOS",
-                  style: TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 2),
-                ),
-                const SizedBox(height: 25),
-                
-                // 📝 REPORTE 1: CHECKLISTS
-                _buildReportCard(
-                  titulo: "Checklists Mensuales",
-                  descripcion: "Reporte de novedades y roturas cargadas por choferes.",
-                  icono: Icons.fact_check_rounded,
-                  color: Colors.greenAccent,
-                  // ✅ Cambiado: Ya no ponemos _generando en true acá porque primero abre el diálogo
-                  onTap: _generando ? null : _ejecutarReporteChecklist,
-                ),
-
-                const SizedBox(height: 20),
-
-                // 🚛 REPORTE 2: ESTADO DE FLOTA (API Volvo)
-                _buildReportCard(
-                  titulo: "Estado de Flota (API Volvo)",
-                  descripcion: "Sincroniza consumo, KMs y posición con Volvo Connect en tiempo real.",
-                  icono: Icons.cloud_sync_rounded,
-                  color: Colors.blueAccent,
-                  onTap: _generando ? null : _prepararYGenerarReporteFlota,
-                ),
-
-                const SizedBox(height: 20),
-
-                _buildReportCard(
-                  titulo: "Consumo de Combustible",
-                  descripcion: "Análisis histórico de litros por unidad.",
-                  icono: Icons.local_gas_station_rounded,
-                  color: Colors.white24,
-                  isLocked: true,
-                  onTap: null,
-                ),
-              ],
-            ),
-          ),
-          
-          // Pantalla de carga (Solo se activa durante procesos asíncronos pesados)
-          if (_generando)
-            Container(
-              color: Colors.black87,
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.blueAccent),
-                    SizedBox(height: 25),
-                    Text("SINCRONIZANDO DATOS...", 
-                      style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                    SizedBox(height: 10),
-                    Text("Esto puede tardar unos segundos", 
-                      style: TextStyle(color: Colors.white54, fontSize: 12)),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // --- LÓGICA DE EXPORTACIÓN ---
+  // --- LÓGICA DE EXPORTACIÓN BLINDADA ---
 
   Future<void> _ejecutarReporteChecklist() async {
-    // ✅ CORREGIDO: Llamamos al nuevo servicio que abre el diálogo de opciones
+    final messenger = ScaffoldMessenger.of(context);
     try {
       await ReportChecklistService.mostrarOpcionesYGenerar(context);
     } catch (e) {
-      if (mounted) _mostrarSnack("❌ Error: $e", esError: true);
+      if (mounted) _mostrarSnack(messenger, "❌ Error: $e", esError: true);
     }
   }
 
   Future<void> _prepararYGenerarReporteFlota() async {
+    // ✅ MENTOR: Capturamos el messenger ANTES de cualquier proceso asíncrono.
+    final messenger = ScaffoldMessenger.of(context);
+    
     setState(() => _generando = true);
     
     try {
@@ -119,27 +39,133 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       if (!mounted) return;
       setState(() => _generando = false);
 
-      // 2. Abrimos el diálogo de opciones (ReportGenerator es el nombre de tu clase en report_flota.dart)
+      // 2. Abrimos el diálogo de opciones
       await ReportGenerator.mostrarOpcionesYGenerar(context, cacheVolvo);
 
     } catch (e) {
       if (mounted) {
         setState(() => _generando = false);
-        _mostrarSnack("❌ Error al conectar con Volvo: $e", esError: true);
+        _mostrarSnack(messenger, "❌ Error al conectar con Volvo: $e", esError: true);
       }
     }
   }
 
-  void _mostrarSnack(String mensaje, {bool esError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
+  void _mostrarSnack(ScaffoldMessengerState messenger, String mensaje, {bool esError = false}) {
+    messenger.showSnackBar(
       SnackBar(
-        content: Text(mensaje), 
+        content: Text(mensaje, style: const TextStyle(fontWeight: FontWeight.bold)), 
         backgroundColor: esError ? Colors.redAccent : Colors.green,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
 
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: const Text("CENTRO DE REPORTES", style: TextStyle(letterSpacing: 1.2)),
+      ),
+      body: Stack(
+        children: [
+          // Fondo base (heredado de main.dart)
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/fondo_login.jpg',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => 
+                  Container(color: Theme.of(context).scaffoldBackgroundColor),
+            ),
+          ),
+          Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
+
+          SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.all(20.0),
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 5, bottom: 20),
+                  child: Text(
+                    "INFORMES ESTRATÉGICOS",
+                    style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 2),
+                  ),
+                ),
+                
+                // 📝 REPORTE 1: CHECKLISTS
+                _buildReportCard(
+                  titulo: "Checklists Mensuales",
+                  descripcion: "Reporte de novedades y roturas cargadas por choferes.",
+                  icono: Icons.fact_check_rounded,
+                  color: Colors.greenAccent,
+                  onTap: _generando ? null : _ejecutarReporteChecklist,
+                ),
+
+                const SizedBox(height: 15),
+
+                // 🚛 REPORTE 2: ESTADO DE FLOTA (API Volvo)
+                _buildReportCard(
+                  titulo: "Estado de Flota (Volvo)",
+                  descripcion: "Sincroniza consumo, KMs y posición con Volvo Connect.",
+                  icono: Icons.cloud_sync_rounded,
+                  color: Colors.blueAccent,
+                  onTap: _generando ? null : _prepararYGenerarReporteFlota,
+                ),
+
+                const SizedBox(height: 15),
+
+                // REPORTE 3: BLOQUEADO
+                _buildReportCard(
+                  titulo: "Consumo de Combustible",
+                  descripcion: "Análisis histórico de litros por unidad. (Próximamente)",
+                  icono: Icons.local_gas_station_rounded,
+                  color: Colors.white,
+                  isLocked: true,
+                  onTap: null,
+                ),
+              ],
+            ),
+          ),
+          
+          // ✅ MENTOR: Pantalla de carga con Blur (Cristal esmerilado) para UX Premium
+          if (_generando)
+            Positioned.fill(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                child: Container(
+                  color: Colors.black.withAlpha(150),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(30),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.blueAccent.withAlpha(50))
+                      ),
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Colors.blueAccent),
+                          SizedBox(height: 25),
+                          Text("CONECTANDO CON VOLVO", 
+                            style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                          SizedBox(height: 10),
+                          Text("Descargando telemetría de flota...", 
+                            style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ MENTOR: Tarjeta rediseñada para responder correctamente al "Tap" (InkWell Ripple Fix)
   Widget _buildReportCard({
     required String titulo,
     required String descripcion,
@@ -148,47 +174,56 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     required VoidCallback? onTap,
     bool isLocked = false,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white.withAlpha(15),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withAlpha(50), width: 1),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 25,
-              backgroundColor: color.withAlpha(30),
-              child: Icon(icono, color: color, size: 28),
-            ),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(titulo, 
-                    style: TextStyle(
-                      color: isLocked ? Colors.white38 : Colors.white, 
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15
-                    )
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface, // Toma el color global
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withAlpha(isLocked ? 15 : 50), width: 1),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20), // Para que la onda de choque no se salga por las esquinas
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: color.withAlpha(isLocked ? 10 : 30),
+                    shape: BoxShape.circle,
                   ),
-                  const SizedBox(height: 4),
-                  Text(descripcion, 
-                    style: const TextStyle(color: Colors.white54, fontSize: 11, height: 1.3)
+                  child: Icon(icono, color: isLocked ? Colors.white24 : color, size: 28),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(titulo, 
+                        style: TextStyle(
+                          color: isLocked ? Colors.white38 : Colors.white, 
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15
+                        )
+                      ),
+                      const SizedBox(height: 6),
+                      Text(descripcion, 
+                        style: TextStyle(color: isLocked ? Colors.white24 : Colors.white54, fontSize: 12, height: 1.3)
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                Icon(
+                  isLocked ? Icons.lock_outline : Icons.chevron_right_rounded, 
+                  color: isLocked ? Colors.white12 : Colors.white38,
+                  size: 24,
+                ),
+              ],
             ),
-            Icon(
-              isLocked ? Icons.lock_outline : Icons.chevron_right_rounded, 
-              color: isLocked ? Colors.white24 : Colors.white38
-            ),
-          ],
+          ),
         ),
       ),
     );

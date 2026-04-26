@@ -18,10 +18,18 @@ class AdminPersonalListaScreen extends StatefulWidget {
 class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchText = "";
+  
+  // ✅ MENTOR: Stream fijo para evitar lecturas duplicadas al buscar.
+  late final Stream<QuerySnapshot> _empleadosStream;
 
   @override
   void initState() {
     super.initState();
+    _empleadosStream = FirebaseFirestore.instance
+        .collection('EMPLEADOS')
+        .orderBy('NOMBRE')
+        .snapshots();
+
     _searchController.addListener(() {
       if (mounted) setState(() => _searchText = _searchController.text.toUpperCase());
     });
@@ -54,12 +62,12 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
       
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text("Actualizado: $campo"), backgroundColor: Colors.green),
+        SnackBar(content: Text("Dato actualizado: $campo"), backgroundColor: Colors.green),
       );
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text("Error al actualizar: $e"), backgroundColor: Colors.red),
+        SnackBar(content: Text("Error al actualizar en base de datos: $e"), backgroundColor: Colors.redAccent),
       );
     }
   }
@@ -73,10 +81,10 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
       backgroundColor: Colors.transparent,
       builder: (bCtx) => Container(
         padding: const EdgeInsets.all(20),
-        decoration: const BoxDecoration(
-          color: Color(0xFF0D1D2D), // ✅ Mentora: Consistencia visual al modo oscuro
-          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-          border: Border(top: BorderSide(color: Colors.orangeAccent, width: 2))
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+          border: const Border(top: BorderSide(color: Colors.greenAccent, width: 2))
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -93,7 +101,7 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.orangeAccent),
+              leading: const Icon(Icons.camera_alt, color: Colors.greenAccent),
               title: const Text("Subir nueva desde Galería", style: TextStyle(color: Colors.white)),
               onTap: () async {
                 navigator.pop();
@@ -114,12 +122,15 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     try {
       messenger.showSnackBar(const SnackBar(content: Text("Subiendo archivo...")));
       Reference ref = FirebaseStorage.instance.ref().child(storagePath);
-      await ref.putFile(file);
-      String downloadUrl = await ref.getDownloadURL();
       
+      // ✅ MENTOR: Agregamos metadatos para asegurar que el navegador sepa que es una imagen.
+      SettableMetadata metadata = SettableMetadata(contentType: 'image/jpeg');
+      await ref.putFile(file, metadata);
+      
+      String downloadUrl = await ref.getDownloadURL();
       await _updateData('EMPLEADOS', id, dbCampo, downloadUrl);
     } catch (e) {
-      if (mounted) messenger.showSnackBar(const SnackBar(content: Text("Error al subir"), backgroundColor: Colors.red));
+      if (mounted) messenger.showSnackBar(const SnackBar(content: Text("Error al subir al servidor"), backgroundColor: Colors.redAccent));
     }
   }
 
@@ -138,10 +149,10 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
       backgroundColor: Colors.transparent,
       builder: (bCtx) => Container(
         padding: const EdgeInsets.all(20),
-        decoration: const BoxDecoration(
-          color: Color(0xFF0D1D2D), // ✅ Modo oscuro
-          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-          border: Border(top: BorderSide(color: Colors.orangeAccent, width: 2))
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+          border: const Border(top: BorderSide(color: Colors.greenAccent, width: 2))
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -178,13 +189,6 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
       initialDate: initial,
       firstDate: DateTime(2020),
       lastDate: DateTime(2040),
-      // ✅ Mentora: Agregamos el tema oscuro al calendario para que no desentone
-      builder: (context, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(primary: Colors.orangeAccent, onPrimary: Colors.black, surface: Color(0xFF0D1D2D)),
-        ),
-        child: child!,
-      ),
     );
     if (picked != null) {
       String nuevaFecha = picked.toString().split(' ')[0];
@@ -194,91 +198,91 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: const Text("Gestión de Personal"),
-        centerTitle: true,
-        backgroundColor: const Color(0xFF1A3A5A).withAlpha(230),
-        foregroundColor: Colors.white,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(60),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: _searchController,
-              style: const TextStyle(color: Colors.black),
-              decoration: InputDecoration(
-                hintText: "Nombre, Tractor o Enganche...",
-                prefixIcon: const Icon(Icons.search),
-                fillColor: Colors.white,
-                filled: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          title: const Text("Gestión de Personal"),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(60),
+            child: Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: TextField(
+                controller: _searchController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  hintText: "Nombre, Tractor o Enganche...",
+                  prefixIcon: Icon(Icons.search, color: Colors.greenAccent),
+                ),
               ),
             ),
           ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const AdminPersonalFormScreen()),
-          );
-        },
-        backgroundColor: Colors.orangeAccent,
-        icon: const Icon(Icons.person_add_alt_1, color: Colors.black),
-        label: const Text("NUEVO CHOFER", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-      ),
-      body: Stack(
-        children: [
-          Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
-          Container(color: Colors.black.withAlpha(150)),
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('EMPLEADOS').orderBy('NOMBRE').snapshots(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
-              
-              final empleados = snapshot.data!.docs.where((doc) {
-                var data = doc.data() as Map<String, dynamic>;
-                String nombre = (data['NOMBRE'] ?? '').toString().toUpperCase();
-                String tractor = (data['VEHICULO'] ?? '').toString().toUpperCase();
-                String enganche = (data['ENGANCHE'] ?? '').toString().toUpperCase();
-                return nombre.contains(_searchText) || tractor.contains(_searchText) || enganche.contains(_searchText);
-              }).toList();
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () {
+            Navigator.push(context, MaterialPageRoute(builder: (context) => const AdminPersonalFormScreen()));
+          },
+          backgroundColor: Colors.greenAccent,
+          icon: const Icon(Icons.person_add_alt_1, color: Colors.black),
+          label: const Text("NUEVO CHOFER", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        ),
+        body: Stack(
+          children: [
+            Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
+            Container(color: Colors.black.withAlpha(200)),
+            StreamBuilder<QuerySnapshot>(
+              stream: _empleadosStream, // ✅ MENTOR: Stream filtrado en memoria
+              builder: (context, snapshot) {
+                if (snapshot.hasError) return const Center(child: Text("Error al cargar personal", style: TextStyle(color: Colors.redAccent)));
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.greenAccent));
+                
+                final empleados = snapshot.data!.docs.where((doc) {
+                  var data = doc.data() as Map<String, dynamic>;
+                  String nombre = (data['NOMBRE'] ?? '').toString().toUpperCase();
+                  String tractor = (data['VEHICULO'] ?? '').toString().toUpperCase();
+                  String enganche = (data['ENGANCHE'] ?? '').toString().toUpperCase();
+                  return nombre.contains(_searchText) || tractor.contains(_searchText) || enganche.contains(_searchText);
+                }).toList();
 
-              return ListView.builder(
-                padding: const EdgeInsets.only(top: 150, bottom: 80),
-                itemCount: empleados.length,
-                itemBuilder: (context, index) {
-                  var data = empleados[index].data() as Map<String, dynamic>;
-                  String dni = empleados[index].id;
-                  return _buildEmpleadoCard(dni, data);
-                },
-              );
-            },
-          ),
-        ],
+                if (empleados.isEmpty) return const Center(child: Text("No se encontraron choferes", style: TextStyle(color: Colors.white54)));
+
+                return ListView.builder(
+                  padding: const EdgeInsets.only(top: 160, bottom: 90),
+                  itemCount: empleados.length,
+                  itemBuilder: (context, index) {
+                    var data = empleados[index].data() as Map<String, dynamic>;
+                    String dni = empleados[index].id;
+                    return _buildEmpleadoCard(dni, data);
+                  },
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildEmpleadoCard(String dni, Map<String, dynamic> data) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: Colors.white.withAlpha(25),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF132538).withAlpha(200),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.white.withAlpha(15)),
+      ),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: Colors.white24,
+          backgroundColor: Colors.white12,
           backgroundImage: (data['ARCHIVO_PERFIL'] != null && data['ARCHIVO_PERFIL'] != "-") 
               ? NetworkImage(data['ARCHIVO_PERFIL']) : null,
           child: (data['ARCHIVO_PERFIL'] == null || data['ARCHIVO_PERFIL'] == "-") 
-              ? const Icon(Icons.person, color: Colors.white) : null,
+              ? const Icon(Icons.person, color: Colors.white54) : null,
         ),
         title: Text(data['NOMBRE'] ?? 'Sin nombre', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        subtitle: Text("Tractor: ${data['VEHICULO'] ?? '-'} | Enganche: ${data['ENGANCHE'] ?? '-'}", style: const TextStyle(color: Colors.white70)),
-        trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+        subtitle: Text("Unidad: ${data['VEHICULO'] ?? '-'} | Eng: ${data['ENGANCHE'] ?? '-'}", style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white24, size: 18),
         onTap: () => _mostrarDetalleChofer(context, dni),
       ),
     );
@@ -292,10 +296,10 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
       builder: (bCtx) => DraggableScrollableSheet(
         initialChildSize: 0.9,
         builder: (sCtx, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFF0D1D2D), // ✅ Mentora: Fondo oscuro
-            borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-            border: Border(top: BorderSide(color: Colors.orangeAccent, width: 2))
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
+            border: const Border(top: BorderSide(color: Colors.greenAccent, width: 2))
           ),
           child: StreamBuilder<DocumentSnapshot>(
             stream: FirebaseFirestore.instance.collection('EMPLEADOS').doc(dni).snapshots(),
@@ -307,31 +311,33 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
                 controller: scrollController,
                 padding: const EdgeInsets.all(20),
                 children: [
-                  Center(child: Container(width: 50, height: 5, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)))),
+                  Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)))),
                   const SizedBox(height: 20),
                   _buildHeaderDetalle(dni, data),
-                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 10),
+                  const Divider(color: Colors.white10),
                   _buildSeccionTitulo(Icons.badge, "Documentación Personal"),
                   _buildDatoSimple("DNI", dni, (val) => _updateData('EMPLEADOS', dni, 'DNI', val)),
                   _buildDatoSimple("CUIL", _formatearCUIL(data['CUIL'] ?? "-"), (val) => _updateData('EMPLEADOS', dni, 'CUIL', val.replaceAll('-', ''))),
                   _buildDatoEmpresaSeleccionable("Empresa", data['EMPRESA'] ?? "-", (val) => _updateData('EMPLEADOS', dni, 'EMPRESA', val)),
                   
-                  const Divider(color: Colors.white24),
+                  const Divider(color: Colors.white10),
                   _buildSeccionTitulo(Icons.folder_shared, "Vencimientos Críticos"),
                   _buildFilaDocumento("LICENCIA", "VENCIMIENTO_LICENCIA_DE_CONDUCIR", "ARCHIVO_LICENCIA_DE_CONDUCIR", data, dni),
                   _buildFilaDocumento("PSICOFÍSICO", "VENCIMIENTO_PSICOFISICO", "ARCHIVO_PSICOFISICO", data, dni),
                   _buildFilaDocumento("MANEJO DEFENSIVO", "VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO", "ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO", data, dni),
                   
-                  const Divider(color: Colors.white24),
+                  const Divider(color: Colors.white10),
                   _buildSeccionTitulo(Icons.work, "Seguros y Aportes"),
                   _buildFilaDocumento("ART", "VENCIMIENTO_ART", "ARCHIVO_ART", data, dni),
                   _buildFilaDocumento("F. 931", "VENCIMIENTO_931", "ARCHIVO_931", data, dni),
                   _buildFilaDocumento("SEGURO VIDA", "VENCIMIENTO_SEGURO_DE_VIDA", "ARCHIVO_SEGURO_DE_VIDA", data, dni),
                   
-                  const Divider(color: Colors.white24),
-                  _buildSeccionTitulo(Icons.local_shipping, "Unidades"),
+                  const Divider(color: Colors.white10),
+                  _buildSeccionTitulo(Icons.local_shipping, "Asignación de Unidades"),
                   _buildAsignacionUnidad(dni, "VEHICULO", "Tractor: ${data['VEHICULO'] ?? '-'}", data['VEHICULO'] ?? ""),
                   _buildAsignacionUnidad(dni, "ENGANCHE", "Enganche: ${data['ENGANCHE'] ?? '-'}", data['ENGANCHE'] ?? ""),
+                  const SizedBox(height: 30),
                 ],
               );
             },
@@ -350,18 +356,18 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
               radius: 50,
               backgroundColor: Colors.white12,
               backgroundImage: (data['ARCHIVO_PERFIL'] != null && data['ARCHIVO_PERFIL'] != "-") ? NetworkImage(data['ARCHIVO_PERFIL']) : null,
-              child: (data['ARCHIVO_PERFIL'] == null || data['ARCHIVO_PERFIL'] == "-") ? const Icon(Icons.person, size: 50, color: Colors.white) : null,
+              child: (data['ARCHIVO_PERFIL'] == null || data['ARCHIVO_PERFIL'] == "-") ? const Icon(Icons.person, size: 50, color: Colors.white24) : null,
             ),
             Positioned(
               bottom: 0, right: 0,
               child: GestureDetector(
                 onTap: () => _gestionarFotoPerfil(dni, data['ARCHIVO_PERFIL']),
-                child: Container(padding: const EdgeInsets.all(8), decoration: const BoxDecoration(color: Colors.orangeAccent, shape: BoxShape.circle), child: const Icon(Icons.edit, size: 20, color: Colors.black)),
+                child: Container(padding: const EdgeInsets.all(8), decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle), child: const Icon(Icons.edit, size: 18, color: Colors.black)),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Text(data['NOMBRE'] ?? "Sin Nombre", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
       ],
     );
@@ -386,24 +392,25 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
 
   Widget _buildDatoEditableCompleto(String etiqueta, String? fecha, String? url, VoidCallback onTap) {
     int dias = AppFormatters.calcularDiasRestantes(fecha ?? "");
-    Color colorSemaforo = (dias < 0) ? Colors.red : (dias <= 14) ? Colors.orange : (dias <= 30) ? Colors.greenAccent : Colors.blueAccent;
+    Color colorSemaforo = (dias < 0) ? Colors.redAccent : (dias <= 14) ? Colors.orangeAccent : (dias <= 30) ? Colors.greenAccent : Colors.blueAccent;
 
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(children: [
-          Expanded(child: Text(etiqueta, style: const TextStyle(fontSize: 13, color: Colors.white))),
+          Expanded(child: Text(etiqueta, style: const TextStyle(fontSize: 13, color: Colors.white70))),
           if (url != null && url.isNotEmpty && url != "-") const Icon(Icons.file_present, size: 18, color: Colors.blueAccent),
           const SizedBox(width: 8),
-          Text(AppFormatters.formatearFecha(fecha ?? ""), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
-          const SizedBox(width: 8),
+          Text(AppFormatters.formatearFecha(fecha ?? ""), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13)),
+          const SizedBox(width: 12),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: colorSemaforo, borderRadius: BorderRadius.circular(4)),
-            child: Text("${dias}d", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: colorSemaforo.withAlpha(50), borderRadius: BorderRadius.circular(6), border: Border.all(color: colorSemaforo, width: 0.5)),
+            child: Text("${dias}d", style: TextStyle(color: colorSemaforo, fontSize: 10, fontWeight: FontWeight.bold)),
           ),
-          const Icon(Icons.chevron_right, color: Colors.white54),
+          const SizedBox(width: 5),
+          const Icon(Icons.chevron_right, color: Colors.white24, size: 16),
         ]),
       ),
     );
@@ -412,13 +419,12 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
   Widget _buildAsignacionUnidad(String dni, String campo, String label, String actual) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text(label, style: const TextStyle(color: Colors.white)),
-      trailing: const Icon(Icons.edit, size: 20, color: Colors.orangeAccent),
+      title: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14)),
+      trailing: const Icon(Icons.sync_alt, size: 20, color: Colors.greenAccent),
       onTap: () => _seleccionarUnidad(dni, campo, actual),
     );
   }
 
-  // ✅ LECCIÓN DE MENTORÍA APLICADA: BATCH WRITES (Múltiples guardados simultáneos)
   void _seleccionarUnidad(String dni, String campo, String patenteActual) {
     List<String> tipos = (campo == 'VEHICULO') ? ['TRACTOR'] : ['BATEA', 'TOLVA', 'ACOPLADO'];
     final navigator = Navigator.of(context);
@@ -426,31 +432,26 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A3A5A),
-        title: Text("Asignar ${campo == 'VEHICULO' ? 'Tractor' : 'Enganche'}", style: const TextStyle(color: Colors.white)),
+        title: Text("Asignar ${campo == 'VEHICULO' ? 'Tractor' : 'Enganche'}"),
         content: SizedBox(
           width: double.maxFinite,
           height: 350,
           child: StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('VEHICULOS').where('TIPO', whereIn: tipos).snapshots(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.orangeAccent));
+              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.greenAccent));
               var unidades = snapshot.data!.docs;
               
               return ListView.builder(
                 itemCount: unidades.length + 1,
                 itemBuilder: (context, index) {
                   
-                  // LÓGICA BLINDADA CON BATCH
                   Future<void> procesarCambio(String? patenteNueva) async {
                     try {
                       String cleanActual = patenteActual.trim();
                       final db = FirebaseFirestore.instance;
-                      
-                      // Creamos el "Lote" de tareas
                       WriteBatch batch = db.batch();
 
-                      // 1. Vinculamos la unidad nueva y al chofer
                       if (patenteNueva != null && patenteNueva != "-") {
                         batch.update(db.collection('VEHICULOS').doc(patenteNueva), {'ESTADO': 'OCUPADO'});
                         batch.update(db.collection('EMPLEADOS').doc(dni), {campo: patenteNueva});
@@ -458,28 +459,21 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
                         batch.update(db.collection('EMPLEADOS').doc(dni), {campo: "-"});
                       }
 
-                      // Ejecutamos el lote de forma SEGURA (Todo o Nada)
                       await batch.commit();
 
-                      // 2. Liberamos la vieja (Lo hacemos por separado en un try-catch porque si la patente vieja ya no existe, rompería todo el proceso)
                       if (cleanActual.isNotEmpty && cleanActual != "-" && cleanActual != "S/D") {
                         try {
                           await db.collection('VEHICULOS').doc(cleanActual).update({'ESTADO': 'LIBRE'});
-                        } catch(e) {
-                          debugPrint("Unidad vieja ignorada: $e");
-                        }
+                        } catch(e) { debugPrint("Aviso: Unidad previa ya libre."); }
                       }
-
-                    } catch (e) {
-                      debugPrint("⚠️ Error: $e");
-                    }
+                    } catch (e) { debugPrint("Error en asignación: $e"); }
                     if (mounted) navigator.pop();
                   }
 
                   if (index == 0) {
                     return ListTile(
-                      leading: const Icon(Icons.not_interested, color: Colors.redAccent),
-                      title: const Text("QUITAR ASIGNACIÓN", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                      leading: const Icon(Icons.link_off, color: Colors.redAccent),
+                      title: const Text("DESVINCULAR", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
                       onTap: () => procesarCambio(null),
                     );
                   }
@@ -491,8 +485,8 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
                   if (vData['ESTADO'] == 'OCUPADO' && patenteItem != patenteActual.trim()) return const SizedBox();
                   
                   return ListTile(
-                    title: Text(patenteItem, style: const TextStyle(color: Colors.white)),
-                    trailing: patenteItem == patenteActual.trim() ? const Icon(Icons.check, color: Colors.greenAccent) : null,
+                    title: Text(patenteItem, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                    trailing: patenteItem == patenteActual.trim() ? const Icon(Icons.check_circle, color: Colors.greenAccent) : null,
                     onTap: () => procesarCambio(patenteItem),
                   );
                 },
@@ -507,9 +501,9 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
   Widget _buildDatoSimple(String etiqueta, String valor, Function(String) onEdit) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text(etiqueta, style: const TextStyle(fontSize: 12, color: Colors.white54)),
-      subtitle: Text(valor, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-      trailing: const Icon(Icons.edit, size: 18, color: Colors.orangeAccent),
+      title: Text(etiqueta, style: const TextStyle(fontSize: 12, color: Colors.white38)),
+      subtitle: Text(valor, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+      trailing: const Icon(Icons.edit_note, size: 22, color: Colors.greenAccent),
       onTap: () => _mostrarDialogoTexto(etiqueta, valor, onEdit),
     );
   }
@@ -521,26 +515,21 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A3A5A),
-        title: Text("Editar $titulo", style: const TextStyle(color: Colors.white)),
+        title: Text("Editar $titulo"),
         content: TextField(
           controller: controller, 
           textCapitalization: TextCapitalization.characters,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
-          ),
+          decoration: const InputDecoration(hintText: "Escriba aquí..."),
         ),
         actions: [
-          TextButton(onPressed: () => navigator.pop(), child: const Text("Cancelar", style: TextStyle(color: Colors.white54))),
+          TextButton(onPressed: () => navigator.pop(), child: const Text("CANCELAR")),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black),
             onPressed: () { 
               onSave(controller.text.trim().toUpperCase()); 
               navigator.pop();
             }, 
-            child: const Text("Guardar")
+            child: const Text("GUARDAR")
           )
         ],
       ),
@@ -557,16 +546,13 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A3A5A),
-        title: const Text("Seleccionar Empresa", style: TextStyle(color: Colors.white)),
+        title: const Text("Seleccionar Empresa"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: empresas.map((e) => ListTile(
+            contentPadding: EdgeInsets.zero,
             title: Text(e, style: const TextStyle(fontSize: 12, color: Colors.white)),
-            onTap: () { 
-              onEdit(e); 
-              navigator.pop();
-            },
+            onTap: () { onEdit(e); navigator.pop(); },
           )).toList(),
         ),
       ),
@@ -576,20 +562,20 @@ class _AdminPersonalListaScreenState extends State<AdminPersonalListaScreen> {
   Widget _buildDatoEmpresaSeleccionable(String etiqueta, String valor, Function(String) onEdit) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text(etiqueta, style: const TextStyle(fontSize: 12, color: Colors.white54)),
-      subtitle: Text(valor, style: const TextStyle(fontSize: 14, color: Colors.white)),
-      trailing: const Icon(Icons.business, size: 18, color: Colors.orangeAccent),
+      title: Text(etiqueta, style: const TextStyle(fontSize: 12, color: Colors.white38)),
+      subtitle: Text(valor, style: const TextStyle(fontSize: 13, color: Colors.white)),
+      trailing: const Icon(Icons.business_center, size: 20, color: Colors.greenAccent),
       onTap: () => _mostrarDialogoEmpresa(etiqueta, valor, onEdit),
     );
   }
 
   Widget _buildSeccionTitulo(IconData icono, String titulo) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.only(top: 20, bottom: 10),
       child: Row(children: [
-        Icon(icono, color: Colors.orangeAccent, size: 20),
+        Icon(icono, color: Colors.greenAccent, size: 18),
         const SizedBox(width: 10),
-        Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orangeAccent, letterSpacing: 1.2)),
+        Text(titulo.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.greenAccent, letterSpacing: 1.1, fontSize: 13)),
       ]),
     );
   }

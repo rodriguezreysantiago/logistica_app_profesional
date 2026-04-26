@@ -65,30 +65,42 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   }
 
   Future<void> _subirDocumento(String campoUrl, String tipoDoc) async {
-    // ✅ CORRECCIÓN LINTER: Guardamos el mensajero en la línea 1 de la función
     final messenger = ScaffoldMessenger.of(context);
 
     File? fileToUpload;
     String fileName = "";
 
+    // ✅ MENTOR: El BottomSheet ahora usa el color surface del Theme Global
     final int? source = await showModalBottomSheet<int>(
       context: context,
-      backgroundColor: const Color(0xFF1A3A5A),
-      builder: (bCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.orangeAccent),
-              title: const Text("Tomar Foto", style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context, 1),
-            ),
-            ListTile(
-              leading: const Icon(Icons.file_present, color: Colors.blueAccent),
-              title: const Text("Seleccionar Archivo (PDF/Imagen)", style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context, 2),
-            ),
-          ],
+      backgroundColor: Colors.transparent,
+      builder: (bCtx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: const Border(top: BorderSide(color: Colors.greenAccent, width: 2))
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(15),
+                child: Text("Adjuntar Documento", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.greenAccent),
+                title: const Text("Tomar Foto", style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(context, 1),
+              ),
+              ListTile(
+                leading: const Icon(Icons.file_present, color: Colors.blueAccent),
+                title: const Text("Seleccionar Archivo (PDF/Imagen)", style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(context, 2),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
         ),
       ),
     );
@@ -113,29 +125,32 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       try {
         String path = "vehiculos/${widget.vehiculoId.trim()}/$fileName";
         Reference ref = FirebaseStorage.instance.ref().child(path);
-        await ref.putFile(fileToUpload);
+        
+        // ✅ MENTOR: Intentamos adivinar el tipo para que el navegador lo abra bien después
+        SettableMetadata? metadata;
+        if (fileName.toLowerCase().endsWith('.pdf')) {
+          metadata = SettableMetadata(contentType: 'application/pdf');
+        } else if (fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg')) {
+          metadata = SettableMetadata(contentType: 'image/jpeg');
+        }
+
+        await ref.putFile(fileToUpload, metadata);
         String downloadUrl = await ref.getDownloadURL();
 
         if (mounted) {
           setState(() {
-            if (tipoDoc == 'RTO') {
-              _urlRto = downloadUrl;
-            }
-            if (tipoDoc == 'SEGURO') {
-              _urlSeguro = downloadUrl;
-            }
+            if (tipoDoc == 'RTO') _urlRto = downloadUrl;
+            if (tipoDoc == 'SEGURO') _urlSeguro = downloadUrl;
             _isSaving = false;
           });
-          // ✅ Usamos el messenger guardado en la línea 1
           messenger.showSnackBar(
-            SnackBar(content: Text("Documento $tipoDoc cargado."), backgroundColor: Colors.blue),
+            SnackBar(content: Text("Documento $tipoDoc cargado."), backgroundColor: Colors.blueAccent),
           );
         }
       } catch (e) {
         if (mounted) {
           setState(() => _isSaving = false);
-          // ✅ Usamos el messenger guardado en la línea 1
-          messenger.showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+          messenger.showSnackBar(SnackBar(content: Text("Error al subir: $e"), backgroundColor: Colors.redAccent));
         }
       }
     }
@@ -146,7 +161,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
     if (_vinController.text.length < 10) {
       messenger.showSnackBar(
-        const SnackBar(content: Text("Se requiere un VIN válido (Mín. 10 caracteres)"), backgroundColor: Colors.orange),
+        const SnackBar(content: Text("Se requiere un VIN válido (Mín. 10 caracteres)"), backgroundColor: Colors.orangeAccent),
       );
       return;
     }
@@ -154,7 +169,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     setState(() => _isSyncing = true);
     
     try {
-      final metros = await VolvoApiService().traerKilometrajeCualquierVia(_vinController.text);
+      final metros = await VolvoApiService().traerKilometrajeCualquierVia(_vinController.text.trim().toUpperCase());
       
       if (!mounted) return;
       
@@ -166,20 +181,18 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
         );
       } else {
         messenger.showSnackBar(
-          const SnackBar(content: Text("Unidad en reposo o no encontrada en Volvo."), backgroundColor: Colors.orange),
+          const SnackBar(content: Text("Unidad en reposo o no encontrada en Volvo."), backgroundColor: Colors.orangeAccent),
         );
       }
     } catch (e) {
       debugPrint("Error sincro: $e");
       if (mounted) {
          messenger.showSnackBar(
-          SnackBar(content: Text("Error de conexión con Volvo: $e"), backgroundColor: Colors.red),
+          SnackBar(content: Text("Error de conexión con Volvo: $e"), backgroundColor: Colors.redAccent),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isSyncing = false);
-      }
+      if (mounted) setState(() => _isSyncing = false);
     }
   }
 
@@ -194,19 +207,6 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       initialDate: initialDate,
       firstDate: DateTime(2020),
       lastDate: DateTime(2040),
-      locale: const Locale('es', 'AR'),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Colors.orangeAccent,
-              onPrimary: Colors.black,
-              surface: Color(0xFF1A3A5A),
-            ),
-          ),
-          child: child!,
-        );
-      },
     );
 
     if (picked != null && mounted) {
@@ -229,13 +229,12 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF0D1D2D),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Seleccionar Empresa", style: TextStyle(color: Colors.white, fontSize: 16)),
+        title: const Text("Seleccionar Empresa"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: empresas.map((e) => ListTile(
-            title: Text(e, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            contentPadding: EdgeInsets.zero,
+            title: Text(e, style: const TextStyle(color: Colors.white, fontSize: 13)),
             onTap: () {
               setState(() => _empresaController.text = e);
               Navigator.pop(context);
@@ -247,9 +246,8 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   }
 
   Future<void> _guardarCambios() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
+    if (_isSaving) return;
 
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -274,7 +272,6 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       });
       
       if (!mounted) return;
-      
       messenger.showSnackBar(
         const SnackBar(content: Text("Ficha actualizada con éxito"), backgroundColor: Colors.green)
       );
@@ -284,7 +281,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       if (mounted) {
         setState(() => _isSaving = false);
         messenger.showSnackBar(
-          SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.red)
+          SnackBar(content: Text("Error al guardar: $e"), backgroundColor: Colors.redAccent)
         );
       }
     }
@@ -294,106 +291,157 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   Widget build(BuildContext context) {
     bool esVolvo = _marcaController.text.toUpperCase().contains("VOLVO");
 
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(title: Text("Ficha: ${widget.vehiculoId}"), centerTitle: true, backgroundColor: Colors.transparent, elevation: 0, foregroundColor: Colors.white),
-      body: Stack(
-        children: [
-          Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
-          Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
-          SafeArea(
-            child: Form(
-              key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  _buildSectionTitle("INFORMACIÓN TÉCNICA"),
-                  
-                  _buildTextField(_marcaController, "Marca del Fabricante", Icons.branding_watermark),
-                  _buildTextField(_modeloController, "Modelo de la Unidad", Icons.directions_car),
-                  _buildTextField(_anioController, "Año de Fabricación", Icons.calendar_today, isNumber: true),
-                  
-                  if (esVolvo) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: Colors.blue.withAlpha(20), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blueAccent.withAlpha(50))),
-                      child: Column(children: [
-                        _buildTextField(_vinController, "Código VIN", Icons.fingerprint),
-                        const SizedBox(height: 10),
-                        _isSyncing 
-                          ? const Padding(padding: EdgeInsets.all(8.0), child: CircularProgressIndicator(color: Colors.blueAccent)) 
-                          : TextButton.icon(
-                              onPressed: _sincronizarConVolvoManual, 
-                              icon: const Icon(Icons.sync, color: Colors.blueAccent), 
-                              label: const Text("SINCRONIZAR VOLVO", style: TextStyle(color: Colors.blueAccent, fontSize: 11, fontWeight: FontWeight.bold))
-                            ),
-                      ]),
+    // ✅ MENTOR: GestureDetector en la raíz cierra el teclado si tocan el fondo
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(title: Text("Ficha: ${widget.vehiculoId}")),
+        body: Stack(
+          children: [
+            Positioned.fill(child: Image.asset('assets/images/fondo_login.jpg', fit: BoxFit.cover)),
+            Positioned.fill(child: Container(color: Colors.black.withAlpha(200))),
+            SafeArea(
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    _buildSectionTitle("INFORMACIÓN TÉCNICA"),
+                    
+                    _buildTextField(
+                      controller: _marcaController, 
+                      label: "Marca del Fabricante", 
+                      icon: Icons.branding_watermark,
                     ),
-                  ],
-
-                  _buildTextField(_kmController, "Kilometraje Actual", Icons.speed, isNumber: true),
-                  const SizedBox(height: 10),
-                  _buildEmpresaTile(),
-
-                  const SizedBox(height: 30),
-                  _buildSectionTitle("AUDITORÍA DE VENCIMIENTOS Y DOCUMENTACIÓN"),
-
-                  _buildDatePickerTile(
-                    "Vencimiento RTO", _fechaRto, _urlRto,
-                    () => _seleccionarFecha(context, true),
-                    () => _subirDocumento('ARCHIVO_RTO', 'RTO'),
-                  ),
-                  const Divider(color: Colors.white10, height: 1),
-                  _buildDatePickerTile(
-                    "Póliza de Seguro", _fechaSeguro, _urlSeguro,
-                    () => _seleccionarFecha(context, false),
-                    () => _subirDocumento('ARCHIVO_SEGURO', 'SEGURO'),
-                  ),
-
-                  const SizedBox(height: 40),
-                  _isSaving 
-                    ? const Center(child: CircularProgressIndicator(color: Colors.orangeAccent)) 
-                    : ElevatedButton.icon(
-                        onPressed: _guardarCambios, 
-                        icon: const Icon(Icons.save), 
-                        label: const Text("GUARDAR CAMBIOS"), 
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black, minimumSize: const Size(double.infinity, 55), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))
+                    _buildTextField(
+                      controller: _modeloController, 
+                      label: "Modelo de la Unidad", 
+                      icon: Icons.directions_car,
+                    ),
+                    _buildTextField(
+                      controller: _anioController, 
+                      label: "Año de Fabricación", 
+                      icon: Icons.calendar_today, 
+                      isNumber: true,
+                    ),
+                    
+                    if (esVolvo) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.blueAccent.withAlpha(20), 
+                          borderRadius: BorderRadius.circular(14), 
+                          border: Border.all(color: Colors.blueAccent.withAlpha(50))
+                        ),
+                        child: Column(children: [
+                          _buildTextField(
+                            controller: _vinController, 
+                            label: "Código VIN (Volvo)", 
+                            icon: Icons.fingerprint,
+                            textInputAction: TextInputAction.done,
+                          ),
+                          const SizedBox(height: 15),
+                          _isSyncing 
+                            ? const CircularProgressIndicator(color: Colors.blueAccent) 
+                            : SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: _sincronizarConVolvoManual, 
+                                  icon: const Icon(Icons.sync, color: Colors.blueAccent), 
+                                  label: const Text("FORZAR SINCRO VOLVO", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Colors.blueAccent),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+                                  ),
+                                ),
+                              ),
+                        ]),
                       ),
-                  const SizedBox(height: 20),
-                ],
+                      const SizedBox(height: 20),
+                    ],
+
+                    _buildTextField(
+                      controller: _kmController, 
+                      label: "Kilometraje Actual", 
+                      icon: Icons.speed, 
+                      isNumber: true,
+                      textInputAction: TextInputAction.done,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildEmpresaTile(),
+
+                    const SizedBox(height: 35),
+                    _buildSectionTitle("AUDITORÍA DE VENCIMIENTOS"),
+
+                    _buildDatePickerTile(
+                      "Vencimiento RTO", _fechaRto, _urlRto,
+                      () => _seleccionarFecha(context, true),
+                      () => _subirDocumento('ARCHIVO_RTO', 'RTO'),
+                    ),
+                    const Divider(color: Colors.white10, height: 1),
+                    _buildDatePickerTile(
+                      "Póliza de Seguro", _fechaSeguro, _urlSeguro,
+                      () => _seleccionarFecha(context, false),
+                      () => _subirDocumento('ARCHIVO_SEGURO', 'SEGURO'),
+                    ),
+
+                    const SizedBox(height: 40),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 55,
+                      child: ElevatedButton.icon(
+                        onPressed: _isSaving ? null : _guardarCambios, 
+                        icon: _isSaving 
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)) 
+                          : const Icon(Icons.save), 
+                        label: Text(
+                          _isSaving ? "GUARDANDO..." : "GUARDAR CAMBIOS",
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+                        ), 
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildSectionTitle(String title) {
-    return Padding(padding: const EdgeInsets.only(bottom: 15, left: 5), child: Text(title, style: const TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 2)));
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 15, left: 5), 
+      child: Text(title, style: const TextStyle(color: Colors.greenAccent, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5))
+    );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool isNumber = false}) {
+  // ✅ MENTOR: Input ultra limpio. El diseño pesado ahora lo hace main.dart
+  Widget _buildTextField({
+    required TextEditingController controller, 
+    required String label, 
+    required IconData icon, 
+    bool isNumber = false,
+    TextInputAction textInputAction = TextInputAction.next,
+  }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: TextFormField(
         controller: controller,
         keyboardType: isNumber ? TextInputType.number : TextInputType.text,
         textCapitalization: TextCapitalization.characters,
-        style: const TextStyle(color: Colors.white, fontSize: 14),
+        textInputAction: textInputAction,
+        style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-          prefixIcon: Icon(icon, color: Colors.orangeAccent, size: 18),
-          filled: true,
-          fillColor: Colors.white.withAlpha(20),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
+          prefixIcon: Icon(icon, color: Theme.of(context).colorScheme.primary, size: 20),
         ),
         validator: (value) {
-          if (value == null || value.isEmpty) {
-            return "Campo requerido";
-          }
+          if (value == null || value.trim().isEmpty) return "Campo requerido";
           return null;
         }
       )
@@ -403,18 +451,22 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   Widget _buildEmpresaTile() {
     return InkWell(
       onTap: _mostrarSelectorEmpresa, 
-      borderRadius: BorderRadius.circular(12), 
+      borderRadius: BorderRadius.circular(14), 
       child: Container(
         padding: const EdgeInsets.all(16), 
-        decoration: BoxDecoration(color: Colors.white.withAlpha(20), borderRadius: BorderRadius.circular(12)), 
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface, 
+          borderRadius: BorderRadius.circular(14)
+        ), 
         child: Row(children: [
-          const Icon(Icons.business, color: Colors.orangeAccent), 
+          const Icon(Icons.business, color: Colors.greenAccent), 
           const SizedBox(width: 15), 
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text("Empresa Titular", style: TextStyle(color: Colors.white54, fontSize: 10)), 
-            Text(_empresaController.text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))
+            const Text("Empresa Titular", style: TextStyle(color: Colors.white54, fontSize: 11)), 
+            const SizedBox(height: 4),
+            Text(_empresaController.text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))
           ])), 
-          const Icon(Icons.chevron_right, color: Colors.white24)
+          const Icon(Icons.edit, color: Colors.white24, size: 18)
         ])
       )
     );
@@ -422,12 +474,12 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
   Widget _buildDatePickerTile(String label, String? fecha, String? urlActual, VoidCallback onTapDate, VoidCallback onTapFile) {
     int dias = AppFormatters.calcularDiasRestantes(fecha ?? "");
-    Color colorSemaforo = dias < 0 ? Colors.red : (dias <= 14 ? Colors.orange : (dias <= 30 ? Colors.greenAccent : Colors.blueAccent));
+    Color colorSemaforo = dias < 0 ? Colors.redAccent : (dias <= 14 ? Colors.orangeAccent : (dias <= 30 ? Colors.greenAccent : Colors.blueAccent));
 
     return ListTile(
       onTap: onTapDate,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-      leading: Icon(Icons.edit_calendar, color: colorSemaforo, size: 24),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+      leading: Icon(Icons.edit_calendar, color: colorSemaforo, size: 28),
       title: Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
       subtitle: Text(AppFormatters.formatearFecha(fecha ?? ""), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
       trailing: Row(
@@ -443,11 +495,12 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
               ), 
               child: Text("${dias}d", style: TextStyle(color: colorSemaforo, fontWeight: FontWeight.bold, fontSize: 11))
             ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 15),
           IconButton(
             icon: Icon(
               urlActual != null && urlActual != "-" ? Icons.file_download_done : Icons.upload_file, 
-              color: urlActual != null && urlActual != "-" ? Colors.blueAccent : Colors.orangeAccent
+              color: urlActual != null && urlActual != "-" ? Colors.blueAccent : Colors.white54,
+              size: 26,
             ),
             onPressed: onTapFile,
           ),

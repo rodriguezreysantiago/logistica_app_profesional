@@ -1,22 +1,18 @@
 class AppFormatters {
   // --- FORMATEAR KILOMETRAJE (1.232.232,0) ---
   static String formatearKilometraje(dynamic valor) {
-    if (valor == null || valor == 0 || valor == "0" || valor == "" || valor == "nan") return "0,0";
+    if (valor == null || valor == 0 || valor == "0" || valor == "" || valor.toString().toLowerCase() == "nan") return "0,0";
     
     try {
-      // ✅ Mentora: Limpieza robusta. Nos quedamos solo con números y el punto decimal.
       String raw = valor.toString().replaceAll(',', '.'); 
       double numero = double.parse(raw);
       
-      // 1. Convertimos a String con 1 decimal y cambiamos punto por coma
       String fixed = numero.toStringAsFixed(1).replaceAll('.', ',');
       
-      // 2. Separamos la parte entera de la decimal
       List<String> partes = fixed.split(',');
       String entera = partes[0];
       String decimal = partes[1];
 
-      // 3. Agregamos los puntos de miles a la parte entera usando Regex
       final reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
       entera = entera.replaceAllMapped(reg, (Match m) => '${m[1]}.');
 
@@ -44,11 +40,14 @@ class AppFormatters {
 
   // --- FORMATEAR FECHA (DD/MM/YYYY) ---
   static String formatearFecha(String? fecha) {
-    if (fecha == null || fecha.isEmpty || fecha == "---" || fecha == "nan") {
+    if (fecha == null || fecha.isEmpty || fecha == "---" || fecha.toLowerCase() == "nan") {
       return "Sin datos";
     }
     try {
-      final String f = fecha.replaceAll('/', '-').trim();
+      // ✅ MENTOR: Limpiamos cualquier rastro de horas (T o espacio)
+      final String soloFecha = fecha.split('T').first.split(' ').first;
+      final String f = soloFecha.replaceAll('/', '-').trim();
+      
       final List<String> partes = f.split('-');
       if (partes.length == 3) {
         if (partes[0].length == 4) { // YYYY-MM-DD
@@ -56,7 +55,7 @@ class AppFormatters {
         }
         return "${partes[0].padLeft(2, '0')}/${partes[1].padLeft(2, '0')}/${partes[2]}";
       }
-      return fecha;
+      return soloFecha;
     } catch (e) { 
       return fecha; 
     }
@@ -64,11 +63,14 @@ class AppFormatters {
 
   // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
   static int calcularDiasRestantes(String? fecha) {
-    if (fecha == null || fecha.isEmpty || fecha == "---" || fecha == "nan") {
+    if (fecha == null || fecha.isEmpty || fecha == "---" || fecha.toLowerCase() == "nan") {
       return 999;
     }
     try {
-      final String f = fecha.replaceAll('/', '-').trim();
+      // ✅ MENTOR: Aplicamos la misma limpieza de horas para evitar crasheos en el parseo
+      final String soloFecha = fecha.split('T').first.split(' ').first;
+      final String f = soloFecha.replaceAll('/', '-').trim();
+      
       final List<String> partes = f.split('-');
       DateTime fVto;
       
@@ -82,7 +84,6 @@ class AppFormatters {
         );
       }
       
-      // ✅ Mentora: Normalizamos AMBAS fechas a las 00:00:00 para que el cálculo sea exacto
       final vtoNormalizado = DateTime(fVto.year, fVto.month, fVto.day);
       final ahora = DateTime.now();
       final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);

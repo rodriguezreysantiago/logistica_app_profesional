@@ -1,17 +1,16 @@
 import 'dart:io';
-import 'package:excel/excel.dart' as ex; // ✅ Mismo prefijo para evitar conflictos
+import 'package:excel/excel.dart' as ex; 
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart'; // Para compartir en móvil
+import 'package:share_plus/share_plus.dart'; 
 
 class ReportChecklistService {
   
   static Future<void> mostrarOpcionesYGenerar(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     
-    // ✅ Opciones para que Ariel elija qué columnas quiere ver
     Map<String, bool> opciones = {
       "FECHA": true,
       "DOMINIO": true,
@@ -26,31 +25,48 @@ class ReportChecklistService {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          backgroundColor: const Color(0xFF1A3A5A),
-          title: const Text("Configurar Reporte Novedades", style: TextStyle(color: Colors.white, fontSize: 18)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: opciones.keys.map((key) {
-                return CheckboxListTile(
-                  title: Text(key, style: const TextStyle(color: Colors.white70, fontSize: 14)),
-                  value: opciones[key],
-                  activeColor: Colors.orangeAccent,
-                  checkColor: Colors.black,
-                  onChanged: (val) => setState(() => opciones[key] = val ?? false),
-                );
-              }).toList(),
+          backgroundColor: Theme.of(context).colorScheme.surface, // ✅ MENTOR: Tema global
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.white.withAlpha(20))
+          ),
+          title: const Text("Reporte de Novedades", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Container(
+            width: double.maxFinite,
+            constraints: const BoxConstraints(maxHeight: 400),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: opciones.keys.map((key) {
+                  return CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(key, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
+                    value: opciones[key],
+                    activeColor: Colors.greenAccent,
+                    checkColor: Colors.black,
+                    side: const BorderSide(color: Colors.white54),
+                    onChanged: (val) => setState(() => opciones[key] = val ?? false),
+                  );
+                }).toList(),
+              ),
             ),
           ),
+          actionsPadding: const EdgeInsets.fromLTRB(15, 0, 15, 15),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false), 
               child: const Text("CANCELAR", style: TextStyle(color: Colors.white54))
             ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green, 
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+              ),
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("GENERAR EXCEL", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text("GENERAR EXCEL", style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -58,14 +74,26 @@ class ReportChecklistService {
     );
 
     if (confirmar == true) {
-      messenger.showSnackBar(const SnackBar(content: Text("Procesando novedades...")));
-      await _ejecutarGeneracion(opciones);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+              SizedBox(width: 15),
+              Text("Procesando novedades del mes..."),
+            ],
+          ),
+          backgroundColor: Colors.orangeAccent,
+          duration: Duration(seconds: 2),
+        )
+      );
+      // ✅ MENTOR: Pasamos el messenger a la función asíncrona
+      await _ejecutarGeneracion(opciones, messenger);
     }
   }
 
-  static Future<void> _ejecutarGeneracion(Map<String, bool> filtros) async {
+  static Future<void> _ejecutarGeneracion(Map<String, bool> filtros, ScaffoldMessengerState messenger) async {
     try {
-      // Traemos los checklists ordenados por fecha
       final snapshot = await FirebaseFirestore.instance
           .collection('CHECKLISTS')
           .orderBy('FECHA', descending: true)
@@ -76,13 +104,13 @@ class ReportChecklistService {
       excel.rename('Sheet1', sheetName);
       ex.Sheet sheetObject = excel[sheetName];
 
-      // ✅ Mismo sistema de bordes y estilos que el de Flota
       var borderThin = ex.Border(borderStyle: ex.BorderStyle.Thin);
       var borderMedium = ex.Border(borderStyle: ex.BorderStyle.Medium);
 
       var headerStyle = ex.CellStyle(
         bold: true, 
-        backgroundColorHex: ex.ExcelColor.fromHexString("#D3D3D3"),
+        backgroundColorHex: ex.ExcelColor.fromHexString("#1A3A5A"), // ✅ MENTOR: Azul corporativo
+        fontColorHex: ex.ExcelColor.fromHexString("#FFFFFF"),
         horizontalAlign: ex.HorizontalAlign.Center,
         bottomBorder: borderMedium,
         topBorder: borderThin,
@@ -90,7 +118,6 @@ class ReportChecklistService {
         rightBorder: borderThin,
       );
 
-      // Cabeceras dinámicas basadas en la selección
       List<String> titulos = [];
       filtros.forEach((key, val) { if (val) titulos.add(key); });
 
@@ -106,14 +133,12 @@ class ReportChecklistService {
         final Map respuestas = data['RESPUESTAS'] ?? {};
         final Map observaciones = data['OBSERVACIONES'] ?? {};
         
-        // Formatear fecha
         String fechaStr = "-";
         if (data['FECHA'] != null) {
           DateTime dt = (data['FECHA'] as Timestamp).toDate();
           fechaStr = DateFormat('dd/MM/yyyy').format(dt);
         }
 
-        // Recorremos las respuestas para encontrar solo REG o MAL
         respuestas.forEach((item, estado) {
           if (estado == "REG" || estado == "MAL") {
             int col = 0;
@@ -140,17 +165,15 @@ class ReportChecklistService {
               sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(observaciones[item] ?? "");
             }
             
-            row++; // Siguiente fila para la siguiente novedad
+            row++; 
           }
         });
       }
 
-      // Ajuste de ancho de columnas
       for (var i = 0; i < titulos.length; i++) {
         sheetObject.setColumnWidth(i, 20.0); 
       }
 
-      // Guardar archivo
       final String fileName = "Reporte_Novedades_${DateTime.now().millisecondsSinceEpoch}.xlsx";
       final directory = await getApplicationDocumentsDirectory();
       final path = "${directory.path}/$fileName";
@@ -161,15 +184,19 @@ class ReportChecklistService {
           ..createSync(recursive: true)
           ..writeAsBytesSync(fileBytes);
         
-        // Compatibilidad Windows / Móvil
         if (Platform.isWindows) {
           await Process.run('cmd', ['/c', 'start', '', path]);
         } else {
-          await Share.shareXFiles([XFile(path)], text: 'Reporte de Novedades');
+          // ✅ MENTOR: Disparo automático del menú de compartir nativo
+          await Share.shareXFiles([XFile(path)], text: 'Reporte de Novedades (Mantenimiento)');
         }
       }
     } catch (e) {
       debugPrint("❌ Error Reporte Checklist: $e");
+      // ✅ MENTOR: Feedback seguro para el usuario si algo falla
+      messenger.showSnackBar(
+        SnackBar(content: Text("❌ Error al generar el Excel: $e"), backgroundColor: Colors.redAccent)
+      );
     }
   }
 }

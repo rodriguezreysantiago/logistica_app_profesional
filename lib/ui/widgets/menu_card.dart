@@ -16,45 +16,56 @@ class MenuCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 6,
-      color: color,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: InkWell(
-        // ✅ Mentora: Asignación directa y limpia. El InkWell ya es seguro por naturaleza.
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(15),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Icono con sombra suave para profundidad
-            Icon(
-              icono, 
-              size: 55, 
-              color: Colors.white,
-              shadows: [
-                Shadow(
-                  color: Colors.black.withAlpha(75),
-                  blurRadius: 10,
-                  offset: const Offset(2, 2),
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface, // ✅ MENTOR: Hereda el fondo oscuro global
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withAlpha(15)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(50),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent, // ✅ MENTOR: Permite que el InkWell dibuje el ripple effect
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // ✅ MENTOR: El color del parámetro se usa como acento elegante
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: color.withAlpha(25), 
+                  shape: BoxShape.circle,
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Text(
-                titulo,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14, 
-                  letterSpacing: 1.1,
+                child: Icon(
+                  icono, 
+                  size: 38, 
+                  color: color, // Ícono brillante
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 15),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10.0),
+                child: Text(
+                  titulo,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13, 
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
