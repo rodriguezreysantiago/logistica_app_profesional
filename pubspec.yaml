@@ -12,42 +12,47 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
-  # --- RED Y APIs ---
+  # ================= ESTADO GLOBAL =================
+  provider: ^6.1.2   # ✅ AGREGADO
+
+  # ================= RED Y APIs =================
   dio: ^5.7.0
   http: ^1.2.0
 
-  # --- SISTEMA Y PERSISTENCIA ---
+  # ================= SISTEMA Y PERSISTENCIA =================
   shared_preferences: ^2.3.2
   path_provider: ^2.1.5
   url_launcher: ^6.3.1
   file_picker: ^8.1.7
+
+  # ⚠️ SOLO WINDOWS (podés dejarlo si usás desktop)
   ffi: ^2.1.2
   win32: ^5.5.4
 
-  # --- REPORTE Y DATOS ---
+  # ================= REPORTE Y DATOS =================
   excel: ^4.0.6
   csv: ^6.0.0
   intl: ^0.20.2
 
-  # --- NOTIFICACIONES ---
+  # ================= NOTIFICACIONES =================
   flutter_local_notifications: ^17.2.1
   share_plus: ^7.2.2
 
-  # --- LOCALIZACIÓN ---
+  # ================= LOCALIZACIÓN =================
   flutter_localizations:
     sdk: flutter
 
-  # --- FIREBASE ---
+  # ================= FIREBASE =================
   firebase_core: ^3.6.0
   cloud_firestore: ^5.4.4
   firebase_storage: ^12.3.2
 
-  # --- ARCHIVOS ---
+  # ================= ARCHIVOS =================
   image_picker: ^1.1.2
   flutter_pdfview: ^1.3.2
   pdfrx: ^1.0.10
 
-  # --- SEGURIDAD ---
+  # ================= SEGURIDAD =================
   crypto: ^3.0.3
 
 dev_dependencies:

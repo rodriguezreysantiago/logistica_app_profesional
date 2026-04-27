@@ -1,41 +1,45 @@
-import 'dart:ui'; 
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
 import 'core/services/prefs_service.dart';
 import 'core/services/notification_service.dart';
+import 'core/services/auto_sync_service.dart';
 
-import 'core/routes/app_router.dart';
+import 'routing/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/constants/app_constants.dart';
 
-// Pantalla inicial
-import 'ui/screens/login_screen.dart';
+// 🔹 DEPENDENCIAS
+import 'features/vehicles/providers/vehiculo_provider.dart';
+import 'features/sync_dashboard/providers/sync_dashboard_provider.dart';
+import 'features/vehicles/services/vehiculo_manager.dart';
+import 'features/vehicles/services/vehiculo_repository.dart';
+import 'features/vehicles/services/volvo_api_service.dart';
 
-// ✅ MEJORA PRO: Clave global para poder navegar desde fuera del árbol de widgets
+// Pantalla inicial
+import 'features/auth/screens/login_screen.dart';
+
+// Clave global
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ==========================================================================
-  // 1. CAPTURADOR GLOBAL DE ERRORES ASÍNCRONOS
-  // ==========================================================================
+  // ================= ERRORES =================
   PlatformDispatcher.instance.onError = (error, stack) {
     debugPrint("🚨 [ERROR GLOBAL ASÍNCRONO]: $error");
-    return true; 
+    return true;
   };
 
-  // ==========================================================================
-  // 2. CAPTURADOR GLOBAL DE ERRORES DE UI
-  // ==========================================================================
   FlutterError.onError = (FlutterErrorDetails details) {
     debugPrint("🚨 [ERROR GLOBAL FLUTTER]: ${details.exception}");
   };
 
-  // Inicialización de servicios críticos
+  // ================= FIREBASE =================
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -48,10 +52,50 @@ void main() async {
   await PrefsService.init();
   await NotificationService.init();
 
-  runApp(const LogisticaApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        // 🔹 API
+        Provider(create: (_) => VolvoApiService()),
+
+        // 🔹 REPO
+        ProxyProvider<VolvoApiService, VehiculoRepository>(
+          update: (_, api, __) => VehiculoRepository(api: api),
+        ),
+
+        // 🔹 MANAGER
+        ProxyProvider2<VehiculoRepository, VolvoApiService, VehiculoManager>(
+          update: (_, repo, api, __) => VehiculoManager(repo, api),
+        ),
+
+        // 🔹 PROVIDER UI
+        ChangeNotifierProxyProvider2<
+            VehiculoManager,
+            VehiculoRepository,
+            VehiculoProvider>(
+          create: (context) => VehiculoProvider(
+            manager: context.read<VehiculoManager>(),
+            repository: context.read<VehiculoRepository>(),
+          ),
+          update: (_, manager, repo, provider) {
+            provider!.manager = manager;
+            provider.repository = repo;
+            return provider;
+          },
+        ),
+
+        // 🔥 DASHBOARD OBSERVABILIDAD
+        ChangeNotifierProvider(
+          create: (_) => SyncDashboardProvider(),
+        ),
+      ],
+      child: const LogisticaApp(),
+    ),
+  );
 }
 
-// Convertimos a StatefulWidget para poder escuchar el Stream de notificaciones
+// ================= APP =================
+
 class LogisticaApp extends StatefulWidget {
   const LogisticaApp({super.key});
 
@@ -60,31 +104,43 @@ class LogisticaApp extends StatefulWidget {
 }
 
 class _LogisticaAppState extends State<LogisticaApp> {
+  AutoSyncService? _autoSync;
 
   @override
   void initState() {
     super.initState();
-    // ✅ MEJORA PRO: Escuchamos cuando el usuario toca una notificación
-    NotificationService.selectNotificationStream.stream.listen((String? payload) {
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<VehiculoProvider>();
+      // ✅ FIX: Inyectamos el dashboard para que reciba los eventos del autosync.
+      final dashboard = context.read<SyncDashboardProvider>();
+
+      // 🔥 init data
+      provider.init();
+
+      // 🔥 autosync
+      _autoSync = AutoSyncService(provider, dashboard: dashboard);
+      _autoSync!.start();
+    });
+
+    NotificationService.selectNotificationStream.stream
+        .listen((String? payload) {
       if (payload == null) return;
-      
-      debugPrint("Navegando vía notificación al payload: $payload");
-      
-      // Verificamos que el navegador esté listo
-      if (navigatorKey.currentState != null) {
-        if (payload == 'vencimiento') {
-          // ✅ CORRECCIÓN: Usando la constante correcta de tu AppRoutes
-          navigatorKey.currentState!.pushNamed(AppRoutes.misVencimientos); 
-        } else if (payload == 'admin_revision') {
-          navigatorKey.currentState!.pushNamed(AppRoutes.adminRevisiones);
-        }
+
+      final nav = navigatorKey.currentState;
+      if (nav == null) return;
+
+      if (payload == 'vencimiento') {
+        nav.pushNamed(AppRoutes.misVencimientos);
+      } else if (payload == 'admin_revision') {
+        nav.pushNamed(AppRoutes.adminRevisiones);
       }
     });
   }
 
   @override
   void dispose() {
-    // Limpieza de memoria
+    _autoSync?.stop();
     NotificationService.dispose();
     super.dispose();
   }
@@ -92,58 +148,9 @@ class _LogisticaAppState extends State<LogisticaApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: navigatorKey, // ✅ Inyectamos la clave global aquí
+      navigatorKey: navigatorKey,
       title: AppTexts.appName,
       debugShowCheckedModeBanner: false,
-
-      // ==========================================================================
-      // 3. INTERCEPTOR DE UI: REEMPLAZO DE LA PANTALLA GRIS DE LA MUERTE
-      // ==========================================================================
-      builder: (context, widget) {
-        ErrorWidget.builder = (FlutterErrorDetails errorDetails) {
-          return Scaffold(
-            backgroundColor: AppTheme.darkTheme.scaffoldBackgroundColor,
-            body: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(30.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 70),
-                    const SizedBox(height: 20),
-                    const Text(
-                      "Algo no salió como esperábamos",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      "Se ha registrado el error para el equipo de soporte.",
-                      style: TextStyle(fontSize: 14, color: Colors.white70),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.black45,
-                        borderRadius: BorderRadius.circular(8)
-                      ),
-                      child: Text(
-                        errorDetails.exceptionAsString(),
-                        style: const TextStyle(fontSize: 10, color: Colors.grey),
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        };
-        return widget!;
-      },
 
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -159,9 +166,8 @@ class _LogisticaAppState extends State<LogisticaApp> {
 
       theme: AppTheme.darkTheme,
 
-      initialRoute: PrefsService.isLoggedIn
-          ? AppRoutes.home
-          : AppRoutes.login,
+      initialRoute:
+          PrefsService.isLoggedIn ? AppRoutes.home : AppRoutes.login,
 
       routes: {
         AppRoutes.login: (_) => const LoginScreen(),

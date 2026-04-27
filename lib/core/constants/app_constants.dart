@@ -17,6 +17,8 @@ class AppRoutes {
   static const String adminVencimientosMenu = '/admin_vencimientos_menu';
   static const String adminRevisiones = '/admin_revisiones';
   static const String adminReportes = '/admin_reportes';
+  static const String syncDashboard = '/sync_dashboard';
+
 
   // Auditorías
   static const String vencimientosChoferes = '/vencimientos_choferes';
@@ -52,3 +54,4 @@ class AppRoles {
   static const String admin = 'ADMIN';
   static const String chofer = 'USUARIO'; // O 'CHOFER', según uses en tu base
 }
+  
