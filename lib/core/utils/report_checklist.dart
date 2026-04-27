@@ -1,17 +1,22 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:excel/excel.dart' as ex; 
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart'; 
+import '../constants/app_constants.dart'; // ✅ Para AppCollections
 
 class ReportChecklistService {
   
+  ReportChecklistService._(); // Constructor privado
+
   static Future<void> mostrarOpcionesYGenerar(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     
-    Map<String, bool> opciones = {
+    // Definición de columnas disponibles
+    final Map<String, bool> opciones = {
       "FECHA": true,
       "DOMINIO": true,
       "TIPO": true,
@@ -25,109 +30,105 @@ class ReportChecklistService {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          backgroundColor: Theme.of(context).colorScheme.surface, // ✅ MENTOR: Tema global
+          backgroundColor: Theme.of(context).colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
             side: BorderSide(color: Colors.white.withAlpha(20))
           ),
-          title: const Text("Reporte de Novedades", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          content: Container(
+          title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Reporte de Novedades", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              Text("Se exportarán solo estados REG y MAL", style: TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+            ],
+          ),
+          content: SizedBox(
             width: double.maxFinite,
-            constraints: const BoxConstraints(maxHeight: 400),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: opciones.keys.map((key) {
-                  return CheckboxListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(key, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
-                    value: opciones[key],
-                    activeColor: Colors.greenAccent,
-                    checkColor: Colors.black,
-                    side: const BorderSide(color: Colors.white54),
-                    onChanged: (val) => setState(() => opciones[key] = val ?? false),
-                  );
-                }).toList(),
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: opciones.keys.map((key) {
+                return CheckboxListTile(
+                  dense: true,
+                  title: Text(key, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  value: opciones[key],
+                  activeColor: Colors.greenAccent,
+                  onChanged: (val) => setState(() => opciones[key] = val ?? false),
+                );
+              }).toList(),
             ),
           ),
-          actionsPadding: const EdgeInsets.fromLTRB(15, 0, 15, 15),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false), 
               child: const Text("CANCELAR", style: TextStyle(color: Colors.white54))
             ),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green, 
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
-              ),
+            ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              icon: const Icon(Icons.download_rounded, size: 18),
-              label: const Text("GENERAR EXCEL", style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text("GENERAR EXCEL"),
             ),
           ],
         ),
       ),
     );
 
-    if (confirmar == true) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-              SizedBox(width: 15),
-              Text("Procesando novedades del mes..."),
-            ],
-          ),
-          backgroundColor: Colors.orangeAccent,
-          duration: Duration(seconds: 2),
-        )
-      );
-      // ✅ MENTOR: Pasamos el messenger a la función asíncrona
+    if (confirmar == true && context.mounted) {
+      _showLoadingSnackBar(messenger);
       await _ejecutarGeneracion(opciones, messenger);
     }
   }
 
+  static void _showLoadingSnackBar(ScaffoldMessengerState messenger) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+            SizedBox(width: 15),
+            Text("Procesando datos de mantenimiento..."),
+          ],
+        ),
+        backgroundColor: Colors.blueGrey,
+      )
+    );
+  }
+
   static Future<void> _ejecutarGeneracion(Map<String, bool> filtros, ScaffoldMessengerState messenger) async {
     try {
+      // ✅ MEJORA PRO: Filtro por fecha (Freno de mano de costos)
+      // Solo traemos los checklists de los últimos 45 días para evitar descargar miles de docs inútiles
+      final DateTime limiteCarga = DateTime.now().subtract(const Duration(days: 45));
+
       final snapshot = await FirebaseFirestore.instance
-          .collection('CHECKLISTS')
+          .collection(AppCollections.checklists)
+          .where('FECHA', isGreaterThan: Timestamp.fromDate(limiteCarga))
           .orderBy('FECHA', descending: true)
           .get();
 
       var excel = ex.Excel.createExcel(); 
-      String sheetName = "NOVEDADES";
+      String sheetName = "NOVEDADES_MANTENIMIENTO";
       excel.rename('Sheet1', sheetName);
       ex.Sheet sheetObject = excel[sheetName];
 
-      var borderThin = ex.Border(borderStyle: ex.BorderStyle.Thin);
-      var borderMedium = ex.Border(borderStyle: ex.BorderStyle.Medium);
-
+      // Estilos
       var headerStyle = ex.CellStyle(
         bold: true, 
-        backgroundColorHex: ex.ExcelColor.fromHexString("#1A3A5A"), // ✅ MENTOR: Azul corporativo
+        backgroundColorHex: ex.ExcelColor.fromHexString("#1A3A5A"),
         fontColorHex: ex.ExcelColor.fromHexString("#FFFFFF"),
         horizontalAlign: ex.HorizontalAlign.Center,
-        bottomBorder: borderMedium,
-        topBorder: borderThin,
-        leftBorder: borderThin,
-        rightBorder: borderThin,
       );
 
-      List<String> titulos = [];
-      filtros.forEach((key, val) { if (val) titulos.add(key); });
+      // 1. Crear Encabezados dinámicos
+      List<String> columnasActivas = [];
+      filtros.forEach((key, val) { if (val) columnasActivas.add(key); });
 
-      for (var i = 0; i < titulos.length; i++) {
+      for (var i = 0; i < columnasActivas.length; i++) {
         var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
-        cell.value = ex.TextCellValue(titulos[i]);
+        cell.value = ex.TextCellValue(columnasActivas[i]);
         cell.cellStyle = headerStyle;
       }
 
-      int row = 1;
+      // 2. Cargar Datos
+      int currentRow = 1;
       for (var doc in snapshot.docs) {
         final data = doc.data();
         final Map respuestas = data['RESPUESTAS'] ?? {};
@@ -135,68 +136,62 @@ class ReportChecklistService {
         
         String fechaStr = "-";
         if (data['FECHA'] != null) {
-          DateTime dt = (data['FECHA'] as Timestamp).toDate();
-          fechaStr = DateFormat('dd/MM/yyyy').format(dt);
+          fechaStr = DateFormat('dd/MM/yyyy').format((data['FECHA'] as Timestamp).toDate());
         }
 
         respuestas.forEach((item, estado) {
+          // Solo exportamos lo que requiere atención
           if (estado == "REG" || estado == "MAL") {
-            int col = 0;
-
-            if (filtros["FECHA"]!) { 
-              sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(fechaStr);
+            for (var i = 0; i < columnasActivas.length; i++) {
+              var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: currentRow));
+              
+              // Mapeo dinámico de datos según la columna activa
+              cell.value = ex.TextCellValue(_obtenerValorCelda(columnasActivas[i], data, item, estado, observaciones, fechaStr));
             }
-            if (filtros["DOMINIO"]!) { 
-              sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(data['DOMINIO'] ?? "");
-            }
-            if (filtros["TIPO"]!) { 
-              sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(data['TIPO'] ?? "");
-            }
-            if (filtros["CHOFER"]!) { 
-              sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(data['NOMBRE'] ?? "");
-            }
-            if (filtros["ITEM"]!) { 
-              sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(item);
-            }
-            if (filtros["ESTADO"]!) { 
-              sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(estado);
-            }
-            if (filtros["OBSERVACIÓN"]!) { 
-              sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: col++, rowIndex: row)).value = ex.TextCellValue(observaciones[item] ?? "");
-            }
-            
-            row++; 
+            currentRow++; 
           }
         });
       }
 
-      for (var i = 0; i < titulos.length; i++) {
-        sheetObject.setColumnWidth(i, 20.0); 
+      // ✅ MEJORA PRO: UX de Excel (Auto-filtros y columnas anchas)
+      for (var i = 0; i < columnasActivas.length; i++) {
+        sheetObject.setColumnWidth(i, 25.0); 
       }
 
-      final String fileName = "Reporte_Novedades_${DateTime.now().millisecondsSinceEpoch}.xlsx";
-      final directory = await getApplicationDocumentsDirectory();
+      // 3. Guardado y Compartido
+      final String fileName = "Novedades_${DateFormat('yyyy_MM_dd').format(DateTime.now())}.xlsx";
+      final directory = await getTemporaryDirectory(); // Mejor usar temp para reportes volátiles
       final path = "${directory.path}/$fileName";
       
       final fileBytes = excel.save();
       if (fileBytes != null) {
-        File(path)
-          ..createSync(recursive: true)
-          ..writeAsBytesSync(fileBytes);
+        File(path).writeAsBytesSync(fileBytes);
         
-        if (Platform.isWindows) {
-          await Process.run('cmd', ['/c', 'start', '', path]);
-        } else {
-          // ✅ MENTOR: Disparo automático del menú de compartir nativo
-          await Share.shareXFiles([XFile(path)], text: 'Reporte de Novedades (Mantenimiento)');
-        }
+        await Share.shareXFiles(
+          [XFile(path)], 
+          text: '📋 Reporte de Novedades - Flete MB\nGenerado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}'
+        );
       }
+
     } catch (e) {
-      debugPrint("❌ Error Reporte Checklist: $e");
-      // ✅ MENTOR: Feedback seguro para el usuario si algo falla
+      debugPrint("❌ Error Excel: $e");
       messenger.showSnackBar(
-        SnackBar(content: Text("❌ Error al generar el Excel: $e"), backgroundColor: Colors.redAccent)
+        SnackBar(content: Text("Error al generar reporte: $e"), backgroundColor: Colors.redAccent)
       );
+    }
+  }
+
+  // Helper para mapear los datos a las celdas
+  static String _obtenerValorCelda(String columna, Map data, String item, dynamic estado, Map obs, String fecha) {
+    switch (columna) {
+      case "FECHA": return fecha;
+      case "DOMINIO": return data['DOMINIO'] ?? "";
+      case "TIPO": return data['TIPO'] ?? "";
+      case "CHOFER": return data['NOMBRE'] ?? "";
+      case "ITEM": return item;
+      case "ESTADO": return estado.toString();
+      case "OBSERVACIÓN": return obs[item] ?? "";
+      default: return "";
     }
   }
 }

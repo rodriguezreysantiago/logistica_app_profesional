@@ -1,4 +1,7 @@
 class AppFormatters {
+  // ✅ MEJORA PRO: Constructor privado para evitar instanciaciones innecesarias
+  AppFormatters._();
+
   // --- FORMATEAR KILOMETRAJE (1.232.232,0) ---
   static String formatearKilometraje(dynamic valor) {
     if (valor == null || valor == 0 || valor == "0" || valor == "" || valor.toString().toLowerCase() == "nan") return "0,0";
@@ -38,52 +41,56 @@ class AppFormatters {
     return "${s.substring(0, 2)}-${s.substring(2, 10)}-${s.substring(10)}";
   }
 
-  // --- FORMATEAR FECHA (DD/MM/YYYY) ---
-  static String formatearFecha(String? fecha) {
-    if (fecha == null || fecha.isEmpty || fecha == "---" || fecha.toLowerCase() == "nan") {
-      return "Sin datos";
+  // ===========================================================================
+  // ✅ MEJORA PRO: HELPER PRIVADO PARA PARSEO UNIVERSAL DE FECHAS
+  // ===========================================================================
+  static DateTime? _parseUniversalDate(dynamic fecha) {
+    if (fecha == null || fecha.toString().isEmpty || fecha == "---" || fecha.toString().toLowerCase() == "nan") {
+      return null;
     }
+    
+    if (fecha is DateTime) return fecha;
+
     try {
-      // ✅ MENTOR: Limpiamos cualquier rastro de horas (T o espacio)
-      final String soloFecha = fecha.split('T').first.split(' ').first;
+      final String stringFecha = fecha.toString();
+      final String soloFecha = stringFecha.split('T').first.split(' ').first;
       final String f = soloFecha.replaceAll('/', '-').trim();
       
       final List<String> partes = f.split('-');
       if (partes.length == 3) {
         if (partes[0].length == 4) { // YYYY-MM-DD
-          return "${partes[2].padLeft(2, '0')}/${partes[1].padLeft(2, '0')}/${partes[0]}";
+          return DateTime.parse(f);
+        } else { // DD-MM-YYYY
+          return DateTime(
+            int.parse(partes[2]), 
+            int.parse(partes[1]), 
+            int.parse(partes[0])
+          );
         }
-        return "${partes[0].padLeft(2, '0')}/${partes[1].padLeft(2, '0')}/${partes[2]}";
       }
-      return soloFecha;
-    } catch (e) { 
-      return fecha; 
+    } catch (_) {}
+    return null;
+  }
+
+  // --- FORMATEAR FECHA (DD/MM/YYYY) ---
+  static String formatearFecha(dynamic fecha) {
+    final DateTime? parsed = _parseUniversalDate(fecha);
+    
+    if (parsed != null) {
+      return "${parsed.day.toString().padLeft(2, '0')}/${parsed.month.toString().padLeft(2, '0')}/${parsed.year}";
     }
+    
+    // Si no pudo parsear, devuelve lo que ingresó por defecto
+    return fecha?.toString() ?? "Sin datos";
   }
 
   // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
-  static int calcularDiasRestantes(String? fecha) {
-    if (fecha == null || fecha.isEmpty || fecha == "---" || fecha.toLowerCase() == "nan") {
-      return 999;
-    }
+  static int calcularDiasRestantes(dynamic fecha) {
+    final DateTime? fVto = _parseUniversalDate(fecha);
+    
+    if (fVto == null) return 999;
+
     try {
-      // ✅ MENTOR: Aplicamos la misma limpieza de horas para evitar crasheos en el parseo
-      final String soloFecha = fecha.split('T').first.split(' ').first;
-      final String f = soloFecha.replaceAll('/', '-').trim();
-      
-      final List<String> partes = f.split('-');
-      DateTime fVto;
-      
-      if (partes[0].length == 4) {
-        fVto = DateTime.parse(f);
-      } else {
-        fVto = DateTime(
-          int.parse(partes[2]), 
-          int.parse(partes[1]), 
-          int.parse(partes[0])
-        );
-      }
-      
       final vtoNormalizado = DateTime(fVto.year, fVto.month, fVto.day);
       final ahora = DateTime.now();
       final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);

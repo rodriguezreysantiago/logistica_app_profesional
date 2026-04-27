@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/prefs_service.dart';
+import '../constants/app_constants.dart'; // ✅ MEJORA PRO: Importamos las constantes
 
 import '../../ui/widgets/auth_guard.dart';
 import '../../ui/widgets/role_guard.dart';
@@ -23,6 +24,9 @@ import '../../ui/screens/admin_vencimientos_chasis_screen.dart';
 import '../../ui/screens/admin_vencimientos_acoplados_screen.dart';
 
 class AppRouter {
+  // ✅ MEJORA PRO: Constructor privado para evitar que alguien haga AppRouter()
+  AppRouter._();
+
   static Widget _proteger(Widget child) {
     return AuthGuard(child: child);
   }
@@ -47,7 +51,8 @@ class AppRouter {
 
   static Route<dynamic>? generateRoute(RouteSettings settings) {
     switch (settings.name) {
-      case '/home':
+      // ✅ MEJORA PRO: Reemplazo absoluto de Strings mágicos por Constantes Fuertes
+      case AppRoutes.home:
         final args = settings.arguments as Map<String, dynamic>?;
 
         return _buildRoute(
@@ -61,7 +66,7 @@ class AppRouter {
           settings,
         );
 
-      case '/perfil':
+      case AppRoutes.perfil:
         return _buildRoute(
           _proteger(
             UserMiPerfilScreen(
@@ -71,7 +76,7 @@ class AppRouter {
           settings,
         );
 
-      case '/equipo':
+      case AppRoutes.equipo:
         return _buildRoute(
           _proteger(
             UserMiEquipoScreen(
@@ -81,7 +86,7 @@ class AppRouter {
           settings,
         );
 
-      case '/mis_vencimientos':
+      case AppRoutes.misVencimientos:
         return _buildRoute(
           _proteger(
             UserMisVencimientosScreen(
@@ -91,55 +96,55 @@ class AppRouter {
           settings,
         );
 
-      case '/admin_panel':
+      case AppRoutes.adminPanel:
         return _buildRoute(
           _protegerAdmin(const AdminPanelScreen()),
           settings,
         );
 
-      case '/admin_personal_lista':
+      case AppRoutes.adminPersonalLista:
         return _buildRoute(
           _protegerAdmin(const AdminPersonalListaScreen()),
           settings,
         );
 
-      case '/admin_vehiculos_lista':
+      case AppRoutes.adminVehiculosLista:
         return _buildRoute(
           _protegerAdmin(const AdminVehiculosListaScreen()),
           settings,
         );
 
-      case '/admin_vencimientos_menu':
+      case AppRoutes.adminVencimientosMenu:
         return _buildRoute(
           _protegerAdmin(const AdminVencimientosMenuScreen()),
           settings,
         );
 
-      case '/admin_revisiones':
+      case AppRoutes.adminRevisiones:
         return _buildRoute(
           _protegerAdmin(const AdminRevisionesScreen()),
           settings,
         );
 
-      case '/admin_reportes':
+      case AppRoutes.adminReportes:
         return _buildRoute(
           _protegerAdmin(const AdminReportsScreen()),
           settings,
         );
 
-      case '/vencimientos_choferes':
+      case AppRoutes.vencimientosChoferes:
         return _buildRoute(
           _protegerAdmin(const AdminVencimientosChoferesScreen()),
           settings,
         );
 
-      case '/vencimientos_chasis':
+      case AppRoutes.vencimientosChasis:
         return _buildRoute(
           _protegerAdmin(const AdminVencimientosChasisScreen()),
           settings,
         );
 
-      case '/vencimientos_acoplados':
+      case AppRoutes.vencimientosAcoplados:
         return _buildRoute(
           _protegerAdmin(const AdminVencimientosAcopladosScreen()),
           settings,
@@ -154,17 +159,18 @@ class AppRouter {
     return MaterialPageRoute(
       builder: (context) => Scaffold(
         appBar: AppBar(
-          title: const Text("Ruta no encontrada"),
+          // ✅ MEJORA PRO: Uso de constante de texto para consistencia
+          title: const Text(AppTexts.rutaNoEncontrada), 
         ),
         body: Center(
           child: ElevatedButton(
             onPressed: () {
               Navigator.of(context).pushNamedAndRemoveUntil(
-                '/',
+                AppRoutes.login, // ✅ Manda seguro a la constante de login
                 (_) => false,
               );
             },
-            child: const Text("VOLVER"),
+            child: const Text("VOLVER AL INICIO"),
           ),
         ),
       ),

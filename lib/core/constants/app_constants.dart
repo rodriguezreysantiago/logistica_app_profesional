@@ -1,4 +1,7 @@
 class AppRoutes {
+  // ✅ MEJORA PRO: Constructor privado. Evita que la clase sea instanciada por error.
+  AppRoutes._();
+
   static const String login = '/';
   static const String home = '/home';
 
@@ -22,6 +25,30 @@ class AppRoutes {
 }
 
 class AppTexts {
+  AppTexts._();
+
   static const String appName = 'S.M.A.R.T. Logística';
   static const String rutaNoEncontrada = 'Ruta no encontrada';
+  // Podés mantener un registro visual de tu versión acá
+  static const String appVersion = 'v 1.0.7'; 
+}
+
+// ===========================================================================
+// ✅ MEJORA PRO: CENTRALIZACIÓN DE COLECCIONES Y ROLES (Sin "Magic Strings")
+// ===========================================================================
+
+class AppCollections {
+  AppCollections._();
+
+  static const String empleados = 'EMPLEADOS';
+  static const String vehiculos = 'VEHICULOS';
+  static const String revisiones = 'REVISIONES';
+  static const String checklists = 'CHECKLISTS';
+}
+
+class AppRoles {
+  AppRoles._();
+
+  static const String admin = 'ADMIN';
+  static const String chofer = 'USUARIO'; // O 'CHOFER', según uses en tu base
 }

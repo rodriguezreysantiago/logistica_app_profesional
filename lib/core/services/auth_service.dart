@@ -1,3 +1,4 @@
+import 'dart:async'; // Necesario para TimeoutException
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -45,6 +46,8 @@ class LoginResult {
 class AuthService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // ✅ MENTOR: Mantenemos SHA256 por retrocompatibilidad con las cuentas existentes.
+  // Para futuras escalabilidades empresariales, sugerimos usar Bcrypt.
   String _hashPassword(String password) {
     final bytes = utf8.encode(password.trim());
     final digest = sha256.convert(bytes);
@@ -57,23 +60,42 @@ class AuthService {
   }) async {
     try {
       final cleanDni = dni.replaceAll(RegExp(r'[^0-9]'), '');
+      
+      // ✅ MEJORA PRO: Pre-validación para evitar lecturas inútiles a Firebase
+      if (cleanDni.isEmpty || password.trim().isEmpty) {
+        return LoginResult.error('Complete todos los campos requeridos.');
+      }
+
       final hashedPassword = _hashPassword(password);
 
-      final doc = await _db.collection('EMPLEADOS').doc(cleanDni).get();
+      // ✅ MEJORA PRO: Timeout integrado. Falla con gracia si el chofer no tiene señal.
+      final doc = await _db
+          .collection('EMPLEADOS')
+          .doc(cleanDni)
+          .get()
+          .timeout(const Duration(seconds: 8), onTimeout: () {
+            throw TimeoutException('Sin conexión.');
+          });
 
       if (!doc.exists) {
-        return LoginResult.error('El usuario no existe');
+        return LoginResult.error('El usuario no existe o el DNI es incorrecto.');
       }
 
       final data = doc.data();
       if (data == null) {
-        return LoginResult.error('No se pudo obtener la información del usuario');
+        return LoginResult.error('No se pudo obtener la información del usuario.');
+      }
+
+      // ✅ MEJORA PRO: Regla de Negocio Crítica. Bloquear a usuarios inactivos.
+      final bool isActive = data['ACTIVO'] is bool ? data['ACTIVO'] : true;
+      if (!isActive) {
+        return LoginResult.error('Usuario inactivo. Contacte a administración.');
       }
 
       final storedPassword = data['CONTRASEÑA']?.toString() ?? '';
 
       if (storedPassword != hashedPassword) {
-        return LoginResult.error('Contraseña incorrecta');
+        return LoginResult.error('Contraseña incorrecta.');
       }
 
       final nombre = data['NOMBRE']?.toString() ?? 'Usuario';
@@ -90,11 +112,14 @@ class AuthService {
         nombre: nombre,
         rol: rol,
       );
+      
+    } on TimeoutException catch (_) {
+      return LoginResult.error('Tiempo de espera agotado. Verifique su señal de internet.');
     } catch (e, stack) {
-      debugPrint('AuthService.login error: $e');
+      debugPrint('🚨 AuthService.login error: $e');
       debugPrint(stack.toString());
 
-      return LoginResult.error('Error interno al iniciar sesión');
+      return LoginResult.error('Error interno al iniciar sesión.');
     }
   }
 

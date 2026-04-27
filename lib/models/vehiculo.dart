@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Vehiculo {
   final String dominio; // El ID en Firestore
   final String marca;
@@ -9,7 +11,7 @@ class Vehiculo {
   final DateTime? vencimientoRto;
   final DateTime? vencimientoSeguro;
   final String? urlPdfRto;
-  final String? urlPdfSeguro; // ✅ MENTOR: Agregado para coincidir con la UI
+  final String? urlPdfSeguro;
   final String estado;
 
   Vehiculo({
@@ -23,11 +25,14 @@ class Vehiculo {
     this.vencimientoRto,
     this.vencimientoSeguro,
     this.urlPdfRto,
-    this.urlPdfSeguro, // ✅ MENTOR: Inicializado
+    this.urlPdfSeguro,
     this.estado = 'LIBRE', 
   });
 
-  // Para subir datos a Firebase
+  // ==========================================================================
+  // SERIALIZACIÓN (Hacia Firebase)
+  // ==========================================================================
+  
   Map<String, dynamic> toMap() {
     return {
       'DOMINIO': dominio.toUpperCase(),
@@ -37,15 +42,22 @@ class Vehiculo {
       'TIPO': tipo.toUpperCase(),
       'EMPRESA': empresa.toUpperCase(),
       'VIN': vin?.toUpperCase(), 
-      'VENCIMIENTO_RTO': vencimientoRto?.toIso8601String().split('T')[0], 
-      'VENCIMIENTO_SEGURO': vencimientoSeguro?.toIso8601String().split('T')[0],
+      
+      // ✅ MEJORA PRO: Firestore convierte nativamente los objetos DateTime 
+      // de Dart a su tipo 'Timestamp' para permitir filtros de fecha exactos y baratos.
+      'VENCIMIENTO_RTO': vencimientoRto, 
+      'VENCIMIENTO_SEGURO': vencimientoSeguro,
+      
       'ARCHIVO_RTO': urlPdfRto,
-      'ARCHIVO_SEGURO': urlPdfSeguro, // ✅ MENTOR: Mapeado para la subida
+      'ARCHIVO_SEGURO': urlPdfSeguro, 
       'ESTADO': estado.toUpperCase(), 
     };
   }
 
-  // Para leer datos de Firebase
+  // ==========================================================================
+  // DESERIALIZACIÓN (Desde Firebase)
+  // ==========================================================================
+  
   factory Vehiculo.fromMap(Map<String, dynamic> map, String id) {
     return Vehiculo(
       dominio: id,
@@ -55,15 +67,61 @@ class Vehiculo {
       tipo: map['TIPO'] ?? 'TRACTOR',
       empresa: map['EMPRESA'] ?? 'PROPIA',
       vin: map['VIN'], 
-      vencimientoRto: map['VENCIMIENTO_RTO'] != null 
-          ? DateTime.tryParse(map['VENCIMIENTO_RTO']) 
-          : null,
-      vencimientoSeguro: map['VENCIMIENTO_SEGURO'] != null 
-          ? DateTime.tryParse(map['VENCIMIENTO_SEGURO']) 
-          : null,
+      
+      // ✅ MEJORA PRO: Lectura a prueba de fallos. Si hay un camión viejo cargado con 
+      // String, lo lee bien. Si es uno nuevo cargado con Timestamp, también lo lee.
+      vencimientoRto: _parseDate(map['VENCIMIENTO_RTO']),
+      vencimientoSeguro: _parseDate(map['VENCIMIENTO_SEGURO']),
+      
       urlPdfRto: map['ARCHIVO_RTO'],
-      urlPdfSeguro: map['ARCHIVO_SEGURO'], // ✅ MENTOR: Mapeado para la lectura
+      urlPdfSeguro: map['ARCHIVO_SEGURO'], 
       estado: map['ESTADO'] ?? 'LIBRE',
+    );
+  }
+
+  // Helper privado para retrocompatibilidad de fechas
+  static DateTime? _parseDate(dynamic dateData) {
+    if (dateData == null) return null;
+    if (dateData is Timestamp) {
+      return dateData.toDate(); // Formato óptimo nuevo
+    }
+    if (dateData is String) {
+      return DateTime.tryParse(dateData); // Formato heredado antiguo
+    }
+    return null;
+  }
+
+  // ==========================================================================
+  // MUTABILIDAD CONTROLADA (Imprescindible para Gestores de Estado)
+  // ==========================================================================
+  
+  Vehiculo copyWith({
+    String? dominio,
+    String? marca,
+    String? modelo,
+    int? anio,
+    String? tipo,
+    String? empresa,
+    String? vin,
+    DateTime? vencimientoRto,
+    DateTime? vencimientoSeguro,
+    String? urlPdfRto,
+    String? urlPdfSeguro,
+    String? estado,
+  }) {
+    return Vehiculo(
+      dominio: dominio ?? this.dominio,
+      marca: marca ?? this.marca,
+      modelo: modelo ?? this.modelo,
+      anio: anio ?? this.anio,
+      tipo: tipo ?? this.tipo,
+      empresa: empresa ?? this.empresa,
+      vin: vin ?? this.vin,
+      vencimientoRto: vencimientoRto ?? this.vencimientoRto,
+      vencimientoSeguro: vencimientoSeguro ?? this.vencimientoSeguro,
+      urlPdfRto: urlPdfRto ?? this.urlPdfRto,
+      urlPdfSeguro: urlPdfSeguro ?? this.urlPdfSeguro,
+      estado: estado ?? this.estado,
     );
   }
 }

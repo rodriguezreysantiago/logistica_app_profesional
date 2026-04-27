@@ -7,32 +7,74 @@ class VolvoApiService {
   // Para la V2, migrar esto a Firebase Cloud Functions o Google Cloud Secret Manager.
   final String _clientId = '018B1E992E';
   final String _clientSecret = 'yeBgBh3of3';
+  
+  // ✅ MEJORA PRO: Endpoints separados para Autorización y Datos
+  final String _authUrl = 'https://api.volvotrucks.com/oauth2/token'; // O la URL de autenticación específica de tu contrato
   final String _baseUrl = 'https://api.volvotrucks.com';
   
-  // ✅ MENTOR: Timeout agresivo (3s) para no bloquear la UI si el camión está apagado
+  // Caché del token para no pedirlo en cada consulta
+  String? _accessToken;
+  DateTime? _tokenExpiry;
+
   final Dio _dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 3),
-      receiveTimeout: const Duration(seconds: 3),
-      sendTimeout: const Duration(seconds: 3),
+      connectTimeout: const Duration(seconds: 4), // Le damos 1s más por si la red fluctúa
+      receiveTimeout: const Duration(seconds: 4),
+      sendTimeout: const Duration(seconds: 4),
     ),
   );
 
-  String get _authHeader => 'Basic ${base64Encode(utf8.encode('$_clientId:$_clientSecret'))}';
+  // ===========================================================================
+  // 1. MOTOR DE AUTENTICACIÓN (OAUTH 2.0)
+  // ===========================================================================
+  
+  Future<String?> _getValidToken() async {
+    // Si tenemos un token y todavía le faltan más de 5 minutos para vencer, lo reusamos.
+    if (_accessToken != null && _tokenExpiry != null && _tokenExpiry!.isAfter(DateTime.now().add(const Duration(minutes: 5)))) {
+      return _accessToken;
+    }
 
-  Map<String, String> get _baseHeaders => {
-    'Authorization': _authHeader,
-    'User-Agent': 'Logistica_App_Profesional/1.0',
-    'Connection': 'keep-alive',
-  };
+    try {
+      final String authHeader = 'Basic ${base64Encode(utf8.encode('$_clientId:$_clientSecret'))}';
+      
+      final response = await _dio.post(
+        _authUrl,
+        data: {'grant_type': 'client_credentials'},
+        options: Options(
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200 && response.data['access_token'] != null) {
+        _accessToken = response.data['access_token'];
+        // Generalmente duran 3600 segundos (1 hora)
+        int expiresIn = response.data['expires_in'] ?? 3600;
+        _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
+        return _accessToken;
+      }
+    } catch (e) {
+      debugPrint("🚨 [VOLVO AUTH] Error obteniendo Token: $e");
+    }
+    return null;
+  }
+
+  // ===========================================================================
+  // 2. CONSULTAS A LA API
+  // ===========================================================================
 
   Future<List<dynamic>> traerDatosFlota() async {
+    final token = await _getValidToken();
+    if (token == null) return []; // Fallo de autorización
+
     try {
       final response = await _dio.get(
         '$_baseUrl/vehicle/vehiclestatuses',
         queryParameters: {'latestOnly': 'true', 'itemsPerPage': 100},
         options: Options(headers: {
-          ..._baseHeaders,
+          'Authorization': 'Bearer $token', // ✅ USAMOS EL TOKEN, NO LAS CREDENCIALES CRUDAS
           'Accept': 'application/x.volvogroup.com.vehiclestatuses.v1.0+json'
         }),
       );
@@ -43,21 +85,28 @@ class VolvoApiService {
     }
   }
 
-  // ✅ MÉTODO DE RASTREO PROFUNDO (Fallback Chain)
   Future<double?> traerKilometrajeCualquierVia(String vin) async {
     final String cleanVin = vin.trim().toUpperCase();
     if (cleanVin.isEmpty) return null;
     
+    final token = await _getValidToken();
+    if (token == null) return null;
+
+    final Map<String, String> dataHeaders = {
+      'Authorization': 'Bearer $token', // ✅ USAMOS EL TOKEN
+      'User-Agent': 'Logistica_App_Profesional/1.0',
+    };
+
     // --- INTENTO 1: ODOMETER ---
     try {
       final res = await _dio.get(
         '$_baseUrl/vehicle/vehicles/$cleanVin/odometer',
         options: Options(
           headers: {
-            ..._baseHeaders,
+            ...dataHeaders,
             'Accept': 'application/x.volvogroup.com.vehicleodometer.v1.0+json'
           },
-          validateStatus: (s) => s != null && s < 500, // ✅ MENTOR: Validación segura
+          validateStatus: (s) => s != null && s < 500,
         ),
       );
       if (res.statusCode == 200 && res.data != null) {
@@ -72,7 +121,7 @@ class VolvoApiService {
         queryParameters: {'vin': cleanVin, 'latestOnly': 'true'},
         options: Options(
           headers: {
-            ..._baseHeaders,
+            ...dataHeaders,
             'Accept': 'application/x.volvogroup.com.vehiclestatuses.v1.0+json'
           },
           validateStatus: (s) => s != null && s < 500,
@@ -94,7 +143,7 @@ class VolvoApiService {
         '$_baseUrl/vehicle/vehicles/$cleanVin/utilization',
         options: Options(
           headers: {
-            ..._baseHeaders,
+            ...dataHeaders,
             'Accept': 'application/x.volvogroup.com.vehicleutilization.v1.0+json'
           },
           validateStatus: (s) => s != null && s < 500,
@@ -103,12 +152,11 @@ class VolvoApiService {
       if (res.statusCode == 200 && res.data != null) {
          final double? metros = double.tryParse(res.data['totalDistance'].toString());
          if (metros != null) {
-           return metros / 1000; // ✅ MENTOR: Matemática perfecta
+           return metros / 1000;
          }
       }
     } catch (_) {}
 
-    // Si la batería del camión está cortada o sin señal
     debugPrint("💤 [OFFLINE] $cleanVin: Sin respuesta telemétrica.");
     return null;
   }

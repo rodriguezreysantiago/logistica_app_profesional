@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async'; // ✅ MENTOR: Necesario para manejar TimeoutException
 import 'package:flutter/foundation.dart'; 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -7,7 +8,9 @@ class FirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
-  // --- 1. MÉTODOS DE SUBIDA GENÉRICOS ---
+  // ===========================================================================
+  // 1. MÉTODOS DE SUBIDA GENÉRICOS
+  // ===========================================================================
 
   Future<String> subirArchivoGenerico({
     required File archivo,
@@ -18,7 +21,12 @@ class FirebaseService {
       String contentType = _obtenerContentType(extension);
 
       final ref = _storage.ref().child(rutaStorage);
-      await ref.putFile(archivo, SettableMetadata(contentType: contentType));
+      
+      // ✅ MEJORA PRO: Timeout de 30s. Evita que la app se congele en rutas sin 4G.
+      await ref.putFile(archivo, SettableMetadata(contentType: contentType))
+          .timeout(const Duration(seconds: 30), onTimeout: () {
+            throw TimeoutException('La conexión es demasiado lenta para subir el archivo.');
+          });
       
       return await ref.getDownloadURL();
     } catch (e) {
@@ -26,7 +34,9 @@ class FirebaseService {
     }
   }
 
-  // --- 2. SOLICITUDES DE REVISIÓN (Chofer) ---
+  // ===========================================================================
+  // 2. SOLICITUDES DE REVISIÓN (Chofer)
+  // ===========================================================================
   
   Future<void> registrarSolicitudRevision({
     required String dni,
@@ -44,7 +54,13 @@ class FirebaseService {
       final String nombreArchivo = 'REVISIONES/${dni}_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension';
       
       final ref = _storage.ref().child(nombreArchivo);
-      await ref.putFile(archivo, SettableMetadata(contentType: contentType));
+      
+      // ✅ MEJORA PRO: Protección de red para las subidas de los choferes
+      await ref.putFile(archivo, SettableMetadata(contentType: contentType))
+          .timeout(const Duration(seconds: 30), onTimeout: () {
+            throw TimeoutException('Sin señal suficiente para subir la imagen de revisión.');
+          });
+          
       String url = await ref.getDownloadURL();
 
       await _db.collection('REVISIONES').add({
@@ -71,7 +87,9 @@ class FirebaseService {
     return 'image/jpeg'; // Fallback por defecto para jpg/jpeg
   }
 
-  // --- 3. GESTIÓN DE USUARIOS / EMPLEADOS ---
+  // ===========================================================================
+  // 3. GESTIÓN DE USUARIOS / EMPLEADOS
+  // ===========================================================================
 
   Future<void> actualizarDatoEmpleado(String dni, String campo, dynamic valor) async {
     try {
@@ -83,7 +101,9 @@ class FirebaseService {
     }
   }
 
-  // --- 4. CONSULTAS Y PROCESAMIENTO (Admin) ---
+  // ===========================================================================
+  // 4. CONSULTAS Y PROCESAMIENTO (Admin)
+  // ===========================================================================
 
   Future<void> finalizarRevision({
     required String idSolicitud,
@@ -102,49 +122,44 @@ class FirebaseService {
         Map<String, dynamic> camposAActualizar = {};
 
         if (campoAct.startsWith('VENCIMIENTO_')) {
-          // Trámite de Papeles: Guardamos la fecha Y la URL del archivo
           String campoArchivo = campoAct.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
           camposAActualizar[campoAct] = datos['fecha_vencimiento'];
           camposAActualizar[campoArchivo] = datos['url_archivo'];
           camposAActualizar['ultima_auditoria'] = FieldValue.serverTimestamp();
           
         } else if (campoAct == 'SOLICITUD_VEHICULO' || campoAct == 'SOLICITUD_ENGANCHE') {
-          // ✅ MENTOR: Lógica corregida para la rotación de flota
           String campoDestino = campoAct == 'SOLICITUD_VEHICULO' ? 'VEHICULO' : 'ENGANCHE';
           String nuevaUnidad = datos['patente'] ?? '';
           String unidadActual = datos['unidad_actual'] ?? '';
           
           camposAActualizar[campoDestino] = nuevaUnidad;
           
-          // Ocupamos la nueva unidad
           if (nuevaUnidad.isNotEmpty && nuevaUnidad != "-") {
             DocumentReference vehiculoNuevoRef = _db.collection('VEHICULOS').doc(nuevaUnidad);
             batch.update(vehiculoNuevoRef, {'ESTADO': 'ASIGNADO'});
           }
-          // Liberamos la unidad vieja
           if (unidadActual.isNotEmpty && unidadActual != "-" && unidadActual != "SIN ASIGNAR") {
             DocumentReference vehiculoViejoRef = _db.collection('VEHICULOS').doc(unidadActual);
             batch.update(vehiculoViejoRef, {'ESTADO': 'LIBRE'});
           }
           
         } else {
-          // Fallback de seguridad
           camposAActualizar[campoAct] = datos['fecha_vencimiento'];
         }
 
         batch.update(destinoRef, camposAActualizar);
       } 
       
-      // Borramos el archivo del Storage solo si se RECHAZA. 
       if (!aprobado && datos != null && datos['path_storage'] != null && datos['path_storage'].toString().isNotEmpty) {
         try {
+          // El borrado de archivos en background no necesita trabar el proceso principal
+          // por lo que no es estrictamente necesario un timeout aquí, pero controlamos el error.
           await _storage.ref().child(datos['path_storage']).delete();
         } catch (e) {
           debugPrint("El archivo no existía o no se pudo borrar: $e");
         }
       }
 
-      // Borramos la solicitud
       DocumentReference solicitudRef = _db.collection('REVISIONES').doc(idSolicitud);
       batch.delete(solicitudRef);
 
@@ -159,6 +174,45 @@ class FirebaseService {
         .collection('REVISIONES')
         .where('estado', isEqualTo: 'PENDIENTE')
         .orderBy('fecha_solicitud', descending: true)
+        .limit(50) 
         .snapshots();
+  }
+
+  // ===========================================================================
+  // 5. MOTOR DE PAGINACIÓN DE FLOTA Y PERSONAL (CONTROL DE COSTOS)
+  // ===========================================================================
+
+  Future<QuerySnapshot> getVehiculosPaginados({
+    required int limit,
+    DocumentSnapshot? lastDocument,
+  }) async {
+    Query query = _db
+        .collection('VEHICULOS')
+        .orderBy(FieldPath.documentId) 
+        .limit(limit);
+
+    if (lastDocument != null) {
+      query = query.startAfterDocument(lastDocument);
+    }
+
+    return await query.get();
+  }
+
+  Future<QuerySnapshot> getEmpleadosPaginados({
+    required int limit,
+    DocumentSnapshot? lastDocument,
+  }) async {
+    Query query = _db
+        .collection('EMPLEADOS')
+        // ✅ CORRECCIÓN CRÍTICA: El campo en la base es 'NOMBRE', no 'nombre_completo'.
+        // Si no se cambia, esta consulta devolverá 0 resultados siempre o fallará por falta de índice.
+        .orderBy('NOMBRE') 
+        .limit(limit);
+
+    if (lastDocument != null) {
+      query = query.startAfterDocument(lastDocument);
+    }
+
+    return await query.get();
   }
 }

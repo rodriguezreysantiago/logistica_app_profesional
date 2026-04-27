@@ -1,3 +1,4 @@
+import 'dart:async'; // Necesario para TimeoutException
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/utils/checklist_data.dart';
@@ -21,6 +22,8 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
   final Map<String, String> _respuestas = {};
   final Map<String, String> _observaciones = {};
   
+  // Lista para rastrear qué preguntas faltan contestar y resaltarlas en rojo
+  List<String> _preguntasConError = [];
   bool _enviando = false;
 
   @override
@@ -28,7 +31,6 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
     final Map<String, List<String>> secciones = 
         widget.tipo == "TRACTOR" ? ChecklistData.itemsTractor : ChecklistData.itemsBatea;
 
-    // ✅ MENTOR: GestureDetector para ocultar el teclado al tocar fuera de los inputs
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
@@ -49,7 +51,6 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
         ),
         body: Stack(
           children: [
-            // ✅ MENTOR: Fondo unificado con el resto de la app
             Positioned.fill(
               child: Image.asset(
                 'assets/images/fondo_login.jpg',
@@ -61,7 +62,6 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
             Positioned.fill(
               child: Container(color: Colors.black.withAlpha(200)),
             ),
-
             SafeArea(
               child: Column(
                 children: [
@@ -69,26 +69,7 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.orangeAccent.withAlpha(20),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.orangeAccent.withAlpha(50))
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.info_outline, color: Colors.orangeAccent, size: 20),
-                              SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  "Es obligatorio completar todos los puntos. Detalle cualquier novedad en el campo de texto.",
-                                  style: TextStyle(color: Colors.white70, fontSize: 12, fontStyle: FontStyle.italic),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        _buildInfoCard(),
                         const SizedBox(height: 25),
                         ...secciones.entries.map((sec) => _buildSeccion(sec.key, sec.value)),
                       ],
@@ -100,6 +81,29 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orangeAccent.withAlpha(20),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orangeAccent.withAlpha(50))
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.info_outline, color: Colors.orangeAccent, size: 20),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Es obligatorio completar todos los puntos. Detalle cualquier novedad en el campo de texto.",
+              style: TextStyle(color: Colors.white70, fontSize: 12, fontStyle: FontStyle.italic),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -127,13 +131,20 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
   }
 
   Widget _buildItemPregunta(String item) {
-    return Container(
+    bool tieneError = _preguntasConError.contains(item);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
       margin: const EdgeInsets.only(bottom: 15),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface, // ✅ MENTOR: Hereda el color global
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withAlpha(15)),
+        // Si falta contestar, pinta el borde de rojo llamativo
+        border: Border.all(color: tieneError ? Colors.redAccent : Colors.white.withAlpha(15), width: tieneError ? 2 : 1),
+        boxShadow: tieneError 
+            ? [BoxShadow(color: Colors.redAccent.withAlpha(50), blurRadius: 8, spreadRadius: 1)] 
+            : [],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -157,7 +168,7 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
                 onSelected: (val) {
                   setState(() {
                     _respuestas[item] = estado;
-                    // Limpia el comentario si vuelve a poner BUE
+                    _preguntasConError.remove(item); // Quita el error al responder
                     if (estado == "BUE") {
                       _observaciones.remove(item);
                     }
@@ -167,7 +178,6 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
             }).toList(),
           ),
           
-          // Animación suave al desplegar el campo de texto
           AnimatedSize(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
@@ -192,7 +202,12 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
                         borderSide: BorderSide(color: _getColor(_respuestas[item]!))
                       )
                     ),
-                    onChanged: (val) => _observaciones[item] = val,
+                    onChanged: (val) {
+                      _observaciones[item] = val;
+                      if (val.trim().isNotEmpty) {
+                        setState(() => _preguntasConError.remove(item));
+                      }
+                    },
                   ),
                 )
               : const SizedBox.shrink(),
@@ -214,11 +229,7 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(100),
-            blurRadius: 10,
-            offset: const Offset(0, -5)
-          )
+          BoxShadow(color: Colors.black.withAlpha(100), blurRadius: 10, offset: const Offset(0, -5))
         ]
       ),
       child: SafeArea(
@@ -243,22 +254,23 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    final int totalItemsRequeridos = secciones.values.expand((e) => e).length;
+    List<String> faltantes = [];
 
-    if (_respuestas.length < totalItemsRequeridos) {
-      _notificar(messenger, "⚠️ Faltan puntos por responder (${_respuestas.length} de $totalItemsRequeridos).");
-      return;
+    // 1. Validar qué preguntas faltan contestar o justificar
+    for (var sec in secciones.values) {
+      for (var item in sec) {
+        if (!_respuestas.containsKey(item)) {
+          faltantes.add(item);
+        } else if ((_respuestas[item] == "REG" || _respuestas[item] == "MAL") && 
+                  (_observaciones[item] == null || _observaciones[item]!.trim().isEmpty)) {
+          faltantes.add(item);
+        }
+      }
     }
 
-    bool faltaComentario = false;
-    _respuestas.forEach((key, value) {
-      if ((value == "REG" || value == "MAL") && (_observaciones[key] == null || _observaciones[key]!.trim().isEmpty)) {
-        faltaComentario = true;
-      }
-    });
-
-    if (faltaComentario) {
-      _notificar(messenger, "⚠️ Debe detallar el motivo en los puntos marcados como REG o MAL.");
+    if (faltantes.isNotEmpty) {
+      setState(() => _preguntasConError = faltantes);
+      _notificar(messenger, "⚠️ Complete o justifique los puntos resaltados en rojo.");
       return;
     }
 
@@ -266,29 +278,51 @@ class _UserChecklistFormScreenState extends State<UserChecklistFormScreen> {
 
     try {
       final now = DateTime.now();
-      
-      await FirebaseFirestore.instance.collection('CHECKLISTS').add({
+      final payload = {
         'ANIO': now.year,                              
-        'DNI': PrefsService.dni,               
+        'DNI': PrefsService.dni,                
         'FECHA': FieldValue.serverTimestamp(), 
         'MES': now.month,                              
         'NOMBRE': PrefsService.nombre.toUpperCase(), 
         'DOMINIO': widget.patente,                     
         'TIPO': widget.tipo,                   
         'RESPUESTAS': _respuestas,                     
-        'OBSERVACIONES': _observaciones,               
+        'OBSERVACIONES': _observaciones, 
+        'SINCRONIZADO_LOCAL': true // Flag útil para auditoría posterior
+      };
+
+      // 2. MODO OFFLINE: Timeout hack para Firebase.
+      // Si Firebase no responde en 4 segundos (ej. sin 4G), lanzamos error.
+      // Sin embargo, Firebase internamente YA guardó el documento en su caché local
+      // y lo subirá solo cuando recupere la conexión.
+      await FirebaseFirestore.instance.collection('CHECKLISTS').add(payload)
+        .timeout(const Duration(seconds: 4), onTimeout: () {
+          throw TimeoutException("OFFLINE_MODE");
       });
 
       if (mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text("✅ Registro guardado con éxito", style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.green),
+          const SnackBar(content: Text("✅ Registro sincronizado en la nube", style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.green),
         );
         navigator.pop();
       }
+
     } catch (e) {
       if (mounted) {
-        setState(() => _enviando = false);
-        _notificar(messenger, "❌ Error al guardar: $e");
+        if (e is TimeoutException && e.message == "OFFLINE_MODE") {
+          // El usuario no tiene internet, pero Firebase retuvo el dato.
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text("📡 Sin conexión. Guardado en el equipo, se subirá automáticamente.", style: TextStyle(fontWeight: FontWeight.bold)), 
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+          navigator.pop();
+        } else {
+          setState(() => _enviando = false);
+          _notificar(messenger, "❌ Error crítico al guardar: $e");
+        }
       }
     }
   }
