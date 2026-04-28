@@ -50,3 +50,5 @@ serviceAccountKey.json
 *.p12
 *.key
 .env
+secrets.json
+!secrets.example.json

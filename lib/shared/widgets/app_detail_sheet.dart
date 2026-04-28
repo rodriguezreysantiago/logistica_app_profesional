@@ -1,0 +1,116 @@
+import 'package:flutter/material.dart';
+
+/// Helper estático para abrir BottomSheets de "detalle" uniformemente.
+///
+/// Reemplaza el patrón inconsistente actual donde:
+/// - Personal usa BottomSheet draggable
+/// - Revisiones usa AlertDialog
+/// - Flota usa ExpansionTile inline
+///
+/// Uso típico:
+/// ```
+/// AppDetailSheet.show(
+///   context: context,
+///   title: 'Detalle del chofer',
+///   builder: (ctx, scrollCtl) => ListView(
+///     controller: scrollCtl,
+///     children: [...],
+///   ),
+/// );
+/// ```
+///
+/// El [builder] recibe el [ScrollController] que debe asignarse al
+/// ListView/CustomScrollView interno para que el sheet se mueva correctamente.
+class AppDetailSheet {
+  AppDetailSheet._();
+
+  /// Abre un BottomSheet draggable estándar.
+  /// Devuelve el valor que el caller pase a `Navigator.pop(ctx, valor)`.
+  static Future<T?> show<T>({
+    required BuildContext context,
+    required String title,
+    required Widget Function(BuildContext, ScrollController) builder,
+    double initialChildSize = 0.85,
+    double minChildSize = 0.5,
+    double maxChildSize = 0.95,
+    List<Widget>? actions,
+    IconData? icon,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: initialChildSize,
+        minChildSize: minChildSize,
+        maxChildSize: maxChildSize,
+        expand: false,
+        builder: (sheetCtx, scrollCtl) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(25),
+            ),
+            border: Border(
+              top: BorderSide(
+                color: Theme.of(context).colorScheme.primary,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Column(
+            children: [
+              // Handle deslizable visual (como iOS / Material 3)
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // Header con título + acciones
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
+                child: Row(
+                  children: [
+                    if (icon != null) ...[
+                      Icon(
+                        icon,
+                        color: Theme.of(context).colorScheme.primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    if (actions != null) ...actions,
+                    IconButton(
+                      icon: const Icon(Icons.close,
+                          color: Colors.white54, size: 20),
+                      onPressed: () => Navigator.of(sheetCtx).pop(),
+                      tooltip: 'Cerrar',
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(color: Colors.white10, height: 1),
+              // Contenido scrollable proveído por el caller
+              Expanded(child: builder(sheetCtx, scrollCtl)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

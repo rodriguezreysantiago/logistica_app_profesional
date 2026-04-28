@@ -14,7 +14,7 @@ import '../features/vehicles/screens/user_mi_equipo_screen.dart';
 import '../features/employees/screens/user_mi_perfil_screen.dart';
 import '../features/expirations/screens/user_mis_vencimientos_screen.dart';
 
-import '../features/admin_dashboard/screens/admin_panel_screen.dart';
+import '../features/admin_dashboard/screens/admin_shell.dart';
 import '../features/employees/screens/admin_personal_lista_screen.dart';
 import '../features/vehicles/screens/admin_vehiculos_lista_screen.dart';
 import '../features/expirations/screens/admin_vencimientos_menu_screen.dart';
@@ -98,9 +98,11 @@ class AppRouter {
         );
 
       // ================= ADMIN =================
+      // Shell con NavigationRail/BottomNav que contiene todas las secciones admin.
+      // La AdminPanelScreen original se renderiza como sección "Inicio" del shell.
       case AppRoutes.adminPanel:
         return _buildRoute(
-          _protegerAdmin(const AdminPanelScreen()),
+          _protegerAdmin(const AdminShell()),
           settings,
         );
 

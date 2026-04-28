@@ -53,7 +53,8 @@ dependencies:
   pdfrx: ^1.0.10
 
   # ================= SEGURIDAD =================
-  crypto: ^3.0.3
+  crypto: ^3.0.3      # SHA-256 (legacy, mantener para verificar contraseñas viejas)
+  bcrypt: ^1.1.3      # ✅ Hash con salt para nuevas contraseñas (more secure)
 
 dev_dependencies:
   flutter_test:

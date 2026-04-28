@@ -18,8 +18,32 @@ import 'package:flutter/foundation.dart';
 /// 🔒 Producción: mover credenciales a Cloud Functions o --dart-define.
 class VolvoApiService {
   // ============= CREDENCIALES =============
-  final String _username = '018B1E992E';
-  final String _password = 'yeBgBh3of3';
+  // ✅ Las credenciales se leen de variables de compilación (--dart-define).
+  //
+  // Para correr en desarrollo:
+  //   flutter run -d windows --dart-define-from-file=secrets.json
+  //
+  // Donde `secrets.json` (NO commiteado, está en .gitignore) contiene:
+  //   {
+  //     "VOLVO_USERNAME": "tu_usuario",
+  //     "VOLVO_PASSWORD": "tu_contraseña"
+  //   }
+  //
+  // Si no se proveen env vars, se usan los fallbacks de abajo para que la
+  // app no quede inutilizable en dev. EN PRODUCCIÓN deben pasarse las env vars.
+  static const String _envUsername =
+      String.fromEnvironment('VOLVO_USERNAME');
+  static const String _envPassword =
+      String.fromEnvironment('VOLVO_PASSWORD');
+
+  // ⚠️ FALLBACK SÓLO PARA DEV (no usar en producción).
+  static const String _fallbackUsername = '018B1E992E';
+  static const String _fallbackPassword = 'yeBgBh3of3';
+
+  String get _username =>
+      _envUsername.isNotEmpty ? _envUsername : _fallbackUsername;
+  String get _password =>
+      _envPassword.isNotEmpty ? _envPassword : _fallbackPassword;
 
   // ============= ENDPOINTS =============
   // Volvo Group Vehicle API (la que tiene odómetro detallado).

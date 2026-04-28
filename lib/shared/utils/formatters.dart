@@ -51,24 +51,30 @@ class AppFormatters {
     
     if (fecha is DateTime) return fecha;
 
+    // Usamos tryParse en lugar de parse para no depender de excepciones
+    // como flujo de control. Mismo resultado, sin throw + catch.
     try {
       final String stringFecha = fecha.toString();
       final String soloFecha = stringFecha.split('T').first.split(' ').first;
       final String f = soloFecha.replaceAll('/', '-').trim();
-      
+
       final List<String> partes = f.split('-');
       if (partes.length == 3) {
-        if (partes[0].length == 4) { // YYYY-MM-DD
-          return DateTime.parse(f);
-        } else { // DD-MM-YYYY
-          return DateTime(
-            int.parse(partes[2]), 
-            int.parse(partes[1]), 
-            int.parse(partes[0])
-          );
+        if (partes[0].length == 4) {
+          // Formato YYYY-MM-DD (ISO)
+          return DateTime.tryParse(f);
+        }
+        // Formato DD-MM-YYYY: parseamos cada componente con tryParse.
+        final dia = int.tryParse(partes[0]);
+        final mes = int.tryParse(partes[1]);
+        final anio = int.tryParse(partes[2]);
+        if (dia != null && mes != null && anio != null) {
+          return DateTime(anio, mes, dia);
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // Cualquier formato no contemplado → null
+    }
     return null;
   }
 
