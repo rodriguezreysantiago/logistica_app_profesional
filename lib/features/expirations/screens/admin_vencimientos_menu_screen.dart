@@ -38,7 +38,7 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
           SizedBox(height: 10),
           _MenuTile(
             titulo: 'VENCIMIENTOS DE PERSONAL',
-            subtitulo: 'Seguimiento de carnets, LINTI y ART',
+            subtitulo: 'Seguimiento de carnets, preocupacional y ART',
             icono: Icons.person_search,
             colorIcono: Colors.blueAccent,
             ruta: '/vencimientos_choferes',
@@ -52,7 +52,7 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
           ),
           _MenuTile(
             titulo: 'VENCIMIENTOS DE ENGANCHES',
-            subtitulo: 'Auditoría de bateas, tolvas y acoplados',
+            subtitulo: 'Auditoría de bateas, tolvas, bivuelcos y tanques',
             icono: Icons.grid_view,
             colorIcono: Colors.tealAccent,
             ruta: '/vencimientos_acoplados',

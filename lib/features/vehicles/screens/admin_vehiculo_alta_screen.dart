@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
+import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Form de alta de un nuevo vehículo (tractor / batea / tolva).
@@ -81,10 +83,10 @@ class _AdminVehiculoAltaScreenState
       }
 
       // 2) Crear el vehículo
-      await FirebaseFirestore.instance
-          .collection('VEHICULOS')
-          .doc(patente)
-          .set({
+      // Inicializamos los campos de vencimiento (fecha vacía + archivo
+      // "-") según los specs del tipo. Así un tractor recién creado
+      // arranca con los 4 vencimientos listos y un enganche con los 2.
+      final initialFields = <String, dynamic>{
         'DOMINIO': patente,
         'TIPO': _tipo,
         'MARCA': _marcaCtrl.text.trim().toUpperCase(),
@@ -97,11 +99,16 @@ class _AdminVehiculoAltaScreenState
         'ESTADO': 'LIBRE',
         'KM_ACTUAL': 0,
         'fecha_alta': FieldValue.serverTimestamp(),
-        'ARCHIVO_RTO': '-',
-        'ARCHIVO_SEGURO': '-',
-        'VENCIMIENTO_RTO': '',
-        'VENCIMIENTO_SEGURO': '',
-      });
+      };
+      for (final spec in AppVencimientos.forTipo(_tipo)) {
+        initialFields[spec.campoFecha] = '';
+        initialFields[spec.campoArchivo] = '-';
+      }
+
+      await FirebaseFirestore.instance
+          .collection('VEHICULOS')
+          .doc(patente)
+          .set(initialFields);
 
       if (!mounted) return;
       messenger.showSnackBar(
@@ -328,31 +335,53 @@ class _SelectorTipo extends StatelessWidget {
     required this.onChanged,
   });
 
+  // Mapeo tipo → icono. Centralizado acá porque es solo para esta UI;
+  // si se reutiliza en otra pantalla, se mueve a app_constants.dart.
+  static const Map<String, IconData> _iconos = {
+    'TRACTOR': Icons.local_shipping,
+    'BATEA': Icons.view_agenda,
+    'TOLVA': Icons.difference,
+    'BIVUELCO': Icons.unfold_more,
+    'TANQUE': Icons.propane_tank,
+  };
+
+  // Etiqueta capitalizada (primera letra mayúscula, resto minúscula).
+  String _label(String t) => t.isEmpty
+      ? t
+      : '${t[0].toUpperCase()}${t.substring(1).toLowerCase()}';
+
   @override
   Widget build(BuildContext context) {
+    const tipos = AppTiposVehiculo.seleccionables;
     return SizedBox(
       width: double.infinity,
-      child: SegmentedButton<String>(
-        segments: const [
-          ButtonSegment(
-            value: 'TRACTOR',
-            label: Text('Tractor', style: TextStyle(fontSize: 12)),
-            icon: Icon(Icons.local_shipping, size: 16),
-          ),
-          ButtonSegment(
-            value: 'BATEA',
-            label: Text('Batea', style: TextStyle(fontSize: 12)),
-            icon: Icon(Icons.view_agenda, size: 16),
-          ),
-          ButtonSegment(
-            value: 'TOLVA',
-            label: Text('Tolva', style: TextStyle(fontSize: 12)),
-            icon: Icon(Icons.difference, size: 16),
-          ),
-        ],
-        selected: {tipo},
-        onSelectionChanged:
-            enabled ? (set) => onChanged(set.first) : null,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: tipos.map((t) {
+          final seleccionado = tipo == t;
+          return ChoiceChip(
+            avatar: Icon(
+              _iconos[t] ?? Icons.directions_car,
+              size: 16,
+              color: seleccionado
+                  ? Colors.black
+                  : Theme.of(context).colorScheme.primary,
+            ),
+            label: Text(
+              _label(t),
+              style: TextStyle(
+                fontSize: 12,
+                color: seleccionado ? Colors.black : Colors.white,
+                fontWeight:
+                    seleccionado ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            selected: seleccionado,
+            onSelected:
+                enabled ? (selected) => onChanged(t) : null,
+          );
+        }).toList(),
       ),
     );
   }

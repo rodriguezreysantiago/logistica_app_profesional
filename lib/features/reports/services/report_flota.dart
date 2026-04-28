@@ -24,6 +24,8 @@ class ReportGenerator {
       "PROMEDIO KM/L": true,
       "VENCIMIENTO RTO": true,
       "VENCIMIENTO SEGURO": true,
+      "VENCIMIENTO EXT. CABINA": true,
+      "VENCIMIENTO EXT. EXTERIOR": true,
       "ESTADO CONEXION": true,
     };
 
@@ -186,12 +188,20 @@ class ReportGenerator {
         }
 
         if (filtros["VENCIMIENTO RTO"]!) {
-          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: currentCol++, rowIndex: currentRow)).value = 
+          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: currentCol++, rowIndex: currentRow)).value =
               ex.TextCellValue(AppFormatters.formatearFecha(data['VENCIMIENTO_RTO']));
         }
         if (filtros["VENCIMIENTO SEGURO"]!) {
-          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: currentCol++, rowIndex: currentRow)).value = 
+          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: currentCol++, rowIndex: currentRow)).value =
               ex.TextCellValue(AppFormatters.formatearFecha(data['VENCIMIENTO_SEGURO']));
+        }
+        if (filtros["VENCIMIENTO EXT. CABINA"]!) {
+          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: currentCol++, rowIndex: currentRow)).value =
+              ex.TextCellValue(AppFormatters.formatearFecha(data['VENCIMIENTO_EXTINTOR_CABINA']));
+        }
+        if (filtros["VENCIMIENTO EXT. EXTERIOR"]!) {
+          sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: currentCol++, rowIndex: currentRow)).value =
+              ex.TextCellValue(AppFormatters.formatearFecha(data['VENCIMIENTO_EXTINTOR_EXTERIOR']));
         }
         
         if (filtros["ESTADO CONEXION"]!) {

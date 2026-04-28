@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -59,13 +61,18 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (result.success) {
-      navigator.pushReplacementNamed(
-        '/home',
-        arguments: {
-          'dni': result.dni,
-          'nombre': result.nombre,
-          'rol': result.rol,
-        },
+      // El Future de pushReplacementNamed se completa recién cuando la
+      // pantalla /home haga pop (o sea, nunca para nuestro caso). No
+      // queremos esperarlo: lo descartamos explícito con unawaited().
+      unawaited(
+        navigator.pushReplacementNamed(
+          '/home',
+          arguments: {
+            'dni': result.dni,
+            'nombre': result.nombre,
+            'rol': result.rol,
+          },
+        ),
       );
     } else {
       _mostrarError(

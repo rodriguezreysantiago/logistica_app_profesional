@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/services/auto_sync_service.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../providers/sync_dashboard_provider.dart';
 
-/// Dashboard de observabilidad del sync con Volvo.
+/// Dashboard de observabilidad del sync con Volvo Connect.
 ///
-/// Muestra métricas en tiempo real del AutoSyncService:
-/// - Activos / éxito / errores en este ciclo
-/// - Total acumulado, tasa de éxito, latencia promedio
+/// Muestra (en este orden):
+/// - Estado actual del ciclo (activos / éxito / errores / saltados)
 /// - Progreso del ciclo actual (cuántos vehículos van procesados)
+/// - Métricas globales (total, tasa de éxito, latencia, último sync)
+/// - Botón "ejecutar ahora" para disparar un ciclo on-demand
+/// - Actividad reciente (lista de últimos 50 eventos por unidad)
+/// - Histórico de ciclos (últimos 15)
 class SyncDashboardScreen extends StatelessWidget {
   const SyncDashboardScreen({super.key});
 
@@ -32,7 +36,7 @@ class SyncDashboardScreen extends StatelessWidget {
 }
 
 // =============================================================================
-// CUERPO DE LA PANTALLA
+// CUERPO
 // =============================================================================
 
 class _Body extends StatelessWidget {
@@ -41,87 +45,329 @@ class _Body extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    return ListView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Cards principales (activos / éxito / errores)
-          const _SectionHeader(label: 'Estado actual'),
+      children: [
+        // ─── Cards de estado ────────────────────────────────────────
+        const _SectionHeader(label: 'Estado actual'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _LiveCard(
+              label: 'Activos',
+              value: dash.activeSyncs.toString(),
+              color: Colors.orangeAccent,
+              icon: Icons.sync,
+            ),
+            const SizedBox(width: 10),
+            _LiveCard(
+              label: 'Éxito',
+              value: dash.successSyncs.toString(),
+              color: Colors.greenAccent,
+              icon: Icons.check_circle,
+            ),
+            const SizedBox(width: 10),
+            _LiveCard(
+              label: 'Errores',
+              value: dash.failedSyncs.toString(),
+              color: Colors.redAccent,
+              icon: Icons.error,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // ─── Ciclo actual ───────────────────────────────────────────
+        if (dash.cycleTotal > 0) ...[
+          const _SectionHeader(label: 'Ciclo actual'),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              _LiveCard(
-                label: 'Activos',
-                value: dash.activeSyncs.toString(),
-                color: Colors.orangeAccent,
-                icon: Icons.sync,
-              ),
-              const SizedBox(width: 10),
-              _LiveCard(
-                label: 'Éxito',
-                value: dash.successSyncs.toString(),
-                color: Colors.greenAccent,
-                icon: Icons.check_circle,
-              ),
-              const SizedBox(width: 10),
-              _LiveCard(
-                label: 'Errores',
-                value: dash.failedSyncs.toString(),
-                color: Colors.redAccent,
-                icon: Icons.error,
-              ),
-            ],
+          _CicloProgress(
+            cycle: dash.cycle,
+            procesados: dash.cycleProcessed,
+            total: dash.cycleTotal,
           ),
           const SizedBox(height: 24),
+        ],
 
-          // Progreso del ciclo actual
-          if (dash.cycleTotal > 0) ...[
-            const _SectionHeader(label: 'Ciclo actual'),
-            const SizedBox(height: 8),
-            _CicloProgress(
-              cycle: dash.cycle,
-              procesados: dash.cycleProcessed,
-              total: dash.cycleTotal,
+        // ─── Métricas globales ─────────────────────────────────────
+        const _SectionHeader(label: 'Métricas globales'),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          childAspectRatio: 1.8,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          children: [
+            _StatTile(
+              label: 'Total syncs',
+              value: dash.totalSyncs.toString(),
             ),
-            const SizedBox(height: 24),
+            _StatTile(
+              label: 'Tasa de éxito',
+              value: '${(dash.successRate * 100).toStringAsFixed(1)}%',
+              accent: dash.successRate >= 0.9
+                  ? Colors.greenAccent
+                  : (dash.successRate >= 0.7
+                      ? Colors.orangeAccent
+                      : Colors.redAccent),
+            ),
+            _StatTile(
+              label: 'Latencia avg',
+              value: '${dash.avgLatencyMs.toStringAsFixed(0)} ms',
+            ),
+            _StatTile(
+              label: 'Saltados',
+              value: dash.skippedSyncs.toString(),
+              accent: Colors.white60,
+            ),
+            _StatTile(
+              label: 'Último sync',
+              value: dash.lastSyncAt != null
+                  ? _formatHora(dash.lastSyncAt!)
+                  : '—',
+            ),
+            _StatTile(
+              label: 'Ciclos',
+              value: dash.cycle.toString(),
+            ),
           ],
+        ),
+        const SizedBox(height: 24),
 
-          // Métricas acumuladas
-          const _SectionHeader(label: 'Métricas globales'),
-          const SizedBox(height: 8),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 1.8,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            children: [
-              _StatTile(
-                label: 'Total syncs',
-                value: dash.totalSyncs.toString(),
-              ),
-              _StatTile(
-                label: 'Tasa de éxito',
-                value: '${(dash.successRate * 100).toStringAsFixed(1)}%',
-                accent: dash.successRate >= 0.9
-                    ? Colors.greenAccent
-                    : (dash.successRate >= 0.7
-                        ? Colors.orangeAccent
-                        : Colors.redAccent),
-              ),
-              _StatTile(
-                label: 'Latencia avg',
-                value: '${dash.avgLatencyMs.toStringAsFixed(0)} ms',
-              ),
-              _StatTile(
-                label: 'Último sync',
-                value: dash.lastSyncAt != null
-                    ? dash.lastSyncAt.toString().substring(11, 19)
-                    : '—',
-              ),
-            ],
+        // ─── Botón disparar ahora ──────────────────────────────────
+        const _BotonEjecutarAhora(),
+        const SizedBox(height: 24),
+
+        // ─── Actividad reciente ────────────────────────────────────
+        const _SectionHeader(label: 'Actividad reciente'),
+        const SizedBox(height: 8),
+        _ActividadReciente(eventos: dash.eventosRecientes),
+        const SizedBox(height: 24),
+
+        // ─── Histórico de ciclos ───────────────────────────────────
+        const _SectionHeader(label: 'Histórico de ciclos'),
+        const SizedBox(height: 8),
+        _HistoricoCiclos(ciclos: dash.historicoCiclos),
+        const SizedBox(height: 30),
+      ],
+    );
+  }
+
+  String _formatHora(DateTime d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
+  }
+}
+
+// =============================================================================
+// BOTÓN EJECUTAR AHORA
+// =============================================================================
+
+class _BotonEjecutarAhora extends StatefulWidget {
+  const _BotonEjecutarAhora();
+
+  @override
+  State<_BotonEjecutarAhora> createState() => _BotonEjecutarAhoraState();
+}
+
+class _BotonEjecutarAhoraState extends State<_BotonEjecutarAhora> {
+  bool _ejecutando = false;
+
+  Future<void> _disparar() async {
+    if (_ejecutando) return;
+    setState(() => _ejecutando = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final svc = context.read<AutoSyncService>();
+
+    final lanzado = await svc.runNow();
+
+    if (!mounted) return;
+    setState(() => _ejecutando = false);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(lanzado
+            ? 'Ciclo manual disparado.'
+            : 'Ya hay un ciclo en curso, esperá a que termine.'),
+        backgroundColor: lanzado ? Colors.green : Colors.orangeAccent,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _ejecutando ? null : _disparar,
+        icon: _ejecutando
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.cyanAccent),
+              )
+            : const Icon(Icons.play_arrow, color: Colors.cyanAccent),
+        label: Text(
+          _ejecutando ? 'EJECUTANDO...' : 'EJECUTAR CICLO AHORA',
+          style: const TextStyle(
+            color: Colors.cyanAccent,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: Colors.cyanAccent),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// ACTIVIDAD RECIENTE
+// =============================================================================
+
+class _ActividadReciente extends StatelessWidget {
+  final List<SyncEvent> eventos;
+  const _ActividadReciente({required this.eventos});
+
+  @override
+  Widget build(BuildContext context) {
+    if (eventos.isEmpty) {
+      return const AppCard(
+        margin: EdgeInsets.zero,
+        padding: EdgeInsets.all(20),
+        child: Text(
+          'Sin actividad todavía. El primer ciclo arranca al abrir la app '
+          'y se repite cada minuto. Si seguís sin ver nada, tocá '
+          '"EJECUTAR CICLO AHORA" para disparar uno manual.',
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      );
+    }
+
+    return AppCard(
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          for (int i = 0; i < eventos.length; i++) ...[
+            _EventoTile(evento: eventos[i]),
+            if (i < eventos.length - 1)
+              const Divider(color: Colors.white10, height: 1),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _EventoTile extends StatelessWidget {
+  final SyncEvent evento;
+  const _EventoTile({required this.evento});
+
+  ({IconData icon, Color color, String label}) get _info {
+    switch (evento.tipo) {
+      case SyncEventTipo.exito:
+        return (
+          icon: Icons.check_circle,
+          color: Colors.greenAccent,
+          label: 'OK'
+        );
+      case SyncEventTipo.error:
+        return (
+          icon: Icons.error,
+          color: Colors.redAccent,
+          label: 'ERROR'
+        );
+      case SyncEventTipo.saltado:
+        return (
+          icon: Icons.skip_next,
+          color: Colors.white54,
+          label: 'SKIP'
+        );
+    }
+  }
+
+  String _formatHora(DateTime d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final info = _info;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(info.icon, color: info.color, size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      evento.patente,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: info.color.withAlpha(25),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        info.label,
+                        style: TextStyle(
+                          color: info.color,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      _formatHora(evento.cuando),
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+                if (evento.mensaje != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    evento.mensaje!,
+                    style: TextStyle(
+                      color: info.color.withAlpha(180),
+                      fontSize: 11,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
           ),
         ],
       ),
@@ -130,7 +376,148 @@ class _Body extends StatelessWidget {
 }
 
 // =============================================================================
-// COMPONENTES
+// HISTÓRICO DE CICLOS
+// =============================================================================
+
+class _HistoricoCiclos extends StatelessWidget {
+  final List<CicloResumen> ciclos;
+  const _HistoricoCiclos({required this.ciclos});
+
+  @override
+  Widget build(BuildContext context) {
+    if (ciclos.isEmpty) {
+      return const AppCard(
+        margin: EdgeInsets.zero,
+        padding: EdgeInsets.all(20),
+        child: Text(
+          'No hay ciclos completados todavía.',
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      );
+    }
+
+    return AppCard(
+      margin: EdgeInsets.zero,
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          // Header de la "tabla"
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              children: [
+                SizedBox(width: 36, child: _Hdr('#')),
+                SizedBox(width: 60, child: _Hdr('Hora')),
+                Expanded(child: _Hdr('Tot')),
+                Expanded(child: _Hdr('OK')),
+                Expanded(child: _Hdr('Err')),
+                Expanded(child: _Hdr('Skip')),
+                SizedBox(width: 50, child: _Hdr('Dur')),
+              ],
+            ),
+          ),
+          const Divider(color: Colors.white10, height: 1),
+          for (int i = 0; i < ciclos.length; i++) ...[
+            _CicloTile(c: ciclos[i]),
+            if (i < ciclos.length - 1)
+              const Divider(color: Colors.white10, height: 1),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _Hdr extends StatelessWidget {
+  final String t;
+  const _Hdr(this.t);
+  @override
+  Widget build(BuildContext context) => Text(
+        t,
+        style: const TextStyle(
+          color: Colors.greenAccent,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.2,
+        ),
+      );
+}
+
+class _CicloTile extends StatelessWidget {
+  final CicloResumen c;
+  const _CicloTile({required this.c});
+
+  String _formatHora(DateTime d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.hour)}:${two(d.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 36,
+            child: Text(
+              '#${c.numero}',
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 60,
+            child: Text(
+              _formatHora(c.inicio),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          Expanded(child: _Num(c.total, Colors.white)),
+          Expanded(child: _Num(c.exito, Colors.greenAccent)),
+          Expanded(child: _Num(c.error, Colors.redAccent)),
+          Expanded(child: _Num(c.saltado, Colors.white54)),
+          SizedBox(
+            width: 50,
+            child: Text(
+              '${c.duracion.inSeconds}s',
+              style: const TextStyle(
+                color: Colors.cyanAccent,
+                fontSize: 11,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Num extends StatelessWidget {
+  final int n;
+  final Color color;
+  const _Num(this.n, this.color);
+  @override
+  Widget build(BuildContext context) => Text(
+        n.toString(),
+        style: TextStyle(
+          color: n > 0 ? color : Colors.white24,
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
+      );
+}
+
+// =============================================================================
+// COMPONENTES VIEJOS (ya existían)
 // =============================================================================
 
 class _SectionHeader extends StatelessWidget {

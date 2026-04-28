@@ -88,6 +88,21 @@ void main() async {
         ChangeNotifierProvider(
           create: (_) => SyncDashboardProvider(),
         ),
+
+        // 🔥 AUTO-SYNC SERVICE
+        // Se crea una sola vez (cuando prev es null) y se le pasa al
+        // dispose del provider la baja del Timer interno. El botón
+        // "ejecutar ahora" del dashboard usa runNow() de esta instancia.
+        ProxyProvider2<VehiculoProvider, SyncDashboardProvider,
+            AutoSyncService>(
+          update: (_, vehProv, dashProv, prev) {
+            if (prev != null) return prev;
+            final svc = AutoSyncService(vehProv, dashboard: dashProv);
+            svc.start();
+            return svc;
+          },
+          dispose: (_, svc) => svc.stop(),
+        ),
       ],
       child: const LogisticaApp(),
     ),
@@ -104,23 +119,24 @@ class LogisticaApp extends StatefulWidget {
 }
 
 class _LogisticaAppState extends State<LogisticaApp> {
-  AutoSyncService? _autoSync;
+  // El AutoSyncService ahora vive en el provider tree (ver main()). El
+  // start/stop lo maneja el ProxyProvider — acá solo precargamos los
+  // datos del provider y nos enganchamos al stream de notificaciones.
 
   @override
   void initState() {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final provider = context.read<VehiculoProvider>();
-      // ✅ FIX: Inyectamos el dashboard para que reciba los eventos del autosync.
-      final dashboard = context.read<SyncDashboardProvider>();
+      // Precarga del cache de Volvo (no bloqueante: si falla, los syncs
+      // posteriores irán igual al endpoint individual).
+      context.read<VehiculoProvider>().init();
 
-      // 🔥 init data
-      provider.init();
-
-      // 🔥 autosync
-      _autoSync = AutoSyncService(provider, dashboard: dashboard);
-      _autoSync!.start();
+      // Tocamos el AutoSyncService para forzar su construcción ahora,
+      // así el primer ciclo arranca apenas se completa el primer build.
+      // Sin esto, el ProxyProvider lo construye recién cuando alguien
+      // lo lee desde el árbol.
+      context.read<AutoSyncService>();
     });
 
     NotificationService.selectNotificationStream.stream
@@ -140,7 +156,7 @@ class _LogisticaAppState extends State<LogisticaApp> {
 
   @override
   void dispose() {
-    _autoSync?.stop();
+    // El stop del AutoSync lo maneja el provider tree.
     NotificationService.dispose();
     super.dispose();
   }

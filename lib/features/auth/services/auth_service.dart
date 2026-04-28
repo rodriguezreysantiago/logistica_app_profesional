@@ -109,7 +109,8 @@ class AuthService {
       // ✅ Migración silenciosa si todavía está en formato legacy
       if (PasswordHasher.isLegacy(storedHash)) {
         // Disparamos en background — si falla, el login ya fue exitoso.
-        _migrarHashSilencioso(cleanDni, cleanPass);
+        // unawaited() es explícito: descartamos el Future a propósito.
+        unawaited(_migrarHashSilencioso(cleanDni, cleanPass));
       }
 
       final nombre = data['NOMBRE']?.toString() ?? 'Usuario';
@@ -156,9 +157,11 @@ class AuthService {
         'CONTRASEÑA': nuevoHash,
         'hash_migrado_a_bcrypt': FieldValue.serverTimestamp(),
       });
-      debugPrint('🔐 Hash migrado a Bcrypt para DNI: $dni');
+      // No logueamos el DNI en claro para evitar dejar PII en logcat.
+      debugPrint('🔐 Hash migrado a Bcrypt (usuario #${dni.hashCode}).');
     } catch (e) {
-      debugPrint('⚠️ No se pudo migrar hash a Bcrypt para $dni: $e');
+      debugPrint(
+          '⚠️ No se pudo migrar hash a Bcrypt (usuario #${dni.hashCode}): $e');
     }
   }
 }

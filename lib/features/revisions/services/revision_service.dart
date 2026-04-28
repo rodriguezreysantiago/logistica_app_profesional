@@ -46,6 +46,17 @@ class RevisionService {
     required String fechaS,
     required String coleccionDestino,
   }) async {
+    // Defensa profunda: nunca dejamos crear solicitudes con campos críticos
+    // vacíos. De lo contrario, después el admin no la puede aprobar porque
+    // .doc('') revienta. Mejor fallar acá con mensaje claro.
+    if (dni.trim().isEmpty ||
+        campo.trim().isEmpty ||
+        coleccionDestino.trim().isEmpty) {
+      throw ArgumentError(
+        'Solicitud incompleta: faltan dni, campo o coleccion_destino.',
+      );
+    }
+
     try {
       final extension = archivo.path.split('.').last.toLowerCase();
       final nombreArchivo =
@@ -95,13 +106,30 @@ class RevisionService {
     required bool aprobado,
     Map<String, dynamic>? datos,
   }) async {
+    // Sin id de la solicitud no podemos ni siquiera borrarla; abortamos
+    // antes de tocar Firestore para evitar el "document path must be a
+    // non-empty string" que se ve clarísimo en producción.
+    if (idSolicitud.trim().isEmpty) {
+      throw StateError('La solicitud no tiene ID válido.');
+    }
+
     try {
       final batch = _db.batch();
 
       if (aprobado && datos != null) {
-        final colDestino = (datos['coleccion_destino'] ?? '').toString();
-        final idDoc = (datos['dni'] ?? '').toString();
-        final campoAct = (datos['campo'] ?? '').toString();
+        final colDestino = (datos['coleccion_destino'] ?? '').toString().trim();
+        final idDoc = (datos['dni'] ?? '').toString().trim();
+        final campoAct = (datos['campo'] ?? '').toString().trim();
+
+        // Cualquier campo path-relevante vacío ⇒ Firestore revienta.
+        if (colDestino.isEmpty || idDoc.isEmpty || campoAct.isEmpty) {
+          // Limpiamos la solicitud inválida y devolvemos un error útil.
+          await _db.collection('REVISIONES').doc(idSolicitud).delete();
+          throw StateError(
+            'La solicitud está incompleta (faltan datos de destino o '
+            'campo a actualizar). Se eliminó del listado.',
+          );
+        }
 
         final destinoRef = _db.collection(colDestino).doc(idDoc);
         final camposAActualizar = <String, dynamic>{};
@@ -117,8 +145,8 @@ class RevisionService {
             campoAct == 'SOLICITUD_ENGANCHE') {
           final campoDestino =
               campoAct == 'SOLICITUD_VEHICULO' ? 'VEHICULO' : 'ENGANCHE';
-          final nuevaUnidad = (datos['patente'] ?? '').toString();
-          final unidadActual = (datos['unidad_actual'] ?? '').toString();
+          final nuevaUnidad = (datos['patente'] ?? '').toString().trim();
+          final unidadActual = (datos['unidad_actual'] ?? '').toString().trim();
 
           camposAActualizar[campoDestino] = nuevaUnidad;
 
@@ -130,7 +158,7 @@ class RevisionService {
           }
           if (unidadActual.isNotEmpty &&
               unidadActual != '-' &&
-              unidadActual != 'SIN ASIGNAR') {
+              unidadActual.toUpperCase() != 'SIN ASIGNAR') {
             batch.update(
               _db.collection('VEHICULOS').doc(unidadActual),
               {'ESTADO': 'LIBRE'},
@@ -158,6 +186,10 @@ class RevisionService {
       // Eliminar la solicitud al cerrar el batch
       batch.delete(_db.collection('REVISIONES').doc(idSolicitud));
       await batch.commit();
+    } on StateError {
+      // Re-lanzamos los errores estructurados sin envolverlos: el caller
+      // los muestra con su mensaje legible.
+      rethrow;
     } catch (e) {
       throw Exception('Error al finalizar la revisión: $e');
     }

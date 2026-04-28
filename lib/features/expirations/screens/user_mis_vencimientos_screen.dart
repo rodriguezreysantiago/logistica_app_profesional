@@ -1,13 +1,15 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../revisions/services/revision_service.dart';
+import '../../../core/constants/vencimientos_config.dart';
+import '../../../shared/utils/fecha_input_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../checklist/screens/user_checklist_form_screen.dart';
@@ -48,16 +50,20 @@ class _UserMisVencimientosScreenState
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    showDialog(
+    // Loading modal: el Future del showDialog se completa cuando lo
+    // cerramos nosotros mismos abajo. Lo descartamos explícito para
+    // que `unawaited_futures` no se queje y para evitar deadlock.
+    unawaited(showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => const Center(
         child: CircularProgressIndicator(color: Colors.greenAccent),
       ),
-    );
+    ));
 
     try {
       await tarea();
+      if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(SnackBar(
         content: Text(mensajeExito,
@@ -65,6 +71,7 @@ class _UserMisVencimientosScreenState
         backgroundColor: Colors.green,
       ));
     } catch (e) {
+      if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(SnackBar(
         content: Text('Error: $e'),
@@ -132,7 +139,7 @@ class _UserMisVencimientosScreenState
                   ),
                 ),
                 maxLength: 10,
-                inputFormatters: [_FechaInputFormatter()],
+                inputFormatters: [FechaInputFormatter()],
                 validator: (value) =>
                     (value == null || value.length < 10)
                         ? 'Fecha incompleta'
@@ -270,7 +277,10 @@ class _UserMisVencimientosScreenState
     required String coleccion,
     required String nombreUsuario,
   }) {
-    _ejecutarTarea(
+    // _ejecutarTarea devuelve Future<void>; lo descartamos explícito
+    // por consistencia con el resto del código y por si en el futuro
+    // _enviar pasa a ser async (el lint dispararía).
+    unawaited(_ejecutarTarea(
       tarea: () async => _revisionService.registrarSolicitud(
         dni: idDoc,
         nombreUsuario: nombreUsuario,
@@ -281,7 +291,7 @@ class _UserMisVencimientosScreenState
         coleccionDestino: coleccion,
       ),
       mensajeExito: 'Solicitud enviada. Aguarde aprobación de la oficina.',
-    );
+    ));
   }
 
   // ---------------------------------------------------------------------------
@@ -304,7 +314,17 @@ class _UserMisVencimientosScreenState
             );
           }
 
-          final data = snapshot.data!.data() as Map<String, dynamic>;
+          // Cast defensivo: si el documento llegara con un shape
+          // distinto al esperado, mostramos error en lugar de crash.
+          final raw = snapshot.data!.data();
+          if (raw is! Map<String, dynamic>) {
+            return const AppErrorState(
+              title: 'Datos corruptos',
+              subtitle:
+                  'El formato de tu legajo no es válido. Contactá a la oficina.',
+            );
+          }
+          final data = raw;
           final nombreChofer = (data['NOMBRE'] ?? 'Chofer').toString();
           final pVehiculo = (data['VEHICULO'] ?? '').toString().trim();
           final pEnganche = (data['ENGANCHE'] ?? '').toString().trim();
@@ -328,14 +348,14 @@ class _UserMisVencimientosScreenState
                 ),
               ),
               _CardVencimientoUser(
-                titulo: 'Psicofísico (LINTI)',
-                fecha: data['VENCIMIENTO_PSICOFISICO'],
-                campo: 'VENCIMIENTO_PSICOFISICO',
-                urlArchivo: data['ARCHIVO_PSICOFISICO'],
+                titulo: 'Preocupacional',
+                fecha: data['VENCIMIENTO_PREOCUPACIONAL'],
+                campo: 'VENCIMIENTO_PREOCUPACIONAL',
+                urlArchivo: data['ARCHIVO_PREOCUPACIONAL'],
                 idDoc: widget.dniUser,
                 onUpload: () => _iniciarTramite(
-                  etiqueta: 'PSICOFÍSICO',
-                  campo: 'VENCIMIENTO_PSICOFISICO',
+                  etiqueta: 'PREOCUPACIONAL',
+                  campo: 'VENCIMIENTO_PREOCUPACIONAL',
                   idDoc: widget.dniUser,
                   coleccion: 'EMPLEADOS',
                   nombreUsuario: nombreChofer,
@@ -597,7 +617,12 @@ class _DetalleEquipo extends StatelessWidget {
         if (!vSnap.hasData || !vSnap.data!.exists) {
           return _CardInformativa('Unidad $patente no registrada');
         }
-        final vData = vSnap.data!.data() as Map<String, dynamic>;
+        // Cast defensivo (mismo patrón que en el snapshot del empleado).
+        final vRaw = vSnap.data!.data();
+        if (vRaw is! Map<String, dynamic>) {
+          return _CardInformativa('Datos de $patente corruptos');
+        }
+        final vData = vRaw;
 
         return AppCard(
           padding: const EdgeInsets.all(16),
@@ -617,34 +642,27 @@ class _DetalleEquipo extends StatelessWidget {
                   ),
                 ),
               ),
-              _CardVencimientoUser(
-                titulo: 'RTO / VTV',
-                fecha: vData['VENCIMIENTO_RTO'],
-                campo: 'VENCIMIENTO_RTO',
-                urlArchivo: vData['ARCHIVO_RTO'],
-                idDoc: patente,
-                onUpload: () => onTramiteVehiculo(
-                  etiqueta: 'RTO',
-                  campo: 'VENCIMIENTO_RTO',
+              // Vencimientos del vehículo: tractor (4) o enganche (2),
+              // según AppVencimientos. La etiqueta para iniciar trámite
+              // es la parte del campo después de VENCIMIENTO_ (ej.
+              // "RTO", "SEGURO", "EXTINTOR_CABINA"), que usa el sistema
+              // de revisiones para mapear de vuelta al ARCHIVO_ correcto.
+              for (final spec in AppVencimientos.forTipo(
+                  vData['TIPO']?.toString() ?? tipo))
+                _CardVencimientoUser(
+                  titulo: spec.etiqueta,
+                  fecha: vData[spec.campoFecha],
+                  campo: spec.campoFecha,
+                  urlArchivo: vData[spec.campoArchivo],
                   idDoc: patente,
-                  coleccion: 'VEHICULOS',
-                  nombreUsuario: nombreChofer,
+                  onUpload: () => onTramiteVehiculo(
+                    etiqueta: spec.etiqueta.toUpperCase(),
+                    campo: spec.campoFecha,
+                    idDoc: patente,
+                    coleccion: 'VEHICULOS',
+                    nombreUsuario: nombreChofer,
+                  ),
                 ),
-              ),
-              _CardVencimientoUser(
-                titulo: 'Seguro de unidad',
-                fecha: vData['VENCIMIENTO_SEGURO'],
-                campo: 'VENCIMIENTO_SEGURO',
-                urlArchivo: vData['ARCHIVO_SEGURO'],
-                idDoc: patente,
-                onUpload: () => onTramiteVehiculo(
-                  etiqueta: 'SEGURO',
-                  campo: 'VENCIMIENTO_SEGURO',
-                  idDoc: patente,
-                  coleccion: 'VEHICULOS',
-                  nombreUsuario: nombreChofer,
-                ),
-              ),
               const SizedBox(height: 8),
               _AccesoChecklist(patente: patente, tipoLabel: tipo),
             ],
@@ -750,29 +768,5 @@ class _AccesoChecklist extends StatelessWidget {
   }
 }
 
-// =============================================================================
-// FORMATTER DEL CAMPO DE FECHA
-// =============================================================================
-
-class _FechaInputFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    var text = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
-    if (text.length > 8) text = text.substring(0, 8);
-    final buffer = StringBuffer();
-    for (int i = 0; i < text.length; i++) {
-      buffer.write(text[i]);
-      if ((i == 1 || i == 3) && i != text.length - 1) {
-        buffer.write('/');
-      }
-    }
-    final stringFinal = buffer.toString();
-    return TextEditingValue(
-      text: stringFinal,
-      selection: TextSelection.collapsed(offset: stringFinal.length),
-    );
-  }
-}
+// El _FechaInputFormatter local se reemplazó por FechaInputFormatter
+// en lib/shared/utils/fecha_input_formatter.dart (compartido).

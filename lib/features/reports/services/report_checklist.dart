@@ -158,21 +158,28 @@ class ReportChecklistService {
         sheetObject.setColumnWidth(i, 25.0); 
       }
 
-      // 3. Guardado y Compartido
+      // 3. Guardado y apertura nativa
       final String fileName = "Novedades_${DateFormat('yyyy_MM_dd').format(DateTime.now())}.xlsx";
       final directory = await getTemporaryDirectory(); // Mejor usar temp para reportes volátiles
       final path = "${directory.path}/$fileName";
-      
+
       final fileBytes = excel.save();
       if (fileBytes != null) {
         File(path).writeAsBytesSync(fileBytes);
-        
-        await Share.shareXFiles(
-          [XFile(path)], 
-          text: '📋 Reporte de Novedades - Flete MB\nGenerado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}'
-        );
-      }
 
+        // Mismo patrón que report_flota: en Windows abrimos el archivo
+        // directamente con la app por defecto (Excel). En mobile no hay
+        // "abrir con", así que caemos al sheet de compartir nativo.
+        if (Platform.isWindows) {
+          await Process.run('cmd', ['/c', 'start', '', path]);
+        } else {
+          await Share.shareXFiles(
+            [XFile(path)],
+            text: '📋 Reporte de Novedades - Flete MB\n'
+                'Generado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}',
+          );
+        }
+      }
     } catch (e) {
       debugPrint("❌ Error Excel: $e");
       messenger.showSnackBar(

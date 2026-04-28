@@ -2,6 +2,62 @@ import 'package:dio/dio.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
+/// Resultado de un request de diagnóstico contra Volvo. Pensado para
+/// inspeccionar visualmente qué viene en el response cuando algo no
+/// se está parseando como esperamos.
+class VolvoDiagnostico {
+  final int? statusCode;
+  final String? statusMessage;
+  final dynamic rawBody; // Map o String según el response
+  final String? errorMessage;
+  final Duration duracion;
+  final String urlConsultada;
+
+  const VolvoDiagnostico({
+    required this.statusCode,
+    required this.statusMessage,
+    required this.rawBody,
+    required this.errorMessage,
+    required this.duracion,
+    required this.urlConsultada,
+  });
+
+  bool get fueExitoso =>
+      errorMessage == null && statusCode != null && statusCode! < 400;
+}
+
+/// Snapshot de telemetría de un vehículo, sacado de un solo request a
+/// `/vehicle/vehiclestatuses`. Cualquier campo puede venir `null` si el
+/// vehículo no lo reporta (típico en marcas no-Volvo o unidades viejas).
+class VolvoTelemetria {
+  /// Odómetro acumulado en metros. Para KM dividir entre 1000.
+  final double? odometroMetros;
+
+  /// Nivel de combustible 0..100. Lo entrega Volvo en porcentaje.
+  final double? nivelCombustiblePct;
+
+  /// Autonomía estimada en kilómetros que el vehículo puede recorrer
+  /// con el combustible actual antes de quedarse vacío.
+  final double? autonomiaKm;
+
+  /// Timestamp del snapshot que recibimos del vehículo (no del momento
+  /// en que llamamos al API).
+  final DateTime? leidoEn;
+
+  const VolvoTelemetria({
+    this.odometroMetros,
+    this.nivelCombustiblePct,
+    this.autonomiaKm,
+    this.leidoEn,
+  });
+
+  /// True cuando el response trajo al menos un dato útil.
+  bool get tieneAlgunDato =>
+      odometroMetros != null ||
+      nivelCombustiblePct != null ||
+      autonomiaKm != null;
+}
+
 /// Servicio de integración con Volvo Connect — Volvo Group Vehicle API.
 ///
 /// 📚 BASADO EN DOC OFICIAL (Volvo Trucks Developer Portal):
@@ -18,32 +74,32 @@ import 'package:flutter/foundation.dart';
 /// 🔒 Producción: mover credenciales a Cloud Functions o --dart-define.
 class VolvoApiService {
   // ============= CREDENCIALES =============
-  // ✅ Las credenciales se leen de variables de compilación (--dart-define).
+  // Las credenciales se leen ÚNICAMENTE de variables de compilación
+  // (`--dart-define`). Nunca se hardcodean ni se compilan en el binario:
+  // si lo hicieran, cualquiera que descomprima el APK las obtendría.
   //
   // Para correr en desarrollo:
-  //   flutter run -d windows --dart-define-from-file=secrets.json
+  //   flutter run --dart-define-from-file=secrets.json
   //
-  // Donde `secrets.json` (NO commiteado, está en .gitignore) contiene:
+  // `secrets.json` (NO commiteado — está en .gitignore) contiene:
   //   {
   //     "VOLVO_USERNAME": "tu_usuario",
   //     "VOLVO_PASSWORD": "tu_contraseña"
   //   }
   //
-  // Si no se proveen env vars, se usan los fallbacks de abajo para que la
-  // app no quede inutilizable en dev. EN PRODUCCIÓN deben pasarse las env vars.
+  // En producción las env vars deben inyectarse desde el pipeline de build
+  // (CI/CD), preferentemente migrando el flujo a una Cloud Function que
+  // actúe como proxy y mantenga las credenciales server-side.
   static const String _envUsername =
       String.fromEnvironment('VOLVO_USERNAME');
   static const String _envPassword =
       String.fromEnvironment('VOLVO_PASSWORD');
 
-  // ⚠️ FALLBACK SÓLO PARA DEV (no usar en producción).
-  static const String _fallbackUsername = '018B1E992E';
-  static const String _fallbackPassword = 'yeBgBh3of3';
+  String get _username => _envUsername;
+  String get _password => _envPassword;
 
-  String get _username =>
-      _envUsername.isNotEmpty ? _envUsername : _fallbackUsername;
-  String get _password =>
-      _envPassword.isNotEmpty ? _envPassword : _fallbackPassword;
+  bool get _hasCredentials =>
+      _envUsername.isNotEmpty && _envPassword.isNotEmpty;
 
   // ============= ENDPOINTS =============
   // Volvo Group Vehicle API (la que tiene odómetro detallado).
@@ -58,9 +114,12 @@ class VolvoApiService {
   static const String _acceptStatuses =
       'application/x.volvogroup.com.vehiclestatuses.v1.0+json; UTF-8';
 
-  // Header Basic Auth, calculado una sola vez.
-  late final String _authHeader =
-      'Basic ${base64Encode(utf8.encode('$_username:$_password'))}';
+  // Header Basic Auth, calculado una sola vez. Si las credenciales no
+  // fueron inyectadas vía --dart-define, dejamos un valor vacío y los
+  // requests devuelven [] sin pegarle a Volvo (ver guard `_hasCredentials`).
+  late final String _authHeader = _hasCredentials
+      ? 'Basic ${base64Encode(utf8.encode('$_username:$_password'))}'
+      : '';
 
   // ============= CIRCUIT BREAKER =============
   // Si la auth falla 3 veces seguidas con 401, dejamos de pegarle a Volvo
@@ -129,6 +188,11 @@ class VolvoApiService {
   /// Devuelve la lista de vehículos asignados a la cuenta de API.
   /// Respuesta: vehicleResponse.vehicles[]
   Future<List<dynamic>> traerDatosFlota() async {
+    if (!_hasCredentials) {
+      debugPrint(
+          "⚠️ [VOLVO FLOTA] Sin credenciales (faltan VOLVO_USERNAME / VOLVO_PASSWORD en --dart-define).");
+      return [];
+    }
     if (_circuitOpen) {
       debugPrint("⏸️ [VOLVO FLOTA] Circuit breaker abierto. Saltando llamada.");
       return [];
@@ -175,6 +239,11 @@ class VolvoApiService {
     final String cleanVin = vin.trim().toUpperCase();
     if (cleanVin.isEmpty) return null;
 
+    if (!_hasCredentials) {
+      debugPrint(
+          "⚠️ [VOLVO KM $cleanVin] Sin credenciales — saltando llamada.");
+      return null;
+    }
     if (_circuitOpen) {
       debugPrint("⏸️ [VOLVO KM $cleanVin] Circuit breaker abierto.");
       return null;
@@ -226,12 +295,268 @@ class VolvoApiService {
   }
 
   // ===========================================================================
+  // 2.b TELEMETRÍA COMPLETA POR VIN — /vehicle/vehiclestatuses
+  // ===========================================================================
+  //
+  // Mismo endpoint que `traerKilometrajeCualquierVia`, pero parsea más
+  // campos del response (combustible y autonomía) sin generar requests
+  // adicionales. Cuesta lo mismo en términos de rate limit.
+
+  /// Trae odómetro + nivel de combustible + autonomía estimada de un VIN
+  /// en una sola llamada. Devuelve un [VolvoTelemetria] vacío si la
+  /// unidad no respondió o no hay credenciales.
+  Future<VolvoTelemetria> traerTelemetria(String vin) async {
+    final String cleanVin = vin.trim().toUpperCase();
+    if (cleanVin.isEmpty) return const VolvoTelemetria();
+
+    if (!_hasCredentials) {
+      debugPrint(
+          "⚠️ [VOLVO TELE $cleanVin] Sin credenciales — saltando llamada.");
+      return const VolvoTelemetria();
+    }
+    if (_circuitOpen) {
+      debugPrint("⏸️ [VOLVO TELE $cleanVin] Circuit breaker abierto.");
+      return const VolvoTelemetria();
+    }
+
+    try {
+      final res = await _dio.get(
+        _statusesUrl,
+        queryParameters: {
+          'vin': cleanVin,
+          'latestOnly': 'true',
+          // CRÍTICO: sin este parámetro la API devuelve solo el snapshot
+          // base (odómetro, posición) y OMITE fuelLevel + estimatedDistance.
+          // Con VOLVOGROUPSNAPSHOT vienen los campos del grupo Volvo.
+          'additionalContent': 'VOLVOGROUPSNAPSHOT',
+        },
+        options: Options(
+          headers: {
+            'Authorization': _authHeader,
+            'Accept': _acceptStatuses,
+          },
+          validateStatus: (s) => true,
+        ),
+      );
+
+      _trackAuthState(res);
+
+      if (res.statusCode == 200 && res.data != null) {
+        final statuses = res.data['vehicleStatusResponse']?['vehicleStatuses'];
+        if (statuses is List && statuses.isNotEmpty) {
+          final tele = _parseStatus(statuses[0]);
+          if (tele.tieneAlgunDato) {
+            debugPrint(
+                "✅ [VOLVO TELE $cleanVin] km=${tele.odometroMetros != null ? (tele.odometroMetros! / 1000).toStringAsFixed(0) : '?'} "
+                "fuel=${tele.nivelCombustiblePct?.toStringAsFixed(0) ?? '?'}% "
+                "auton=${tele.autonomiaKm?.toStringAsFixed(0) ?? '?'}km");
+            return tele;
+          }
+        }
+        debugPrint(
+            "ℹ️ [VOLVO TELE $cleanVin] Respuesta 200 pero sin datos útiles.");
+        return const VolvoTelemetria();
+      }
+
+      _logDioResult("TELE $cleanVin", response: res);
+      return const VolvoTelemetria();
+    } catch (e) {
+      _logDioResult("TELE $cleanVin", error: e);
+      return const VolvoTelemetria();
+    }
+  }
+
+  /// Parser de un objeto `vehicleStatuses[i]` del response oficial.
+  ///
+  /// La estructura real del response (verificada con un VIN diésel +
+  /// `additionalContent=VOLVOGROUPSNAPSHOT`) es:
+  ///
+  /// ```
+  /// vehicleStatuses[i] = {
+  ///   hrTotalVehicleDistance: <metros>,             // odómetro
+  ///   snapshotData: {
+  ///     fuelLevel1: <0-100>,                        // % combustible
+  ///     volvoGroupSnapshot: {
+  ///       estimatedDistanceToEmpty: {
+  ///         fuel: <metros>, gas: <metros>           // autonomía por fuente
+  ///       }
+  ///     }
+  ///   }
+  /// }
+  /// ```
+  ///
+  /// El parser igual probará paths "legacy" (sin snapshotData) por si una
+  /// versión vieja del API los aplana al primer nivel.
+  VolvoTelemetria _parseStatus(dynamic raw) {
+    if (raw is! Map) return const VolvoTelemetria();
+
+    // 1) Odómetro (metros). Está al primer nivel del status.
+    final odo = _toDouble(raw['hrTotalVehicleDistance']);
+
+    final snap = raw['snapshotData'];
+    final volvoSnap = (snap is Map) ? snap['volvoGroupSnapshot'] : null;
+
+    // 2) Nivel de combustible — buscar en orden, primero el path real
+    //    confirmado, después fallbacks.
+    double? fuel;
+    if (snap is Map) fuel = _toDouble(snap['fuelLevel1']);
+    if (fuel == null) {
+      final fuelObj = raw['fuelLevel'];
+      if (fuelObj is Map) fuel = _toDouble(fuelObj['fuelLevel1']);
+    }
+    fuel ??= _toDouble(raw['fuelLevel1']);
+
+    // 3) Autonomía — el path real es snapshotData.volvoGroupSnapshot
+    //    .estimatedDistanceToEmpty.{fuel|total|gas|batteryPack} en metros.
+    //    Probamos varios contenedores por compatibilidad.
+    final autonMetros = _extraerAutonomiaMetros(raw, snap, volvoSnap);
+    final autonKm = autonMetros != null ? autonMetros / 1000 : null;
+
+    // 4) Timestamp del snapshot.
+    DateTime? leidoEn;
+    final ts = raw['receivedDateTime'] ?? raw['createdDateTime'];
+    if (ts is String) {
+      leidoEn = DateTime.tryParse(ts);
+    }
+
+    return VolvoTelemetria(
+      odometroMetros: (odo != null && odo > 0) ? odo : null,
+      nivelCombustiblePct:
+          (fuel != null && fuel >= 0 && fuel <= 100) ? fuel : null,
+      autonomiaKm: (autonKm != null && autonKm >= 0) ? autonKm : null,
+      leidoEn: leidoEn,
+    );
+  }
+
+  /// Extrae `estimatedDistanceToEmpty` (en metros) recorriendo todos los
+  /// contenedores posibles. Devuelve null si ninguno tiene valor útil.
+  double? _extraerAutonomiaMetros(Map raw, dynamic snap, dynamic volvoSnap) {
+    // Lista de Maps donde puede estar el objeto estimatedDistanceToEmpty.
+    final candidatos = <Map>[
+      if (volvoSnap is Map) volvoSnap, // ← path real confirmado para diésel
+      if (snap is Map) snap,
+      raw,
+    ];
+
+    // Bonus: contenedores específicos de vehículos eléctricos/híbridos.
+    for (final c in const [
+      'chargingStatusInfo',
+      'volvoGroupChargingStatusInfo',
+      'batteryPackInfo',
+    ]) {
+      final container = raw[c];
+      if (container is Map) candidatos.add(container);
+    }
+
+    for (final container in candidatos) {
+      final edte = container['estimatedDistanceToEmpty'];
+      if (edte is Map) {
+        // Probamos campos en orden de preferencia. La doc nueva usa
+        // {fuel, gas, batteryPack} sin `total`; la doc vieja tiene `total`.
+        final v = _toDouble(edte['total']) ??
+            _toDouble(edte['fuel']) ??
+            _toDouble(edte['batteryPack']) ??
+            _toDouble(edte['gas']);
+        if (v != null && v > 0) return v;
+      } else if (edte is num) {
+        // Edge case: algunos responses lo aplanan a número directo.
+        return edte.toDouble();
+      }
+    }
+    return null;
+  }
+
+  static double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
+
+  // ===========================================================================
+  // DIAGNÓSTICO — request crudo para inspección manual
+  // ===========================================================================
+
+  /// Hace el mismo request que `traerTelemetria` pero devuelve el response
+  /// completo sin parsear. Para usar desde una pantalla de admin cuando
+  /// algún campo no aparece y necesitamos ver qué viene literalmente.
+  Future<VolvoDiagnostico> diagnosticarStatus(String vin) async {
+    final cleanVin = vin.trim().toUpperCase();
+    final url = '$_statusesUrl?vin=$cleanVin&latestOnly=true'
+        '&additionalContent=VOLVOGROUPSNAPSHOT';
+
+    if (cleanVin.isEmpty) {
+      return VolvoDiagnostico(
+        statusCode: null,
+        statusMessage: null,
+        rawBody: null,
+        errorMessage: 'VIN vacío.',
+        duracion: Duration.zero,
+        urlConsultada: url,
+      );
+    }
+    if (!_hasCredentials) {
+      return VolvoDiagnostico(
+        statusCode: null,
+        statusMessage: null,
+        rawBody: null,
+        errorMessage:
+            'Faltan credenciales (VOLVO_USERNAME / VOLVO_PASSWORD en --dart-define).',
+        duracion: Duration.zero,
+        urlConsultada: url,
+      );
+    }
+
+    final stopwatch = Stopwatch()..start();
+    try {
+      final res = await _dio.get(
+        _statusesUrl,
+        queryParameters: {
+          'vin': cleanVin,
+          'latestOnly': 'true',
+          'additionalContent': 'VOLVOGROUPSNAPSHOT',
+        },
+        options: Options(
+          headers: {
+            'Authorization': _authHeader,
+            'Accept': _acceptStatuses,
+          },
+          validateStatus: (s) => true,
+        ),
+      );
+      stopwatch.stop();
+      _trackAuthState(res);
+      return VolvoDiagnostico(
+        statusCode: res.statusCode,
+        statusMessage: res.statusMessage,
+        rawBody: res.data,
+        errorMessage: null,
+        duracion: stopwatch.elapsed,
+        urlConsultada: url,
+      );
+    } catch (e) {
+      stopwatch.stop();
+      return VolvoDiagnostico(
+        statusCode: null,
+        statusMessage: null,
+        rawBody: null,
+        errorMessage: e.toString(),
+        duracion: stopwatch.elapsed,
+        urlConsultada: url,
+      );
+    }
+  }
+
+  // ===========================================================================
   // 3. ESTADOS DE TODA LA FLOTA — para precarga en cache
   // ===========================================================================
 
   /// Trae el último estado de TODAS las unidades en una sola llamada.
   /// Útil como caché previo a sincronizar uno por uno.
   Future<List<dynamic>> traerEstadosFlota() async {
+    if (!_hasCredentials) {
+      debugPrint("⚠️ [VOLVO STATUS-ALL] Sin credenciales — saltando llamada.");
+      return [];
+    }
     if (_circuitOpen) return [];
 
     try {

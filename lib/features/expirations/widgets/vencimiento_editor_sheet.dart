@@ -5,7 +5,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/formatters.dart';
+import '../../../shared/utils/whatsapp_helper.dart';
+import '../../../shared/widgets/fecha_dialog.dart';
+import '../services/aviso_vencimiento_builder.dart';
+import '../services/aviso_vencimiento_service.dart';
 import 'vencimiento_item.dart';
 
 /// Bottom sheet para editar un vencimiento puntual.
@@ -56,11 +61,10 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
   }
 
   Future<void> _seleccionarFecha() async {
-    final picker = await showDatePicker(
-      context: context,
-      initialDate: _fechaSeleccionada,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2040),
+    final picker = await pickFecha(
+      context,
+      initial: _fechaSeleccionada,
+      titulo: 'Vencimiento ${widget.item.tipoDoc}',
     );
     if (picker != null && mounted) {
       setState(() => _fechaSeleccionada = picker);
@@ -98,6 +102,138 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
 
     await ref.putFile(_archivoSeleccionado!, metadata);
     return await ref.getDownloadURL();
+  }
+
+  /// Resuelve el chofer al que hay que avisarle según el tipo de
+  /// vencimiento y abre WhatsApp con el mensaje pre-armado.
+  ///
+  /// - Si la auditoría es de EMPLEADOS (chofer), el chofer es el dueño
+  ///   del docId — leemos su TELEFONO directamente.
+  /// - Si la auditoría es de VEHICULOS (tractor/batea), buscamos al
+  ///   empleado que tiene asignada esa patente como VEHICULO o ENGANCHE.
+  Future<void> _avisarPorWhatsApp() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _subiendo = true);
+
+    String? telefono;
+    String? primerNombre;
+
+    try {
+      final db = FirebaseFirestore.instance;
+
+      if (widget.item.coleccion == 'EMPLEADOS') {
+        final snap =
+            await db.collection('EMPLEADOS').doc(widget.item.docId).get();
+        if (snap.exists) {
+          final data = snap.data()!;
+          telefono = data['TELEFONO']?.toString();
+          primerNombre = _extraerPrimerNombre(data['NOMBRE']?.toString());
+        }
+      } else {
+        // VEHICULOS: el docId es la patente. Buscamos al chofer que la
+        // tiene asignada como tractor (VEHICULO) o como enganche.
+        final patente = widget.item.docId;
+        final qVehiculo = await db
+            .collection('EMPLEADOS')
+            .where('VEHICULO', isEqualTo: patente)
+            .limit(1)
+            .get();
+        QueryDocumentSnapshot? doc;
+        if (qVehiculo.docs.isNotEmpty) {
+          doc = qVehiculo.docs.first;
+        } else {
+          final qEnganche = await db
+              .collection('EMPLEADOS')
+              .where('ENGANCHE', isEqualTo: patente)
+              .limit(1)
+              .get();
+          if (qEnganche.docs.isNotEmpty) doc = qEnganche.docs.first;
+        }
+        if (doc != null) {
+          final data = doc.data() as Map<String, dynamic>;
+          telefono = data['TELEFONO']?.toString();
+          primerNombre = _extraerPrimerNombre(data['NOMBRE']?.toString());
+        }
+      }
+    } catch (e) {
+      // Seguimos abriendo WhatsApp aunque falle el lookup: al menos el
+      // mensaje queda pre-armado y el admin elige el destinatario.
+      debugPrint('No se pudo resolver chofer destinatario: $e');
+    } finally {
+      if (mounted) setState(() => _subiendo = false);
+    }
+
+    if (!mounted) return;
+
+    final mensaje = AvisoVencimientoBuilder.build(
+      item: widget.item,
+      destinatarioNombre: primerNombre,
+    );
+    final tieneTel = telefono != null && telefono.trim().isNotEmpty;
+
+    final ok =
+        await WhatsAppHelper.abrir(numero: telefono, mensaje: mensaje);
+
+    if (!mounted) return;
+    if (!ok) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir WhatsApp en este dispositivo.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (!tieneTel) {
+      // Abrimos WhatsApp pero sin destinatario para que el admin lo
+      // cargue manualmente. NO registramos en el historial porque no
+      // sabemos si efectivamente lo terminó enviando ni a quién.
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+              'El chofer no tiene teléfono cargado — elegí el contacto en WhatsApp.'),
+          backgroundColor: Colors.orangeAccent,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    // Registramos el aviso en el historial. Lo hacemos en background:
+    // si Firestore falla, el aviso ya se mandó igual y no queremos
+    // bloquear al admin con un error secundario.
+    try {
+      await AvisoVencimientoService.registrar(
+        destinatarioColeccion: widget.item.coleccion,
+        destinatarioId: widget.item.docId,
+        campoBase: widget.item.campoBase,
+        tipoDoc: widget.item.tipoDoc,
+        canal: 'WHATSAPP',
+        diasRestantes: widget.item.dias,
+        mensaje: mensaje,
+        adminDni: PrefsService.dni,
+        adminNombre: PrefsService.nombre,
+      );
+    } catch (e) {
+      debugPrint('No se pudo registrar el aviso en historial: $e');
+    }
+  }
+
+  /// Para nombres tipo "PEREZ JUAN CARLOS" devuelve "Juan" (formato
+  /// APELLIDO NOMBRE… que usa la app).
+  ///
+  /// Si el campo viene con un solo token (ej. solo "PEREZ"), devuelve
+  /// `null` en lugar de arriesgar — preferimos saludar con "Hola"
+  /// genérico que llamar al chofer por su apellido.
+  String? _extraerPrimerNombre(String? nombreCompleto) {
+    if (nombreCompleto == null || nombreCompleto.trim().isEmpty) return null;
+    final partes = nombreCompleto.trim().split(RegExp(r'\s+'));
+    if (partes.length < 2) return null;
+    final n = partes[1];
+    if (n.isEmpty) return null;
+    // Capitalizamos: primera mayúscula, resto minúscula.
+    return '${n[0].toUpperCase()}${n.substring(1).toLowerCase()}';
   }
 
   Future<void> _guardar() async {
@@ -256,7 +392,44 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
             ),
           ),
 
-          const SizedBox(height: 30),
+          const SizedBox(height: 20),
+
+          // Historial de avisos previos para este vencimiento
+          // específico. Se actualiza en vivo: cuando el admin manda un
+          // WhatsApp y vuelve al sheet, el contador y la fila de
+          // "último aviso" reflejan el cambio sin recargar.
+          _HistorialAvisos(item: widget.item),
+
+          const SizedBox(height: 12),
+
+          // Botón "Avisar por WhatsApp" — abre WhatsApp del admin con
+          // el chofer cargado (si tiene teléfono en su legajo) y el
+          // mensaje pre-armado según los días restantes.
+          if (!_subiendo)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _avisarPorWhatsApp,
+                icon: const Icon(Icons.send,
+                    color: Color(0xFF25D366), size: 20),
+                label: const Text(
+                  'AVISAR POR WHATSAPP',
+                  style: TextStyle(
+                    color: Color(0xFF25D366),
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFF25D366)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 12),
 
           // Botones de acción
           if (_subiendo)
@@ -299,6 +472,272 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                 ),
               ],
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// HISTORIAL DE AVISOS
+// =============================================================================
+
+/// Bloque colapsable que muestra el historial de avisos enviados para
+/// este vencimiento puntual: cuántos se mandaron, cuándo fue el último,
+/// y al expandirlo, la lista detallada (por canal, por admin, días que
+/// faltaban en ese momento).
+///
+/// Lee directo de Firestore con un Stream, así si el admin manda un
+/// WhatsApp y vuelve al sheet, el contador se actualiza en vivo sin
+/// necesidad de cerrar y abrir de nuevo.
+class _HistorialAvisos extends StatelessWidget {
+  final VencimientoItem item;
+  const _HistorialAvisos({required this.item});
+
+  String _hace(DateTime cuando) {
+    final diff = DateTime.now().difference(cuando);
+    if (diff.inMinutes < 1) return 'recién';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return 'hace $m ${m == 1 ? "min" : "min"}';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return 'hace $h ${h == 1 ? "hora" : "horas"}';
+    }
+    if (diff.inDays < 30) {
+      final d = diff.inDays;
+      return 'hace $d ${d == 1 ? "día" : "días"}';
+    }
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(cuando.day)}/${two(cuando.month)}/${cuando.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<AvisoVencimiento>>(
+      stream: AvisoVencimientoService.streamHistorial(
+        destinatarioColeccion: item.coleccion,
+        destinatarioId: item.docId,
+        campoBase: item.campoBase,
+      ),
+      builder: (ctx, snap) {
+        // ── ERROR ───────────────────────────────────────────────────
+        // Si la query falla (típicamente: permisos de Firestore o un
+        // problema de red), lo mostramos en lugar de quedar invisible.
+        if (snap.hasError) {
+          return _Caja(
+            color: Colors.redAccent,
+            icono: Icons.error_outline,
+            texto: 'No se pudo cargar el historial: ${snap.error}',
+          );
+        }
+
+        // ── LOADING ─────────────────────────────────────────────────
+        // Visible (no vacío como antes) para que el usuario sepa que
+        // hay un bloque ocupando ese espacio.
+        if (!snap.hasData) {
+          return const _Caja(
+            color: Colors.white24,
+            icono: Icons.history,
+            texto: 'Cargando historial de avisos...',
+            mostrarSpinner: true,
+          );
+        }
+
+        final avisos = snap.data!;
+
+        // ── VACÍO ───────────────────────────────────────────────────
+        if (avisos.isEmpty) {
+          return const _Caja(
+            color: Colors.white24,
+            icono: Icons.history,
+            texto: 'Sin avisos previos para este vencimiento.',
+          );
+        }
+
+        final ultimo = avisos.first;
+        return Theme(
+          // Quitamos el divider/borde gris del ExpansionTile.
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF25D366).withAlpha(12),
+              borderRadius: BorderRadius.circular(10),
+              border:
+                  Border.all(color: const Color(0xFF25D366).withAlpha(60)),
+            ),
+            child: ExpansionTile(
+              tilePadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+              childrenPadding:
+                  const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              leading: const Icon(Icons.history,
+                  color: Color(0xFF25D366), size: 18),
+              title: Text(
+                '${avisos.length} aviso${avisos.length == 1 ? "" : "s"} '
+                'enviado${avisos.length == 1 ? "" : "s"}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+              subtitle: Text(
+                'Último: ${_hace(ultimo.enviadoEn)} · '
+                'por ${_extraerPrimerNombre(ultimo.enviadoPorNombre) ?? "Admin"}',
+                style: const TextStyle(
+                  color: Colors.white60,
+                  fontSize: 11,
+                ),
+              ),
+              children: avisos.map((a) => _ItemHistorial(aviso: a)).toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String? _extraerPrimerNombre(String? nombreCompleto) {
+    if (nombreCompleto == null || nombreCompleto.trim().isEmpty) return null;
+    final partes = nombreCompleto.trim().split(RegExp(r'\s+'));
+    if (partes.length >= 2) {
+      final n = partes[1];
+      return '${n[0].toUpperCase()}${n.substring(1).toLowerCase()}';
+    }
+    return partes.first;
+  }
+}
+
+class _ItemHistorial extends StatelessWidget {
+  final AvisoVencimiento aviso;
+  const _ItemHistorial({required this.aviso});
+
+  String _formatFecha(DateTime d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.day)}/${two(d.month)} ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  IconData get _icono {
+    switch (aviso.canal) {
+      case 'WHATSAPP':
+        return Icons.chat;
+      case 'MAIL':
+        return Icons.mail_outline;
+      case 'PUSH':
+        return Icons.notifications_active_outlined;
+      default:
+        return Icons.notifications_none;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(_icono, color: const Color(0xFF25D366), size: 14),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      _formatFecha(aviso.enviadoEn),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      aviso.canal,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                if (aviso.enviadoPorNombre.isNotEmpty)
+                  Text(
+                    'por ${aviso.enviadoPorNombre.toUpperCase()} · '
+                    '${aviso.diasRestantes < 0 ? "vencido hace ${-aviso.diasRestantes}d" : "${aviso.diasRestantes}d restantes"}',
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 10,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// CAJA INFORMATIVA — usada por _HistorialAvisos para sus estados
+// (error / cargando / vacío). Muestra un panel pequeño con borde de color,
+// icono y mensaje, opcionalmente con un spinner mientras carga.
+// =============================================================================
+
+class _Caja extends StatelessWidget {
+  final Color color;
+  final IconData icono;
+  final String texto;
+  final bool mostrarSpinner;
+
+  const _Caja({
+    required this.color,
+    required this.icono,
+    required this.texto,
+    this.mostrarSpinner = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withAlpha(60)),
+      ),
+      child: Row(
+        children: [
+          if (mostrarSpinner)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: color,
+              ),
+            )
+          else
+            Icon(icono, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              texto,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
         ],
       ),
     );

@@ -6,9 +6,12 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../../../shared/widgets/fecha_dialog.dart';
 import '../services/volvo_api_service.dart';
+import 'diagnostico_volvo_screen.dart';
 
 /// Form de edición de la ficha de un vehículo existente.
 ///
@@ -45,10 +48,17 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   late final TextEditingController _vinCtrl;
   late final TextEditingController _kmCtrl;
 
-  String? _fechaRto;
-  String? _fechaSeguro;
-  String? _urlRto;
-  String? _urlSeguro;
+  /// Estado de los vencimientos, indexado por el nombre del campo de
+  /// Firestore. Usar maps en lugar de variables individuales nos permite
+  /// agregar nuevos vencimientos en el futuro tocando SOLO la lista
+  /// `AppVencimientos`.
+  final Map<String, String?> _fechas = {};
+  final Map<String, String?> _urls = {};
+
+  /// Lista de vencimientos que aplica a este vehículo, según su tipo
+  /// (tractor → 4 vencimientos; enganche → 2). Se calcula una sola vez
+  /// en initState y se usa en _guardar y en build.
+  late final List<VencimientoSpec> _vencimientos;
 
   @override
   void initState() {
@@ -65,10 +75,12 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     _vinCtrl = TextEditingController(text: d['VIN']?.toString() ?? '');
     _kmCtrl =
         TextEditingController(text: d['KM_ACTUAL']?.toString() ?? '0');
-    _fechaRto = d['VENCIMIENTO_RTO']?.toString();
-    _fechaSeguro = d['VENCIMIENTO_SEGURO']?.toString();
-    _urlRto = d['ARCHIVO_RTO']?.toString();
-    _urlSeguro = d['ARCHIVO_SEGURO']?.toString();
+
+    _vencimientos = AppVencimientos.forTipo(d['TIPO']?.toString());
+    for (final spec in _vencimientos) {
+      _fechas[spec.campoFecha] = d[spec.campoFecha]?.toString();
+      _urls[spec.campoArchivo] = d[spec.campoArchivo]?.toString();
+    }
   }
 
   @override
@@ -86,7 +98,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   // ACCIONES
   // ---------------------------------------------------------------------------
 
-  Future<void> _subirDocumento(String tipoDoc) async {
+  Future<void> _subirDocumento(VencimientoSpec spec) async {
     final messenger = ScaffoldMessenger.of(context);
     final source = await _elegirFuenteArchivo();
     if (source == null) return;
@@ -99,8 +111,10 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
           .pickImage(source: ImageSource.camera, imageQuality: 50);
       if (photo != null) {
         fileToUpload = File(photo.path);
-        fileName =
-            '${tipoDoc}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        // Nombre de archivo: usamos el campoArchivo (sin prefijo ARCHIVO_)
+        // como tag para que sea fácil identificar el archivo en Storage.
+        final tag = spec.campoArchivo.replaceFirst('ARCHIVO_', '');
+        fileName = '${tag}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       }
     } else {
       final result = await FilePicker.platform.pickFiles(type: FileType.any);
@@ -130,20 +144,17 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
       if (!mounted) return;
       setState(() {
-        if (tipoDoc == 'RTO') _urlRto = downloadUrl;
-        if (tipoDoc == 'SEGURO') _urlSeguro = downloadUrl;
-        _isSaving = false;
+        _urls[spec.campoArchivo] = downloadUrl;
       });
 
       messenger.showSnackBar(
         SnackBar(
-          content: Text('Documento $tipoDoc cargado.'),
+          content: Text('${spec.etiqueta} cargado.'),
           backgroundColor: Colors.blueAccent,
         ),
       );
     } catch (e) {
       if (mounted) {
-        setState(() => _isSaving = false);
         messenger.showSnackBar(
           SnackBar(
             content: Text('Error al subir: $e'),
@@ -151,6 +162,10 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
           ),
         );
       }
+    } finally {
+      // Siempre reseteamos _isSaving — incluso si la subida falló o el
+      // widget se desmontó (el chequeo de mounted protege el setState).
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -198,6 +213,28 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
               const SizedBox(height: 10),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _abrirDiagnostico() {
+    final vin = _vinCtrl.text.trim().toUpperCase();
+    if (vin.length < 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Necesito un VIN válido para diagnosticar.'),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DiagnosticoVolvoScreen(
+          patente: widget.vehiculoId,
+          vin: vin,
         ),
       ),
     );
@@ -256,27 +293,21 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     }
   }
 
-  Future<void> _seleccionarFecha(bool esRto) async {
-    final fechaActual = esRto ? _fechaRto : _fechaSeguro;
+  Future<void> _seleccionarFecha(VencimientoSpec spec) async {
+    final fechaActual = _fechas[spec.campoFecha];
     final initial = (fechaActual != null && fechaActual.isNotEmpty)
-        ? (DateTime.tryParse(fechaActual) ?? DateTime.now())
-        : DateTime.now();
+        ? DateTime.tryParse(fechaActual)
+        : null;
 
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2040),
+    final picked = await pickFecha(
+      context,
+      initial: initial,
+      titulo: 'Vencimiento ${spec.etiqueta}',
     );
 
     if (picked != null && mounted) {
       setState(() {
-        final f = picked.toString().split(' ').first;
-        if (esRto) {
-          _fechaRto = f;
-        } else {
-          _fechaSeguro = f;
-        }
+        _fechas[spec.campoFecha] = picked.toString().split(' ').first;
       });
     }
   }
@@ -319,24 +350,29 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _isSaving = true);
 
+    bool guardadoOk = false;
     try {
       final id = widget.vehiculoId.trim().toUpperCase();
-      await FirebaseFirestore.instance
-          .collection('VEHICULOS')
-          .doc(id)
-          .update({
+      final updates = <String, dynamic>{
         'MARCA': _marcaCtrl.text.trim().toUpperCase(),
         'MODELO': _modeloCtrl.text.trim().toUpperCase(),
         'ANIO': int.tryParse(_anioCtrl.text.trim()) ?? 0,
         'EMPRESA': _empresaCtrl.text.trim().toUpperCase(),
         'VIN': _vinCtrl.text.trim().toUpperCase(),
         'KM_ACTUAL': double.tryParse(_kmCtrl.text) ?? 0.0,
-        'VENCIMIENTO_RTO': _fechaRto ?? '',
-        'VENCIMIENTO_SEGURO': _fechaSeguro ?? '',
-        'ARCHIVO_RTO': _urlRto ?? '-',
-        'ARCHIVO_SEGURO': _urlSeguro ?? '-',
         'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
-      });
+      };
+      // Persistimos cada vencimiento iterando la lista — sumar uno
+      // nuevo a AppVencimientos lo guarda automáticamente.
+      for (final spec in _vencimientos) {
+        updates[spec.campoFecha] = _fechas[spec.campoFecha] ?? '';
+        updates[spec.campoArchivo] = _urls[spec.campoArchivo] ?? '-';
+      }
+      await FirebaseFirestore.instance
+          .collection('VEHICULOS')
+          .doc(id)
+          .update(updates);
+      guardadoOk = true;
 
       if (!mounted) return;
       messenger.showSnackBar(
@@ -348,13 +384,19 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       navigator.pop();
     } catch (e) {
       if (mounted) {
-        setState(() => _isSaving = false);
         messenger.showSnackBar(
           SnackBar(
             content: Text('Error al guardar: $e'),
             backgroundColor: Colors.redAccent,
           ),
         );
+      }
+    } finally {
+      // Solo reseteamos el flag si NO hicimos pop (si se hizo pop, la
+      // pantalla se va a desmontar y no necesitamos tocar nada). Esto
+      // garantiza que el botón vuelva a habilitarse si la operación falló.
+      if (!guardadoOk && mounted) {
+        setState(() => _isSaving = false);
       }
     }
   }
@@ -400,6 +442,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
                   vinController: _vinCtrl,
                   isSyncing: _isSyncing,
                   onSync: _sincronizarConVolvo,
+                  onDiagnostico: _abrirDiagnostico,
                 ),
                 const SizedBox(height: 16),
               ],
@@ -417,23 +460,22 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
               ),
               const SizedBox(height: 28),
               const _SectionTitle('Auditoría de vencimientos'),
-              _DateTile(
-                label: 'Vencimiento RTO',
-                fecha: _fechaRto,
-                url: _urlRto,
-                onTapDate: () => _seleccionarFecha(true),
-                onTapFile: () => _subirDocumento('RTO'),
-                tituloVisor: 'RTO ${widget.vehiculoId}',
-              ),
-              const Divider(color: Colors.white10, height: 1),
-              _DateTile(
-                label: 'Póliza de seguro',
-                fecha: _fechaSeguro,
-                url: _urlSeguro,
-                onTapDate: () => _seleccionarFecha(false),
-                onTapFile: () => _subirDocumento('SEGURO'),
-                tituloVisor: 'Seguro ${widget.vehiculoId}',
-              ),
+              // Tiles generados desde la lista de specs: sumar un
+              // VencimientoSpec a AppVencimientos.tractor / .enganche y
+              // automáticamente aparece acá.
+              for (int i = 0; i < _vencimientos.length; i++) ...[
+                _DateTile(
+                  label: 'Vencimiento ${_vencimientos[i].etiqueta}',
+                  fecha: _fechas[_vencimientos[i].campoFecha],
+                  url: _urls[_vencimientos[i].campoArchivo],
+                  onTapDate: () => _seleccionarFecha(_vencimientos[i]),
+                  onTapFile: () => _subirDocumento(_vencimientos[i]),
+                  tituloVisor:
+                      '${_vencimientos[i].etiqueta} ${widget.vehiculoId}',
+                ),
+                if (i < _vencimientos.length - 1)
+                  const Divider(color: Colors.white10, height: 1),
+              ],
               const SizedBox(height: 32),
               _BotonGuardar(
                 guardando: _isSaving,
@@ -524,11 +566,13 @@ class _BloqueVolvo extends StatelessWidget {
   final TextEditingController vinController;
   final bool isSyncing;
   final VoidCallback onSync;
+  final VoidCallback onDiagnostico;
 
   const _BloqueVolvo({
     required this.vinController,
     required this.isSyncing,
     required this.onSync,
+    required this.onDiagnostico,
   });
 
   @override
@@ -575,6 +619,27 @@ class _BloqueVolvo extends StatelessWidget {
                 ),
               ),
             ),
+          const SizedBox(height: 8),
+          // Botón de diagnóstico — abre una pantalla con el JSON crudo
+          // del response de Volvo y un análisis automático de qué campos
+          // están viniendo. Útil cuando algún dato no aparece en la UI.
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: onDiagnostico,
+              icon: const Icon(Icons.bug_report,
+                  color: Colors.orangeAccent, size: 18),
+              label: const Text(
+                'DIAGNÓSTICO',
+                style: TextStyle(
+                  color: Colors.orangeAccent,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -645,39 +710,72 @@ class _DateTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final tieneArchivo = url != null && url!.isNotEmpty && url != '-';
 
-    return ListTile(
-      onTap: onTapDate,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
-      leading: AppFileThumbnail(
-        url: url,
-        tituloVisor: tituloVisor,
-        size: 40,
-      ),
-      title: Text(
-        label,
-        style: const TextStyle(color: Colors.white54, fontSize: 12),
-      ),
-      subtitle: Text(
-        AppFormatters.formatearFecha(fecha ?? ''),
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-          fontSize: 15,
-        ),
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+    // No usamos ListTile.onTap porque colisiona con los taps internos de
+    // los iconos. En lugar de eso, hacemos clickeable solo la zona del
+    // título/fecha (que abre el date picker) y dejamos los iconos del
+    // trailing como botones explícitos: Ver + Reemplazar/Subir.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+      child: Row(
         children: [
+          AppFileThumbnail(
+            url: url,
+            tituloVisor: tituloVisor,
+            size: 40,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: onTapDate,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      AppFormatters.formatearFecha(fecha ?? ''),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           VencimientoBadge(fecha: fecha),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
+          if (tieneArchivo)
+            IconButton(
+              icon: const Icon(Icons.visibility,
+                  color: Colors.greenAccent, size: 22),
+              tooltip: 'Ver archivo',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      PreviewScreen(url: url!, titulo: tituloVisor),
+                ),
+              ),
+            ),
           IconButton(
             icon: Icon(
-              tieneArchivo ? Icons.file_download_done : Icons.upload_file,
+              tieneArchivo ? Icons.file_upload_outlined : Icons.upload_file,
               color: tieneArchivo ? Colors.blueAccent : Colors.white54,
-              size: 24,
+              size: 22,
             ),
-            tooltip: tieneArchivo ? 'Reemplazar archivo' : 'Subir archivo',
+            tooltip:
+                tieneArchivo ? 'Reemplazar archivo' : 'Subir archivo',
             onPressed: onTapFile,
           ),
         ],

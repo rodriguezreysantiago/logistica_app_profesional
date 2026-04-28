@@ -17,7 +17,8 @@ dependencies:
 
   # ================= RED Y APIs =================
   dio: ^5.7.0
-  http: ^1.2.0
+  # `http` se removió (2026-04-28): no se importa en ningún archivo,
+  # toda la red va por dio.
 
   # ================= SISTEMA Y PERSISTENCIA =================
   shared_preferences: ^2.3.2
@@ -25,13 +26,15 @@ dependencies:
   url_launcher: ^6.3.1
   file_picker: ^8.1.7
 
-  # ⚠️ SOLO WINDOWS (podés dejarlo si usás desktop)
+  # ⚠️ SOLO WINDOWS DESKTOP — necesarias para que file_picker y otros
+  # plugins resuelvan correctamente en target Windows. Si en algún
+  # momento la app deja de tener target Windows, se pueden eliminar.
   ffi: ^2.1.2
   win32: ^5.5.4
 
   # ================= REPORTE Y DATOS =================
   excel: ^4.0.6
-  csv: ^6.0.0
+  # `csv` se removió (2026-04-28): los reportes exportan solo Excel.
   intl: ^0.20.2
 
   # ================= NOTIFICACIONES =================
@@ -49,7 +52,8 @@ dependencies:
 
   # ================= ARCHIVOS =================
   image_picker: ^1.1.2
-  flutter_pdfview: ^1.3.2
+  # `flutter_pdfview` se removió (2026-04-28): la previsualización
+  # de PDFs se hace con pdfrx (preview_screen.dart).
   pdfrx: ^1.0.10
 
   # ================= SEGURIDAD =================

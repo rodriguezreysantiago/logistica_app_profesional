@@ -61,6 +61,35 @@ class VehiculoRepository {
     });
   }
 
+  /// Persiste un snapshot completo de telemetría: KM, combustible y
+  /// autonomía. Solo escribe los campos que vienen no-nulos para evitar
+  /// borrar datos buenos con un null transitorio (típico cuando el camión
+  /// está en zona sin cobertura y el response llega incompleto).
+  Future<void> actualizarTelemetria({
+    required String patente,
+    double? km,
+    double? nivelCombustiblePct,
+    double? autonomiaKm,
+  }) async {
+    final updates = <String, dynamic>{
+      'ULTIMA_SINCRO': FieldValue.serverTimestamp(),
+      'SINCRO_TIPO': 'AUTO',
+    };
+
+    if (km != null) updates['KM_ACTUAL'] = km;
+    if (nivelCombustiblePct != null) {
+      updates['NIVEL_COMBUSTIBLE'] = nivelCombustiblePct;
+      updates['ULTIMA_LECTURA_COMBUSTIBLE'] = FieldValue.serverTimestamp();
+    }
+    if (autonomiaKm != null) updates['AUTONOMIA_KM'] = autonomiaKm;
+
+    // Solo escribimos si hay algo más que el timestamp; sino estaríamos
+    // tocando Firestore sin razón.
+    if (updates.length <= 2) return;
+
+    await _db.collection(collection).doc(patente).update(updates);
+  }
+
   Future<void> actualizarCampos({
     required String patente,
     required Map<String, dynamic> data,
@@ -141,13 +170,7 @@ class VehiculoRepository {
     }
   }
 
-  // ================= API KM =================
-
-  Future<double?> traerKmDesdeApi(String vin) async {
-    try {
-      return await _api.traerKilometrajeCualquierVia(vin);
-    } catch (_) {
-      return null;
-    }
-  }
+  // El manager pega directo a `_api.traerTelemetria` cuando necesita
+  // datos frescos de un VIN. Antes había un wrapper `traerKmDesdeApi`
+  // que solo envolvía en try-catch — se removió porque era redundante.
 }

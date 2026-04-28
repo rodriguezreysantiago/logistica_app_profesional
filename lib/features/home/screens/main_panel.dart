@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -140,7 +142,9 @@ class MainPanel extends StatelessWidget {
 
     await _authService.logout();
     if (!context.mounted) return;
-    navigator.pushNamedAndRemoveUntil('/', (route) => false);
+    // El Future de pushNamedAndRemoveUntil se completa cuando la nueva
+    // ruta haga pop (nunca, en este caso). Lo descartamos explícito.
+    unawaited(navigator.pushNamedAndRemoveUntil('/', (route) => false));
   }
 }
 
@@ -154,7 +158,13 @@ class _WelcomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primerNombre = nombre.split(' ').first;
+    // Los nombres en Firestore se guardan como APELLIDO NOMBRE SEGUNDO_NOMBRE,
+    // así que para saludar usamos el segundo token (el nombre real). Si por
+    // algún motivo el campo viene con una sola palabra, usamos esa como
+    // fallback para no quedar en blanco.
+    final partes = nombre.trim().split(RegExp(r'\s+'));
+    final primerNombre =
+        partes.length >= 2 ? partes[1] : (partes.isNotEmpty ? partes.first : '');
     return AppCard(
       padding: const EdgeInsets.all(25),
       margin: EdgeInsets.zero,

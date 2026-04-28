@@ -19,8 +19,8 @@ class Empleado {
   final DateTime? vencimientoLicencia;
   final String? archivoLicencia;
   
-  final DateTime? vencimientoPsicofisico;
-  final String? archivoPsicofisico;
+  final DateTime? vencimientoPreocupacional;
+  final String? archivoPreocupacional;
   
   final DateTime? vencimientoManejo;
   final String? archivoManejo;
@@ -42,8 +42,8 @@ class Empleado {
     this.enganche,
     this.vencimientoLicencia,
     this.archivoLicencia,
-    this.vencimientoPsicofisico,
-    this.archivoPsicofisico,
+    this.vencimientoPreocupacional,
+    this.archivoPreocupacional,
     this.vencimientoManejo,
     this.archivoManejo,
     this.vencimientoArt,
@@ -70,13 +70,13 @@ class Empleado {
       // ✅ MEJORA PRO: Al pasar un DateTime, Firebase automáticamente 
       // lo convierte a su tipo nativo 'Timestamp', permitiendo querys eficientes.
       'VENCIMIENTO_LICENCIA_DE_CONDUCIR': vencimientoLicencia,
-      'VENCIMIENTO_PSICOFISICO': vencimientoPsicofisico,
+      'VENCIMIENTO_PREOCUPACIONAL': vencimientoPreocupacional,
       'VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO': vencimientoManejo,
       'VENCIMIENTO_ART': vencimientoArt,
       
       // Archivos PDF/Imágenes
       'ARCHIVO_LICENCIA_DE_CONDUCIR': archivoLicencia,
-      'ARCHIVO_PSICOFISICO': archivoPsicofisico,
+      'ARCHIVO_PREOCUPACIONAL': archivoPreocupacional,
       'ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO': archivoManejo,
       'ARCHIVO_ART': archivoArt,
     };
@@ -106,8 +106,8 @@ class Empleado {
       vencimientoLicencia: _parseDate(map['VENCIMIENTO_LICENCIA_DE_CONDUCIR']),
       archivoLicencia: map['ARCHIVO_LICENCIA_DE_CONDUCIR'],
       
-      vencimientoPsicofisico: _parseDate(map['VENCIMIENTO_PSICOFISICO']),
-      archivoPsicofisico: map['ARCHIVO_PSICOFISICO'],
+      vencimientoPreocupacional: _parseDate(map['VENCIMIENTO_PREOCUPACIONAL']),
+      archivoPreocupacional: map['ARCHIVO_PREOCUPACIONAL'],
       
       vencimientoManejo: _parseDate(map['VENCIMIENTO_CURSO_DE_MANEJO_DEFENSIVO']),
       archivoManejo: map['ARCHIVO_CURSO_DE_MANEJO_DEFENSIVO'],
@@ -147,8 +147,8 @@ class Empleado {
     String? enganche,
     DateTime? vencimientoLicencia,
     String? archivoLicencia,
-    DateTime? vencimientoPsicofisico,
-    String? archivoPsicofisico,
+    DateTime? vencimientoPreocupacional,
+    String? archivoPreocupacional,
     DateTime? vencimientoManejo,
     String? archivoManejo,
     DateTime? vencimientoArt,
@@ -168,8 +168,8 @@ class Empleado {
       enganche: enganche ?? this.enganche,
       vencimientoLicencia: vencimientoLicencia ?? this.vencimientoLicencia,
       archivoLicencia: archivoLicencia ?? this.archivoLicencia,
-      vencimientoPsicofisico: vencimientoPsicofisico ?? this.vencimientoPsicofisico,
-      archivoPsicofisico: archivoPsicofisico ?? this.archivoPsicofisico,
+      vencimientoPreocupacional: vencimientoPreocupacional ?? this.vencimientoPreocupacional,
+      archivoPreocupacional: archivoPreocupacional ?? this.archivoPreocupacional,
       vencimientoManejo: vencimientoManejo ?? this.vencimientoManejo,
       archivoManejo: archivoManejo ?? this.archivoManejo,
       vencimientoArt: vencimientoArt ?? this.vencimientoArt,

@@ -1,12 +1,16 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../../../shared/widgets/fecha_dialog.dart';
 
 import 'admin_personal_form_screen.dart';
 
@@ -244,6 +248,23 @@ class _DetalleChofer extends StatelessWidget {
           onSave: (v) => _Actualizar.dato(
               context, dni, 'CUIL', v.replaceAll('-', '')),
         ),
+        _DatoEditableTexto(
+          etiqueta: 'MAIL',
+          valor: (data['MAIL'] ?? '-').toString(),
+          // El mail se guarda en minúsculas; pisamos el toUpperCase() del
+          // dialog estándar dejando el valor crudo.
+          onSave: (v) => _Actualizar.dato(
+              context, dni, 'MAIL', v.toLowerCase().trim()),
+        ),
+        _DatoEditableTexto(
+          etiqueta: 'TELÉFONO',
+          valor: (data['TELEFONO'] ?? '-').toString(),
+          // Solo guardamos los dígitos sin trim de mayúsculas (el dialog
+          // por default lo aplica). El normalizador de WhatsApp ya tolera
+          // espacios y guiones, pero si lo dejamos limpio mejor.
+          onSave: (v) => _Actualizar.dato(
+              context, dni, 'TELEFONO', v.trim()),
+        ),
         _DatoEditableEmpresa(
           valor: (data['EMPRESA'] ?? '-').toString(),
           onSave: (v) => _Actualizar.dato(context, dni, 'EMPRESA', v),
@@ -261,9 +282,9 @@ class _DetalleChofer extends StatelessWidget {
         ),
         _FilaVencimiento(
           dni: dni,
-          etiqueta: 'PSICOFÍSICO',
-          campoFecha: 'VENCIMIENTO_PSICOFISICO',
-          campoUrl: 'ARCHIVO_PSICOFISICO',
+          etiqueta: 'PREOCUPACIONAL',
+          campoFecha: 'VENCIMIENTO_PREOCUPACIONAL',
+          campoUrl: 'ARCHIVO_PREOCUPACIONAL',
           data: data,
         ),
         _FilaVencimiento(
@@ -445,16 +466,41 @@ class _DatoEditableTexto extends StatelessWidget {
   }
 
   void _mostrarDialogo(BuildContext context) {
-    final controller = TextEditingController(text: valor);
+    // Pre-cargamos el valor actual y lo dejamos seleccionado completo. Así
+    // el admin puede:
+    //   - Borrar todo con un solo Delete/Backspace.
+    //   - Sobreescribir directamente tipeando (reemplaza la selección).
+    // Antes el cursor quedaba al final del texto y el admin tenía que
+    // borrar caracter por caracter, lo que llevaba a confusión.
+    final controller = TextEditingController(text: valor)
+      ..selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: valor.length,
+      );
+
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
         title: Text('Editar $etiqueta'),
         content: TextField(
           controller: controller,
+          autofocus: true,
           textCapitalization: TextCapitalization.characters,
           style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(hintText: 'Escriba aquí...'),
+          decoration: InputDecoration(
+            hintText: 'Escriba aquí...',
+            // Botón X para vaciar el campo de un toque.
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.clear, color: Colors.white54),
+              tooltip: 'Vaciar campo',
+              onPressed: () => controller.clear(),
+            ),
+          ),
+          // Permite enviar con Enter sin tener que ir al botón.
+          onSubmitted: (_) {
+            onSave(controller.text.trim().toUpperCase());
+            Navigator.pop(dCtx);
+          },
         ),
         actions: [
           TextButton(
@@ -645,6 +691,8 @@ class _AsignacionUnidad extends StatelessWidget {
 // para que sean fáciles de encontrar y, en el futuro, mover a un service.
 // =============================================================================
 
+enum _FuenteArchivoChofer { camara, galeria, archivo }
+
 class _Actualizar {
   _Actualizar._();
 
@@ -689,7 +737,11 @@ class _Actualizar {
     final picker = ImagePicker();
     final navigator = Navigator.of(context);
 
-    showModalBottomSheet(
+    // El Future de showModalBottomSheet se completa cuando el sheet
+    // se cierra. Acá solo lo abrimos y nos vamos — la lógica de subir
+    // la foto vive dentro de los onTap de los ListTile, no dependemos
+    // del valor de retorno.
+    unawaited(showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (bCtx) => Container(
@@ -758,10 +810,11 @@ class _Actualizar {
           ],
         ),
       ),
-    );
+    ));
   }
 
   /// Sube un archivo físico a Storage y guarda la URL en Firestore.
+  /// Detecta el contentType según la extensión (PDF, JPG, PNG).
   static Future<void> _subirArchivo(
     BuildContext context,
     String id,
@@ -775,7 +828,21 @@ class _Actualizar {
         const SnackBar(content: Text('Subiendo archivo...')),
       );
       final ref = FirebaseStorage.instance.ref().child(storagePath);
-      final metadata = SettableMetadata(contentType: 'image/jpeg');
+
+      // Detectamos contentType según extensión para que Firebase Storage
+      // lo sirva con el header correcto y el visor sepa abrirlo bien.
+      final lower = storagePath.toLowerCase();
+      String? contentType;
+      if (lower.endsWith('.pdf')) {
+        contentType = 'application/pdf';
+      } else if (lower.endsWith('.png')) {
+        contentType = 'image/png';
+      } else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+        contentType = 'image/jpeg';
+      }
+      final metadata =
+          contentType != null ? SettableMetadata(contentType: contentType) : null;
+
       await ref.putFile(file, metadata);
       final downloadUrl = await ref.getDownloadURL();
       if (context.mounted) {
@@ -791,6 +858,111 @@ class _Actualizar {
         );
       }
     }
+  }
+
+  /// Abre un sheet para que el admin elija de dónde tomar el archivo
+  /// (cámara, galería, o PDF/imagen del dispositivo) y lo sube.
+  /// Pensado para reemplazar papeles del chofer (licencia, ART, etc.).
+  static Future<void> _reemplazarDocumentoChofer({
+    required BuildContext context,
+    required String dni,
+    required String etiqueta,
+    required String campoUrl,
+  }) async {
+    final picker = ImagePicker();
+
+    final fuente = await showModalBottomSheet<_FuenteArchivoChofer>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sCtx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(sCtx).colorScheme.surface,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(25)),
+          border: const Border(
+              top: BorderSide(color: Colors.greenAccent, width: 2)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  etiqueta,
+                  style: const TextStyle(
+                    color: Colors.greenAccent,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.camera_alt, color: Colors.greenAccent),
+                title: const Text('Tomar foto con la cámara',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () =>
+                    Navigator.pop(sCtx, _FuenteArchivoChofer.camara),
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.photo_library, color: Colors.blueAccent),
+                title: const Text('Foto desde la galería',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () =>
+                    Navigator.pop(sCtx, _FuenteArchivoChofer.galeria),
+              ),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf,
+                    color: Colors.redAccent),
+                title: const Text('PDF / archivo del dispositivo',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () =>
+                    Navigator.pop(sCtx, _FuenteArchivoChofer.archivo),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (fuente == null) return;
+    if (!context.mounted) return;
+
+    File? archivo;
+    String extension = 'jpg';
+
+    switch (fuente) {
+      case _FuenteArchivoChofer.camara:
+      case _FuenteArchivoChofer.galeria:
+        final source = fuente == _FuenteArchivoChofer.camara
+            ? ImageSource.camera
+            : ImageSource.gallery;
+        final img = await picker.pickImage(source: source, imageQuality: 60);
+        if (img == null) return;
+        archivo = File(img.path);
+        extension = 'jpg';
+        break;
+      case _FuenteArchivoChofer.archivo:
+        final res = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
+        );
+        if (res == null || res.files.single.path == null) return;
+        archivo = File(res.files.single.path!);
+        extension = res.files.single.extension?.toLowerCase() ?? 'pdf';
+        break;
+    }
+
+    // Después del picker viene otro await: revalidamos contra el mismo
+    // BuildContext que vamos a pasar a _subirArchivo (el lint pide eso).
+    if (!context.mounted) return;
+    final storagePath =
+        'EMPLEADOS/$dni/${campoUrl}_${DateTime.now().millisecondsSinceEpoch}.$extension';
+    await _subirArchivo(context, dni, archivo, storagePath, campoUrl);
   }
 
   /// Sheet con opciones para gestionar un documento (fecha + archivo).
@@ -859,6 +1031,31 @@ class _Actualizar {
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.upload_file,
+                  color: Colors.orangeAccent),
+              title: Text(
+                urlActual != null &&
+                        urlActual.isNotEmpty &&
+                        urlActual != '-'
+                    ? 'Reemplazar archivo cargado'
+                    : 'Subir archivo nuevo',
+                style: const TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                'Foto o PDF — sin pasar por el flujo de revisión',
+                style: TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+              onTap: () {
+                navigator.pop();
+                _reemplazarDocumentoChofer(
+                  context: context,
+                  dni: dni,
+                  etiqueta: etiqueta,
+                  campoUrl: campoUrl,
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -871,12 +1068,11 @@ class _Actualizar {
     String campo,
     String? fechaActual,
   ) async {
-    final initial = DateTime.tryParse(fechaActual ?? '') ?? DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2040),
+    final initial = DateTime.tryParse(fechaActual ?? '');
+    final picked = await pickFecha(
+      context,
+      initial: initial,
+      titulo: 'Vencimiento ${campo.replaceAll("VENCIMIENTO_", "").replaceAll("_", " ")}',
     );
     if (picked != null && context.mounted) {
       final nuevaFecha = picked.toString().split(' ').first;
@@ -892,8 +1088,8 @@ class _Actualizar {
     String patenteActual,
   ) {
     final tipos = (campo == 'VEHICULO')
-        ? ['TRACTOR']
-        : ['BATEA', 'TOLVA', 'ACOPLADO'];
+        ? <String>[AppTiposVehiculo.tractor]
+        : AppTiposVehiculo.enganches;
 
     showDialog(
       context: context,

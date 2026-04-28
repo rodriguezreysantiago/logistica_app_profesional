@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../widgets/vencimiento_editor_sheet.dart';
@@ -21,10 +22,6 @@ class _AdminVencimientosChasisScreenState
   late final Stream<QuerySnapshot> _vehiculosStream;
 
   static const _tiposIncluidos = ['CHASIS', 'TRACTOR'];
-  static const Map<String, String> _documentosAuditados = {
-    'RTO': 'RTO',
-    'Seguro': 'SEGURO',
-  };
 
   @override
   void initState() {
@@ -41,22 +38,28 @@ class _AdminVencimientosChasisScreenState
       if (!_tiposIncluidos.contains(tipo)) continue;
 
       final patente = doc.id.toUpperCase();
-      _documentosAuditados.forEach((etiqueta, campoBase) {
-        final fecha = data['VENCIMIENTO_$campoBase']?.toString();
-        if (fecha == null || fecha.isEmpty) return;
+      // Iteramos los vencimientos definidos para tractor en
+      // AppVencimientos. Cuando sumes uno nuevo a esa lista, esta
+      // auditoría lo audita automáticamente.
+      for (final spec in AppVencimientos.tractor) {
+        final fecha = data[spec.campoFecha]?.toString();
+        if (fecha == null || fecha.isEmpty) continue;
+        // VencimientoItem espera el "campoBase" sin prefijo, p.ej. 'RTO'
+        // o 'EXTINTOR_CABINA'. Lo derivamos del campoFecha.
+        final campoBase = spec.campoFecha.replaceFirst('VENCIMIENTO_', '');
         final dias = AppFormatters.calcularDiasRestantes(fecha);
         items.add(VencimientoItem(
           docId: patente,
           coleccion: 'VEHICULOS',
           titulo: '$tipo - $patente',
-          tipoDoc: etiqueta,
+          tipoDoc: spec.etiqueta,
           campoBase: campoBase,
           fecha: fecha,
           dias: dias,
-          urlArchivo: data['ARCHIVO_$campoBase']?.toString(),
+          urlArchivo: data[spec.campoArchivo]?.toString(),
           storagePath: 'VEHICULOS_DOCS',
         ));
-      });
+      }
     }
 
     final criticos =

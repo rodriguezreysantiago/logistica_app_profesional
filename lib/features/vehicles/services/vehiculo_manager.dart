@@ -81,10 +81,14 @@ class VehiculoManager {
 
     await Future.delayed(Duration(milliseconds: delay));
 
-    task().whenComplete(() {
+    // Fire-and-forget intencional: el pool de concurrencia depende de
+    // que la task corra en paralelo. El whenComplete agenda el
+    // decremento del contador para cuando termine. Esperarla acá
+    // (await) rompería el paralelismo.
+    unawaited(task().whenComplete(() {
       _currentRunning--;
       _processQueue();
-    });
+    }));
   }
 
   Future<void> _executeSync(String patente, String vin) async {
@@ -93,30 +97,45 @@ class VehiculoManager {
     final cleanVin = vin.trim().toUpperCase();
 
     try {
-      double? metros;
+      // 1️⃣ CACHE LOCAL — fast path: si la precarga masiva (`/vehicles`)
+      //    ya nos dio el odómetro de esta unidad, evitamos un request
+      //    individual. La cache no incluye combustible/autonomía: si los
+      //    necesitamos frescos, hay que pegar al endpoint individual.
+      final metrosCache = _buscarEnCache(cleanVin);
+      if (metrosCache != null && metrosCache > 0) {
+        final km = metrosCache / 1000;
+        await _repo.actualizarKilometraje(patente: patente, km: km);
+        debugPrint(
+            "✅ Sync (cache) $patente → ${km.toStringAsFixed(1)} km");
+        return;
+      }
 
-      // 1️⃣ CACHE LOCAL
-      metros = _buscarEnCache(cleanVin);
+      // 2️⃣ API individual: trae odómetro + combustible + autonomía en
+      //    un solo request. Es el camino que se ejecuta cuando el cache
+      //    no tiene la unidad o no tiene odómetro válido.
+      final tele = await _api.traerTelemetria(cleanVin);
 
-      // 2️⃣ REPO
-      metros ??= await _repo.traerKmDesdeApi(cleanVin);
-
-      // 3️⃣ FALLBACK API
-      metros ??= await _api.traerKilometrajeCualquierVia(cleanVin);
-
-      if (metros == null || metros <= 0) {
+      if (!tele.tieneAlgunDato) {
         debugPrint("ℹ️ $patente sin datos válidos");
         return;
       }
 
-      final km = metros / 1000;
+      final km = tele.odometroMetros != null
+          ? tele.odometroMetros! / 1000
+          : null;
 
-      await _repo.actualizarKilometraje(
+      await _repo.actualizarTelemetria(
         patente: patente,
         km: km,
+        nivelCombustiblePct: tele.nivelCombustiblePct,
+        autonomiaKm: tele.autonomiaKm,
       );
 
-      debugPrint("✅ Sync OK $patente → ${km.toStringAsFixed(1)} km");
+      debugPrint(
+          "✅ Sync $patente → "
+          "km=${km?.toStringAsFixed(1) ?? '?'}, "
+          "fuel=${tele.nivelCombustiblePct?.toStringAsFixed(0) ?? '?'}%, "
+          "auton=${tele.autonomiaKm?.toStringAsFixed(0) ?? '?'}km");
     } catch (e, stack) {
       debugPrint("❌ Sync error $patente: $e");
       debugPrint(stack.toString());

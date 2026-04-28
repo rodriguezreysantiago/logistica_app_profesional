@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -44,16 +45,19 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    showDialog(
+    // Loading modal: el Future se completa cuando lo cerramos nosotros
+    // mismos con navigator.pop() abajo. Esperarlo sería un deadlock.
+    unawaited(showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => const Center(
         child: CircularProgressIndicator(color: Colors.greenAccent),
       ),
-    );
+    ));
 
     try {
       await tarea();
+      if (!mounted) return;
       navigator.pop(); // cierra loading
       messenger.showSnackBar(
         SnackBar(
@@ -63,6 +67,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(
         SnackBar(
@@ -152,13 +157,16 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
               // ✅ Guardamos el hash Bcrypt, no la contraseña en plano.
               final nuevoHash =
                   PasswordHasher.hashBcrypt(nvaCtrl.text);
-              _ejecutarTarea(
+              // El callback no es async pero _ejecutarTarea devuelve un
+              // Future; lo descartamos explícito para que quede claro
+              // y para anticiparnos a versiones más estrictas del lint.
+              unawaited(_ejecutarTarea(
                 tarea: () async => FirebaseFirestore.instance
                     .collection('EMPLEADOS')
                     .doc(widget.dni)
                     .update({'CONTRASEÑA': nuevoHash}),
                 mensajeExito: 'Contraseña actualizada correctamente',
-              );
+              ));
             },
             child: const Text('GUARDAR',
                 style: TextStyle(fontWeight: FontWeight.bold)),
@@ -225,8 +233,12 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     final image =
         await picker.pickImage(source: source, imageQuality: 50);
     if (image == null) return;
+    if (!mounted) return;
 
-    _ejecutarTarea(
+    // _ejecutarTarea devuelve Future<void>: lo descartamos explícito
+    // porque _seleccionarImagen ya cumplió su cometido (mostrar el
+    // loading, hacer el upload y cerrar) — no necesitamos esperarlo.
+    unawaited(_ejecutarTarea(
       tarea: () async {
         final url = await _storageService.subirArchivo(
           archivo: File(image.path),
@@ -238,7 +250,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
             .update({'ARCHIVO_PERFIL': url});
       },
       mensajeExito: 'Foto de perfil actualizada',
-    );
+    ));
   }
 
   // ---------------------------------------------------------------------------
@@ -262,7 +274,18 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
             );
           }
 
-          final data = snapshot.data!.data() as Map<String, dynamic>;
+          // En lugar de un cast directo (que puede crashear si el
+          // documento tiene un shape inesperado), validamos el tipo y
+          // devolvemos un error amigable si algo viene mal.
+          final raw = snapshot.data!.data();
+          if (raw is! Map<String, dynamic>) {
+            return const AppErrorState(
+              title: 'Datos corruptos',
+              subtitle:
+                  'El formato de tu perfil no es válido. Contactá a administración.',
+            );
+          }
+          final data = raw;
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
@@ -506,6 +529,12 @@ class _DatosCard extends StatelessWidget {
             label: 'TELÉFONO',
             valor: (data['TELEFONO'] ?? '—').toString(),
             icon: Icons.phone_android,
+          ),
+          const _SeparadorTile(),
+          _InfoTile(
+            label: 'MAIL',
+            valor: (data['MAIL'] ?? '—').toString(),
+            icon: Icons.alternate_email,
           ),
         ],
       ),

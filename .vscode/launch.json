@@ -6,7 +6,26 @@
             "request": "launch",
             "type": "dart",
             "program": "lib/main.dart",
-            "args": ["-d", "windows"]
+            // toolArgs son los flags que se le pasan a `flutter run`.
+            // --dart-define-from-file=secrets.json inyecta las credenciales
+            // VOLVO_USERNAME y VOLVO_PASSWORD desde el archivo secrets.json
+            // (que NO está en git). Sin esto, los requests a Volvo Connect
+            // fallan con "Faltan credenciales".
+            "toolArgs": [
+                "-d", "windows",
+                "--dart-define-from-file=secrets.json"
+            ]
+        },
+        {
+            "name": "Logistica App (Windows) – Profile",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "-d", "windows",
+                "--dart-define-from-file=secrets.json"
+            ]
         }
     ]
 }

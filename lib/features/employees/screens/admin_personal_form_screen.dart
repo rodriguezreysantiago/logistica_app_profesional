@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/utils/password_hasher.dart';
+import '../../../shared/utils/upper_case_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Form de alta de un nuevo legajo de personal (chofer o admin).
@@ -20,6 +21,7 @@ class _AdminPersonalFormScreenState
   final _dniCtrl = TextEditingController();
   final _nombreCtrl = TextEditingController();
   final _cuilCtrl = TextEditingController();
+  final _mailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
 
   String _rol = 'USER';
@@ -37,6 +39,7 @@ class _AdminPersonalFormScreenState
     _dniCtrl.dispose();
     _nombreCtrl.dispose();
     _cuilCtrl.dispose();
+    _mailCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
   }
@@ -57,6 +60,8 @@ class _AdminPersonalFormScreenState
           .collection('EMPLEADOS')
           .doc(dni)
           .get();
+
+      if (!mounted) return;
 
       if (doc.exists) {
         messenger.showSnackBar(
@@ -81,6 +86,7 @@ class _AdminPersonalFormScreenState
           .set({
         'NOMBRE': _nombreCtrl.text.trim().toUpperCase(),
         'CUIL': _cuilCtrl.text.trim(),
+        'MAIL': _mailCtrl.text.trim().toLowerCase(),
         'CONTRASEÑA': passwordHash,
         'ROL': _rol,
         'EMPRESA': _empresa,
@@ -92,6 +98,10 @@ class _AdminPersonalFormScreenState
         'ultima_modificacion': FieldValue.serverTimestamp(),
       });
 
+      // El widget puede haberse desmontado durante el await; si fue así,
+      // no usamos messenger ni navigator (sus referencias quedaron stale).
+      if (!mounted) return;
+
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Chofer creado con éxito'),
@@ -100,6 +110,7 @@ class _AdminPersonalFormScreenState
       );
       navigator.pop();
     } catch (e) {
+      if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
           content: Text('Error al guardar: $e'),
@@ -134,7 +145,7 @@ class _AdminPersonalFormScreenState
                   label: 'Nombre y apellido completo',
                   controller: _nombreCtrl,
                   icon: Icons.person,
-                  textCapitalization: TextCapitalization.words,
+                  // Nombre va en MAYÚSCULAS para uniformar la base.
                 ),
                 _FormInput(
                   label: 'CUIL (sin guiones)',
@@ -143,6 +154,14 @@ class _AdminPersonalFormScreenState
                   isNumeric: true,
                   maxLength: 11,
                   isCuil: true,
+                ),
+                _FormInput(
+                  label: 'Mail (opcional)',
+                  controller: _mailCtrl,
+                  icon: Icons.alternate_email,
+                  // El mail va tal cual lo tipea el admin (sin mayúsculas).
+                  toUpperCase: false,
+                  isMail: true,
                 ),
                 _FormInput(
                   label: 'Contraseña inicial',
@@ -209,7 +228,12 @@ class _FormInput extends StatelessWidget {
   final bool isNumeric;
   final int? maxLength;
   final bool isCuil;
-  final TextCapitalization textCapitalization;
+  final bool isMail;
+  /// Si es true, el texto se transforma a MAYÚSCULAS mientras se tipea.
+  /// Default true para que los campos de identificación (DNI, nombre,
+  /// CUIL) queden uniformes. Antes se hacía con `textCapitalization`,
+  /// pero eso rompe el Backspace en Windows desktop.
+  final bool toUpperCase;
   final TextInputAction textInputAction;
 
   const _FormInput({
@@ -219,9 +243,13 @@ class _FormInput extends StatelessWidget {
     this.isNumeric = false,
     this.maxLength,
     this.isCuil = false,
-    this.textCapitalization = TextCapitalization.characters,
+    this.isMail = false,
+    this.toUpperCase = true,
     this.textInputAction = TextInputAction.next,
   });
+
+  // Regex muy laxo, solo para evitar typos groseros (espacios, falta de @, etc.).
+  static final RegExp _mailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
   @override
   Widget build(BuildContext context) {
@@ -230,10 +258,14 @@ class _FormInput extends StatelessWidget {
       child: TextFormField(
         controller: controller,
         maxLength: maxLength,
-        keyboardType:
-            isNumeric ? TextInputType.number : TextInputType.text,
+        keyboardType: isMail
+            ? TextInputType.emailAddress
+            : (isNumeric ? TextInputType.number : TextInputType.text),
         textInputAction: textInputAction,
-        textCapitalization: textCapitalization,
+        // ✅ Convertimos a mayúsculas con un inputFormatter en lugar de
+        //    `textCapitalization` para que Backspace funcione en Windows.
+        inputFormatters:
+            toUpperCase ? [UpperCaseInputFormatter()] : null,
         style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
           counterText: '',
@@ -245,13 +277,20 @@ class _FormInput extends StatelessWidget {
           ),
         ),
         validator: (value) {
-          if (value == null || value.trim().isEmpty) {
+          final v = value?.trim() ?? '';
+          // El mail es opcional: si está vacío, OK. Si tiene texto, validamos.
+          if (isMail) {
+            if (v.isEmpty) return null;
+            if (!_mailRegex.hasMatch(v)) return 'Mail inválido';
+            return null;
+          }
+          if (v.isEmpty) {
             return 'Campo obligatorio';
           }
-          if (isNumeric && value.length < (maxLength ?? 0)) {
+          if (isNumeric && v.length < (maxLength ?? 0)) {
             return 'Dato incompleto';
           }
-          if (isCuil && value.length != 11) {
+          if (isCuil && v.length != 11) {
             return 'El CUIL debe tener 11 dígitos';
           }
           return null;

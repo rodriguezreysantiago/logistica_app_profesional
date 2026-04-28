@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../providers/vehiculo_provider.dart';
@@ -32,17 +33,28 @@ class _AdminVehiculosListaScreenState
     });
   }
 
+  /// Tabs que mostramos: tractor primero (la unidad que tracciona) y
+  /// después los enganches. Filtramos `ACOPLADO` porque solo existe por
+  /// retrocompatibilidad con docs viejos y no queremos un tab vacío.
+  static List<String> get _tipos => [
+        AppTiposVehiculo.tractor,
+        ...AppTiposVehiculo.enganches.where((t) => t != 'ACOPLADO'),
+      ];
+
   @override
   Widget build(BuildContext context) {
+    final tipos = _tipos;
     return DefaultTabController(
-      length: 3,
+      length: tipos.length,
       child: AppScaffold(
         title: 'Gestión de Flota',
-        bottom: const TabBar(
+        // isScrollable: con 5 tabs no entran cómodos en una sola fila;
+        // esto los hace deslizables horizontalmente.
+        bottom: TabBar(
+          isScrollable: true,
           tabs: [
-            Tab(text: 'TRACTORES'),
-            Tab(text: 'BATEAS'),
-            Tab(text: 'TOLVAS'),
+            for (final t in tipos)
+              Tab(text: AppTiposVehiculo.pluralEtiquetas[t] ?? t),
           ],
         ),
         floatingActionButton: FloatingActionButton.extended(
@@ -55,11 +67,9 @@ class _AdminVehiculosListaScreenState
           icon: const Icon(Icons.add),
           label: const Text('NUEVO'),
         ),
-        body: const TabBarView(
+        body: TabBarView(
           children: [
-            _ListaPorTipo(tipo: 'TRACTOR'),
-            _ListaPorTipo(tipo: 'BATEA'),
-            _ListaPorTipo(tipo: 'TOLVA'),
+            for (final t in tipos) _ListaPorTipo(tipo: t),
           ],
         ),
       ),
@@ -97,16 +107,7 @@ class _ListaPorTipo extends StatelessWidget {
   }
 
   String _pluralPretty(String tipo) {
-    switch (tipo) {
-      case 'TRACTOR':
-        return 'tractores';
-      case 'BATEA':
-        return 'bateas';
-      case 'TOLVA':
-        return 'tolvas';
-      default:
-        return tipo.toLowerCase();
-    }
+    return AppTiposVehiculo.pluralMinusculas[tipo] ?? tipo.toLowerCase();
   }
 }
 
@@ -198,6 +199,11 @@ class _VehiculoCard extends StatelessWidget {
                   ),
                 ],
               ),
+              // Telemetría compacta (combustible + autonomía). Solo se
+              // muestra si la unidad reporta esos datos vía Volvo. Para
+              // unidades sin telemetría, esta fila no aparece y el card
+              // queda como antes.
+              _TelemetriaCompacta(data: data),
               const SizedBox(height: 10),
               // Vista rápida de vencimientos (badges compactos)
               Row(
@@ -302,7 +308,8 @@ class _DetalleVehiculo extends StatelessWidget {
     final anio = (data['ANIO'] ?? data['AÑO'] ?? '').toString();
     final estado = (data['ESTADO'] ?? 'LIBRE').toString().toUpperCase();
     final vin = (data['VIN'] ?? '').toString();
-    final km = data['KM_ACTUAL'];
+    // KM ahora se lee dentro de _PanelTelemetria; no hace falta tenerlo
+    // como variable local acá.
 
     return ListView(
       controller: scrollController,
@@ -337,32 +344,10 @@ class _DetalleVehiculo extends StatelessWidget {
         ),
         const SizedBox(height: 16),
 
-        // Tarjeta de KM destacada
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.greenAccent.withAlpha(15),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.greenAccent.withAlpha(40)),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.speed, color: Colors.greenAccent),
-              const SizedBox(width: 10),
-              const Text('Kilometraje',
-                  style: TextStyle(color: Colors.white60, fontSize: 12)),
-              const Spacer(),
-              Text(
-                '${AppFormatters.formatearKilometraje(km)} km',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-            ],
-          ),
-        ),
+        // Panel de telemetría: KM + combustible + autonomía. Si la unidad
+        // no tiene combustible/autonomía reportados, el panel cae a una
+        // tarjeta simple de KM (compatibilidad con vehículos no-Volvo).
+        _PanelTelemetria(data: data),
 
         const SizedBox(height: 18),
         const _SectionTitle(icon: Icons.fingerprint, label: 'Datos técnicos'),
@@ -594,6 +579,282 @@ class _InfoRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TELEMETRÍA (combustible + autonomía leídos de Volvo Connect)
+// ─────────────────────────────────────────────────────────────────────────────
+
+double? _toDouble(dynamic v) {
+  if (v == null) return null;
+  if (v is num) return v.toDouble();
+  return double.tryParse(v.toString());
+}
+
+/// Color para la barrita de combustible: verde > 50, naranja 20-50, rojo < 20.
+Color _colorCombustible(double pct) {
+  if (pct >= 50) return Colors.greenAccent;
+  if (pct >= 20) return Colors.orangeAccent;
+  return Colors.redAccent;
+}
+
+/// Versión compacta de la telemetría para usar dentro del card de la lista.
+/// Una sola fila con dos chips: combustible y autonomía. Si la unidad no
+/// reporta ninguno de los dos, el widget devuelve un SizedBox vacío.
+class _TelemetriaCompacta extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _TelemetriaCompacta({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final fuel = _toDouble(data['NIVEL_COMBUSTIBLE']);
+    final auton = _toDouble(data['AUTONOMIA_KM']);
+
+    if (fuel == null && auton == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          if (fuel != null) ...[
+            _ChipTelemetria(
+              icono: Icons.local_gas_station,
+              color: _colorCombustible(fuel),
+              texto: '${fuel.clamp(0, 100).toStringAsFixed(0)}%',
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (auton != null)
+            _ChipTelemetria(
+              icono: Icons.route,
+              color: Colors.cyanAccent,
+              texto: '${auton.toStringAsFixed(0)} km',
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChipTelemetria extends StatelessWidget {
+  final IconData icono;
+  final Color color;
+  final String texto;
+
+  const _ChipTelemetria({
+    required this.icono,
+    required this.color,
+    required this.texto,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withAlpha(20),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withAlpha(60)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icono, color: color, size: 12),
+          const SizedBox(width: 4),
+          Text(
+            texto,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Panel de telemetría grande que va en el bottom sheet del detalle.
+/// Reemplaza la tarjeta de "Kilometraje" original. Si la unidad solo
+/// tiene KM (no es Volvo o no reporta), se ve como antes.
+class _PanelTelemetria extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _PanelTelemetria({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final km = _toDouble(data['KM_ACTUAL']);
+    final fuel = _toDouble(data['NIVEL_COMBUSTIBLE']);
+    final auton = _toDouble(data['AUTONOMIA_KM']);
+    final hayTelemetria = fuel != null || auton != null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.greenAccent.withAlpha(15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.greenAccent.withAlpha(40)),
+      ),
+      child: hayTelemetria
+          ? Row(
+              children: [
+                Expanded(
+                  child: _CeldaTelemetria(
+                    icono: Icons.speed,
+                    color: Colors.greenAccent,
+                    valor: km != null
+                        ? AppFormatters.formatearKilometraje(km)
+                        : '—',
+                    unidad: 'km',
+                    etiqueta: 'ODÓMETRO',
+                  ),
+                ),
+                if (fuel != null)
+                  Expanded(
+                    child: _CeldaCombustible(porcentaje: fuel),
+                  ),
+                if (auton != null)
+                  Expanded(
+                    child: _CeldaTelemetria(
+                      icono: Icons.route,
+                      color: Colors.cyanAccent,
+                      valor: auton.toStringAsFixed(0),
+                      unidad: 'km',
+                      etiqueta: 'AUTONOMÍA',
+                    ),
+                  ),
+              ],
+            )
+          // Fallback: igual que antes para unidades sin combustible/autonomía.
+          : Row(
+              children: [
+                const Icon(Icons.speed, color: Colors.greenAccent),
+                const SizedBox(width: 10),
+                const Text('Kilometraje',
+                    style: TextStyle(color: Colors.white60, fontSize: 12)),
+                const Spacer(),
+                Text(
+                  '${AppFormatters.formatearKilometraje(km)} km',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _CeldaTelemetria extends StatelessWidget {
+  final IconData icono;
+  final Color color;
+  final String valor;
+  final String unidad;
+  final String etiqueta;
+
+  const _CeldaTelemetria({
+    required this.icono,
+    required this.color,
+    required this.valor,
+    required this.unidad,
+    required this.etiqueta,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Icon(icono, color: color, size: 22),
+        const SizedBox(height: 6),
+        RichText(
+          text: TextSpan(
+            children: [
+              TextSpan(
+                text: valor,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              TextSpan(
+                text: ' $unidad',
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          etiqueta,
+          style: const TextStyle(
+            color: Colors.white38,
+            fontSize: 9,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CeldaCombustible extends StatelessWidget {
+  final double porcentaje;
+  const _CeldaCombustible({required this.porcentaje});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = porcentaje.clamp(0.0, 100.0);
+    final color = _colorCombustible(pct);
+
+    return Column(
+      children: [
+        Icon(Icons.local_gas_station, color: color, size: 22),
+        const SizedBox(height: 6),
+        Text(
+          '${pct.toStringAsFixed(0)}%',
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 60,
+          height: 4,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: pct / 100,
+              backgroundColor: Colors.white12,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          'COMBUSTIBLE',
+          style: TextStyle(
+            color: Colors.white38,
+            fontSize: 9,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1,
+          ),
+        ),
+      ],
     );
   }
 }

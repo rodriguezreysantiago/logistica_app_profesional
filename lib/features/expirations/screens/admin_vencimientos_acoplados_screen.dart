@@ -1,13 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
+import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../widgets/vencimiento_editor_sheet.dart';
 import '../widgets/vencimiento_item.dart';
 import '../widgets/vencimiento_item_card.dart';
 
-/// Auditoría de vencimientos de bateas/tolvas/acoplados.
+/// Auditoría de vencimientos de los enganches de la flota: bateas,
+/// tolvas, bivuelcos, tanques y acoplados (legacy).
 class AdminVencimientosAcopladosScreen extends StatefulWidget {
   const AdminVencimientosAcopladosScreen({super.key});
 
@@ -20,11 +23,7 @@ class _AdminVencimientosAcopladosScreenState
     extends State<AdminVencimientosAcopladosScreen> {
   late final Stream<QuerySnapshot> _vehiculosStream;
 
-  static const _tiposIncluidos = ['BATEA', 'TOLVA', 'ACOPLADO'];
-  static const Map<String, String> _documentosAuditados = {
-    'RTO': 'RTO',
-    'Seguro': 'SEGURO',
-  };
+  static const List<String> _tiposIncluidos = AppTiposVehiculo.enganches;
 
   @override
   void initState() {
@@ -41,22 +40,25 @@ class _AdminVencimientosAcopladosScreenState
       if (!_tiposIncluidos.contains(tipo)) continue;
 
       final patente = doc.id.toUpperCase();
-      _documentosAuditados.forEach((etiqueta, campoBase) {
-        final fecha = data['VENCIMIENTO_$campoBase']?.toString();
-        if (fecha == null || fecha.isEmpty) return;
+      // Iteramos AppVencimientos.enganche para que sumar un vencimiento
+      // nuevo a esa lista lo audite automáticamente.
+      for (final spec in AppVencimientos.enganche) {
+        final fecha = data[spec.campoFecha]?.toString();
+        if (fecha == null || fecha.isEmpty) continue;
+        final campoBase = spec.campoFecha.replaceFirst('VENCIMIENTO_', '');
         final dias = AppFormatters.calcularDiasRestantes(fecha);
         items.add(VencimientoItem(
           docId: patente,
           coleccion: 'VEHICULOS',
           titulo: '$tipo - $patente',
-          tipoDoc: etiqueta,
+          tipoDoc: spec.etiqueta,
           campoBase: campoBase,
           fecha: fecha,
           dias: dias,
-          urlArchivo: data['ARCHIVO_$campoBase']?.toString(),
+          urlArchivo: data[spec.campoArchivo]?.toString(),
           storagePath: 'VEHICULOS_DOCS',
         ));
-      });
+      }
     }
 
     final criticos =

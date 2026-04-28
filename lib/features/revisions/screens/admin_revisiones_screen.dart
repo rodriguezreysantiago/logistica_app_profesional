@@ -296,6 +296,18 @@ class _DetalleRevision extends StatelessWidget {
     final messenger = ScaffoldMessenger.of(context);
     final esCambioEquipo = data['tipo_solicitud'] == 'CAMBIO_EQUIPO';
 
+    // Validación previa: si no tenemos id de la solicitud no podemos hacer
+    // nada útil — abortamos antes de cerrar el sheet.
+    if (idDoc.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Solicitud inválida (sin ID).'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     // Cerrar el sheet inmediatamente para feedback visual
     navigator.pop();
 
@@ -325,6 +337,17 @@ class _DetalleRevision extends StatelessWidget {
           backgroundColor: aprobado ? Colors.green : Colors.redAccent,
         ),
       );
+    } on StateError catch (e) {
+      // Solicitudes corruptas (sin dni/patente/campo) — mensaje claro
+      // en vez del críptico "document path must be a non-empty string".
+      debugPrint('Solicitud corrupta: ${e.message}');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.orangeAccent,
+          duration: const Duration(seconds: 5),
+        ),
+      );
     } catch (e) {
       debugPrint('Error procesando revisión: $e');
       messenger.showSnackBar(
@@ -338,11 +361,23 @@ class _DetalleRevision extends StatelessWidget {
 
   Future<void> _aprobarCambioEquipo() async {
     final db = FirebaseFirestore.instance;
-    final batch = db.batch();
-    final dni = (data['dni'] ?? '').toString();
-    final nueva = (data['patente'] ?? '').toString();
-    final actual = (data['unidad_actual'] ?? '').toString();
+    final dni = (data['dni'] ?? '').toString().trim();
+    final nueva = (data['patente'] ?? '').toString().trim();
+    final actual = (data['unidad_actual'] ?? '').toString().trim();
     final esTractor = data['campo'] == 'SOLICITUD_VEHICULO';
+
+    // Validación defensiva: si la solicitud no tiene los IDs mínimos no
+    // podemos hacer el update sin crashear con "document path must be a
+    // non-empty string". Borramos la solicitud rota y avisamos al admin.
+    if (dni.isEmpty || nueva.isEmpty || idDoc.isEmpty) {
+      await db.collection('REVISIONES').doc(idDoc).delete();
+      throw StateError(
+        'La solicitud no tiene chofer (dni) o unidad (patente) válidos. '
+        'Se eliminó del listado.',
+      );
+    }
+
+    final batch = db.batch();
 
     // 1) Actualizar empleado con la nueva unidad
     batch.update(db.collection('EMPLEADOS').doc(dni), {
@@ -350,15 +385,17 @@ class _DetalleRevision extends StatelessWidget {
       'ultima_actualizacion': FieldValue.serverTimestamp(),
     });
 
-    // 2) Liberar la unidad anterior si existía
-    if (actual.isNotEmpty && actual != '-' && actual != 'SIN ASIGNAR') {
+    // 2) Liberar la unidad anterior si existía y es válida
+    if (actual.isNotEmpty &&
+        actual != '-' &&
+        actual.toUpperCase() != 'SIN ASIGNAR') {
       batch.update(
         db.collection('VEHICULOS').doc(actual),
         {'ESTADO': 'LIBRE'},
       );
     }
 
-    // 3) Marcar la unidad nueva como ocupada
+    // 3) Marcar la unidad nueva como ocupada (ya validamos que no es vacía)
     batch.update(
       db.collection('VEHICULOS').doc(nueva),
       {'ESTADO': 'OCUPADO'},
@@ -371,28 +408,36 @@ class _DetalleRevision extends StatelessWidget {
   }
 
   Future<void> _aprobarDocumento() async {
-    final coleccion = (data['coleccion_destino'] ?? 'EMPLEADOS').toString();
+    final db = FirebaseFirestore.instance;
+    final coleccion = (data['coleccion_destino'] ?? 'EMPLEADOS').toString().trim();
     final idDestino =
         (data['dni'] ?? data['patente'] ?? '').toString().trim().toUpperCase();
-    final campoVencimiento = (data['campo'] ?? '').toString();
+    final campoVencimiento = (data['campo'] ?? '').toString().trim();
     final urlArchivo = (data['url_archivo'] ?? '').toString();
 
-    if (idDestino.isNotEmpty && campoVencimiento.isNotEmpty) {
-      final campoArchivo =
-          campoVencimiento.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
-      await FirebaseFirestore.instance
-          .collection(coleccion)
-          .doc(idDestino)
-          .update({
-        campoVencimiento: data['fecha_vencimiento'],
-        campoArchivo: urlArchivo,
-        'ultima_actualizacion_sistema': FieldValue.serverTimestamp(),
-      });
+    // Validación defensiva: sin idDestino o sin campo no podemos persistir
+    // el cambio. Sin idDoc no podemos borrar la solicitud. Cualquier doc
+    // path vacío hace explotar el plugin de Firestore.
+    if (idDoc.isEmpty) {
+      throw StateError('La solicitud no tiene ID válido.');
     }
-    await FirebaseFirestore.instance
-        .collection('REVISIONES')
-        .doc(idDoc)
-        .delete();
+    if (idDestino.isEmpty || campoVencimiento.isEmpty || coleccion.isEmpty) {
+      // Limpiamos la solicitud rota — el admin no la puede salvar.
+      await db.collection('REVISIONES').doc(idDoc).delete();
+      throw StateError(
+        'La solicitud no tiene destino (dni/patente) o campo válidos. '
+        'Se eliminó del listado.',
+      );
+    }
+
+    final campoArchivo =
+        campoVencimiento.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
+    await db.collection(coleccion).doc(idDestino).update({
+      campoVencimiento: data['fecha_vencimiento'],
+      campoArchivo: urlArchivo,
+      'ultima_actualizacion_sistema': FieldValue.serverTimestamp(),
+    });
+    await db.collection('REVISIONES').doc(idDoc).delete();
   }
 }
 
