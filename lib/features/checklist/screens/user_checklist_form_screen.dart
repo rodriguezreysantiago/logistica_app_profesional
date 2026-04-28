@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../data/checklist_data.dart';
 
@@ -153,29 +154,12 @@ class _UserChecklistFormScreenState
       );
 
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Registro sincronizado en la nube',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
+      AppFeedback.successOn(messenger, 'Registro sincronizado en la nube');
       navigator.pop();
     } catch (e) {
       if (!mounted) return;
       if (e is TimeoutException && e.message == 'OFFLINE_MODE') {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Sin conexión. Guardado en el equipo, se subirá automáticamente.',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 4),
-          ),
-        );
+        AppFeedback.warningOn(messenger, 'Sin conexión. Guardado en el equipo, se subirá automáticamente.');
         navigator.pop();
       } else {
         setState(() => _enviando = false);
@@ -188,15 +172,7 @@ class _UserChecklistFormScreenState
     ScaffoldMessengerState messenger,
     String mensaje,
   ) {
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          mensaje,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.redAccent,
-      ),
-    );
+    AppFeedback.errorOn(messenger, mensaje);
   }
 }
 

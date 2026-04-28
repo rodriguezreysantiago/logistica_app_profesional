@@ -173,4 +173,88 @@ class VehiculoRepository {
   // El manager pega directo a `_api.traerTelemetria` cuando necesita
   // datos frescos de un VIN. Antes había un wrapper `traerKmDesdeApi`
   // que solo envolvía en try-catch — se removió porque era redundante.
+
+  // ===========================================================================
+  // SNAPSHOTS HISTÓRICOS — colección TELEMETRIA_HISTORICO
+  // ===========================================================================
+
+  static const String collectionHistorico = 'TELEMETRIA_HISTORICO';
+
+  /// Itera el [cacheVolvo] y guarda un snapshot histórico por unidad
+  /// para el día de hoy.
+  ///
+  /// El doc tiene id determinístico `{patente}_{YYYY-MM-DD}`, así que
+  /// llamadas múltiples en el mismo día sobreescriben el doc del día
+  /// con el último valor (last-write-wins). Eso es lo que queremos
+  /// para que `snapshot[día] = último litro_acumulado del día`.
+  ///
+  /// El reporte de consumo después calcula:
+  ///   litros_período = snapshot[hasta] − snapshot[desde − 1]
+  ///
+  /// Idempotente y barato: una flota chica genera ~30 docs/día.
+  Future<void> guardarSnapshotsDiarios(List<dynamic> cacheVolvo) async {
+    if (cacheVolvo.isEmpty) return;
+
+    // Construimos un map VIN → patente cruzando con Firestore. El cache
+    // de Volvo solo trae VINs; necesitamos la patente para que el id
+    // del doc histórico sea legible y consistente con el resto de la app.
+    final vehiculos = await _db.collection(collection).get();
+    final vinToPatente = <String, String>{};
+    for (final doc in vehiculos.docs) {
+      final data = doc.data();
+      final vin = (data['VIN'] ?? '').toString().trim().toUpperCase();
+      if (vin.isNotEmpty && vin != '-') {
+        vinToPatente[vin] = doc.id;
+      }
+    }
+
+    final hoy = DateTime.now();
+    final fecha = DateTime(hoy.year, hoy.month, hoy.day);
+    final fechaTxt =
+        '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}';
+
+    // Usamos batch para reducir round-trips. Firestore acepta hasta 500
+    // ops por batch — para una flota chica nunca llegamos.
+    final batch = _db.batch();
+    var contadosEscritos = 0;
+
+    for (final v in cacheVolvo) {
+      final vin = (v['vin'] ?? '').toString().trim().toUpperCase();
+      if (vin.isEmpty) continue;
+      final patente = vinToPatente[vin];
+      if (patente == null) continue;
+
+      // Litros acumulados — viene del campo Volvo `accumulatedData.totalFuelConsumption`.
+      final acc = v['accumulatedData'];
+      double litros = 0;
+      if (acc is Map) {
+        litros = ((acc['totalFuelConsumption'] ?? 0) as num).toDouble();
+      }
+
+      // Odómetro — Volvo lo entrega en metros. La cache prioriza
+      // `hrTotalVehicleDistance` que es el odómetro de alta resolución.
+      final metros = (v['hrTotalVehicleDistance'] ??
+              v['lastKnownOdometer'] ??
+              0) as num;
+      final km = metros.toDouble() / 1000;
+
+      // Sin telemetría útil no escribimos: ahorra storage y evita ruido
+      // en el reporte (un snapshot con 0/0 se ve como una caída a cero).
+      if (litros == 0 && km == 0) continue;
+
+      final docId = '${patente}_$fechaTxt';
+      batch.set(_db.collection(collectionHistorico).doc(docId), {
+        'patente': patente,
+        'vin': vin,
+        'fecha': Timestamp.fromDate(fecha),
+        'litros_acumulados': litros,
+        'km': km,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+      contadosEscritos++;
+    }
+
+    if (contadosEscritos == 0) return;
+    await batch.commit();
+  }
 }

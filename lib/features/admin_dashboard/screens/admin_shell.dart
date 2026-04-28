@@ -152,6 +152,14 @@ class _AdminShellState extends State<AdminShell> {
         elevation: 0,
         foregroundColor: Colors.white,
         actions: [
+          // Botón visible para abrir el palette desde la AppBar — además
+          // de Ctrl+K — para que los admins que no recuerden el atajo
+          // puedan acceder igual.
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Búsqueda rápida (Ctrl+K)',
+            onPressed: () => CommandPalette.show(context),
+          ),
           IconButton(
             icon: const Icon(Icons.exit_to_app),
             tooltip: 'Volver al menú principal',
@@ -159,28 +167,30 @@ class _AdminShellState extends State<AdminShell> {
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // Fondo unificado (se ve a través del rail/bottombar)
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/fondo_login.jpg',
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                color: Theme.of(context).scaffoldBackgroundColor,
+      body: CommandPaletteShortcut(
+        child: Stack(
+          children: [
+            // Fondo unificado (se ve a través del rail/bottombar)
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/fondo_login.jpg',
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                ),
               ),
             ),
-          ),
-          Positioned.fill(
-            child: Container(color: Colors.black.withAlpha(200)),
-          ),
-          // Layout responsive
-          SafeArea(
-            child: esDesktop
-                ? _buildDesktopLayout(section)
-                : _buildMobileLayout(section),
-          ),
-        ],
+            Positioned.fill(
+              child: Container(color: Colors.black.withAlpha(200)),
+            ),
+            // Layout responsive
+            SafeArea(
+              child: esDesktop
+                  ? _buildDesktopLayout(section)
+                  : _buildMobileLayout(section),
+            ),
+          ],
+        ),
       ),
       bottomNavigationBar: esDesktop ? null : _buildBottomBar(),
     );

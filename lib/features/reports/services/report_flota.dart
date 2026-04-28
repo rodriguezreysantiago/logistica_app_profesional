@@ -1,9 +1,11 @@
 import 'dart:io';
-import 'package:excel/excel.dart' as ex; 
+import 'package:excel/excel.dart' as ex;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../core/constants/app_constants.dart';
 
@@ -12,6 +14,14 @@ class ReportGenerator {
 
   static Future<void> mostrarOpcionesYGenerar(BuildContext context, List<dynamic> cacheVolvo) async {
     final messenger = ScaffoldMessenger.of(context);
+
+    // Web no soporta dart:io.File ni Process.run; los reportes Excel
+    // generan archivo en filesystem y lo abren con Excel/Share.
+    // Degradación elegante: avisamos y salimos sin tocar Firestore.
+    if (kIsWeb) {
+      AppFeedback.warningOn(messenger, 'Los reportes Excel solo están disponibles en Windows y Android.');
+      return;
+    }
     
     final Map<String, bool> opciones = {
       "TIPO": true,

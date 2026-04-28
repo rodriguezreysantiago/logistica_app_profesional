@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../core/services/audit_log_service.dart';
+import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Form de alta de un nuevo vehículo (tractor / batea / tolva).
@@ -71,13 +76,7 @@ class _AdminVehiculoAltaScreenState
 
       if (doc.exists) {
         if (!mounted) return;
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Error: esta patente ya está registrada en la flota'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        AppFeedback.errorOn(messenger, 'Error: esta patente ya está registrada en la flota');
         setState(() => _guardando = false);
         return;
       }
@@ -110,22 +109,24 @@ class _AdminVehiculoAltaScreenState
           .doc(patente)
           .set(initialFields);
 
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.crearVehiculo,
+        entidad: 'VEHICULOS',
+        entidadId: patente,
+        detalles: {
+          'tipo': _tipo,
+          'marca': _marcaCtrl.text.trim().toUpperCase(),
+          'modelo': _modeloCtrl.text.trim().toUpperCase(),
+          'empresa': _empresa,
+        },
+      ));
+
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Unidad registrada con éxito'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      AppFeedback.successOn(messenger, 'Unidad registrada con éxito');
       navigator.pop();
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al guardar: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'Error al guardar: $e');
       setState(() => _guardando = false);
     }
   }
@@ -275,6 +276,12 @@ class _VInput extends StatelessWidget {
         maxLength: maxLength,
         readOnly: readOnly,
         textCapitalization: TextCapitalization.characters,
+        // En campos numéricos (ej. año) filtramos cualquier no-dígito.
+        // El keyboardType ayuda en mobile pero no garantiza nada en
+        // desktop ni cuando el usuario pega del clipboard.
+        inputFormatters: isNumeric
+            ? [DigitOnlyFormatter(maxLength: maxLength)]
+            : null,
         style: TextStyle(
           color: readOnly ? Colors.white54 : Colors.white,
           fontSize: 14,

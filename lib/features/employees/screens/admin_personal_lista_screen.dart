@@ -1,13 +1,18 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+// `flutter/services` ya re-exporta Uint8List (dart:typed_data) además de
+// los TextInputFormatter, así que cubre los dos usos de este archivo.
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/audit_log_service.dart';
+import '../../../core/services/storage_service.dart';
+import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
@@ -52,6 +57,9 @@ class _AdminPersonalListaScreenState
             builder: (_) => const AdminPersonalFormScreen(),
           ),
         ),
+        // El tooltip ayuda en desktop (hover) y a screen readers — el
+        // label "NUEVO" del FAB es ambiguo sin contexto fuera del título.
+        tooltip: 'Agregar nuevo chofer',
         icon: const Icon(Icons.person_add_alt_1),
         label: const Text('NUEVO'),
       ),
@@ -190,6 +198,14 @@ class _RolBadge extends StatelessWidget {
 // DETALLE DEL CHOFER (bottom sheet)
 // =============================================================================
 
+/// Wrapper público para abrir la ficha del chofer desde otros features
+/// (ej. el CommandPalette / búsqueda Ctrl+K).
+///
+/// `_DetalleChofer.abrir` es privado por convención del archivo; este
+/// alias top-level expone el mismo flujo sin filtrar el detalle interno.
+Future<void> abrirDetalleChofer(BuildContext context, String dni) =>
+    _DetalleChofer.abrir(context, dni);
+
 class _DetalleChofer extends StatelessWidget {
   final String dni;
   final ScrollController scrollController;
@@ -240,30 +256,43 @@ class _DetalleChofer extends StatelessWidget {
         _DatoEditableTexto(
           etiqueta: 'DNI',
           valor: dni,
+          // DNI: solo dígitos. Si el admin pega "12.345.678" desde un
+          // sheet u otro lado, el formatter lo limpia.
+          inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
+          keyboardType: TextInputType.number,
+          aplicarMayusculas: false,
           onSave: (v) => _Actualizar.dato(context, dni, 'DNI', v),
         ),
         _DatoEditableTexto(
           etiqueta: 'CUIL',
           valor: AppFormatters.formatearCUIL(data['CUIL'] ?? '-'),
+          inputFormatters: [DigitOnlyFormatter(maxLength: 11)],
+          keyboardType: TextInputType.number,
+          aplicarMayusculas: false,
+          // El AppFormatters muestra "20-12345678-9" pero guardamos crudo.
           onSave: (v) => _Actualizar.dato(
               context, dni, 'CUIL', v.replaceAll('-', '')),
         ),
         _DatoEditableTexto(
           etiqueta: 'MAIL',
           valor: (data['MAIL'] ?? '-').toString(),
-          // El mail se guarda en minúsculas; pisamos el toUpperCase() del
-          // dialog estándar dejando el valor crudo.
-          onSave: (v) => _Actualizar.dato(
-              context, dni, 'MAIL', v.toLowerCase().trim()),
+          keyboardType: TextInputType.emailAddress,
+          // El mail va lowercase, no en MAYÚSCULAS como los demás campos.
+          aplicarMayusculas: false,
+          onSave: (v) =>
+              _Actualizar.dato(context, dni, 'MAIL', v.toLowerCase()),
         ),
         _DatoEditableTexto(
           etiqueta: 'TELÉFONO',
           valor: (data['TELEFONO'] ?? '-').toString(),
-          // Solo guardamos los dígitos sin trim de mayúsculas (el dialog
-          // por default lo aplica). El normalizador de WhatsApp ya tolera
-          // espacios y guiones, pero si lo dejamos limpio mejor.
-          onSave: (v) => _Actualizar.dato(
-              context, dni, 'TELEFONO', v.trim()),
+          // Teléfono: solo dígitos. El normalizador de WhatsApp tolera
+          // espacios y guiones, pero conviene guardar limpio para que el
+          // wa.me no falle por caracteres raros.
+          inputFormatters: [DigitOnlyFormatter()],
+          keyboardType: TextInputType.phone,
+          aplicarMayusculas: false,
+          onSave: (v) =>
+              _Actualizar.dato(context, dni, 'TELEFONO', v),
         ),
         _DatoEditableEmpresa(
           valor: (data['EMPRESA'] ?? '-').toString(),
@@ -436,11 +465,21 @@ class _DatoEditableTexto extends StatelessWidget {
   final String etiqueta;
   final String valor;
   final Function(String) onSave;
+  /// Formatters opcionales (ej. `DigitOnlyFormatter` para TELÉFONO).
+  final List<TextInputFormatter>? inputFormatters;
+  /// Tipo de teclado (default text). Útil para teléfono / mail.
+  final TextInputType? keyboardType;
+  /// Si es false, el dialog NO aplica `.toUpperCase()` al guardar — útil
+  /// para campos como mail (lowercase) o teléfono (solo dígitos).
+  final bool aplicarMayusculas;
 
   const _DatoEditableTexto({
     required this.etiqueta,
     required this.valor,
     required this.onSave,
+    this.inputFormatters,
+    this.keyboardType,
+    this.aplicarMayusculas = true,
   });
 
   @override
@@ -478,6 +517,11 @@ class _DatoEditableTexto extends StatelessWidget {
         extentOffset: valor.length,
       );
 
+    String transform(String raw) {
+      final t = raw.trim();
+      return aplicarMayusculas ? t.toUpperCase() : t;
+    }
+
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
@@ -485,7 +529,14 @@ class _DatoEditableTexto extends StatelessWidget {
         content: TextField(
           controller: controller,
           autofocus: true,
-          textCapitalization: TextCapitalization.characters,
+          // Solo aplicamos textCapitalization cuando el caller espera
+          // mayúsculas — evita pisar el formatter numérico del TELÉFONO
+          // o el mail en lowercase.
+          textCapitalization: aplicarMayusculas
+              ? TextCapitalization.characters
+              : TextCapitalization.none,
+          keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
             hintText: 'Escriba aquí...',
@@ -498,7 +549,7 @@ class _DatoEditableTexto extends StatelessWidget {
           ),
           // Permite enviar con Enter sin tener que ir al botón.
           onSubmitted: (_) {
-            onSave(controller.text.trim().toUpperCase());
+            onSave(transform(controller.text));
             Navigator.pop(dCtx);
           },
         ),
@@ -509,7 +560,7 @@ class _DatoEditableTexto extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () {
-              onSave(controller.text.trim().toUpperCase());
+              onSave(transform(controller.text));
               Navigator.pop(dCtx);
             },
             child: const Text('GUARDAR'),
@@ -712,19 +763,15 @@ class _Actualizar {
         campo: valor,
         'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
       });
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Dato actualizado: $campo'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.editarChofer,
+        entidad: 'EMPLEADOS',
+        entidadId: dni.trim(),
+        detalles: {'campo': campo, 'nuevo_valor': valor?.toString() ?? ''},
+      ));
+      AppFeedback.successOn(messenger, 'Dato actualizado: $campo');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al actualizar: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'Error al actualizar: $e');
     }
   }
 
@@ -797,10 +844,15 @@ class _Actualizar {
                   imageQuality: 50,
                 );
                 if (image != null && context.mounted) {
+                  // readAsBytes() es cross-platform; image.path en Web es un
+                  // blob URL que no se puede abrir como dart:io.File.
+                  final bytes = await image.readAsBytes();
+                  if (!context.mounted) return;
                   await _subirArchivo(
                     context,
                     dni,
-                    File(image.path),
+                    bytes,
+                    image.name,
                     'perfiles/$dni.jpg',
                     'ARCHIVO_PERFIL',
                   );
@@ -813,49 +865,33 @@ class _Actualizar {
     ));
   }
 
-  /// Sube un archivo físico a Storage y guarda la URL en Firestore.
-  /// Detecta el contentType según la extensión (PDF, JPG, PNG).
+  /// Sube los bytes de un archivo a Storage y guarda la URL en Firestore.
+  /// Detecta el contentType según la extensión vía `StorageService` —
+  /// que es cross-platform (no usa `dart:io.File`).
   static Future<void> _subirArchivo(
     BuildContext context,
     String id,
-    File file,
+    Uint8List bytes,
+    String nombreOriginal,
     String storagePath,
     String dbCampo,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Subiendo archivo...')),
+      AppFeedback.infoOn(messenger, 'Subiendo archivo...');
+
+      final downloadUrl = await StorageService().subirArchivo(
+        bytes: bytes,
+        nombreOriginal: nombreOriginal,
+        rutaStorage: storagePath,
       );
-      final ref = FirebaseStorage.instance.ref().child(storagePath);
 
-      // Detectamos contentType según extensión para que Firebase Storage
-      // lo sirva con el header correcto y el visor sepa abrirlo bien.
-      final lower = storagePath.toLowerCase();
-      String? contentType;
-      if (lower.endsWith('.pdf')) {
-        contentType = 'application/pdf';
-      } else if (lower.endsWith('.png')) {
-        contentType = 'image/png';
-      } else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-        contentType = 'image/jpeg';
-      }
-      final metadata =
-          contentType != null ? SettableMetadata(contentType: contentType) : null;
-
-      await ref.putFile(file, metadata);
-      final downloadUrl = await ref.getDownloadURL();
       if (context.mounted) {
         await dato(context, id, dbCampo, downloadUrl);
       }
     } catch (e) {
       if (context.mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error al subir: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        AppFeedback.errorOn(messenger, 'Error al subir: $e');
       }
     }
   }
@@ -932,7 +968,8 @@ class _Actualizar {
     if (fuente == null) return;
     if (!context.mounted) return;
 
-    File? archivo;
+    Uint8List? bytes;
+    String nombreOriginal = '';
     String extension = 'jpg';
 
     switch (fuente) {
@@ -943,26 +980,34 @@ class _Actualizar {
             : ImageSource.gallery;
         final img = await picker.pickImage(source: source, imageQuality: 60);
         if (img == null) return;
-        archivo = File(img.path);
+        // readAsBytes(): cross-platform (Web devuelve blob bytes, no File).
+        bytes = await img.readAsBytes();
+        nombreOriginal = img.name;
         extension = 'jpg';
         break;
       case _FuenteArchivoChofer.archivo:
+        // withData: true para que `bytes` venga poblado en Web también.
         final res = await FilePicker.platform.pickFiles(
           type: FileType.custom,
           allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
+          withData: true,
         );
-        if (res == null || res.files.single.path == null) return;
-        archivo = File(res.files.single.path!);
-        extension = res.files.single.extension?.toLowerCase() ?? 'pdf';
+        final picked = res?.files.singleOrNull;
+        if (picked == null || picked.bytes == null) return;
+        bytes = picked.bytes;
+        nombreOriginal = picked.name;
+        extension = picked.extension?.toLowerCase() ?? 'pdf';
         break;
     }
 
     // Después del picker viene otro await: revalidamos contra el mismo
     // BuildContext que vamos a pasar a _subirArchivo (el lint pide eso).
     if (!context.mounted) return;
+    if (bytes == null) return;
     final storagePath =
         'EMPLEADOS/$dni/${campoUrl}_${DateTime.now().millisecondsSinceEpoch}.$extension';
-    await _subirArchivo(context, dni, archivo, storagePath, campoUrl);
+    await _subirArchivo(
+        context, dni, bytes, nombreOriginal, storagePath, campoUrl);
   }
 
   /// Sheet con opciones para gestionar un documento (fecha + archivo).
@@ -1003,7 +1048,7 @@ class _Actualizar {
             const SizedBox(height: 15),
             ListTile(
               leading:
-                  const Icon(Icons.calendar_today, color: Colors.blueAccent),
+                  const Icon(Icons.event_note, color: Colors.blueAccent),
               title: const Text('Editar fecha de vencimiento',
                   style: TextStyle(color: Colors.white)),
               onTap: () {
@@ -1090,12 +1135,17 @@ class _Actualizar {
     final tipos = (campo == 'VEHICULO')
         ? <String>[AppTiposVehiculo.tractor]
         : AppTiposVehiculo.enganches;
+    // Capturamos el messenger del scaffold padre antes de abrir el dialog;
+    // lo usamos después del batch.commit para mostrar feedback al admin
+    // (ScaffoldMessenger.of(dCtx) no aplica una vez cerrado el dialog).
+    final messenger = ScaffoldMessenger.of(context);
+    final esTractor = campo == 'VEHICULO';
+    final etiquetaUnidad = esTractor ? 'tractor' : 'enganche';
 
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
-        title:
-            Text("Asignar ${campo == 'VEHICULO' ? 'tractor' : 'enganche'}"),
+        title: Text("Asignar $etiquetaUnidad"),
         content: SizedBox(
           width: double.maxFinite,
           height: 350,
@@ -1135,21 +1185,47 @@ class _Actualizar {
                   );
                 }
 
-                await batch.commit();
+                try {
+                  await batch.commit();
 
-                if (cleanActual.isNotEmpty &&
-                    cleanActual != '-' &&
-                    cleanActual != 'S/D') {
-                  try {
-                    await db
-                        .collection('VEHICULOS')
-                        .doc(cleanActual)
-                        .update({'ESTADO': 'LIBRE'});
-                  } catch (_) {
-                    // Unidad previa ya no existe / ya estaba libre
+                  if (cleanActual.isNotEmpty &&
+                      cleanActual != '-' &&
+                      cleanActual != 'S/D') {
+                    try {
+                      await db
+                          .collection('VEHICULOS')
+                          .doc(cleanActual)
+                          .update({'ESTADO': 'LIBRE'});
+                    } catch (_) {
+                      // Unidad previa ya no existe / ya estaba libre
+                    }
                   }
+
+                  unawaited(AuditLog.registrar(
+                    accion: (nueva == null || nueva == '-')
+                        ? AuditAccion.desvincularEquipo
+                        : AuditAccion.asignarEquipo,
+                    entidad: 'EMPLEADOS',
+                    entidadId: dni,
+                    detalles: {
+                      'campo': campo,
+                      'unidad_anterior': cleanActual,
+                      'unidad_nueva': nueva ?? '',
+                    },
+                  ));
+
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+
+                  // Feedback de éxito: distinto copy según haya sido
+                  // desvinculación o asignación nueva.
+                  final mensaje = (nueva == null || nueva == '-')
+                      ? 'Se desvinculó el $etiquetaUnidad de este chofer.'
+                      : 'Se asignó el $etiquetaUnidad $nueva.';
+                  AppFeedback.successOn(messenger, mensaje);
+                } catch (e) {
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  AppFeedback.errorOn(messenger, 'No se pudo guardar el cambio: $e');
                 }
-                if (ctx.mounted) Navigator.of(ctx).pop();
               }
 
               return ListView.builder(
@@ -1166,7 +1242,24 @@ class _Actualizar {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      onTap: () => procesarCambio(null),
+                      // Confirmación destructiva: desvincular cambia el
+                      // legajo del chofer Y libera la unidad. Si toca por
+                      // error y no avisamos, el equipo queda mal asignado
+                      // y nadie se entera hasta que el chofer reclame.
+                      onTap: () async {
+                        final ok = await AppConfirmDialog.show(
+                          context,
+                          title: '¿Desvincular $etiquetaUnidad?',
+                          message:
+                              'El chofer va a quedar sin $etiquetaUnidad asignado y la unidad vuelve a estado LIBRE.',
+                          confirmLabel: 'DESVINCULAR',
+                          destructive: true,
+                          icon: Icons.link_off,
+                        );
+                        if (ok == true) {
+                          await procesarCambio(null);
+                        }
+                      },
                     );
                   }
 

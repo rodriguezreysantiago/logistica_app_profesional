@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:firebase_storage/firebase_storage.dart';
 
@@ -10,28 +10,41 @@ import 'package:firebase_storage/firebase_storage.dart';
 ///
 /// Esto vive en `core/services/` porque lo usan varios features
 /// (employees, revisions, vehicles).
+///
+/// **Cross-platform**: trabaja con `Uint8List` (bytes) en lugar de `File`.
+/// Eso permite que la misma API corra en Android, iOS, Windows y Web —
+/// donde `dart:io.File` no existe. Los callers obtienen los bytes así:
+///
+/// - Desde `image_picker`: `await xfile.readAsBytes()`
+/// - Desde `file_picker`:  `pickFiles(withData: true)` → `result.files.single.bytes!`
+/// - Desde `dart:io.File`: `await file.readAsBytes()` (mobile/desktop)
 class StorageService {
   final FirebaseStorage _storage;
 
   StorageService({FirebaseStorage? storage})
       : _storage = storage ?? FirebaseStorage.instance;
 
-  /// Sube un archivo a Firebase Storage en la ruta indicada y devuelve la URL.
+  /// Sube los [bytes] a Firebase Storage en [rutaStorage] y devuelve la URL.
+  ///
+  /// [nombreOriginal] se usa solo para inferir la extensión (y de ahí el
+  /// content-type). Puede ser el nombre del file picker o cualquier string
+  /// que termine con `.pdf`, `.png`, `.jpg`, etc.
   ///
   /// Throws [TimeoutException] si la subida tarda más de 30 segundos.
   Future<String> subirArchivo({
-    required File archivo,
+    required Uint8List bytes,
+    required String nombreOriginal,
     required String rutaStorage,
   }) async {
     try {
-      final extension = archivo.path.split('.').last.toLowerCase();
+      final extension = nombreOriginal.split('.').last.toLowerCase();
       final contentType = _obtenerContentType(extension);
 
       final ref = _storage.ref().child(rutaStorage);
 
       // Timeout de 30s — evita que la app se congele en redes lentas (4G).
       await ref
-          .putFile(archivo, SettableMetadata(contentType: contentType))
+          .putData(bytes, SettableMetadata(contentType: contentType))
           .timeout(
         const Duration(seconds: 30),
         onTimeout: () {

@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/services/audit_log_service.dart';
+import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/password_hasher.dart';
 import '../../../shared/utils/upper_case_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -64,12 +69,7 @@ class _AdminPersonalFormScreenState
       if (!mounted) return;
 
       if (doc.exists) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Error: este DNI ya está registrado'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        AppFeedback.errorOn(messenger, 'Error: este DNI ya está registrado');
         setState(() => _guardando = false);
         return;
       }
@@ -98,25 +98,28 @@ class _AdminPersonalFormScreenState
         'ultima_modificacion': FieldValue.serverTimestamp(),
       });
 
+      // Audit log fire-and-forget: el admin ya tiene su feedback
+      // visual; si falla el log, no rompemos el flujo.
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.crearChofer,
+        entidad: 'EMPLEADOS',
+        entidadId: dni,
+        detalles: {
+          'nombre': _nombreCtrl.text.trim().toUpperCase(),
+          'rol': _rol,
+          'empresa': _empresa,
+        },
+      ));
+
       // El widget puede haberse desmontado durante el await; si fue así,
       // no usamos messenger ni navigator (sus referencias quedaron stale).
       if (!mounted) return;
 
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Chofer creado con éxito'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      AppFeedback.successOn(messenger, 'Chofer creado con éxito');
       navigator.pop();
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al guardar: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'Error al guardar: $e');
       setState(() => _guardando = false);
     }
   }
@@ -126,7 +129,7 @@ class _AdminPersonalFormScreenState
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: AppScaffold(
-        title: 'Nuevo Legajo',
+        title: 'Nuevo chofer',
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Form(
@@ -262,10 +265,16 @@ class _FormInput extends StatelessWidget {
             ? TextInputType.emailAddress
             : (isNumeric ? TextInputType.number : TextInputType.text),
         textInputAction: textInputAction,
-        // ✅ Convertimos a mayúsculas con un inputFormatter en lugar de
-        //    `textCapitalization` para que Backspace funcione en Windows.
-        inputFormatters:
-            toUpperCase ? [UpperCaseInputFormatter()] : null,
+        // Formatters según el tipo de campo:
+        // - Numérico (DNI, CUIL, teléfono): solo dígitos. El keyboardType
+        //   number ayuda en mobile pero no garantiza nada en desktop ni
+        //   en paste, por eso el DigitOnlyFormatter es la red real.
+        // - Texto con toUpperCase: mayúsculas vivas, evitando
+        //   `textCapitalization` que rompe Backspace en Windows.
+        inputFormatters: [
+          if (isNumeric) DigitOnlyFormatter(maxLength: maxLength),
+          if (!isNumeric && toUpperCase) UpperCaseInputFormatter(),
+        ],
         style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
           counterText: '',

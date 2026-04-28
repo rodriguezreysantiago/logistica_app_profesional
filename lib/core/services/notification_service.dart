@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'dart:async'; // ✅ MENTOR: Necesario para el StreamController
-import 'package:flutter/foundation.dart'; 
-import 'package:flutter/material.dart'; 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -11,6 +13,21 @@ class NotificationService {
   static final StreamController<String?> selectNotificationStream = StreamController<String?>.broadcast();
 
   static Future<void> init() async {
+    // Timezone: necesario para `zonedSchedule` que usa el agendado de
+    // recordatorios de vencimientos. `initializeTimeZones` carga la
+    // base IANA y `setLocalLocation` define el huso local. Bahía Blanca
+    // está en `America/Argentina/Buenos_Aires` — todo el equipo usa el
+    // mismo huso así que no necesitamos detección dinámica.
+    if (!kIsWeb) {
+      tz.initializeTimeZones();
+      try {
+        tz.setLocalLocation(tz.getLocation('America/Argentina/Buenos_Aires'));
+      } catch (_) {
+        // Si falla la zona específica, dejamos UTC como fallback
+        // (los avisos pueden quedar corridos pero igual disparan).
+      }
+    }
+
     // CONFIGURACIÓN ANDROID
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -126,8 +143,174 @@ class NotificationService {
     );
   }
 
+  // ===========================================================================
+  // RECORDATORIOS AGENDADOS (vencimientos del chofer)
+  // ===========================================================================
+
+  /// Identifica el rango de IDs reservado para recordatorios agendados
+  /// de vencimientos. Al cancelar todos los recordatorios usamos
+  /// `cancelAll` global, así que este rango es solo documentación —
+  /// la única razón por la que el rango importa es que los IDs deben
+  /// ser únicos a través de toda la app y los hash truncados a 31 bits
+  /// nos dan ~2 mil millones de slots, así que no chocamos con los
+  /// `id` que usa `mostrarAlertaVencimiento` (los cuales son
+  /// pasados explícitamente por el caller, raros).
+  static const int _idMaxBits = 0x7FFFFFFF;
+
+  /// Cancela TODOS los recordatorios agendados.
+  /// Idempotente: pensado para ser llamado antes de re-agendar la lista
+  /// completa, así no acumulamos avisos viejos.
+  static Future<void> cancelarTodosLosRecordatorios() async {
+    if (kIsWeb) return;
+    try {
+      await _notificationsPlugin.cancelAll();
+    } catch (e) {
+      debugPrint('No se pudieron cancelar recordatorios: $e');
+    }
+  }
+
+  /// Agenda recordatorios locales para una lista de vencimientos.
+  ///
+  /// Por cada [VencimientoAviso] con fecha futura, crea hasta 4 avisos
+  /// (a 30, 15, 7 y 1 día antes de la fecha). Los avisos del pasado
+  /// se descartan silenciosamente — si hoy la fecha de aviso ya pasó,
+  /// no tiene sentido programarla.
+  ///
+  /// El ID de cada notificación es un hash determinístico de
+  /// `campoBase + dias_antes`, así que llamadas repetidas con la misma
+  /// data producen los mismos IDs y `zonedSchedule` los reemplaza
+  /// (idempotencia natural). Igual conviene `cancelarTodosLosRecordatorios`
+  /// antes para limpiar campos que el chofer haya renovado y ya no
+  /// están en la lista actual.
+  ///
+  /// **Plataforma**: solo Android/iOS. En Web no hace nada.
+  ///
+  /// Uso típico desde la pantalla de "Mis Vencimientos":
+  /// ```dart
+  /// await NotificationService.cancelarTodosLosRecordatorios();
+  /// await NotificationService.agendarRecordatoriosVencimientos(items);
+  /// ```
+  static Future<void> agendarRecordatoriosVencimientos(
+    List<VencimientoAviso> avisos,
+  ) async {
+    if (kIsWeb) return;
+
+    const diasOffsets = [30, 15, 7, 1];
+    final ahora = tz.TZDateTime.now(tz.local);
+
+    for (final aviso in avisos) {
+      for (final diasAntes in diasOffsets) {
+        final cuando = tz.TZDateTime.from(aviso.fecha, tz.local)
+            .subtract(Duration(days: diasAntes));
+        // No agendar avisos del pasado.
+        if (cuando.isBefore(ahora)) continue;
+
+        final id = _idDeterministico(
+          '${aviso.campoBase}_$diasAntes',
+        );
+        final mensaje = _mensajeRecordatorio(aviso, diasAntes);
+
+        try {
+          await _notificationsPlugin.zonedSchedule(
+            id,
+            'Vencimiento ${aviso.tipoDoc}',
+            mensaje,
+            cuando,
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'vencimientos_canal',
+                'Alertas de Vencimientos',
+                channelDescription:
+                    'Notificaciones sobre documentos próximos a vencer',
+                importance: Importance.high,
+                priority: Priority.high,
+                color: Colors.orangeAccent,
+              ),
+              iOS: DarwinNotificationDetails(
+                presentAlert: true,
+                presentBadge: true,
+                presentSound: true,
+              ),
+            ),
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+            // En iOS hay que decir cómo interpretar el `tz.TZDateTime`
+            // que pasamos: `absoluteTime` significa "en este momento
+            // exacto, no relativo al huso del dispositivo cuando llegue
+            // la fecha". Es lo que queremos para vencimientos fijos.
+            uiLocalNotificationDateInterpretation:
+                UILocalNotificationDateInterpretation.absoluteTime,
+            payload: 'vencimiento',
+            // Solo necesitamos el momento absoluto en el huso local; no
+            // marcamos `matchDateTimeComponents` para que no se repita.
+          );
+        } catch (e) {
+          // Si una notificación particular falla (permiso revocado,
+          // canal no creado, etc.) seguimos con las siguientes.
+          debugPrint('No se pudo agendar aviso $id: $e');
+        }
+      }
+    }
+  }
+
+  /// Texto del recordatorio según los días que faltan. Tono y verbo
+  /// alineados con `AvisoVencimientoBuilder` para que el chofer reciba
+  /// avisos consistentes vía push y vía WhatsApp.
+  static String _mensajeRecordatorio(VencimientoAviso a, int diasAntes) {
+    if (diasAntes == 1) {
+      return 'Tu ${a.tipoDoc.toLowerCase()} vence MAÑANA. Si todavía no '
+          'iniciaste el trámite, hacelo ya.';
+    }
+    if (diasAntes <= 7) {
+      return 'Tu ${a.tipoDoc.toLowerCase()} vence en $diasAntes días. '
+          'Empezá la renovación lo antes posible.';
+    }
+    if (diasAntes <= 15) {
+      return 'Tu ${a.tipoDoc.toLowerCase()} vence en $diasAntes días. '
+          'Es buen momento para empezar el trámite.';
+    }
+    return 'Aviso preventivo: tu ${a.tipoDoc.toLowerCase()} vence en '
+        '$diasAntes días.';
+  }
+
+  /// Hash determinístico positivo de 31 bits a partir de un string.
+  /// Útil para generar IDs de notificación reproducibles desde una
+  /// clave estable (`campoBase_diasAntes`).
+  static int _idDeterministico(String clave) {
+    // Algoritmo simple tipo djb2: rápido, suficiente para IDs únicos
+    // dentro del rango aceptado por el plugin nativo.
+    var hash = 5381;
+    for (final code in clave.codeUnits) {
+      hash = ((hash << 5) + hash) + code;
+      hash &= _idMaxBits;
+    }
+    return hash;
+  }
+
   // ✅ MEJORA PRO: Método de limpieza para evitar fugas de memoria
   static void dispose() {
     selectNotificationStream.close();
   }
+}
+
+/// Datos mínimos para programar un recordatorio de vencimiento.
+/// Lo declaramos acá (en el mismo archivo del servicio) porque
+/// `VencimientoItem` tiene más campos de los que necesitamos y depende
+/// de Firestore — preferimos un DTO simple desacoplado.
+class VencimientoAviso {
+  /// Fecha del vencimiento (no la del recordatorio — el servicio
+  /// resta los días offsets internamente).
+  final DateTime fecha;
+
+  /// Etiqueta legible del documento (ej. "Licencia", "RTO").
+  final String tipoDoc;
+
+  /// Sufijo único del campo en Firestore (ej. "LICENCIA_DE_CONDUCIR").
+  /// Se usa para construir IDs deterministas de notificaciones.
+  final String campoBase;
+
+  const VencimientoAviso({
+    required this.fecha,
+    required this.tipoDoc,
+    required this.campoBase,
+  });
 }

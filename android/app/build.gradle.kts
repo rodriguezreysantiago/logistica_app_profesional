@@ -3,6 +3,11 @@ plugins {
     id("kotlin-android")
     // El plugin de Google Services debe ir después de los de Android/Kotlin
     id("com.google.gms.google-services")
+    // Crashlytics: requiere google-services declarado antes — el plugin
+    // se engancha al build para subir el mapping de obfuscación a
+    // Firebase. En debug es no-op porque AppLogger desactiva la
+    // colección, pero el plugin igual debe estar declarado.
+    id("com.google.firebase.crashlytics")
     id("dev.flutter.flutter-gradle-plugin")
 }
 

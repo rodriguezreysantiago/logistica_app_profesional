@@ -1,10 +1,10 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
+import 'core/services/app_logger.dart';
 import 'core/services/prefs_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/auto_sync_service.dart';
@@ -29,25 +29,25 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ================= ERRORES =================
-  PlatformDispatcher.instance.onError = (error, stack) {
-    debugPrint("🚨 [ERROR GLOBAL ASÍNCRONO]: $error");
-    return true;
-  };
-
-  FlutterError.onError = (FlutterErrorDetails details) {
-    debugPrint("🚨 [ERROR GLOBAL FLUTTER]: ${details.exception}");
-  };
-
   // ================= FIREBASE =================
+  // Inicializar Firebase ANTES que AppLogger porque Crashlytics depende
+  // de FirebaseCore. Si falla acá, seguimos sin telemetría: el logger
+  // detecta y cae al debugPrint local.
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    debugPrint("🔥 Firebase conectado correctamente");
-  } catch (e) {
-    debugPrint("🚨 Error crítico al iniciar Firebase: $e");
+    AppLogger.log('Firebase conectado correctamente');
+  } catch (e, st) {
+    AppLogger.recordError(e, st, reason: 'Firebase.initializeApp falló');
   }
+
+  // ================= ERROR HANDLERS GLOBALES =================
+  // En mobile, AppLogger.init engancha FlutterError.onError y
+  // PlatformDispatcher.onError directo a Crashlytics. En Web/Windows
+  // dejamos los defaults de Flutter (que loguean a consola) — los
+  // try/catch puntuales del código siguen usando AppLogger.recordError.
+  await AppLogger.init();
 
   await PrefsService.init();
   await NotificationService.init();

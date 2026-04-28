@@ -24,6 +24,7 @@ class AppRoutes {
   static const String vencimientosChoferes = '/vencimientos_choferes';
   static const String vencimientosChasis = '/vencimientos_chasis';
   static const String vencimientosAcoplados = '/vencimientos_acoplados';
+  static const String vencimientosCalendario = '/vencimientos_calendario';
 }
 
 class AppTexts {

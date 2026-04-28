@@ -37,6 +37,13 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
           ),
           SizedBox(height: 10),
           _MenuTile(
+            titulo: 'CALENDARIO MENSUAL',
+            subtitulo: 'Vista global con todos los vencimientos por día',
+            icono: Icons.event_note,
+            colorIcono: Colors.greenAccent,
+            ruta: '/vencimientos_calendario',
+          ),
+          _MenuTile(
             titulo: 'VENCIMIENTOS DE PERSONAL',
             subtitulo: 'Seguimiento de carnets, preocupacional y ART',
             icono: Icons.person_search,

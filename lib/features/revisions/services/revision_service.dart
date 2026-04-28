@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+// `flutter/foundation` re-exporta Uint8List (de dart:typed_data) además de
+// debugPrint, así que cubre los dos usos de este archivo en un solo import.
 import 'package:flutter/foundation.dart';
 
 import '../../../core/services/storage_service.dart';
@@ -37,12 +38,17 @@ class RevisionService {
 
   /// Sube el comprobante a Storage y crea el documento de solicitud
   /// en la colección `REVISIONES`.
+  ///
+  /// [archivoBytes] son los bytes del archivo (cross-platform: el caller
+  /// los obtiene de `XFile.readAsBytes()` o `FilePicker(withData: true)`).
+  /// [nombreOriginal] se usa solo para extraer la extensión.
   Future<void> registrarSolicitud({
     required String dni,
     required String nombreUsuario,
     required String etiqueta,
     required String campo,
-    required File archivo,
+    required Uint8List archivoBytes,
+    required String nombreOriginal,
     required String fechaS,
     required String coleccionDestino,
   }) async {
@@ -58,13 +64,14 @@ class RevisionService {
     }
 
     try {
-      final extension = archivo.path.split('.').last.toLowerCase();
+      final extension = nombreOriginal.split('.').last.toLowerCase();
       final nombreArchivo =
           'REVISIONES/${dni}_${campo}_${DateTime.now().millisecondsSinceEpoch}.$extension';
 
       // Reutilizamos el StorageService genérico (incluye timeout y content-type)
       final url = await _storageService.subirArchivo(
-        archivo: archivo,
+        bytes: archivoBytes,
+        nombreOriginal: nombreOriginal,
         rutaStorage: nombreArchivo,
       );
 

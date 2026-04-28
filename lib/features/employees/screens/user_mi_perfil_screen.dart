@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/services/storage_service.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/password_hasher.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -45,36 +45,17 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    // Loading modal: el Future se completa cuando lo cerramos nosotros
-    // mismos con navigator.pop() abajo. Esperarlo sería un deadlock.
-    unawaited(showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(color: Colors.greenAccent),
-      ),
-    ));
+    AppLoadingDialog.show(context);
 
     try {
       await tarea();
       if (!mounted) return;
-      navigator.pop(); // cierra loading
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(mensajeExito,
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.green,
-        ),
-      );
+      AppLoadingDialog.hide(navigator);
+      AppFeedback.successOn(messenger, mensajeExito);
     } catch (e) {
       if (!mounted) return;
-      navigator.pop();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppLoadingDialog.hide(navigator);
+      AppFeedback.errorOn(messenger, 'Error: $e');
     }
   }
 
@@ -136,21 +117,11 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
               //    Antes se comparaba texto-plano vs hash, lo cual nunca era igual.
               if (!PasswordHasher.verify(
                   antCtrl.text, passwordActual)) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('La contraseña actual es incorrecta'),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
+                AppFeedback.error(context, 'La contraseña actual es incorrecta');
                 return;
               }
               if (nvaCtrl.text.trim().length < 4) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Mínimo 4 caracteres'),
-                    backgroundColor: Colors.orangeAccent,
-                  ),
-                );
+                AppFeedback.warning(context, 'Mínimo 4 caracteres');
                 return;
               }
               Navigator.pop(dCtx);
@@ -240,8 +211,12 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     // loading, hacer el upload y cerrar) — no necesitamos esperarlo.
     unawaited(_ejecutarTarea(
       tarea: () async {
+        // Leemos los bytes del XFile (cross-platform: en Web el path es un
+        // blob URL que no se puede abrir como dart:io.File).
+        final bytes = await image.readAsBytes();
         final url = await _storageService.subirArchivo(
-          archivo: File(image.path),
+          bytes: bytes,
+          nombreOriginal: image.name,
           rutaStorage: 'PERFILES/${widget.dni}.jpg',
         );
         await FirebaseFirestore.instance

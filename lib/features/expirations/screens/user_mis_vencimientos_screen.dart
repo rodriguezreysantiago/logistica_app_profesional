@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
@@ -9,8 +9,11 @@ import 'package:intl/intl.dart';
 
 import '../../revisions/services/revision_service.dart';
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../core/services/notification_service.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/fecha_input_formatter.dart';
 import '../../../shared/utils/formatters.dart';
+import '../../../shared/utils/ocr_service.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../checklist/screens/user_checklist_form_screen.dart';
 
@@ -30,6 +33,21 @@ class _UserMisVencimientosScreenState
   final RevisionService _revisionService = RevisionService();
   late final Stream<DocumentSnapshot> _empleadoStream;
 
+  /// Documentos personales del chofer que se auditan. La clave es la
+  /// etiqueta visible (la que aparece en la notificación push) y el
+  /// valor es el sufijo del campo en Firestore. Replica el listado de
+  /// `admin_vencimientos_choferes_screen.dart`; si en el futuro se
+  /// centraliza, mover a `vencimientos_config.dart`.
+  static const Map<String, String> _docsAgendables = {
+    'Licencia': 'LICENCIA_DE_CONDUCIR',
+    'Preocupacional': 'PREOCUPACIONAL',
+    'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
+    'ART': 'ART',
+    'F. 931': '931',
+    'Seguro de Vida': 'SEGURO_DE_VIDA',
+    'Sindicato': 'LIBRE_DE_DEUDA_SINDICAL',
+  };
+
   @override
   void initState() {
     super.initState();
@@ -37,6 +55,47 @@ class _UserMisVencimientosScreenState
         .collection('EMPLEADOS')
         .doc(widget.dniUser)
         .snapshots();
+    // Cuando el chofer abre la pantalla, reagendamos sus recordatorios
+    // push locales (cancela los viejos primero para no acumular avisos
+    // de papeles ya renovados). Es fire-and-forget: si falla el
+    // permiso o la plataforma no soporta, no afecta la pantalla.
+    unawaited(_reagendarRecordatoriosLocales());
+  }
+
+  Future<void> _reagendarRecordatoriosLocales() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('EMPLEADOS')
+          .doc(widget.dniUser)
+          .get();
+      if (!snap.exists) return;
+      final data = snap.data();
+      if (data == null) return;
+
+      final avisos = <VencimientoAviso>[];
+      final hoy = DateTime.now();
+      _docsAgendables.forEach((etiqueta, campoBase) {
+        final fechaStr = data['VENCIMIENTO_$campoBase']?.toString();
+        if (fechaStr == null || fechaStr.isEmpty) return;
+        final fecha = DateTime.tryParse(fechaStr);
+        if (fecha == null) return;
+        // Solo agendamos si el vencimiento es futuro — los pasados ya
+        // perdieron sentido de aviso preventivo.
+        if (fecha.isBefore(hoy)) return;
+        avisos.add(VencimientoAviso(
+          fecha: fecha,
+          tipoDoc: etiqueta,
+          campoBase: campoBase,
+        ));
+      });
+
+      await NotificationService.cancelarTodosLosRecordatorios();
+      if (avisos.isNotEmpty) {
+        await NotificationService.agendarRecordatoriosVencimientos(avisos);
+      }
+    } catch (e) {
+      debugPrint('No se pudieron reagendar recordatorios: $e');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -50,33 +109,17 @@ class _UserMisVencimientosScreenState
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
-    // Loading modal: el Future del showDialog se completa cuando lo
-    // cerramos nosotros mismos abajo. Lo descartamos explícito para
-    // que `unawaited_futures` no se queje y para evitar deadlock.
-    unawaited(showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(color: Colors.greenAccent),
-      ),
-    ));
+    AppLoadingDialog.show(context);
 
     try {
       await tarea();
       if (!mounted) return;
-      navigator.pop();
-      messenger.showSnackBar(SnackBar(
-        content: Text(mensajeExito,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.green,
-      ));
+      AppLoadingDialog.hide(navigator);
+      AppFeedback.successOn(messenger, mensajeExito);
     } catch (e) {
       if (!mounted) return;
-      navigator.pop();
-      messenger.showSnackBar(SnackBar(
-        content: Text('Error: $e'),
-        backgroundColor: Colors.redAccent,
-      ));
+      AppLoadingDialog.hide(navigator);
+      AppFeedback.errorOn(messenger, 'Error: $e');
     }
   }
 
@@ -145,6 +188,19 @@ class _UserMisVencimientosScreenState
                         ? 'Fecha incompleta'
                         : null,
               ),
+              // Botón "Detectar fecha desde foto" — solo aparece en
+              // mobile (Android/iOS), donde ML Kit funciona. El OCR es
+              // best-effort: si falla, el chofer tipea como siempre.
+              if (OcrService.soportado) ...[
+                const SizedBox(height: 12),
+                _BotonDetectarFecha(
+                  onFechaDetectada: (fecha) {
+                    final dd = fecha.day.toString().padLeft(2, '0');
+                    final mm = fecha.month.toString().padLeft(2, '0');
+                    fechaCtrl.text = '$dd/$mm/${fecha.year}';
+                  },
+                ),
+              ],
             ],
           ),
         ),
@@ -225,10 +281,14 @@ class _UserMisVencimientosScreenState
                     .pickImage(source: ImageSource.camera, imageQuality: 50);
                 if (sCtx.mounted) Navigator.pop(sCtx);
                 if (img != null) {
+                  // readAsBytes() es cross-platform — funciona en Web, donde
+                  // img.path es un blob URL no abrible como File.
+                  final bytes = await img.readAsBytes();
                   _enviar(
                     etiqueta: etiqueta,
                     campo: campo,
-                    archivo: File(img.path),
+                    archivoBytes: bytes,
+                    nombreOriginal: img.name,
                     fecha: fechaS,
                     idDoc: idDoc,
                     coleccion: coleccion,
@@ -243,16 +303,21 @@ class _UserMisVencimientosScreenState
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.w500)),
               onTap: () async {
+                // withData: true asegura que `bytes` venga poblado en todas
+                // las plataformas (en Web `path` no existe).
                 final res = await FilePicker.platform.pickFiles(
                   type: FileType.custom,
                   allowedExtensions: const ['pdf', 'jpg', 'png', 'jpeg'],
+                  withData: true,
                 );
                 if (sCtx.mounted) Navigator.pop(sCtx);
-                if (res != null && res.files.single.path != null) {
+                final picked = res?.files.singleOrNull;
+                if (picked != null && picked.bytes != null) {
                   _enviar(
                     etiqueta: etiqueta,
                     campo: campo,
-                    archivo: File(res.files.single.path!),
+                    archivoBytes: picked.bytes!,
+                    nombreOriginal: picked.name,
                     fecha: fechaS,
                     idDoc: idDoc,
                     coleccion: coleccion,
@@ -271,7 +336,8 @@ class _UserMisVencimientosScreenState
   void _enviar({
     required String etiqueta,
     required String campo,
-    required File archivo,
+    required Uint8List archivoBytes,
+    required String nombreOriginal,
     required String fecha,
     required String idDoc,
     required String coleccion,
@@ -286,7 +352,8 @@ class _UserMisVencimientosScreenState
         nombreUsuario: nombreUsuario,
         etiqueta: etiqueta,
         campo: campo,
-        archivo: archivo,
+        archivoBytes: archivoBytes,
+        nombreOriginal: nombreOriginal,
         fechaS: fecha,
         coleccionDestino: coleccion,
       ),
@@ -770,3 +837,96 @@ class _AccesoChecklist extends StatelessWidget {
 
 // El _FechaInputFormatter local se reemplazó por FechaInputFormatter
 // en lib/shared/utils/fecha_input_formatter.dart (compartido).
+
+/// Botón "Detectar fecha desde foto" — abre la cámara, corre OCR sobre
+/// la imagen y, si detecta una fecha válida, llama a [onFechaDetectada]
+/// para que el dialog padre la pre-cargue en el TextFormField.
+///
+/// Best-effort: si el OCR no encuentra nada, se muestra un snackbar
+/// informativo y el chofer puede tipear la fecha manualmente.
+///
+/// Solo se monta cuando `OcrService.soportado` (Android/iOS).
+class _BotonDetectarFecha extends StatefulWidget {
+  final void Function(DateTime) onFechaDetectada;
+  const _BotonDetectarFecha({required this.onFechaDetectada});
+
+  @override
+  State<_BotonDetectarFecha> createState() => _BotonDetectarFechaState();
+}
+
+class _BotonDetectarFechaState extends State<_BotonDetectarFecha> {
+  bool _procesando = false;
+
+  Future<void> _capturar() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _procesando = true);
+
+    try {
+      final picker = ImagePicker();
+      final foto = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 70,
+      );
+      if (foto == null) {
+        if (mounted) setState(() => _procesando = false);
+        return;
+      }
+
+      final fecha = await OcrService.detectarFecha(foto.path);
+      if (!mounted) return;
+      setState(() => _procesando = false);
+
+      if (fecha == null) {
+        AppFeedback.warningOn(messenger,
+            'No se pudo detectar una fecha en la foto. Ingresala manualmente.');
+        return;
+      }
+      widget.onFechaDetectada(fecha);
+      AppFeedback.successOn(messenger,
+          'Fecha detectada: ${fecha.day}/${fecha.month}/${fecha.year}');
+    } catch (e) {
+      if (mounted) {
+        setState(() => _procesando = false);
+        AppFeedback.errorOn(messenger, 'OCR falló: $e');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        onPressed: _procesando ? null : _capturar,
+        style: TextButton.styleFrom(
+          backgroundColor: Colors.greenAccent.withAlpha(20),
+          foregroundColor: Colors.greenAccent,
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.greenAccent.withAlpha(80)),
+          ),
+        ),
+        icon: _procesando
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.greenAccent,
+                ),
+              )
+            : const Icon(Icons.document_scanner_outlined, size: 18),
+        label: Text(
+          _procesando
+              ? 'Analizando comprobante...'
+              : 'Detectar fecha desde foto',
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}

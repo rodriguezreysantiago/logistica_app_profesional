@@ -1,19 +1,28 @@
 import 'dart:io';
 import 'dart:async';
-import 'package:excel/excel.dart' as ex; 
+import 'package:excel/excel.dart' as ex;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart'; 
+import 'package:share_plus/share_plus.dart';
 import '../../../core/constants/app_constants.dart'; // ✅ Para AppCollections
+import '../../../shared/utils/app_feedback.dart';
 
 class ReportChecklistService {
-  
+
   ReportChecklistService._(); // Constructor privado
 
   static Future<void> mostrarOpcionesYGenerar(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
+
+    // Web no soporta dart:io.File ni Process.run. Cortamos limpio aquí
+    // para evitar crash al guardar el .xlsx en disco.
+    if (kIsWeb) {
+      AppFeedback.warningOn(messenger, 'Los reportes Excel solo están disponibles en Windows y Android.');
+      return;
+    }
     
     // Definición de columnas disponibles
     final Map<String, bool> opciones = {
@@ -182,9 +191,7 @@ class ReportChecklistService {
       }
     } catch (e) {
       debugPrint("❌ Error Excel: $e");
-      messenger.showSnackBar(
-        SnackBar(content: Text("Error al generar reporte: $e"), backgroundColor: Colors.redAccent)
-      );
+      AppFeedback.errorOn(messenger, "Error al generar reporte: $e");
     }
   }
 

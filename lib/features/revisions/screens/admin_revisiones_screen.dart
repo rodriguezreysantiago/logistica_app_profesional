@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/services/audit_log_service.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
@@ -149,6 +153,15 @@ class _RevisionCard extends StatelessWidget {
 // DETALLE DE LA REVISIÓN (bottom sheet)
 // =============================================================================
 
+/// Wrapper público para abrir el detalle de una revisión desde otros
+/// features (ej. el CommandPalette / búsqueda Ctrl+K).
+Future<void> abrirDetalleRevision(
+  BuildContext context,
+  String idDoc,
+  Map<String, dynamic> data,
+) =>
+    _DetalleRevision.abrir(context, idDoc, data);
+
 class _DetalleRevision extends StatelessWidget {
   final String idDoc;
   final Map<String, dynamic> data;
@@ -219,7 +232,24 @@ class _DetalleRevision extends StatelessWidget {
         // Footer con botones (siempre visibles)
         _BotonesAccion(
           onAprobar: () => _procesarDecision(context, true),
-          onRechazar: () => _procesarDecision(context, false),
+          // Rechazar es destructivo: borra el comprobante del chofer del
+          // Storage y elimina la solicitud. No hay manera de revertir, el
+          // chofer tiene que volver a fotografiar y subir todo. Por eso
+          // pedimos confirmación con copy clara.
+          onRechazar: () async {
+            final ok = await AppConfirmDialog.show(
+              context,
+              title: '¿Rechazar este trámite?',
+              message:
+                  'Se va a borrar el comprobante que subió el chofer y la solicitud desaparece del listado. Esta acción no se puede deshacer.',
+              confirmLabel: 'RECHAZAR',
+              destructive: true,
+              icon: Icons.cancel_outlined,
+            );
+            if (ok == true && context.mounted) {
+              await _procesarDecision(context, false);
+            }
+          },
         ),
       ],
     );
@@ -279,7 +309,7 @@ class _DetalleRevision extends StatelessWidget {
         valor: AppFormatters.formatearFecha(data['fecha_vencimiento']),
         valorColor: Colors.greenAccent,
         valorSize: 22,
-        icon: Icons.event,
+        icon: Icons.event_note,
       ),
     ];
   }
@@ -299,12 +329,7 @@ class _DetalleRevision extends StatelessWidget {
     // Validación previa: si no tenemos id de la solicitud no podemos hacer
     // nada útil — abortamos antes de cerrar el sheet.
     if (idDoc.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Solicitud inválida (sin ID).'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'Solicitud inválida (sin ID).');
       return;
     }
 
@@ -326,36 +351,38 @@ class _DetalleRevision extends StatelessWidget {
             .delete();
       }
 
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            aprobado
-                ? 'Operación aprobada y guardada'
-                : 'Solicitud rechazada y eliminada',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: aprobado ? Colors.green : Colors.redAccent,
-        ),
-      );
+      // Audit fire-and-forget: una sola entrada por revisión, con tipo
+      // (cambio de equipo o documento) en `detalles` para auditar luego.
+      unawaited(AuditLog.registrar(
+        accion: aprobado
+            ? AuditAccion.aprobarRevision
+            : AuditAccion.rechazarRevision,
+        entidad: 'REVISIONES',
+        entidadId: idDoc,
+        detalles: {
+          'tipo': esCambioEquipo ? 'CAMBIO_EQUIPO' : 'DOCUMENTO',
+          'solicitante': (data['nombre_usuario'] ?? '').toString(),
+          'sobre': (data['etiqueta'] ?? data['campo'] ?? '').toString(),
+        },
+      ));
+
+      final mensaje = aprobado
+          ? 'Operación aprobada y guardada'
+          : 'Solicitud rechazada y eliminada';
+      if (aprobado) {
+        AppFeedback.successOn(messenger, mensaje);
+      } else {
+        AppFeedback.errorOn(messenger, mensaje);
+      }
     } on StateError catch (e) {
       // Solicitudes corruptas (sin dni/patente/campo) — mensaje claro
       // en vez del críptico "document path must be a non-empty string".
       debugPrint('Solicitud corrupta: ${e.message}');
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: Colors.orangeAccent,
-          duration: const Duration(seconds: 5),
-        ),
-      );
+      // StateError.message es String no-nullable, así que no hace falta `??`.
+      AppFeedback.warningOn(messenger, e.message);
     } catch (e) {
       debugPrint('Error procesando revisión: $e');
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error en la base de datos: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'Error en la base de datos: $e');
     }
   }
 

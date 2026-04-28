@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../shared/utils/app_feedback.dart';
 import '../services/auth_service.dart';
 
 /// Pantalla de login.
@@ -48,7 +49,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final pass = _passController.text.trim();
 
     if (dni.isEmpty || pass.isEmpty) {
-      _mostrarError(messenger, 'Completá todos los campos para ingresar');
+      AppFeedback.errorOn(messenger, 'Completá todos los campos para ingresar');
       return;
     }
 
@@ -75,27 +76,11 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
     } else {
-      _mostrarError(
+      AppFeedback.errorOn(
         messenger,
         result.message ?? 'No se pudo iniciar sesión',
       );
     }
-  }
-
-  void _mostrarError(ScaffoldMessengerState messenger, String mensaje) {
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          mensaje,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.redAccent,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-      ),
-    );
   }
 
   @override

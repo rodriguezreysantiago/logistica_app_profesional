@@ -24,6 +24,7 @@ import '../features/reports/screens/admin_reports_screen.dart';
 import '../features/expirations/screens/admin_vencimientos_choferes_screen.dart';
 import '../features/expirations/screens/admin_vencimientos_chasis_screen.dart';
 import '../features/expirations/screens/admin_vencimientos_acoplados_screen.dart';
+import '../features/expirations/screens/admin_vencimientos_calendario_screen.dart';
 
 class AppRouter {
   AppRouter._();
@@ -151,6 +152,12 @@ class AppRouter {
       case AppRoutes.vencimientosAcoplados:
         return _buildRoute(
           _protegerAdmin(const AdminVencimientosAcopladosScreen()),
+          settings,
+        );
+
+      case AppRoutes.vencimientosCalendario:
+        return _buildRoute(
+          _protegerAdmin(const AdminVencimientosCalendarioScreen()),
           settings,
         );
 

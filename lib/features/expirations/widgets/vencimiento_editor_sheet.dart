@@ -1,11 +1,12 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/prefs_service.dart';
+import '../../../core/services/storage_service.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/whatsapp_helper.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
@@ -50,8 +51,11 @@ class _EditorSheetBody extends StatefulWidget {
 
 class _EditorSheetBodyState extends State<_EditorSheetBody> {
   late DateTime _fechaSeleccionada;
-  File? _archivoSeleccionado;
+  Uint8List? _archivoBytes;
+  String? _archivoNombre;
   bool _subiendo = false;
+
+  final StorageService _storageService = StorageService();
 
   @override
   void initState() {
@@ -72,36 +76,36 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
   }
 
   Future<void> _seleccionarArchivo() async {
+    // withData: true para que `bytes` venga poblado en todas las plataformas
+    // (en Web `path` es null porque no hay filesystem).
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['jpg', 'jpeg', 'png', 'pdf'],
+      withData: true,
     );
-    if (result != null && result.files.single.path != null && mounted) {
-      setState(() =>
-          _archivoSeleccionado = File(result.files.single.path!));
+    final picked = result?.files.singleOrNull;
+    if (picked != null && picked.bytes != null && mounted) {
+      setState(() {
+        _archivoBytes = picked.bytes;
+        _archivoNombre = picked.name;
+      });
     }
   }
 
   Future<String?> _subirArchivo() async {
-    if (_archivoSeleccionado == null) return widget.item.urlArchivo;
+    if (_archivoBytes == null) return widget.item.urlArchivo;
 
     final extension =
-        _archivoSeleccionado!.path.split('.').last.toLowerCase();
+        (_archivoNombre ?? '').split('.').last.toLowerCase();
     final nombre =
         '${widget.item.docId}_ADMIN_${widget.item.campoBase}_${DateTime.now().millisecondsSinceEpoch}.$extension';
-    final ref = FirebaseStorage.instance
-        .ref()
-        .child('${widget.item.storagePath}/$nombre');
+    final ruta = '${widget.item.storagePath}/$nombre';
 
-    SettableMetadata? metadata;
-    if (extension == 'pdf') {
-      metadata = SettableMetadata(contentType: 'application/pdf');
-    } else if (['jpg', 'jpeg', 'png'].contains(extension)) {
-      metadata = SettableMetadata(contentType: 'image/jpeg');
-    }
-
-    await ref.putFile(_archivoSeleccionado!, metadata);
-    return await ref.getDownloadURL();
+    return await _storageService.subirArchivo(
+      bytes: _archivoBytes!,
+      nombreOriginal: _archivoNombre ?? 'archivo.$extension',
+      rutaStorage: ruta,
+    );
   }
 
   /// Resuelve el chofer al que hay que avisarle según el tipo de
@@ -176,12 +180,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
 
     if (!mounted) return;
     if (!ok) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo abrir WhatsApp en este dispositivo.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'No se pudo abrir WhatsApp en este dispositivo.');
       return;
     }
 
@@ -189,14 +188,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
       // Abrimos WhatsApp pero sin destinatario para que el admin lo
       // cargue manualmente. NO registramos en el historial porque no
       // sabemos si efectivamente lo terminó enviando ni a quién.
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-              'El chofer no tiene teléfono cargado — elegí el contacto en WhatsApp.'),
-          backgroundColor: Colors.orangeAccent,
-          duration: Duration(seconds: 4),
-        ),
-      );
+      AppFeedback.warningOn(messenger, 'El chofer no tiene teléfono cargado — elegí el contacto en WhatsApp.');
       return;
     }
 
@@ -254,20 +246,10 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
         'ultima_modificacion_admin': FieldValue.serverTimestamp(),
       });
 
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('${widget.item.tipoDoc} actualizado con éxito'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      AppFeedback.successOn(messenger, '${widget.item.tipoDoc} actualizado con éxito');
       navigator.pop();
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al guardar: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'Error al guardar: $e');
       if (mounted) setState(() => _subiendo = false);
     }
   }
@@ -336,7 +318,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                 fontSize: 18,
               ),
             ),
-            trailing: const Icon(Icons.calendar_month,
+            trailing: const Icon(Icons.event_note,
                 color: Colors.greenAccent, size: 28),
             onTap: _seleccionarFecha,
           ),
@@ -353,7 +335,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                 color: Colors.black12,
                 borderRadius: BorderRadius.circular(15),
                 border: Border.all(
-                  color: _archivoSeleccionado == null
+                  color: _archivoBytes == null
                       ? Colors.white10
                       : Colors.greenAccent,
                 ),
@@ -361,10 +343,10 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
               child: Row(
                 children: [
                   Icon(
-                    _archivoSeleccionado == null
+                    _archivoBytes == null
                         ? Icons.upload_file
                         : Icons.check_circle,
-                    color: _archivoSeleccionado == null
+                    color: _archivoBytes == null
                         ? Colors.white38
                         : Colors.greenAccent,
                     size: 28,
@@ -372,11 +354,11 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                   const SizedBox(width: 15),
                   Expanded(
                     child: Text(
-                      _archivoSeleccionado == null
+                      _archivoBytes == null
                           ? 'Cargar comprobante nuevo'
                           : 'Archivo listo para subir',
                       style: TextStyle(
-                        color: _archivoSeleccionado == null
+                        color: _archivoBytes == null
                             ? Colors.white54
                             : Colors.greenAccent,
                         fontSize: 13,
@@ -384,7 +366,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                       ),
                     ),
                   ),
-                  if (_archivoSeleccionado == null)
+                  if (_archivoBytes == null)
                     const Icon(Icons.add_a_photo_outlined,
                         color: Colors.greenAccent, size: 20),
                 ],

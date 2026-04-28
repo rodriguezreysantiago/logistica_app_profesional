@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/services/auto_sync_service.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../providers/sync_dashboard_provider.dart';
 
@@ -185,15 +186,12 @@ class _BotonEjecutarAhoraState extends State<_BotonEjecutarAhora> {
 
     if (!mounted) return;
     setState(() => _ejecutando = false);
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(lanzado
-            ? 'Ciclo manual disparado.'
-            : 'Ya hay un ciclo en curso, esperá a que termine.'),
-        backgroundColor: lanzado ? Colors.green : Colors.orangeAccent,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    final msg = lanzado ? 'Ciclo manual disparado.' : 'Ya hay un ciclo en curso, esperá a que termine.';
+    if (lanzado) {
+      AppFeedback.successOn(messenger, msg);
+    } else {
+      AppFeedback.warningOn(messenger, msg);
+    }
   }
 
   @override

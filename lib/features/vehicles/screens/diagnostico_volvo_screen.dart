@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../services/volvo_api_service.dart';
 
@@ -560,13 +561,7 @@ class _JsonViewerState extends State<_JsonViewer> {
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: json));
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('JSON copiado al portapapeles'),
-                        backgroundColor: Colors.green,
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
+                    AppFeedback.success(context, 'JSON copiado al portapapeles');
                   }
                 },
               ),

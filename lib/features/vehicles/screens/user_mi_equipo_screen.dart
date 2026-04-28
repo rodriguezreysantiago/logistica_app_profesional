@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
@@ -754,17 +755,7 @@ class _ListaUnidadesLibres extends StatelessWidget {
     if (cleanDni.isEmpty || cleanNueva.isEmpty) {
       debugPrint(
           'Solicitud bloqueada: dni="$cleanDni" nueva="$cleanNueva"');
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No se pudo enviar la solicitud (faltan datos del chofer o '
-            'la unidad). Cerrá la app y volvé a iniciar sesión.',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: Colors.redAccent,
-          duration: Duration(seconds: 5),
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'No se pudo enviar la solicitud (faltan datos del chofer o la unidad). Cerrá la app y volvé a iniciar sesión.');
       return;
     }
 
@@ -787,24 +778,11 @@ class _ListaUnidadesLibres extends StatelessWidget {
       });
 
       if (!context.mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Solicitud enviada. Aguarde aprobación de oficina.',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      AppFeedback.warningOn(messenger, 'Solicitud enviada. Aguarde aprobación de oficina.');
     } catch (e) {
       debugPrint('Error solicitud: $e');
       if (!context.mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al enviar solicitud: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      AppFeedback.errorOn(messenger, 'Error al enviar solicitud: $e');
     }
   }
 }

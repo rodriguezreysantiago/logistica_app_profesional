@@ -1,0 +1,766 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:excel/excel.dart' as ex;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../../../core/constants/app_constants.dart';
+import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/widgets/fecha_dialog.dart';
+
+/// Reporte de Consumo de Combustible (admin).
+///
+/// Cruza la flota de Firestore con dos fuentes de telemetría:
+///
+/// - **`TELEMETRIA_HISTORICO`** (Firestore): snapshots diarios que el
+///   AutoSync guarda al final de cada ciclo, con `litros_acumulados`
+///   y `km` por unidad por día. Si el rango pedido cae dentro de los
+///   días que ya tienen snapshot, el reporte calcula litros y KM
+///   reales del **período** restando los snapshots de inicio y fin.
+///
+/// - **Cache Volvo en memoria** (`accumulatedData.totalFuelConsumption`):
+///   fallback cuando para una unidad no hay snapshots todavía (recién
+///   se trackea, o el día elegido es anterior al inicio del histórico).
+///   En ese caso el reporte muestra el acumulado total del vehículo y
+///   marca la fila con "S/D (acum.)" para que el admin sepa que ese
+///   dato no es del período.
+///
+/// El Excel sale con dos hojas:
+///
+/// - **DETALLE**: tabla con todas las unidades, una columna por opción
+///   marcada en el dialog.
+/// - **RANKING**: top 10 unidades más consumidoras del período (filtra
+///   las que no tienen datos del período válidos), con barra Unicode
+///   proporcional al máximo. El package `excel` no soporta charts
+///   nativos, así que el barra se renderiza con caracteres `█`.
+class ReportConsumoService {
+  ReportConsumoService._();
+
+  static Future<void> mostrarOpcionesYGenerar(
+    BuildContext context,
+    List<dynamic> cacheVolvo,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (kIsWeb) {
+      AppFeedback.warningOn(messenger,
+          'Los reportes Excel solo están disponibles en Windows y Android.');
+      return;
+    }
+
+    // ============= 1) Rango de fechas (default: mes en curso) =============
+    final hoy = DateTime.now();
+    DateTime desde = DateTime(hoy.year, hoy.month, 1);
+    DateTime hasta = hoy;
+
+    // ============= 2) Columnas a incluir =============
+    final Map<String, bool> opciones = {
+      "PATENTE": true,
+      "TIPO": true,
+      "MARCA": true,
+      "MODELO": true,
+      "VIN": true,
+      "EMPRESA": true,
+      "KM ACTUAL": true,
+      "LITROS TOTALES": true,
+      "PROMEDIO KM/L": true,
+      "ULTIMA SINCRONIZACION": true,
+      "ESTADO CONEXION": true,
+    };
+
+    final confirmar = await _mostrarDialogoOpciones(
+      context: context,
+      desde: desde,
+      hasta: hasta,
+      opciones: opciones,
+      onRangoCambiado: (d, h) {
+        desde = d;
+        hasta = h;
+      },
+    );
+
+    if (confirmar != true || !context.mounted) return;
+
+    _notificarProgreso(messenger);
+    await _ejecutarGeneracion(
+      desde: desde,
+      hasta: hasta,
+      filtros: opciones,
+      cacheVolvo: cacheVolvo,
+      messenger: messenger,
+    );
+  }
+
+  /// Muestra el dialog de opciones (rango + columnas). Devuelve `true`
+  /// si el admin confirmó "GENERAR".
+  ///
+  /// El dialog se mantiene como `StatefulBuilder` porque las dos fechas
+  /// y los checkboxes se actualizan in-place — no queremos cerrar y
+  /// reabrir el dialog para cambiar una fecha.
+  static Future<bool?> _mostrarDialogoOpciones({
+    required BuildContext context,
+    required DateTime desde,
+    required DateTime hasta,
+    required Map<String, bool> opciones,
+    required void Function(DateTime, DateTime) onRangoCambiado,
+  }) {
+    DateTime localDesde = desde;
+    DateTime localHasta = hasta;
+
+    return showDialog<bool>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: Theme.of(ctx).colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.white.withAlpha(20)),
+          ),
+          title: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Reporte de Consumo",
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 4),
+              Text(
+                "Litros y promedio km/L por unidad",
+                style: TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _LabelSeccion('Rango de referencia'),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _BotonFecha(
+                          label: 'DESDE',
+                          fecha: localDesde,
+                          onPick: (f) {
+                            setDialogState(() => localDesde = f);
+                            onRangoCambiado(localDesde, localHasta);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _BotonFecha(
+                          label: 'HASTA',
+                          fecha: localHasta,
+                          onPick: (f) {
+                            setDialogState(() => localHasta = f);
+                            onRangoCambiado(localDesde, localHasta);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      'Los litros y km del período se calculan a partir de '
+                      'los snapshots diarios que guarda el AutoSync. Si '
+                      'una unidad todavía no tiene snapshots dentro del '
+                      'rango, se reporta el acumulado total y se marca '
+                      'como "S/D (acum.)".',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 10.5,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const _LabelSeccion('Columnas'),
+                  ...opciones.keys.map((key) {
+                    return CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(key,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13)),
+                      value: opciones[key],
+                      activeColor: Colors.greenAccent,
+                      onChanged: (val) =>
+                          setDialogState(() => opciones[key] = val ?? false),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx, false),
+              child: const Text("CANCELAR",
+                  style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dCtx, true),
+              child: const Text("GENERAR EXCEL"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static void _notificarProgreso(ScaffoldMessengerState messenger) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                  color: Colors.white, strokeWidth: 2),
+            ),
+            SizedBox(width: 15),
+            Text("Generando reporte de consumo..."),
+          ],
+        ),
+        backgroundColor: Colors.blueGrey,
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // GENERACIÓN DEL EXCEL
+  // ===========================================================================
+
+  static Future<void> _ejecutarGeneracion({
+    required DateTime desde,
+    required DateTime hasta,
+    required Map<String, bool> filtros,
+    required List<dynamic> cacheVolvo,
+    required ScaffoldMessengerState messenger,
+  }) async {
+    try {
+      // Index Volvo por VIN para búsqueda O(1) por unidad de Firestore.
+      final volvoMap = <String, dynamic>{
+        for (final v in cacheVolvo)
+          (v['vin']?.toString().toUpperCase() ?? ''): v,
+      };
+
+      final db = FirebaseFirestore.instance;
+
+      // Snapshots históricos del rango ampliado.
+      // Pedimos desde 30 días antes de `desde` para tener un buen
+      // candidato como "inicio" (el AutoSync se ejecuta cada minuto
+      // pero a veces hay días sin sync por feriados o caídas de Volvo).
+      final desdeAmpliado = desde.subtract(const Duration(days: 30));
+      final hastaAmpliado = hasta.add(const Duration(days: 1));
+      final snapshotsHistoricos = await db
+          .collection('TELEMETRIA_HISTORICO')
+          .where('fecha',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(desdeAmpliado))
+          .where('fecha',
+              isLessThanOrEqualTo: Timestamp.fromDate(hastaAmpliado))
+          .get();
+
+      // Agrupamos los snapshots por patente, ordenados por fecha
+      // ascendente. Después por cada unidad sacamos:
+      //   - inicio = último snapshot con fecha <= desde
+      //   - fin    = último snapshot con fecha <= hasta
+      // Si solo hay uno, no podemos calcular diferencia (la unidad
+      // arrancó tracking dentro del rango).
+      final porPatente = <String, List<_Snapshot>>{};
+      for (final doc in snapshotsHistoricos.docs) {
+        final data = doc.data();
+        final patente = (data['patente'] ?? '').toString();
+        if (patente.isEmpty) continue;
+        final ts = data['fecha'];
+        if (ts is! Timestamp) continue;
+        porPatente.putIfAbsent(patente, () => []).add(_Snapshot(
+              fecha: ts.toDate(),
+              litros: (data['litros_acumulados'] ?? 0).toDouble(),
+              km: (data['km'] ?? 0).toDouble(),
+            ));
+      }
+      for (final list in porPatente.values) {
+        list.sort((a, b) => a.fecha.compareTo(b.fecha));
+      }
+
+      final snapshot = await db
+          .collection(AppCollections.vehiculos)
+          .get();
+
+      final excel = ex.Excel.createExcel();
+      excel.rename('Sheet1', 'DETALLE');
+      final hojaDetalle = excel['DETALLE'];
+
+      final headerStyle = ex.CellStyle(
+        bold: true,
+        backgroundColorHex: ex.ExcelColor.fromHexString("#1A3A5A"),
+        fontColorHex: ex.ExcelColor.fromHexString("#FFFFFF"),
+        horizontalAlign: ex.HorizontalAlign.Center,
+      );
+      final numStyle = ex.CellStyle(numberFormat: ex.NumFormat.standard_4);
+
+      // Header informativo arriba (rango + nota acumulado)
+      final fmt = DateFormat('dd/MM/yyyy');
+      _setHeaderInfo(
+        hojaDetalle,
+        rangoTxt: '${fmt.format(desde)} a ${fmt.format(hasta)}',
+      );
+
+      // Cabeceras dinámicas en fila 4 (las 3 primeras filas son info)
+      final titulos = <String>[];
+      filtros.forEach((key, val) {
+        if (val) titulos.add(key);
+      });
+
+      const filaCabecera = 4;
+      const filaInicioDatos = 5;
+
+      for (var i = 0; i < titulos.length; i++) {
+        final cell = hojaDetalle.cell(ex.CellIndex.indexByColumnRow(
+            columnIndex: i, rowIndex: filaCabecera));
+        cell.value = ex.TextCellValue(titulos[i]);
+        cell.cellStyle = headerStyle;
+      }
+
+      // ============= Filas de datos =============
+      // Acumulamos también una lista intermedia para construir el Ranking
+      // sin recorrer Firestore dos veces.
+      final filas = <_FilaConsumo>[];
+      var currentRow = filaInicioDatos;
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final patente = doc.id;
+        final vin = (data['VIN'] ?? '').toString().trim().toUpperCase();
+        final volvoData = volvoMap[vin];
+        final fila = _FilaConsumo.from(
+          patente: patente,
+          data: data,
+          volvoData: volvoData,
+          historicos: porPatente[patente] ?? const [],
+          desde: desde,
+          hasta: hasta,
+        );
+        filas.add(fila);
+
+        var col = 0;
+        for (final titulo in titulos) {
+          final cell = hojaDetalle.cell(ex.CellIndex.indexByColumnRow(
+              columnIndex: col++, rowIndex: currentRow));
+          _writeColumna(cell, titulo, fila, numStyle);
+        }
+        currentRow++;
+      }
+
+      for (var i = 0; i < titulos.length; i++) {
+        hojaDetalle.setColumnWidth(i, 22.0);
+      }
+
+      // ============= Hoja RANKING (top 10 más consumidores) =============
+      _construirHojaRanking(excel, filas);
+
+      // ============= Guardar y abrir =============
+      final fileName =
+          "Consumo_${DateFormat('yyyy_MM_dd').format(DateTime.now())}.xlsx";
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/$fileName';
+      final fileBytes = excel.save();
+      if (fileBytes != null) {
+        File(path).writeAsBytesSync(fileBytes);
+        if (Platform.isWindows) {
+          await Process.run('cmd', ['/c', 'start', '', path]);
+        } else {
+          await Share.shareXFiles(
+            [XFile(path)],
+            text: '⛽ Reporte de consumo de combustible — '
+                '${fmt.format(desde)} a ${fmt.format(hasta)}',
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error reporte consumo: $e');
+      AppFeedback.errorOn(messenger, 'Error al generar reporte: $e');
+    }
+  }
+
+  /// Pinta el header informativo en las 3 primeras filas: título +
+  /// rango + nota sobre el dato acumulado.
+  static void _setHeaderInfo(ex.Sheet hoja, {required String rangoTxt}) {
+    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).value =
+        ex.TextCellValue('REPORTE DE CONSUMO DE COMBUSTIBLE');
+    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1)).value =
+        ex.TextCellValue('Rango: $rangoTxt');
+    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2)).value =
+        ex.TextCellValue(
+            'Nota: litros y KM son acumulados totales del vehículo (Volvo Connect).');
+  }
+
+  /// Escribe el valor de una columna específica en la celda según el
+  /// título lógico. Mantenemos esto en un switch separado para que sumar
+  /// columnas nuevas sea agregar una rama y un key en `filtros`.
+  static void _writeColumna(
+    ex.Data cell,
+    String titulo,
+    _FilaConsumo f,
+    ex.CellStyle numStyle,
+  ) {
+    switch (titulo) {
+      case 'PATENTE':
+        cell.value = ex.TextCellValue(f.patente);
+        break;
+      case 'TIPO':
+        cell.value = ex.TextCellValue(f.tipo);
+        break;
+      case 'MARCA':
+        cell.value = ex.TextCellValue(f.marca);
+        break;
+      case 'MODELO':
+        cell.value = ex.TextCellValue(f.modelo);
+        break;
+      case 'VIN':
+        cell.value = ex.TextCellValue(f.vin.isEmpty ? '-' : f.vin);
+        break;
+      case 'EMPRESA':
+        cell.value = ex.TextCellValue(f.empresa);
+        break;
+      case 'KM ACTUAL':
+        if (f.esPeriodo) {
+          cell.value = ex.DoubleCellValue(f.km);
+          cell.cellStyle = numStyle;
+        } else {
+          // Sin histórico no podemos saber km del período. Mostramos
+          // el odómetro actual marcado para que el admin no lo cuente
+          // como "km recorridos".
+          cell.value = ex.TextCellValue('${f.km.round()} (acum.)');
+        }
+        break;
+      case 'LITROS TOTALES':
+        if (f.esPeriodo) {
+          cell.value = ex.DoubleCellValue(f.litros);
+          cell.cellStyle = numStyle;
+        } else {
+          cell.value =
+              ex.TextCellValue('${f.litros.round()} (acum.)');
+        }
+        break;
+      case 'PROMEDIO KM/L':
+        cell.value = ex.DoubleCellValue(
+            double.parse(f.promedioKmPorLitro.toStringAsFixed(2)));
+        cell.cellStyle = numStyle;
+        break;
+      case 'ULTIMA SINCRONIZACION':
+        cell.value = ex.TextCellValue(f.ultimaSync);
+        break;
+      case 'ESTADO CONEXION':
+        cell.value = ex.TextCellValue(f.conectado ? 'CONECTADO' : 'OFFLINE');
+        break;
+    }
+  }
+
+  /// Construye la hoja "RANKING" con el top 10 unidades más consumidoras.
+  ///
+  /// Para visualizar la magnitud sin un chart nativo, agregamos una
+  /// columna "BARRA" con caracteres `█` proporcionales al máximo. Es el
+  /// truco clásico de "in-cell bar chart" — funciona en cualquier Excel
+  /// y en LibreOffice sin macros.
+  static void _construirHojaRanking(
+      ex.Excel excel, List<_FilaConsumo> filas) {
+    final hoja = excel['RANKING'];
+
+    final headerStyle = ex.CellStyle(
+      bold: true,
+      backgroundColorHex: ex.ExcelColor.fromHexString("#5A1A1A"),
+      fontColorHex: ex.ExcelColor.fromHexString("#FFFFFF"),
+      horizontalAlign: ex.HorizontalAlign.Center,
+    );
+
+    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).value =
+        ex.TextCellValue('TOP 10 UNIDADES MÁS CONSUMIDORAS');
+
+    // Solo unidades con datos REALES del período (litros > 0 +
+    // esPeriodo). Las que tienen acumulado no compiten en el ranking
+    // porque sus litros son del histórico completo del vehículo y
+    // distorsionarían la comparación.
+    final ranking = filas
+        .where((f) => f.esPeriodo && f.litros > 0)
+        .toList()
+      ..sort((a, b) => b.litros.compareTo(a.litros));
+    final top = ranking.take(10).toList();
+    if (top.isEmpty) {
+      hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2)).value =
+          ex.TextCellValue(
+              'Sin snapshots históricos en el rango (todavía). El ranking '
+              'aparece después de unos días de tracking activo.');
+      return;
+    }
+
+    final maxLitros = top.first.litros;
+    const titulos = ['#', 'PATENTE', 'MARCA / MODELO', 'LITROS', 'BARRA'];
+    for (var i = 0; i < titulos.length; i++) {
+      final cell = hoja.cell(
+          ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 2));
+      cell.value = ex.TextCellValue(titulos[i]);
+      cell.cellStyle = headerStyle;
+    }
+
+    for (var i = 0; i < top.length; i++) {
+      final f = top[i];
+      final fila = i + 3;
+
+      hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: fila))
+          .value = ex.IntCellValue(i + 1);
+      hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: fila))
+          .value = ex.TextCellValue(f.patente);
+      hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: fila))
+          .value = ex.TextCellValue('${f.marca} ${f.modelo}'.trim());
+      hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: fila))
+          .value = ex.DoubleCellValue(f.litros);
+
+      // Barra unicode: ancho proporcional al máximo, hasta 30 caracteres.
+      final ratio = maxLitros == 0 ? 0.0 : f.litros / maxLitros;
+      final ancho = (ratio * 30).round();
+      final barra = '█' * ancho;
+      hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: fila))
+          .value = ex.TextCellValue(barra);
+    }
+
+    // Anchos cómodos para lectura
+    hoja.setColumnWidth(0, 6);
+    hoja.setColumnWidth(1, 14);
+    hoja.setColumnWidth(2, 28);
+    hoja.setColumnWidth(3, 16);
+    hoja.setColumnWidth(4, 36);
+  }
+}
+
+// =============================================================================
+// MODELO INTERNO DE FILA
+// =============================================================================
+
+/// Snapshot histórico mínimo para los cálculos de período.
+class _Snapshot {
+  final DateTime fecha;
+  final double litros;
+  final double km;
+
+  const _Snapshot({
+    required this.fecha,
+    required this.litros,
+    required this.km,
+  });
+}
+
+/// Tira en una sola estructura los datos de un vehículo + Volvo + el
+/// período calculado desde los snapshots históricos.
+class _FilaConsumo {
+  final String patente;
+  final String tipo;
+  final String marca;
+  final String modelo;
+  final String vin;
+  final String empresa;
+  final double km;
+  final double litros;
+
+  /// Si `true`, los `litros` y `km` corresponden al período pedido
+  /// (calculados como diferencia de snapshots). Si `false`, son el
+  /// total acumulado del vehículo y el reporte los marca con
+  /// "S/D (acum.)" para que el admin lo distinga.
+  final bool esPeriodo;
+
+  final String ultimaSync;
+  final bool conectado;
+
+  const _FilaConsumo({
+    required this.patente,
+    required this.tipo,
+    required this.marca,
+    required this.modelo,
+    required this.vin,
+    required this.empresa,
+    required this.km,
+    required this.litros,
+    required this.esPeriodo,
+    required this.ultimaSync,
+    required this.conectado,
+  });
+
+  /// Promedio km/L; 0 si no tenemos litros (evita división por cero).
+  double get promedioKmPorLitro => litros > 0 ? km / litros : 0.0;
+
+  factory _FilaConsumo.from({
+    required String patente,
+    required Map<String, dynamic> data,
+    required dynamic volvoData,
+    required List<_Snapshot> historicos,
+    required DateTime desde,
+    required DateTime hasta,
+  }) {
+    // Default = acumulado (fallback). Si después detectamos que hay
+    // suficiente histórico para calcular período real, lo reemplazamos.
+    var km = (data['KM_ACTUAL'] ?? 0.0).toDouble();
+    var litros = 0.0;
+    var esPeriodo = false;
+
+    if (volvoData != null && volvoData['accumulatedData'] != null) {
+      litros = (volvoData['accumulatedData']['totalFuelConsumption'] ?? 0.0)
+          .toDouble();
+    }
+
+    // Si hay al menos 2 snapshots (uno antes/igual a `desde` y otro
+    // antes/igual a `hasta`), podemos calcular consumo del período.
+    // Si solo hay uno, la unidad recién arrancó tracking y queda como
+    // acumulado.
+    if (historicos.isNotEmpty) {
+      _Snapshot? inicio;
+      _Snapshot? fin;
+      for (final s in historicos) {
+        if (!s.fecha.isAfter(desde)) inicio = s; // ≤ desde
+        if (!s.fecha.isAfter(hasta)) fin = s; // ≤ hasta
+      }
+      // Si no hay snapshot anterior a `desde`, tomamos el primero
+      // disponible como inicio (la unidad arrancó dentro del rango).
+      // Eso da un consumo "casi del período" pero conviene marcarlo.
+      inicio ??= historicos.first;
+      if (fin != null && fin.fecha.isAfter(inicio.fecha)) {
+        final litrosPeriodo = (fin.litros - inicio.litros)
+            .clamp(0.0, double.infinity)
+            .toDouble();
+        final kmPeriodo =
+            (fin.km - inicio.km).clamp(0.0, double.infinity).toDouble();
+        // Solo aceptamos el período si tenemos consumo > 0 — sino la
+        // unidad estuvo parada y el "acum" es más informativo.
+        if (litrosPeriodo > 0 || kmPeriodo > 0) {
+          litros = litrosPeriodo;
+          km = kmPeriodo;
+          esPeriodo = true;
+        }
+      }
+    }
+
+    var ultimaSync = '-';
+    if (volvoData != null) {
+      final ts = (volvoData['triggerTimestamp'] ??
+              volvoData['samplingTime'] ??
+              '')
+          .toString();
+      if (ts.isNotEmpty) {
+        final dt = DateTime.tryParse(ts);
+        if (dt != null) {
+          ultimaSync = DateFormat('dd/MM HH:mm').format(dt.toLocal());
+        }
+      }
+    }
+
+    return _FilaConsumo(
+      patente: patente,
+      tipo: (data['TIPO'] ?? '').toString(),
+      marca: (data['MARCA'] ?? '').toString(),
+      modelo: (data['MODELO'] ?? '').toString(),
+      vin: (data['VIN'] ?? '').toString().toUpperCase(),
+      empresa: (data['EMPRESA'] ?? '').toString(),
+      km: km,
+      litros: litros,
+      esPeriodo: esPeriodo,
+      ultimaSync: ultimaSync,
+      conectado: volvoData != null,
+    );
+  }
+}
+
+// =============================================================================
+// COMPONENTES DEL DIALOG
+// =============================================================================
+
+class _LabelSeccion extends StatelessWidget {
+  final String texto;
+  const _LabelSeccion(this.texto);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, top: 4),
+      child: Text(
+        texto.toUpperCase(),
+        style: const TextStyle(
+          color: Colors.greenAccent,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.3,
+        ),
+      ),
+    );
+  }
+}
+
+class _BotonFecha extends StatelessWidget {
+  final String label;
+  final DateTime fecha;
+  final void Function(DateTime) onPick;
+
+  const _BotonFecha({
+    required this.label,
+    required this.fecha,
+    required this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('dd/MM/yyyy');
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () async {
+        final f = await pickFecha(context, initial: fecha, titulo: label);
+        if (f != null) onPick(f);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.black.withAlpha(80),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              fmt.format(fecha),
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

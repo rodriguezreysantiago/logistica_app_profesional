@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/utils/app_feedback.dart';
 
 class RoleGuard extends StatelessWidget {
   final Widget child;
@@ -67,13 +68,7 @@ class RoleGuard extends StatelessWidget {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!context.mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(mensaje, style: const TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      AppFeedback.error(context, mensaje);
 
       Navigator.of(context).pushNamedAndRemoveUntil(
         AppRoutes.home, // ✅ MEJORA: Ruta centralizada

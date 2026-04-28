@@ -64,6 +64,7 @@ class _AdminVehiculosListaScreenState
               builder: (_) => const AdminVehiculoAltaScreen(),
             ),
           ),
+          tooltip: 'Agregar nueva unidad',
           icon: const Icon(Icons.add),
           label: const Text('NUEVO'),
         ),
@@ -127,6 +128,13 @@ class _VehiculoCard extends StatelessWidget {
     final modelo = (data['MODELO'] ?? 'S/D').toString();
     final estado = (data['ESTADO'] ?? 'LIBRE').toString().toUpperCase();
     final km = data['KM_ACTUAL'];
+    // Avatar de la unidad: si tiene foto cargada, la mostramos circular.
+    // Si no, fallback a un ícono según el tipo (tractor / enganche).
+    final urlFoto = data['ARCHIVO_FOTO']?.toString();
+    final tieneFoto =
+        urlFoto != null && urlFoto.isNotEmpty && urlFoto != '-';
+    final tipo = (data['TIPO'] ?? 'TRACTOR').toString().toUpperCase();
+    final esTractor = tipo == 'TRACTOR';
 
     return Selector<VehiculoProvider,
         ({bool loading, bool success, String? error})>(
@@ -139,81 +147,106 @@ class _VehiculoCard extends StatelessWidget {
         return AppCard(
           onTap: () => _abrirDetalle(context, patente, data),
           highlighted: state.success || state.error != null,
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header: patente + badge estado + indicadores
-              Row(
-                children: [
-                  Text(
-                    patente.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  _EstadoBadge(estado: estado),
-                  const Spacer(),
-                  if (state.loading)
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  if (state.success)
-                    const Icon(Icons.check_circle,
-                        color: Colors.greenAccent, size: 16),
-                  if (state.error != null)
-                    const Icon(Icons.error_outline,
-                        color: Colors.redAccent, size: 16),
-                ],
+              // Avatar de la unidad — mismo patrón que _EmpleadoCard.
+              // Foto si la cargó el admin; si no, ícono temático (camión
+              // para tractor, enganche para acoplados).
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: Colors.white12,
+                backgroundImage: tieneFoto ? NetworkImage(urlFoto) : null,
+                child: !tieneFoto
+                    ? Icon(
+                        esTractor ? Icons.local_shipping : Icons.rv_hookup,
+                        color: Colors.white54,
+                        size: 22,
+                      )
+                    : null,
               ),
-              const SizedBox(height: 6),
-              // Subtítulo: marca/modelo + km
-              Row(
-                children: [
-                  Icon(Icons.local_shipping,
-                      size: 12, color: Colors.white.withAlpha(120)),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '$marca $modelo',
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header: patente + badge estado + indicadores
+                    Row(
+                      children: [
+                        Text(
+                          patente.toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        _EstadoBadge(estado: estado),
+                        const Spacer(),
+                        if (state.loading)
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        if (state.success)
+                          const Icon(Icons.check_circle,
+                              color: Colors.greenAccent, size: 16),
+                        if (state.error != null)
+                          const Icon(Icons.error_outline,
+                              color: Colors.redAccent, size: 16),
+                      ],
                     ),
-                  ),
-                  Icon(Icons.speed,
-                      size: 12, color: Colors.white.withAlpha(120)),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${AppFormatters.formatearKilometraje(km)} km',
-                    style: const TextStyle(
-                      color: Colors.greenAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                    const SizedBox(height: 6),
+                    // Subtítulo: marca/modelo + km
+                    Row(
+                      children: [
+                        Icon(Icons.local_shipping,
+                            size: 12, color: Colors.white.withAlpha(120)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '$marca $modelo',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Icon(Icons.speed,
+                            size: 12, color: Colors.white.withAlpha(120)),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${AppFormatters.formatearKilometraje(km)} km',
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
-              // Telemetría compacta (combustible + autonomía). Solo se
-              // muestra si la unidad reporta esos datos vía Volvo. Para
-              // unidades sin telemetría, esta fila no aparece y el card
-              // queda como antes.
-              _TelemetriaCompacta(data: data),
-              const SizedBox(height: 10),
-              // Vista rápida de vencimientos (badges compactos)
-              Row(
-                children: [
-                  _MiniVencimiento(
-                      label: 'RTO', fecha: data['VENCIMIENTO_RTO']),
-                  const SizedBox(width: 14),
-                  _MiniVencimiento(
-                      label: 'Seguro', fecha: data['VENCIMIENTO_SEGURO']),
-                ],
+                    // Telemetría compacta (combustible + autonomía). Solo
+                    // se muestra si la unidad reporta esos datos vía
+                    // Volvo. Para unidades sin telemetría, esta fila no
+                    // aparece y el card queda como antes.
+                    _TelemetriaCompacta(data: data),
+                    const SizedBox(height: 10),
+                    // Vista rápida de vencimientos (badges compactos)
+                    Row(
+                      children: [
+                        _MiniVencimiento(
+                            label: 'RTO', fecha: data['VENCIMIENTO_RTO']),
+                        const SizedBox(width: 14),
+                        _MiniVencimiento(
+                            label: 'Seguro',
+                            fecha: data['VENCIMIENTO_SEGURO']),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -224,48 +257,61 @@ class _VehiculoCard extends StatelessWidget {
 
   /// Dispara el sync con Volvo si corresponde y abre el bottom sheet de detalle.
   void _abrirDetalle(BuildContext context, String patente,
-      Map<String, dynamic> data) {
-    final marca = (data['MARCA'] ?? '').toString().toUpperCase();
-    final vin = (data['VIN'] ?? '').toString();
+          Map<String, dynamic> data) =>
+      abrirDetalleVehiculo(context, patente, data);
+}
 
-    // Sync no bloqueante: si es Volvo y tiene VIN, refrescamos el KM en
-    // segundo plano. El stream del documento se actualiza solo cuando termina.
-    if (marca == 'VOLVO' && vin.isNotEmpty) {
-      final p = context.read<VehiculoProvider>();
-      if (!p.isLoading(patente) && p.debeSincronizar(patente)) {
-        p.sync(patente, vin);
-      }
+/// Abre el detalle (bottom sheet) de un vehículo desde cualquier parte
+/// del código.
+///
+/// Si la unidad es Volvo y tiene VIN, dispara un sync de KM no bloqueante
+/// en segundo plano antes de abrir — el stream del doc se refresca solo.
+///
+/// Pensado para que features externos (CommandPalette / búsqueda Ctrl+K,
+/// links profundos, etc.) puedan abrir el detalle sin tener que crear
+/// un `_VehiculoCard` artificial.
+void abrirDetalleVehiculo(BuildContext context, String patente,
+    Map<String, dynamic> data) {
+  final marca = (data['MARCA'] ?? '').toString().toUpperCase();
+  final vin = (data['VIN'] ?? '').toString();
+
+  // Sync no bloqueante: si es Volvo y tiene VIN, refrescamos el KM en
+  // segundo plano. El stream del documento se actualiza solo cuando termina.
+  if (marca == 'VOLVO' && vin.isNotEmpty) {
+    final p = context.read<VehiculoProvider>();
+    if (!p.isLoading(patente) && p.debeSincronizar(patente)) {
+      p.sync(patente, vin);
     }
-
-    AppDetailSheet.show(
-      context: context,
-      title: 'Ficha $patente',
-      icon: Icons.local_shipping,
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.edit, color: Colors.greenAccent, size: 20),
-          tooltip: 'Editar ficha',
-          onPressed: () {
-            Navigator.pop(context);
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => AdminVehiculoFormScreen(
-                  vehiculoId: patente,
-                  datosIniciales: data,
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-      builder: (sheetCtx, scrollCtl) => _DetalleVehiculo(
-        patente: patente,
-        dataInicial: data,
-        scrollController: scrollCtl,
-      ),
-    );
   }
+
+  AppDetailSheet.show(
+    context: context,
+    title: 'Ficha $patente',
+    icon: Icons.local_shipping,
+    actions: [
+      IconButton(
+        icon: const Icon(Icons.edit, color: Colors.greenAccent, size: 20),
+        tooltip: 'Editar ficha',
+        onPressed: () {
+          Navigator.pop(context);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AdminVehiculoFormScreen(
+                vehiculoId: patente,
+                datosIniciales: data,
+              ),
+            ),
+          );
+        },
+      ),
+    ],
+    builder: (sheetCtx, scrollCtl) => _DetalleVehiculo(
+      patente: patente,
+      dataInicial: data,
+      scrollController: scrollCtl,
+    ),
+  );
 }
 
 // =============================================================================
@@ -359,7 +405,7 @@ class _DetalleVehiculo extends StatelessWidget {
             label: 'Empresa', valor: (data['EMPRESA'] ?? '—').toString()),
 
         const SizedBox(height: 18),
-        const _SectionTitle(icon: Icons.event, label: 'Vencimientos'),
+        const _SectionTitle(icon: Icons.event_note, label: 'Vencimientos'),
         _VencimientoRow(
           etiqueta: 'RTO / VTV',
           fecha: data['VENCIMIENTO_RTO'],
@@ -499,7 +545,7 @@ class _MiniVencimiento extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.event, size: 12, color: Colors.white38),
+        const Icon(Icons.event_note, size: 12, color: Colors.white38),
         const SizedBox(width: 4),
         Text(label,
             style:

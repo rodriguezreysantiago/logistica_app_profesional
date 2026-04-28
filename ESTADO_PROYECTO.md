@@ -1,6 +1,6 @@
 # Estado del proyecto — S.M.A.R.T. Logística
 
-Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-04-28**.
+Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-04-28** (sesión nocturna: refactor cross-platform + sprints 1-5 de UX/calidad).
 
 ---
 
@@ -105,6 +105,40 @@ lib/
 - **Reporte Checklist abre en Excel directo** en Windows (antes solo compartía).
 - **Calendario reemplazado por input DD/MM/AAAA**: dialog compacto con validación inline.
 - **Migración total `Psicofísico` → `Preocupacional`**: campos en Firestore renombrados, código actualizado, propiedades del modelo, mensajes de WhatsApp actualizados.
+- **Refactor cross-platform de uploads (sesión 2026-04-28 PM)**: `StorageService.subirArchivo` ahora trabaja con `Uint8List` + nombre original en lugar de `dart:io.File` (usa `putData` en vez de `putFile`). Todos los callers (`user_mi_perfil`, `revision_service`, `vencimiento_editor_sheet`, `admin_personal_lista`, `admin_vehiculo_form`, `user_mis_vencimientos`) pasan ahora `xfile.readAsBytes()` o `FilePicker(withData: true)`. Resultado: la app compila y corre en Chrome / Web sin crashear en flujos de subida. `flutter analyze` → 0 issues.
+- **Reportes Excel con guard de Web**: `report_flota` y `report_checklist` muestran snackbar "solo disponibles en Windows y Android" en `kIsWeb` antes de tocar `dart:io`.
+- **Permisos Android 13+**: agregados `POST_NOTIFICATIONS` (runtime permission para `flutter_local_notifications`) y `CAMERA` + `<uses-feature>` opcional al `AndroidManifest.xml`.
+
+### Sprints 1-5 de UX y calidad (2026-04-28 PM)
+
+**Sprint 1 — Confirmaciones destructivas + feedback de éxito**
+- Nuevo `AppConfirmDialog` (`shared/widgets/app_confirm_dialog.dart`) reutilizable con modo `destructive: true` (botón rojo).
+- DESVINCULAR equipo de chofer ahora pide confirmación destructiva con copy clara + emite snackbar de éxito tras `batch.commit`.
+- RECHAZAR revisión ahora pide confirmación destructiva (antes borraba el comprobante del chofer del Storage sin avisar).
+- Auditados todos los `update`/`set`/`delete`/`batch.commit` del admin: alta de chofer, alta de vehículo, edición de campos, aprobar revisión, etc., ya tenían feedback adecuado.
+
+**Sprint 2 — Sistema unificado de feedback e inputs**
+- `AppFeedback` (`shared/utils/app_feedback.dart`) — paleta semántica (`success`, `error`, `warning`, `info`) con ícono + color + duración consistentes. Versión `*On(messenger, msg)` para casos post-await.
+- `AppLoadingDialog` (`shared/widgets/app_loading_dialog.dart`) — modal de "cargando…" con `show(context)` / `hide(navigator)`.
+- `DigitOnlyFormatter` (`shared/utils/digit_only_formatter.dart`) — filtro de dígitos con `maxLength` opcional. Aplicado a DNI, CUIL, TELÉFONO, año de fabricación, KM en todos los formularios. La red real contra paste / desktop, no solo `keyboardType: number`.
+- 46 SnackBars dispersos migrados a `AppFeedback`. 2 loadings ad-hoc migrados a `AppLoadingDialog`. `keyboardType: emailAddress` en mail.
+
+**Sprint 3 — Pulido visual y constantes**
+- "Nuevo Legajo" → "Nuevo chofer" en el form de alta.
+- Tooltips en FABs (admin de personal y flota).
+- Iconografía de vencimientos unificada a `Icons.event_note` en 5 lugares.
+- `AppColors` (`shared/constants/app_colors.dart`) — paleta centralizada (semánticos + accent + background/surface + text). Documentado: usar `Theme.of(context)` para colores del tema; `AppColors` para colores semánticos puntuales; **no** hardcodear `Colors.greenAccent` en código nuevo.
+
+**Sprint 4 — Quick wins de productividad**
+- **Foto del vehículo**: campo `ARCHIVO_FOTO` en `VEHICULOS`. Avatar circular en `_VehiculoCard` (mismo patrón que `_EmpleadoCard`). Bloque de "Cambiar foto / Agregar foto" en el form de edición.
+- **Búsqueda Ctrl+K**: nuevo `CommandPalette` (`shared/widgets/command_palette.dart`) estilo VS Code. Indexa choferes y vehículos con fetch one-shot, filtro local mientras tipeás. Atajo `Ctrl+K` / `Cmd+K` en `admin_shell.dart` + IconButton de lupa en la AppBar. Funciones públicas top-level `abrirDetalleChofer(context, dni)` y `abrirDetalleVehiculo(context, patente, data)` para que features externos puedan abrir detalles.
+- **Calendario de vencimientos**: package `table_calendar: ^3.1.2`. Pantalla `admin_vencimientos_calendario_screen.dart` con vista mensual, badge contador por día con color según urgencia (rojo ≤7d, naranja ≤30d, verde >30d). Tap en día abre la lista de vencimientos del día. Nueva ruta `/vencimientos_calendario` + tile primero en el menú.
+- **OCR de comprobantes**: package `google_mlkit_text_recognition: ^0.13.1`. `OcrService` (`shared/utils/ocr_service.dart`) con `detectarFecha(path)` solo en Android/iOS. Estrategia: regex multi-formato (`/`, `-`, `.`) + filtra años 2020-2050 + devuelve la **fecha más lejana** (la de vencimiento, no la de emisión). Botón "Detectar fecha desde foto" en el dialog del chofer cuando `OcrService.soportado`.
+
+**Sprint 5 — Calidad y trazabilidad**
+- **`AuditLog`** (`core/services/audit_log_service.dart`): bitácora de acciones del admin en colección `AUDITORIA_ACCIONES`. Helper `registrar(accion, entidad, entidadId, detalles)` con enum `AuditAccion` cerrado. Fire-and-forget. Integrado en alta de chofer, alta de vehículo, edición de campo, asignar/desvincular equipo, aprobar/rechazar revisión.
+- **Crashlytics + `AppLogger`** (`core/services/app_logger.dart`): dep `firebase_crashlytics: ^4.1.3`. `AppLogger.init()` engancha `FlutterError.onError` y `PlatformDispatcher.onError` solo en Android/iOS; en Web/Windows cae a `debugPrint`. En debug `setCrashlyticsCollectionEnabled(false)`. Métodos `recordError(error, stack, reason, fatal)` y `log(msg)` para `try/catch` puntuales. `main.dart` actualizado.
+- **Tests unitarios**: 38 tests verdes. `password_hasher_test.dart` (8), `aviso_vencimiento_builder_test.dart` (13), `ocr_service_test.dart` (14), `widget_test.dart` placeholder. `flutter analyze` → 0 issues. `flutter test` → all passed.
 
 ### Bugs arreglados destacados
 - DNI vacío al solicitar cambio de equipo (`findAncestorStateOfType` fallaba dentro de bottom sheet → propagación explícita).
@@ -115,18 +149,41 @@ lib/
 
 ## 7. Pendientes / roadmap
 
+### Bloqueante de plataforma — iOS
+- **`ios/` no existe en el repo**. La app no es compilable para iPhone hoy. Para habilitarlo:
+  1. Conseguir una Mac (compilar iOS no se puede desde Windows; ni siquiera con codemagic / cloud build se evita el setup inicial).
+  2. Cuenta Apple Developer ($99/año) si se quiere distribuir.
+  3. `flutter create --platforms=ios .` desde la raíz del proyecto.
+  4. Bajar `GoogleService-Info.plist` de Firebase Console (proyecto `logisticaapp-e539a` → iOS app) y dejarlo en `ios/Runner/`.
+  5. Editar `ios/Runner/Info.plist` con los permisos: `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`, `NSPhotoLibraryAddUsageDescription`, `LSApplicationQueriesSchemes` (para `wa.me` con `url_launcher`).
+  6. `Podfile`: `platform :ios, '13.0'` o superior (Firebase requiere ≥13).
+  7. Cambiar el bundle ID a algo real, no `com.example.*` (ej. `ar.com.smartlogistica.flota`).
+
 ### Próximo paso lógico
+- **Activar Crashlytics nativo en Android** (mientras tanto el AppLogger cae a debugPrint sin romper). Sumar:
+  - En `android/build.gradle.kts`: `classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.2'`.
+  - En `android/app/build.gradle.kts`: `apply plugin: 'com.google.firebase.crashlytics'`.
+  - Probar lanzando una excepción manual desde la app de release.
+- **Dashboard / panel home del admin** con métricas vivas (choferes activos, unidades, vencimientos próximos, revisiones pendientes, % checklists OK del último mes). Cuando arranca el día el admin ve "estado de la operación" sin tener que abrir cada sección. Costo medio (1-2 días), impacto alto.
 - **Mails automáticos escalonados** por vencimientos (30/15/7 días + diario al vencer). Requiere:
   - Plan Blaze de Firebase (Cloud Functions con scheduler).
   - Proveedor: SendGrid (free 100/día) o Resend (free 3000/mes) o SMTP de Workspace.
   - Destinatario: aún por definir (chofer, admin, ambos).
 
 ### Roadmap medio plazo (auditoría)
-1. Migrar a **Firebase Auth** (custom token desde Cloud Function) para poder habilitar `firestore.rules`.
+1. Migrar a **Firebase Auth** (custom token desde Cloud Function) para poder habilitar `firestore.rules`. **Bloqueante** de varios items: vista de invitado del dueño, rate limiting confiable, firestore.rules reales.
 2. **Rate limiting** en login (Cloud Function + colección `LOGIN_ATTEMPTS`).
 3. Mover credenciales Volvo Connect a Cloud Function proxy (hoy se inyectan vía `--dart-define-from-file=secrets.json`, OK para dev).
 4. **`flutter_secure_storage`** para sesión en lugar de SharedPreferences plano.
-5. Refactor: `admin_personal_lista_screen.dart` (1000+ líneas).
+5. Refactor: `admin_personal_lista_screen.dart` (1200+ líneas con audit log y formatters; sigue creciendo).
+6. **Modo offline para checklist** del chofer (sqflite/Hive + cola de sync). Útil en ruta sin señal.
+7. **Biometría para login del chofer** (`local_auth`, huella en mobile).
+8. **Vista de invitado del dueño** — link público read-only con dashboard. Requiere Firebase Auth primero.
+
+### Roadmap UI/UX largo
+- **Push notifications agendadas** al chofer ("Tu licencia vence en 5 días") sin necesidad de WhatsApp del admin. `flutter_local_notifications` ya está instalado.
+- **Búsqueda Ctrl+K**: extender para indexar revisiones pendientes (hoy solo choferes y vehículos).
+- **`AppColors`** — migración incremental: cada vez que se toque un archivo, reemplazar `Colors.greenAccent` / `Colors.redAccent` etc. por las constantes centralizadas.
 
 ### Roadmap largo plazo (Volvo)
 - **Anti-robo nocturno** con `wheelBasedSpeed > 0` fuera de horario operativo + push notification al admin.

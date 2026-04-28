@@ -1,12 +1,14 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../core/services/storage_service.dart';
+import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
@@ -55,6 +57,11 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   final Map<String, String?> _fechas = {};
   final Map<String, String?> _urls = {};
 
+  /// URL pública de la foto identificatoria del vehículo (campo
+  /// `ARCHIVO_FOTO`). Es opcional — si no hay, la card cae a un ícono.
+  String? _urlFoto;
+  bool _subiendoFoto = false;
+
   /// Lista de vencimientos que aplica a este vehículo, según su tipo
   /// (tractor → 4 vencimientos; enganche → 2). Se calcula una sola vez
   /// en initState y se usa en _guardar y en build.
@@ -81,6 +88,10 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       _fechas[spec.campoFecha] = d[spec.campoFecha]?.toString();
       _urls[spec.campoArchivo] = d[spec.campoArchivo]?.toString();
     }
+    final fotoCruda = d['ARCHIVO_FOTO']?.toString();
+    if (fotoCruda != null && fotoCruda.isNotEmpty && fotoCruda != '-') {
+      _urlFoto = fotoCruda;
+    }
   }
 
   @override
@@ -98,69 +109,123 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   // ACCIONES
   // ---------------------------------------------------------------------------
 
+  /// Cambia o sube por primera vez la foto identificatoria del vehículo.
+  ///
+  /// El admin elige fuente (cámara o galería/archivo) con el mismo sheet
+  /// que usamos para los comprobantes. Guardamos en Storage como
+  /// `vehiculos/{patente}/foto.jpg` y actualizamos el campo
+  /// `ARCHIVO_FOTO` en Firestore. La card de la lista se refresca solo
+  /// porque escucha el doc en stream.
+  Future<void> _cambiarFotoVehiculo() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final source = await _elegirFuenteArchivo();
+    if (source == null) return;
+
+    Uint8List? bytes;
+    String fileName = 'foto.jpg';
+
+    if (source == _FuenteArchivo.camera) {
+      final photo = await ImagePicker()
+          .pickImage(source: ImageSource.camera, imageQuality: 60);
+      if (photo != null) {
+        bytes = await photo.readAsBytes();
+      }
+    } else {
+      // Solo permitimos imágenes para foto de unidad — un PDF acá no
+      // tiene sentido y rompería el preview circular en la card.
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['jpg', 'jpeg', 'png'],
+        withData: true,
+      );
+      final picked = result?.files.singleOrNull;
+      if (picked != null && picked.bytes != null) {
+        bytes = picked.bytes;
+        fileName = picked.name;
+      }
+    }
+
+    if (bytes == null) return;
+    if (!mounted) return;
+
+    setState(() => _subiendoFoto = true);
+    try {
+      final path = 'vehiculos/${widget.vehiculoId.trim()}/foto.jpg';
+      final url = await StorageService().subirArchivo(
+        bytes: bytes,
+        nombreOriginal: fileName,
+        rutaStorage: path,
+      );
+      await FirebaseFirestore.instance
+          .collection('VEHICULOS')
+          .doc(widget.vehiculoId.trim())
+          .update({'ARCHIVO_FOTO': url});
+
+      if (!mounted) return;
+      setState(() => _urlFoto = url);
+      AppFeedback.successOn(messenger, 'Foto de la unidad actualizada');
+    } catch (e) {
+      if (mounted) {
+        AppFeedback.errorOn(messenger, 'No se pudo subir la foto: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _subiendoFoto = false);
+    }
+  }
+
   Future<void> _subirDocumento(VencimientoSpec spec) async {
     final messenger = ScaffoldMessenger.of(context);
     final source = await _elegirFuenteArchivo();
     if (source == null) return;
 
-    File? fileToUpload;
+    Uint8List? bytes;
     String fileName = '';
 
     if (source == _FuenteArchivo.camera) {
       final photo = await ImagePicker()
           .pickImage(source: ImageSource.camera, imageQuality: 50);
       if (photo != null) {
-        fileToUpload = File(photo.path);
+        // readAsBytes(): cross-platform (Web devuelve blob bytes).
+        bytes = await photo.readAsBytes();
         // Nombre de archivo: usamos el campoArchivo (sin prefijo ARCHIVO_)
         // como tag para que sea fácil identificar el archivo en Storage.
         final tag = spec.campoArchivo.replaceFirst('ARCHIVO_', '');
         fileName = '${tag}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       }
     } else {
-      final result = await FilePicker.platform.pickFiles(type: FileType.any);
-      if (result != null && result.files.single.path != null) {
-        fileToUpload = File(result.files.single.path!);
-        fileName = result.files.single.name;
+      // withData: true asegura que `bytes` venga poblado en Web también.
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        withData: true,
+      );
+      final picked = result?.files.singleOrNull;
+      if (picked != null && picked.bytes != null) {
+        bytes = picked.bytes;
+        fileName = picked.name;
       }
     }
 
-    if (fileToUpload == null) return;
+    if (bytes == null || fileName.isEmpty) return;
 
     setState(() => _isSaving = true);
     try {
       final path = 'vehiculos/${widget.vehiculoId.trim()}/$fileName';
-      final ref = FirebaseStorage.instance.ref().child(path);
 
-      SettableMetadata? metadata;
-      final lower = fileName.toLowerCase();
-      if (lower.endsWith('.pdf')) {
-        metadata = SettableMetadata(contentType: 'application/pdf');
-      } else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-        metadata = SettableMetadata(contentType: 'image/jpeg');
-      }
-
-      await ref.putFile(fileToUpload, metadata);
-      final downloadUrl = await ref.getDownloadURL();
+      final downloadUrl = await StorageService().subirArchivo(
+        bytes: bytes,
+        nombreOriginal: fileName,
+        rutaStorage: path,
+      );
 
       if (!mounted) return;
       setState(() {
         _urls[spec.campoArchivo] = downloadUrl;
       });
 
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('${spec.etiqueta} cargado.'),
-          backgroundColor: Colors.blueAccent,
-        ),
-      );
+      AppFeedback.infoOn(messenger, '${spec.etiqueta} cargado.');
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error al subir: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        AppFeedback.errorOn(messenger, 'Error al subir: $e');
       }
     } finally {
       // Siempre reseteamos _isSaving — incluso si la subida falló o el
@@ -221,12 +286,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   void _abrirDiagnostico() {
     final vin = _vinCtrl.text.trim().toUpperCase();
     if (vin.length < 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Necesito un VIN válido para diagnosticar.'),
-          backgroundColor: Colors.orangeAccent,
-        ),
-      );
+      AppFeedback.warning(context, 'Necesito un VIN válido para diagnosticar.');
       return;
     }
     Navigator.push(
@@ -244,13 +304,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     final messenger = ScaffoldMessenger.of(context);
 
     if (_vinCtrl.text.length < 10) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content:
-              Text('Se requiere un VIN válido (mínimo 10 caracteres)'),
-          backgroundColor: Colors.orangeAccent,
-        ),
-      );
+      AppFeedback.warningOn(messenger, 'Se requiere un VIN válido (mínimo 10 caracteres)');
       return;
     }
 
@@ -264,29 +318,14 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
       if (metros != null && metros > 0) {
         setState(() => _kmCtrl.text = (metros / 1000).toStringAsFixed(0));
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('¡Sincronizado! KM actualizado.'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        AppFeedback.successOn(messenger, '¡Sincronizado! KM actualizado.');
       } else {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Unidad en reposo o no encontrada en Volvo.'),
-            backgroundColor: Colors.orangeAccent,
-          ),
-        );
+        AppFeedback.warningOn(messenger, 'Unidad en reposo o no encontrada en Volvo.');
       }
     } catch (e) {
       debugPrint('Error sincro: $e');
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error de conexión con Volvo: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        AppFeedback.errorOn(messenger, 'Error de conexión con Volvo: $e');
       }
     } finally {
       if (mounted) setState(() => _isSyncing = false);
@@ -375,21 +414,11 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       guardadoOk = true;
 
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Ficha actualizada con éxito'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      AppFeedback.successOn(messenger, 'Ficha actualizada con éxito');
       navigator.pop();
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Error al guardar: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        AppFeedback.errorOn(messenger, 'Error al guardar: $e');
       }
     } finally {
       // Solo reseteamos el flag si NO hicimos pop (si se hizo pop, la
@@ -419,6 +448,15 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              // Identificación visual: foto circular grande + botón
+              // "Cambiar foto". Para que el admin reconozca la unidad
+              // en la lista por la foto antes que por la patente.
+              _FotoUnidad(
+                url: _urlFoto,
+                subiendo: _subiendoFoto,
+                onTap: _cambiarFotoVehiculo,
+              ),
+              const SizedBox(height: 24),
               const _SectionTitle('Información técnica'),
               _FInput(
                 controller: _marcaCtrl,
@@ -496,6 +534,82 @@ enum _FuenteArchivo { camera, fileSystem }
 // COMPONENTES
 // =============================================================================
 
+/// Bloque visual con la foto identificatoria de la unidad y un botón
+/// "Cambiar foto" debajo. Si no hay foto cargada, muestra un avatar
+/// vacío con ícono de camión que invita a tocar.
+class _FotoUnidad extends StatelessWidget {
+  final String? url;
+  final bool subiendo;
+  final VoidCallback onTap;
+
+  const _FotoUnidad({
+    required this.url,
+    required this.subiendo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tieneFoto = url != null && url!.isNotEmpty;
+
+    return Center(
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: subiendo ? null : onTap,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 50,
+                  backgroundColor: Colors.white12,
+                  backgroundImage:
+                      tieneFoto ? NetworkImage(url!) : null,
+                  child: !tieneFoto
+                      ? const Icon(Icons.local_shipping,
+                          size: 44, color: Colors.white38)
+                      : null,
+                ),
+                if (subiendo)
+                  Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withAlpha(140),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        color: Colors.greenAccent,
+                        strokeWidth: 3,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: subiendo ? null : onTap,
+            icon: Icon(
+              tieneFoto ? Icons.edit : Icons.add_a_photo,
+              size: 16,
+              color: Colors.greenAccent,
+            ),
+            label: Text(
+              tieneFoto ? 'Cambiar foto' : 'Agregar foto',
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SectionTitle extends StatelessWidget {
   final String label;
   const _SectionTitle(this.label);
@@ -542,6 +656,9 @@ class _FInput extends StatelessWidget {
             isNumber ? TextInputType.number : TextInputType.text,
         textCapitalization: TextCapitalization.characters,
         textInputAction: textInputAction,
+        // Solo dígitos en KM. Sin esto, el admin podía pegar "100.000"
+        // o "100 km" desde el clipboard y romper la sincronización Volvo.
+        inputFormatters: isNumber ? [DigitOnlyFormatter()] : null,
         style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
           labelText: label,

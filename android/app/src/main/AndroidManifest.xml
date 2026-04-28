@@ -5,10 +5,20 @@
 
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    
+
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- Notificaciones runtime permission (Android 13+ / API 33).
+         Sin esto flutter_local_notifications no puede mostrar avisos en
+         celulares modernos aunque el canal esté creado. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Cámara: image_picker la usa cuando el chofer/admin elige
+         "Tomar foto con la cámara" para subir comprobantes o foto de perfil. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:label="logistica_app_profesional"
