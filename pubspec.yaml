@@ -56,6 +56,13 @@ dependencies:
   # Crashlytics: solo se inicializa en Android/iOS (Web/Windows nativo
   # no son soportados — el AppLogger hace la decisión en runtime).
   firebase_crashlytics: ^4.1.3
+  # Firebase Auth: el login real se hace contra una Cloud Function
+  # (`loginConDni`) que valida bcrypt server-side y emite un custom
+  # token. La function se llama por HTTPS directo con dio (porque
+  # el plugin `cloud_functions` no tiene implementación Windows).
+  # Permite cerrar las firestore.rules con `request.auth.uid` (= DNI)
+  # y `isAdmin()`.
+  firebase_auth: ^5.3.1
 
   # ================= ARCHIVOS =================
   image_picker: ^1.1.2

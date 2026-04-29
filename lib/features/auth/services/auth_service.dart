@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dio/dio.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/services/prefs_service.dart';
-import '../../../shared/utils/password_hasher.dart';
 
 class LoginResult {
   final bool success;
@@ -34,88 +34,114 @@ class LoginResult {
   }
 }
 
-/// Servicio de autenticación.
+/// Servicio de autenticación contra Firebase Auth.
 ///
-/// Soporta dos formatos de hash de contraseña:
-/// - **Bcrypt** (nuevo, con salt) — usado para empleados nuevos y contraseñas
-///   actualizadas.
-/// - **SHA-256** (legacy) — formato antiguo, todavía válido para login pero
-///   se migra automáticamente a Bcrypt en el primer login exitoso.
+/// **Cómo funciona el login**:
 ///
-/// La migración es **silenciosa**: el usuario logue normalmente con su
-/// contraseña de siempre y la próxima vez que login el hash ya estará en
-/// formato moderno.
+/// 1. El cliente llama a la Cloud Function `loginConDni` (callable Gen2)
+///    vía **HTTPS directo** con [Dio]. NO usa el plugin
+///    `cloud_functions` porque ese plugin no tiene implementación
+///    nativa para Windows desktop. Llamando por HTTPS plano funciona
+///    en todas las plataformas (Android, iOS, Web, Windows).
+/// 2. La function valida las credenciales server-side contra la
+///    colección `EMPLEADOS` (campo `CONTRASEÑA` con bcrypt o SHA-256
+///    legacy) y emite un **custom token** con `uid = dni` y custom
+///    claims `{rol, nombre}`.
+/// 3. El cliente hace `signInWithCustomToken(token)` y queda logueado
+///    en Firebase Auth (que sí tiene implementación Windows). A partir
+///    de ahí `request.auth.uid` en las `firestore.rules` es el DNI.
+///
+/// **Protocolo callable**: el body se envuelve en `{"data": {...}}` y
+/// la respuesta viene en `{"result": {...}}` (success) o
+/// `{"error": {"message", "status"}}` (error). Replicamos ese contrato
+/// manualmente acá.
 class AuthService {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  /// URL del callable. Funciona para Gen2 vía la capa de routing
+  /// legacy de Firebase. Si en el futuro cambiamos a Gen1 o cambia el
+  /// pattern, solo se ajusta esta constante.
+  static const String _loginEndpoint =
+      'https://us-central1-logisticaapp-e539a.cloudfunctions.net/loginConDni';
+
+  final FirebaseAuth _auth;
+  final Dio _dio;
+
+  AuthService({
+    FirebaseAuth? auth,
+    Dio? dio,
+  })  : _auth = auth ?? FirebaseAuth.instance,
+        _dio = dio ?? Dio();
 
   /// Login con DNI + contraseña.
   ///
-  /// Si el usuario está en formato legacy (SHA-256) y la contraseña es
-  /// correcta, dispara una migración silenciosa a Bcrypt en background.
-  /// Si la migración falla, el login igualmente termina exitoso (no
-  /// queremos romper UX por algo que no es bloqueante).
+  /// Devuelve [LoginResult.ok] con los datos básicos del chofer si las
+  /// credenciales son válidas, o [LoginResult.error] con un mensaje
+  /// listo para mostrar en UI si algo falló.
   Future<LoginResult> login({
     required String dni,
     required String password,
   }) async {
+    final cleanDni = dni.replaceAll(RegExp(r'[^0-9]'), '');
+    final cleanPass = password.trim();
+
+    // Pre-validación rápida — no quemamos invocaciones de la function
+    // ni latencia de red si el form vino vacío.
+    if (cleanDni.isEmpty || cleanPass.isEmpty) {
+      return LoginResult.error('Complete todos los campos requeridos.');
+    }
+
     try {
-      final cleanDni = dni.replaceAll(RegExp(r'[^0-9]'), '');
-      final cleanPass = password.trim();
-
-      // Pre-validación rápida — no quemamos lecturas de Firebase si el form
-      // está vacío.
-      if (cleanDni.isEmpty || cleanPass.isEmpty) {
-        return LoginResult.error('Complete todos los campos requeridos.');
-      }
-
-      final doc = await _db
-          .collection('EMPLEADOS')
-          .doc(cleanDni)
-          .get()
-          .timeout(
-        const Duration(seconds: 8),
+      // 1) Pedimos el custom token a la function por HTTPS.
+      final response = await _dio.post<Map<String, dynamic>>(
+        _loginEndpoint,
+        data: {
+          // Protocolo callable: payload va envuelto en `data`.
+          'data': {
+            'dni': cleanDni,
+            'password': cleanPass,
+          },
+        },
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          // No tiramos exception por status code — manejamos el error
+          // body abajo (la function devuelve 4xx con body estructurado).
+          validateStatus: (_) => true,
+          responseType: ResponseType.json,
+        ),
+      ).timeout(
+        const Duration(seconds: 12),
         onTimeout: () => throw TimeoutException('Sin conexión.'),
       );
 
-      if (!doc.exists) {
+      // Errores HTTP de la function: el body trae `{"error": {...}}`.
+      if (response.statusCode == null || response.statusCode! >= 400) {
+        final err = response.data?['error'] as Map<String, dynamic>?;
+        final code = (err?['status'] ?? 'unknown').toString();
+        final message = (err?['message'] ?? '').toString();
+        debugPrint('🚨 loginConDni HTTP ${response.statusCode} → $code: $message');
         return LoginResult.error(
-          'El usuario no existe o el DNI es incorrecto.',
+          message.isNotEmpty ? message : _mensajeFallback(code),
         );
       }
 
-      final data = doc.data();
-      if (data == null) {
+      // Respuesta OK del callable: body es `{"result": {...}}`.
+      final result = response.data?['result'] as Map<String, dynamic>?;
+      if (result == null) {
         return LoginResult.error(
-          'No se pudo obtener la información del usuario.',
-        );
+            'No se pudo iniciar sesión (respuesta inválida).');
       }
-
-      // Bloqueo de usuarios inactivos
-      final bool isActive =
-          data['ACTIVO'] is bool ? data['ACTIVO'] : true;
-      if (!isActive) {
+      final token = (result['token'] ?? '').toString();
+      if (token.isEmpty) {
         return LoginResult.error(
-          'Usuario inactivo. Contacte a administración.',
-        );
+            'No se pudo iniciar sesión (respuesta sin token).');
       }
+      final nombre = (result['nombre'] ?? 'Usuario').toString();
+      final rol = (result['rol'] ?? 'USUARIO').toString();
 
-      final storedHash = data['CONTRASEÑA']?.toString() ?? '';
+      // 2) Iniciamos sesión en Firebase Auth con el custom token.
+      await _auth.signInWithCustomToken(token);
 
-      // ✅ Verificación dual (Bcrypt nuevo / SHA-256 legacy)
-      if (!PasswordHasher.verify(cleanPass, storedHash)) {
-        return LoginResult.error('Contraseña incorrecta.');
-      }
-
-      // ✅ Migración silenciosa si todavía está en formato legacy
-      if (PasswordHasher.isLegacy(storedHash)) {
-        // Disparamos en background — si falla, el login ya fue exitoso.
-        // unawaited() es explícito: descartamos el Future a propósito.
-        unawaited(_migrarHashSilencioso(cleanDni, cleanPass));
-      }
-
-      final nombre = data['NOMBRE']?.toString() ?? 'Usuario';
-      final rol = data['ROL']?.toString() ?? 'USUARIO';
-
+      // 3) Persistimos los datos en SharedPreferences para que la app
+      //    los muestre rápido sin tocar Firestore en cada pantalla.
       await PrefsService.guardarUsuario(
         dni: cleanDni,
         nombre: nombre,
@@ -123,10 +149,24 @@ class AuthService {
       );
 
       return LoginResult.ok(dni: cleanDni, nombre: nombre, rol: rol);
+    } on FirebaseAuthException catch (e) {
+      debugPrint('🚨 signInWithCustomToken → ${e.code}: ${e.message}');
+      return LoginResult.error(
+          'No se pudo iniciar sesión (${e.code}). Reintentá en un momento.');
     } on TimeoutException catch (_) {
       return LoginResult.error(
-        'Tiempo de espera agotado. Verifique su señal de internet.',
-      );
+          'Tiempo de espera agotado. Verifique su señal de internet.');
+    } on DioException catch (e) {
+      debugPrint('🚨 loginConDni Dio → type=${e.type} msg=${e.message}');
+      debugPrint('   request URL: ${e.requestOptions.uri}');
+      debugPrint('   request method: ${e.requestOptions.method}');
+      debugPrint('   response status: ${e.response?.statusCode}');
+      debugPrint('   response data: ${e.response?.data}');
+      if (e.error != null) {
+        debugPrint('   underlying error: ${e.error.runtimeType}: ${e.error}');
+      }
+      return LoginResult.error(
+          'No se pudo conectar al servidor. Verifique su conexión.');
     } catch (e, stack) {
       debugPrint('🚨 AuthService.login error: $e');
       debugPrint(stack.toString());
@@ -134,34 +174,39 @@ class AuthService {
     }
   }
 
+  /// Cierra la sesión: Firebase Auth + SharedPreferences locales.
   Future<void> logout() async {
+    try {
+      await _auth.signOut();
+    } catch (e) {
+      debugPrint('⚠️ Error al cerrar sesión Firebase: $e');
+      // No bloqueamos el logout si Firebase falla — limpiamos prefs igual.
+    }
     await PrefsService.clear();
   }
 
-  /// Genera un hash Bcrypt para guardar en Firestore.
-  /// Lo usan las pantallas de creación de empleado y cambio de contraseña.
-  String generarHash(String password) {
-    return PasswordHasher.hashBcrypt(password);
-  }
-
-  // ===========================================================================
-  // INTERNOS
-  // ===========================================================================
-
-  /// Reemplaza el hash SHA-256 actual del usuario por uno Bcrypt.
-  /// Si falla, lo loggeamos pero NO interrumpimos el login.
-  Future<void> _migrarHashSilencioso(String dni, String passwordPlana) async {
-    try {
-      final nuevoHash = PasswordHasher.hashBcrypt(passwordPlana);
-      await _db.collection('EMPLEADOS').doc(dni).update({
-        'CONTRASEÑA': nuevoHash,
-        'hash_migrado_a_bcrypt': FieldValue.serverTimestamp(),
-      });
-      // No logueamos el DNI en claro para evitar dejar PII en logcat.
-      debugPrint('🔐 Hash migrado a Bcrypt (usuario #${dni.hashCode}).');
-    } catch (e) {
-      debugPrint(
-          '⚠️ No se pudo migrar hash a Bcrypt (usuario #${dni.hashCode}): $e');
+  /// Mensaje legible cuando la function devuelve un código pero sin
+  /// `message` poblado (no debería pasar en nuestro código pero
+  /// defendemos la UI igual).
+  String _mensajeFallback(String code) {
+    switch (code) {
+      case 'INVALID_ARGUMENT':
+      case 'invalid-argument':
+        return 'Datos incompletos o inválidos.';
+      case 'NOT_FOUND':
+      case 'not-found':
+        return 'El usuario no existe o el DNI es incorrecto.';
+      case 'PERMISSION_DENIED':
+      case 'permission-denied':
+        return 'Credenciales incorrectas.';
+      case 'FAILED_PRECONDITION':
+      case 'failed-precondition':
+        return 'El usuario no tiene contraseña configurada.';
+      case 'UNAVAILABLE':
+      case 'unavailable':
+        return 'Servicio no disponible. Intentá de nuevo en un rato.';
+      default:
+        return 'Error al iniciar sesión.';
     }
   }
 }

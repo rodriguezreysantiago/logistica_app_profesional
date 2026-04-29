@@ -1,0 +1,14 @@
+# Compilados de TypeScript
+lib/
+
+# Dependencias
+node_modules/
+
+# Logs Firebase
+firebase-debug.log*
+*.log
+
+# Variables de entorno locales
+.env
+.env.local
+.runtimeconfig.json

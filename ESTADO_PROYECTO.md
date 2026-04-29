@@ -1,9 +1,11 @@
 # Estado del proyecto — S.M.A.R.T. Logística
 
-Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-04-29** (auditoría de seguridad profunda + fixes + rotación de key Firebase + limpieza git history + `firestore.rules`/`storage.rules`).
+Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-04-29** (revisión profunda post-pull desde casa, completado documentación de bot WhatsApp + sesión seguridad + sprints 4-8).
 
 Sesiones recientes:
-- **2026-04-29 (esta)** — auditoría de seguridad: rotación de key, limpieza git, fixes en bot (sanitización path, match estricto teléfono, backoff exponencial, grace shutdown), `firestore.rules`/`storage.rules`, AppConfirmDialog migrado a AppColors.
+- **2026-04-29 (PM tarde)** — branch `feature/firebase-auth`: setup Cloud Functions + `loginConDni` callable + adaptación de `AuthService` + `AuthGuard` con doble check + cierre real de `firestore.rules`/`storage.rules` con `request.auth.uid` y `isAdmin()` por custom claim.
+- **2026-04-29 (PM)** — revisión profunda del estado real tras pull, completado este documento con módulos no documentados (bot WhatsApp, audit log, OCR, calendario).
+- **2026-04-29 (mañana)** — auditoría de seguridad: rotación de key Firebase, limpieza git history, fixes en bot Node.js (sanitización path, match estricto teléfono, backoff exponencial, grace shutdown), `firestore.rules` + `storage.rules` publicadas.
 - **2026-04-28 (PM/noche)** — refactor cross-platform + sprints 1-8: UX/calidad + dashboard + reporte consumo con histórico + bot de WhatsApp Fase 1-3.
 - **2026-04-28 (mañana)** — auditoría inicial (`AUDITORIA_2026-04-28.md`).
 
@@ -13,550 +15,320 @@ Sesiones recientes:
 
 App Flutter multiplataforma (Android / iOS / Web / Windows) para gestión de flota de la empresa de transporte **Vecchi / Sucesión Vecchi**, en Bahía Blanca. Maneja:
 
-- **Personal** (choferes y administrativos), con sus papeles vencibles (licencia, preocupacional, ART, manejo defensivo, F.931, seguro de vida, sindicato).
-- **Flota**: tractores y enganches (BATEAS, TOLVAS, BIVUELCOS, TANQUES, ACOPLADOS legacy), con sus vencimientos (RTO, Seguro, Extintor Cabina, Extintor Exterior — los 2 extintores solo para tractores).
+- **Personal** (choferes y administrativos), con sus papeles vencibles (licencia, **preocupacional**, ART, manejo defensivo, F.931, seguro de vida, sindicato).
+- **Flota**: tractores y enganches (BATEAS, TOLVAS, BIVUELCOS, TANQUES, ACOPLADOS legacy), con sus vencimientos (RTO, Seguro, Extintor Cabina, Extintor Exterior — los 2 extintores solo para tractores). Foto del vehículo opcional.
 - **Checklists mensuales** del chofer sobre tractor y enganche.
 - **Sistema de revisiones**: el chofer sube fecha + comprobante de un trámite renovado, el admin aprueba/rechaza desde "Revisiones Pendientes".
-- **Auditoría de vencimientos** (60 días): admin ve qué documentos están por vencer ordenados por urgencia, con badge de color, y desde ahí puede mandarle WhatsApp pre-armado al chofer responsable.
-- **Reportes Excel** de flota y de novedades de checklist.
-- **Integración Volvo Connect** para los tractores Volvo: trae odómetro, % combustible, autonomía estimada en km. Sincronización automática cada 60 segundos vía `AutoSyncService`.
+- **Auditoría de vencimientos** (60 días): admin ve qué documentos están por vencer ordenados por urgencia, con badge de color, y desde ahí puede mandarle WhatsApp pre-armado (Click-to-Chat) al chofer. También vista de **calendario mensual**.
+- **Bot WhatsApp automatizado** (proyecto Node.js externo, escucha la cola en Firestore): el admin encola → el bot envía con anti-throttle → el chofer responde con foto del comprobante → el bot intenta asociarlo automáticamente, y si no puede, lo deja en una bandeja para que el admin lo despache.
+- **Reportes Excel**: flota, novedades de checklist y consumo (con histórico real si disponible).
+- **Integración Volvo Connect** para los tractores Volvo: trae odómetro, % combustible, autonomía estimada en km. Sincronización automática cada 60 segundos vía `AutoSyncService`. Snapshot diario a `TELEMETRIA_HISTORICO` para el reporte de consumo.
+- **Búsqueda global Ctrl+K** estilo VS Code para encontrar choferes / unidades / trámites.
 
 ## 2. Tech stack
 
 - **Flutter 3.x** + Dart 3.0+
-- **Firebase**: Firestore (datos), Storage (archivos), opcionalmente Cloud Messaging (no usado aún).
+- **Firebase**: Firestore (datos), Storage (archivos), Crashlytics (errores en mobile), Cloud Messaging (no usado aún).
 - **State management**: `provider` con `ProxyProvider`/`ChangeNotifierProxyProvider` cadenas.
 - **HTTP**: `dio` (a Volvo Connect API).
-- **Auth**: DNI + contraseña hasheada con Bcrypt (con migración silenciosa desde SHA-256 legacy). NO usa Firebase Auth todavía.
-- **Otros**: `excel`, `intl`, `flutter_local_notifications`, `image_picker`, `file_picker`, `pdfrx`, `share_plus`, `url_launcher`, `flutter_secure_storage` (no aún), `crypto`/`bcrypt`.
-- **Plataformas activas**: Windows desktop (uso del admin desde la oficina) y Android (choferes).
+- **Auth**: Firebase Auth con custom token. La Cloud Function `loginConDni` (en `functions/src/index.ts`) recibe DNI+password, valida server-side contra `EMPLEADOS` (bcrypt o SHA-256 legacy con migración silenciosa) y emite un custom token con `uid = DNI` y custom claims `{ rol, nombre }`. El cliente hace `signInWithCustomToken(token)`.
+- **Calendario**: `table_calendar: ^3.1.x`.
+- **OCR**: `google_mlkit_text_recognition` on-device (Android/iOS solamente).
+- **Otros**: `excel`, `intl`, `flutter_local_notifications`, `image_picker`, `file_picker`, `pdfrx`, `share_plus`, `url_launcher`, `crypto`/`bcrypt`, `timezone`, `path_provider`, `shared_preferences`, `ffi`/`win32` (transitivas Windows).
+- **Plataformas activas**: Windows desktop (admin desde la oficina) y Android (choferes). Web compila pero los reportes Excel se desactivan ahí (toca `dart:io`).
+- **Bot WhatsApp**: proyecto Node.js separado en `whatsapp-bot/` con `firebase-admin`, lee/escribe Firestore vía Admin SDK (bypasea las rules).
 
 ## 3. Arquitectura
 
 ```
-lib/
-├── core/                          # Constantes, servicios cross-feature
-│   ├── constants/
-│   │   ├── app_constants.dart     # Rutas, colecciones, roles, tipos vehículo
-│   │   └── vencimientos_config.dart  # Specs de vencimientos por tipo
-│   └── services/
-│       ├── auto_sync_service.dart # Cron Volvo (Provider singleton)
-│       ├── notification_service.dart
-│       ├── prefs_service.dart     # SharedPreferences (sesión actual)
-│       └── storage_service.dart
-├── features/
-│   ├── admin_dashboard/           # Panel de menús del admin
-│   ├── auth/                      # Login (DNI + bcrypt)
-│   ├── checklist/                 # Checklists mensuales
-│   ├── employees/                 # Personal: alta, lista, detalle, perfil
-│   ├── expirations/               # Mis Vencimientos / auditoría / editor
-│   ├── home/                      # Panel principal post-login
-│   ├── reports/                   # Reportes Excel
-│   ├── revisions/                 # Sistema de revisión admin/chofer
-│   ├── sync_dashboard/            # Observabilidad del AutoSync Volvo
-│   └── vehicles/                  # Flota: alta, lista, detalle, telemetría
-├── routing/app_router.dart
-├── shared/
-│   ├── utils/                     # FechaInputFormatter, WhatsAppHelper, formatters
-│   └── widgets/                   # AppCard, AppListPage, AppScaffold, fecha_dialog…
-├── firebase_options.dart
-└── main.dart
+logistica_app_profesional/
+├── lib/
+│   ├── core/
+│   │   ├── constants/
+│   │   │   ├── app_constants.dart          # Rutas, colecciones, roles, tipos vehículo
+│   │   │   └── vencimientos_config.dart    # Specs de vencimientos por tipo
+│   │   ├── services/
+│   │   │   ├── app_logger.dart             # Logger central (Crashlytics en mobile)
+│   │   │   ├── audit_log_service.dart      # Bitácora AUDITORIA_ACCIONES
+│   │   │   ├── auto_sync_service.dart      # Cron Volvo (Provider singleton)
+│   │   │   ├── notification_service.dart
+│   │   │   ├── prefs_service.dart          # SharedPreferences (sesión)
+│   │   │   └── storage_service.dart        # Subida a Storage (cross-platform)
+│   │   └── theme/app_theme.dart
+│   ├── features/
+│   │   ├── admin_dashboard/                # Panel admin + shell con Ctrl+K
+│   │   ├── auth/                           # Login (DNI + bcrypt)
+│   │   ├── checklist/                      # Checklists mensuales
+│   │   ├── employees/                      # Personal
+│   │   ├── expirations/                    # Vencimientos + auditoría + calendario
+│   │   ├── home/                           # Panel principal post-login
+│   │   ├── reports/                        # Reportes Excel (flota / checklist / consumo)
+│   │   ├── revisions/                      # Sistema de revisión admin/chofer
+│   │   ├── sync_dashboard/                 # Observabilidad del AutoSync Volvo
+│   │   ├── vehicles/                       # Flota + diagnóstico Volvo
+│   │   └── whatsapp_bot/                   # Cola y bandeja del bot Node.js
+│   ├── routing/app_router.dart
+│   ├── shared/
+│   │   ├── constants/app_colors.dart       # Paleta semántica
+│   │   ├── utils/
+│   │   │   ├── app_feedback.dart           # SnackBars semánticos
+│   │   │   ├── digit_only_formatter.dart
+│   │   │   ├── fecha_input_formatter.dart  # DD/MM/AAAA
+│   │   │   ├── formatters.dart             # AppFormatters (fechas, CUIL, KM, días)
+│   │   │   ├── ocr_service.dart            # ML Kit on-device
+│   │   │   ├── password_hasher.dart        # Bcrypt + SHA-256 dual
+│   │   │   ├── upper_case_formatter.dart
+│   │   │   └── whatsapp_helper.dart        # wa.me click-to-chat
+│   │   └── widgets/
+│   │       ├── app_*                       # AppCard, AppListPage, AppScaffold...
+│   │       ├── app_confirm_dialog.dart     # Confirmaciones (modo destructivo)
+│   │       ├── app_loading_dialog.dart     # Modal "cargando..."
+│   │       ├── command_palette.dart        # Búsqueda Ctrl+K
+│   │       ├── fecha_dialog.dart           # pickFecha(...)
+│   │       └── guards/                     # AuthGuard, RoleGuard, AdminGuard
+│   ├── firebase_options.dart
+│   └── main.dart                           # Provider tree completo
+├── whatsapp-bot/                           # PROYECTO NODE.JS SEPARADO
+│   ├── src/
+│   ├── package.json
+│   └── README.md
+├── scripts/                                # Scripts Python (migraciones, carga inicial)
+├── firestore.rules                         # Reglas de seguridad Firestore
+├── storage.rules                           # Reglas de seguridad Storage
+├── firebase.json
+├── secrets.json                            # NO en git — credenciales Volvo
+├── secrets.example.json
+├── serviceAccountKey.json                  # NO en git — admin SDK
+├── pubspec.yaml
+├── ESTADO_PROYECTO.md                      # ESTE archivo
+└── AUDITORIA_2026-04-28.md
 ```
 
-**Patrón clave para Volvo**: `VolvoApiService` → `VehiculoRepository` → `VehiculoManager` → `VehiculoProvider`. Todo en el provider tree de `main.dart` con `ProxyProvider2`.
+**Patrón Volvo**: `VolvoApiService` → `VehiculoRepository` → `VehiculoManager` → `VehiculoProvider` (todos en provider tree de `main.dart` con `ProxyProvider2`).
+
+**Patrón bot WhatsApp**: `[App Flutter]` escribe a `Firestore: COLA_WHATSAPP` → `[Bot Node.js]` con Admin SDK escucha cambios → procesa con anti-throttle → manda WhatsApp → si el chofer responde con comprobante, el bot intenta auto-asociarlo o lo deja en `RESPUESTAS_BOT_AMBIGUAS` para que el admin despache desde la bandeja.
 
 ## 4. Convenciones importantes (NO romper)
 
-- **Nombres de choferes en Firestore**: campo `NOMBRE` con formato `APELLIDO NOMBRE SEGUNDO_NOMBRE`. El saludo siempre toma `partes[1]` (segundo token = nombre real). Si solo hay un token, usamos saludo genérico para evitar llamar al chofer por apellido.
-- **DNIs**: `String` (sin guiones, sin espacios). Es el `documentId` en `EMPLEADOS`.
-- **Patentes**: `String` en mayúscula. Son el `documentId` en `VEHICULOS`.
-- **Fechas en Firestore**: pueden venir como `Timestamp` (nuevo) o `String` ISO (legacy). El helper `_parseDate` en cada modelo soporta ambos.
-- **Campos de vencimiento**: convención `VENCIMIENTO_<NOMBRE>` y `ARCHIVO_<NOMBRE>`. El sistema de revisiones depende de esta convención (`replaceAll('VENCIMIENTO_', 'ARCHIVO_')`).
-- **Tipos de vehículo**: definidos en `AppTiposVehiculo` (centralizado). Sumar uno nuevo → solo se edita esa lista.
-- **Vencimientos por tipo**: definidos en `AppVencimientos.tractor` y `AppVencimientos.enganche`. Sumar uno nuevo → solo se edita esa lista, las pantallas iteran.
-- **Texto de fechas en input**: SIEMPRE usar el helper `pickFecha(...)` (`shared/widgets/fecha_dialog.dart`) que muestra dialog con TextField DD/MM/AAAA. NO usar `showDatePicker` (el cliente lo odia).
+### Datos
+- **Nombres de choferes**: campo `NOMBRE` con formato `APELLIDO NOMBRE SEGUNDO_NOMBRE`. El saludo siempre toma `partes[1]` (nombre real). Si solo hay un token, saludo genérico.
+- **DNIs**: `String` sin guiones/espacios. `documentId` en `EMPLEADOS`.
+- **Patentes**: `String` mayúscula. `documentId` en `VEHICULOS`.
+- **Teléfonos**: helper `WhatsAppHelper._normalizarNumeroAr` acepta varios formatos AR (con/sin 0, con/sin 15, con/sin +54).
+- **Fechas en Firestore**: `Timestamp` (nuevo) o `String` ISO (legacy). Helper `_parseDate` en cada modelo.
+- **Campos de vencimiento**: convención `VENCIMIENTO_<NOMBRE>` y `ARCHIVO_<NOMBRE>`. El sistema de revisiones depende de esto (`replaceAll('VENCIMIENTO_', 'ARCHIVO_')`).
+
+### Centralizaciones (sumar tipos nuevos solo en estas listas)
+- **Tipos de vehículo**: `AppTiposVehiculo` en `app_constants.dart`.
+- **Vencimientos por tipo**: `AppVencimientos.tractor` y `.enganche` en `vencimientos_config.dart`.
 - **Roles**: `ADMIN` y `USUARIO` (no "CHOFER").
-- **Rutas**: definidas en `AppRoutes` (`app_constants.dart`), no hardcodear strings.
+- **Rutas**: `AppRoutes` en `app_constants.dart`, no hardcodear strings.
+- **Colores semánticos**: `AppColors.success/error/warning/info/...`. **NO** hardcodear `Colors.greenAccent`. Para colores del tema usar `Theme.of(context)`.
+
+### UI/UX
+- **Inputs de fecha**: SIEMPRE `pickFecha(...)` (`shared/widgets/fecha_dialog.dart`). NO usar `showDatePicker` (cliente lo odia).
+- **SnackBars**: SIEMPRE `AppFeedback.success/error/warning/info(context, msg)`. Para post-await: `successOn(messenger, msg)`.
+- **Loading modal**: `AppLoadingDialog.show(context, mensaje?)` / `AppLoadingDialog.hide(navigator)`.
+- **Confirmaciones**: `AppConfirmDialog.show(...)` con `destructive: true` para acciones de riesgo.
+- **Inputs numéricos**: agregar `DigitOnlyFormatter` en `inputFormatters` además de `keyboardType` (cubre paste y desktop).
+- **Búsqueda**: `Ctrl+K` (Cmd+K en Mac) abre `CommandPalette`. Para abrir detalles desde otros features usar `abrirDetalleChofer(context, dni)` o `abrirDetalleVehiculo(context, patente, data)`.
+
+### Logging y auditoría
+- **Errores**: `AppLogger.recordError(error, stack, reason: ..., fatal: false)`. En mobile va a Crashlytics; en desktop solo `debugPrint`.
+- **Logs de info**: `AppLogger.log(mensaje)` reemplaza `debugPrint` esparcidos.
+- **Acciones admin**: `AuditLog.registrar(accion: ..., entidad: ..., entidadId: ..., detalles: {...})`. Es fire-and-forget; nunca bloquea.
 
 ## 5. Decisiones técnicas con su razón
 
 | Decisión | Por qué |
 |---|---|
-| Auth propia con bcrypt en lugar de Firebase Auth | Heredado. Migración a Firebase Auth pendiente; necesaria para activar `firestore.rules` |
+| Firebase Auth con **custom token** (no email/password) | Los choferes no tienen email cargado pero sí DNI+password. La function valida server-side y emite un JWT con `uid = DNI` y rol como custom claim — `request.auth.uid` en las rules es el DNI directo |
+| **Rol como custom claim** en el JWT (no en cada regla) | Evita una lectura extra de Firestore por cada regla evaluada. Si admin cambia el rol de un user, ese user mantiene el claim viejo hasta el próximo login (~1 hora máx). Aceptable |
+| Cloud Function en Node.js | Consistencia con el bot WhatsApp, mismo runtime y mismo `firebase-admin` |
 | Firestore queries con `orderBy` en cliente para `AVISOS_VENCIMIENTOS` | Evitar fricción del índice compuesto que Firestore pediría crear manualmente |
 | `AutoSyncService` en provider tree | Su lifecycle (start/stop) lo maneja Provider, no el state del root widget |
 | Volvo Connect via `additionalContent=VOLVOGROUPSNAPSHOT` | Sin ese flag el response NO trae `fuelLevel` ni `estimatedDistanceToEmpty` |
 | `estimatedDistanceToEmpty` lo busca en `snapshotData.volvoGroupSnapshot` | El path real para diésel; los `chargingStatusInfo` son para EVs |
-| Click-to-Chat (`wa.me`) en lugar de Twilio | Empresa chica, no se justifica costo de WhatsApp Business API por ahora |
-| Campo "Preocupacional" en UI, campos `VENCIMIENTO_PREOCUPACIONAL` en Firestore | Migración completa hecha el 2026-04-28 vía `scripts/migrar_psicofisico_a_preocupacional.py` |
+| Bot WhatsApp en Node.js separado, no Twilio | Se monta en un servidor del cliente con `whatsapp-web.js`. Costo cero, pero requiere mantener una sesión QR escaneada y un proceso vivo |
+| Click-to-Chat (`wa.me`) para avisos manuales del admin | Complementa al bot: cuando el admin quiere mandar algo puntual sin pasar por la cola |
+| `StorageService` con `Uint8List` + `putData` | `dart:io.File` no funciona en Web. El refactor hace los uploads cross-platform |
+| Reportes Excel con guard de `kIsWeb` | El package `excel` toca `dart:io` para guardar; en Web mostraría error. Se muestra snackbar |
+| OCR opcional con propiedad `soportado` | ML Kit solo Android/iOS. En Web/Windows el botón "Detectar fecha" se oculta |
+| Campo "Preocupacional" tanto en UI como en Firestore | Migración completa hecha el 2026-04-28 vía `scripts/migrar_psicofisico_a_preocupacional.py` |
 
 ## 6. Lo que ya está hecho
 
-### Auditoría inicial (completa)
-- Reporte: `AUDITORIA_2026-04-28.md`
-- Hallazgos críticos resueltos: credenciales Volvo hardcodeadas (sacadas), `secrets.json` confirmado fuera de git, `mounted` checks en formularios.
-- Hallazgos pendientes: `firestore.rules` no existe (requiere migrar a Firebase Auth primero).
+### 6.1 Auditoría inicial (28 abril mañana)
+Reporte: `AUDITORIA_2026-04-28.md`. Resueltos: credenciales Volvo hardcodeadas, `secrets.json` confirmado fuera de git, `mounted` checks en formularios, `unawaited` en lugares clave.
 
-### Features nuevas
-- **Telemetría Volvo en pantalla del chofer y admin**: odómetro, % combustible (con barra), autonomía km. Solo se muestran en tractores con datos válidos.
-- **Panel diagnóstico Volvo** (botón 🐛 en ficha del vehículo): muestra request, status, JSON crudo, análisis de campos críticos (✓/✗).
-- **Sync Dashboard** ampliado: eventos por unidad (último 50), histórico de ciclos (último 15), botón "ejecutar ahora", motivos de skip detallados.
-- **Tipos de vehículo nuevos**: BIVUELCO, TANQUE (suman a BATEA, TOLVA, ACOPLADO legacy).
-- **Vencimientos nuevos en tractores**: Extintor Cabina, Extintor Exterior. Centralizados en `AppVencimientos`.
-- **MAIL** y **TELÉFONO** editables en gestión de personal y visibles en mi perfil.
-- **Foto/PDF reemplazable** desde admin para los papeles del chofer (sin pasar por flujo de revisión).
-- **Botón "Avisar por WhatsApp"** en cada vencimiento en auditoría: arma URL `wa.me` con mensaje pre-armado según días restantes y firma "_mensaje automático del sistema_".
-- **Historial de avisos por vencimiento**: colección `AVISOS_VENCIMIENTOS` registra cada envío. Bloque colapsable en el editor muestra contador + último.
-- **Reporte Checklist abre en Excel directo** en Windows (antes solo compartía).
-- **Calendario reemplazado por input DD/MM/AAAA**: dialog compacto con validación inline.
-- **Migración total `Psicofísico` → `Preocupacional`**: campos en Firestore renombrados, código actualizado, propiedades del modelo, mensajes de WhatsApp actualizados.
-- **Refactor cross-platform de uploads (sesión 2026-04-28 PM)**: `StorageService.subirArchivo` ahora trabaja con `Uint8List` + nombre original en lugar de `dart:io.File` (usa `putData` en vez de `putFile`). Todos los callers (`user_mi_perfil`, `revision_service`, `vencimiento_editor_sheet`, `admin_personal_lista`, `admin_vehiculo_form`, `user_mis_vencimientos`) pasan ahora `xfile.readAsBytes()` o `FilePicker(withData: true)`. Resultado: la app compila y corre en Chrome / Web sin crashear en flujos de subida. `flutter analyze` → 0 issues.
-- **Reportes Excel con guard de Web**: `report_flota` y `report_checklist` muestran snackbar "solo disponibles en Windows y Android" en `kIsWeb` antes de tocar `dart:io`.
-- **Permisos Android 13+**: agregados `POST_NOTIFICATIONS` (runtime permission para `flutter_local_notifications`) y `CAMERA` + `<uses-feature>` opcional al `AndroidManifest.xml`.
+### 6.2 Refactor cross-platform + features Volvo (28 abril PM)
+- Telemetría Volvo en pantalla del chofer y admin (odómetro, % combustible con barra, autonomía km).
+- Panel diagnóstico Volvo (botón 🐛 en ficha del vehículo): muestra request, status, JSON crudo, análisis de campos críticos (✓/✗).
+- Sync Dashboard ampliado: eventos por unidad (último 50), histórico de ciclos (último 15), botón "ejecutar ahora", motivos de skip detallados.
+- Tipos de vehículo: BIVUELCO, TANQUE.
+- Vencimientos nuevos en tractores: Extintor Cabina, Extintor Exterior.
+- MAIL y TELÉFONO editables en gestión de personal y visibles en mi perfil.
+- Foto/PDF reemplazable desde admin para los papeles del chofer (sin pasar por flujo de revisión).
+- Botón "Avisar por WhatsApp" en cada vencimiento en auditoría con mensaje pre-armado según días restantes.
+- Historial de avisos por vencimiento (`AVISOS_VENCIMIENTOS`) con bloque colapsable en el editor.
+- Reporte Checklist abre Excel directo en Windows.
+- Calendario reemplazado por input DD/MM/AAAA con validación inline.
+- **Migración total `Psicofísico` → `Preocupacional`** en código y Firestore vía script Python idempotente.
+- **Refactor cross-platform de uploads**: `StorageService.subirArchivo` con `Uint8List` + `putData`. Todos los callers actualizados. App compila y corre en Web sin crashear en flujos de subida.
+- Reportes Excel con guard de Web.
+- Permisos Android 13+: `POST_NOTIFICATIONS`, `CAMERA`, `<uses-feature>` opcional.
 
-### Sprints 1-5 de UX y calidad (2026-04-28 PM)
+### 6.3 Sprints 1-3 de UX/calidad (28 abril PM)
+- **Sprint 1**: `AppConfirmDialog` + confirmaciones destructivas en DESVINCULAR equipo y RECHAZAR revisión. Auditoría de feedback en todos los `update`/`set`/`delete` del admin.
+- **Sprint 2**: `AppFeedback` (SnackBars semánticos), `AppLoadingDialog`, `DigitOnlyFormatter`. 46 SnackBars dispersos migrados, 2 loadings ad-hoc consolidados, `keyboardType: emailAddress` en mail.
+- **Sprint 3**: pulido visual ("Nuevo Legajo" → "Nuevo chofer", tooltips en FABs, iconografía vencimientos unificada a `Icons.event_note`), `AppColors` centralizada.
 
-**Sprint 1 — Confirmaciones destructivas + feedback de éxito**
-- Nuevo `AppConfirmDialog` (`shared/widgets/app_confirm_dialog.dart`) reutilizable con modo `destructive: true` (botón rojo).
-- DESVINCULAR equipo de chofer ahora pide confirmación destructiva con copy clara + emite snackbar de éxito tras `batch.commit`.
-- RECHAZAR revisión ahora pide confirmación destructiva (antes borraba el comprobante del chofer del Storage sin avisar).
-- Auditados todos los `update`/`set`/`delete`/`batch.commit` del admin: alta de chofer, alta de vehículo, edición de campos, aprobar revisión, etc., ya tenían feedback adecuado.
+### 6.4 Sprint 4 — Quick wins de productividad (28 abril PM)
+- **Foto del vehículo**: campo `ARCHIVO_FOTO` en VEHICULOS. Avatar circular en `_VehiculoCard`. Bloque "Cambiar foto" en form de edición.
+- **Búsqueda Ctrl+K**: `CommandPalette` indexa choferes + vehículos + revisiones con fetch one-shot, filtro local. Atajo en `admin_shell.dart` + IconButton en AppBar. Funciones `abrirDetalleChofer/Vehiculo/Revision` para uso desde otros features.
+- **Calendario de vencimientos**: pantalla `admin_vencimientos_calendario_screen.dart` con `table_calendar`. Vista mensual con dots por urgencia (rojo ≤7 días, naranja 8-30, verde >30). Tap en día muestra lista; tap en ítem abre `VencimientoEditorSheet`.
 
-**Sprint 2 — Sistema unificado de feedback e inputs**
-- `AppFeedback` (`shared/utils/app_feedback.dart`) — paleta semántica (`success`, `error`, `warning`, `info`) con ícono + color + duración consistentes. Versión `*On(messenger, msg)` para casos post-await.
-- `AppLoadingDialog` (`shared/widgets/app_loading_dialog.dart`) — modal de "cargando…" con `show(context)` / `hide(navigator)`.
-- `DigitOnlyFormatter` (`shared/utils/digit_only_formatter.dart`) — filtro de dígitos con `maxLength` opcional. Aplicado a DNI, CUIL, TELÉFONO, año de fabricación, KM en todos los formularios. La red real contra paste / desktop, no solo `keyboardType: number`.
-- 46 SnackBars dispersos migrados a `AppFeedback`. 2 loadings ad-hoc migrados a `AppLoadingDialog`. `keyboardType: emailAddress` en mail.
+### 6.5 Sprints 5-8 (28 abril noche) — Bot de WhatsApp y reporte de consumo
+- **Reporte de consumo Excel** (`report_consumo.dart`): dialog para rango de fechas + columnas. Estrategia dual: si hay snapshots en `TELEMETRIA_HISTORICO` calcula consumo REAL del período; si no, fallback a `accumulatedData.totalFuelConsumption` y marca "(acum.)". Dos hojas: DETALLE + RANKING (top 10 con barras Unicode).
+- **Snapshot diario de telemetría**: el AutoSync escribe a `TELEMETRIA_HISTORICO` (en futuro debería migrar al bot/Cloud Function).
+- **Bot WhatsApp Fase 1**: encolar avisos manuales del admin a `COLA_WHATSAPP`. Bot Node.js procesa con anti-throttle. Pantalla `admin_whatsapp_cola_screen.dart` para ver estado (PENDIENTE/PROCESANDO/ENVIADO/ERROR) y reintentar/eliminar.
+- **Bot WhatsApp Fase 2**: avisos automáticos por vencimientos. El bot programa los envíos según días restantes (30/15/7/1/0/-X) con idempotencia (colección `AVISOS_AUTOMATICOS_HISTORICO`).
+- **Bot WhatsApp Fase 3**: bandeja de respuestas ambiguas (`admin_bot_bandeja_screen.dart`). Cuando el chofer manda foto sin contexto claro, el bot la deja con OCR ya aplicado y el admin elige a qué papel asociarla → se convierte en revisión.
 
-**Sprint 3 — Pulido visual y constantes**
-- "Nuevo Legajo" → "Nuevo chofer" en el form de alta.
-- Tooltips en FABs (admin de personal y flota).
-- Iconografía de vencimientos unificada a `Icons.event_note` en 5 lugares.
-- `AppColors` (`shared/constants/app_colors.dart`) — paleta centralizada (semánticos + accent + background/surface + text). Documentado: usar `Theme.of(context)` para colores del tema; `AppColors` para colores semánticos puntuales; **no** hardcodear `Colors.greenAccent` en código nuevo.
+### 6.6 Auditoría de seguridad (29 abril mañana)
+- **Rotación de key Firebase**: la `private_key_id` anterior se revocó. Nuevo `serviceAccountKey.json` distribuido fuera de git.
+- **Limpieza git history**: borrados commits viejos que tenían secretos hardcodeados con `git filter-repo`. Force-push al remoto (por eso la divergencia que tuvimos).
+- **Firestore.rules + Storage.rules**: publicadas. Dejan abiertas las colecciones operacionales (read/write) porque la app no usa Firebase Auth, pero bloquean específicamente:
+  - `AVISOS_AUTOMATICOS_HISTORICO` (write false — solo bot via Admin SDK).
+  - `RESPUESTAS_BOT_AMBIGUAS` (write false — solo bot).
+  - `RESPUESTAS_BOT/{archivo}` en Storage (write false — solo bot sube fotos recibidas).
+  - Fallback `match /{document=**} { allow read, write: if false; }` para cualquier colección NO listada → si agregás una nueva sin sumarla a las rules, se rompe.
+- **Fixes en bot Node.js**: sanitización de path (evita `../`), match estricto de teléfono, backoff exponencial en reintentos, grace shutdown (espera mensajes en vuelo antes de cerrar).
+- **`AppConfirmDialog`** migrado a `AppColors` (antes hardcodeaba colores).
 
-**Sprint 4 — Quick wins de productividad**
-- **Foto del vehículo**: campo `ARCHIVO_FOTO` en `VEHICULOS`. Avatar circular en `_VehiculoCard` (mismo patrón que `_EmpleadoCard`). Bloque de "Cambiar foto / Agregar foto" en el form de edición.
-- **Búsqueda Ctrl+K**: nuevo `CommandPalette` (`shared/widgets/command_palette.dart`) estilo VS Code. Indexa choferes y vehículos con fetch one-shot, filtro local mientras tipeás. Atajo `Ctrl+K` / `Cmd+K` en `admin_shell.dart` + IconButton de lupa en la AppBar. Funciones públicas top-level `abrirDetalleChofer(context, dni)` y `abrirDetalleVehiculo(context, patente, data)` para que features externos puedan abrir detalles.
-- **Calendario de vencimientos**: package `table_calendar: ^3.1.2`. Pantalla `admin_vencimientos_calendario_screen.dart` con vista mensual, badge contador por día con color según urgencia (rojo ≤7d, naranja ≤30d, verde >30d). Tap en día abre la lista de vencimientos del día. Nueva ruta `/vencimientos_calendario` + tile primero en el menú.
-- **OCR de comprobantes**: package `google_mlkit_text_recognition: ^0.13.1`. `OcrService` (`shared/utils/ocr_service.dart`) con `detectarFecha(path)` solo en Android/iOS. Estrategia: regex multi-formato (`/`, `-`, `.`) + filtra años 2020-2050 + devuelve la **fecha más lejana** (la de vencimiento, no la de emisión). Botón "Detectar fecha desde foto" en el dialog del chofer cuando `OcrService.soportado`.
+### 6.7 Servicios de logging y auditoría (28 abril PM)
+- **`AppLogger`** en `lib/core/services/app_logger.dart`: `init()` engancha `FlutterError.onError` y `PlatformDispatcher.onError`. `log()`, `recordError()` con destino según plataforma (Crashlytics en mobile, debugPrint en desktop/web).
+- **`AuditLogService`** en `lib/core/services/audit_log_service.dart`: enum `AuditAccion` con 12 casos (crear/editar chofer/vehículo, asignar/desvincular equipo, aprobar/rechazar revisión, cambiar foto, reemplazar papel). Escribe a `AUDITORIA_ACCIONES` con admin DNI/nombre, timestamp, detalles. Fire-and-forget — si falla, no bloquea.
 
-**Sprint 5 — Calidad y trazabilidad**
-- **`AuditLog`** (`core/services/audit_log_service.dart`): bitácora de acciones del admin en colección `AUDITORIA_ACCIONES`. Helper `registrar(accion, entidad, entidadId, detalles)` con enum `AuditAccion` cerrado. Fire-and-forget. Integrado en alta de chofer, alta de vehículo, edición de campo, asignar/desvincular equipo, aprobar/rechazar revisión.
-- **Crashlytics + `AppLogger`** (`core/services/app_logger.dart`): dep `firebase_crashlytics: ^4.1.3`. `AppLogger.init()` engancha `FlutterError.onError` y `PlatformDispatcher.onError` solo en Android/iOS; en Web/Windows cae a `debugPrint`. En debug `setCrashlyticsCollectionEnabled(false)`. Métodos `recordError(error, stack, reason, fatal)` y `log(msg)` para `try/catch` puntuales. `main.dart` actualizado.
-- **Tests unitarios**: 38 tests verdes. `password_hasher_test.dart` (8), `aviso_vencimiento_builder_test.dart` (13), `ocr_service_test.dart` (14), `widget_test.dart` placeholder. `flutter analyze` → 0 issues. `flutter test` → all passed.
-
-### Sprint 6 — Quick wins de mobile + dashboard del admin (2026-04-28 PM/noche)
-
-**Crashlytics nativo en Android**
-- Plugin gradle activado en `android/settings.gradle.kts` (`com.google.firebase.crashlytics 3.0.2`) y aplicado en `android/app/build.gradle.kts`. Junto con `AppLogger` ya cableado, los crashes de producción suben al panel de Firebase. En debug sigue siendo no-op.
-
-**Ctrl+K extendido a revisiones**
-- `CommandPalette` ahora indexa también `REVISIONES` además de `EMPLEADOS` y `VEHICULOS`. Tap → `abrirDetalleRevision(...)` (función pública nueva).
-- Hint del input cambiado a "Buscar chofer, vehículo o trámite…".
-
-**Push notifications agendadas para vencimientos del chofer**
-- Sumado `timezone: ^0.9.4`. `NotificationService` inicializa zona `America/Argentina/Buenos_Aires`. Métodos `cancelarTodosLosRecordatorios()` y `agendarRecordatoriosVencimientos(List<VencimientoAviso>)`.
-- Por cada vencimiento futuro, programa 4 notificaciones locales (30/15/7/1 días antes). IDs deterministas con djb2.
-- `UserMisVencimientosScreen` reagenda al abrir. Fire-and-forget en Web/desktop.
-
-**Dashboard del admin** (panel "Inicio" del shell)
-- Rediseño de `admin_panel_screen.dart`: saludo personalizado + fecha de hoy + grid de **6 KPIs en vivo**:
-  1. Choferes activos. 2. Unidades en flota + asignadas. 3. Trámites pendientes. 4. Vencidos (rojo). 5. Vencen ≤ 7 días. 6. Vencen ≤ 30 días.
-- Tappables, navegan a la sección. `_Stats.from(...)` combina los 3 streams.
-
-### Sprint 7 — Reporte de Consumo + snapshots históricos
-
-**Reporte de Consumo de Combustible** (Excel con 2 hojas)
-- `ReportConsumoService` (`features/reports/services/report_consumo.dart`).
-- Dialog: rango DESDE/HASTA con `pickFecha` (default mes en curso) + checkboxes de columnas.
-- Hoja **DETALLE**: tabla con todas las unidades + header informativo arriba.
-- Hoja **RANKING**: top 10 más consumidoras del período con barra Unicode `█████` proporcional al máximo (truco "in-cell bar chart" porque `excel: ^4.0.6` no soporta charts nativos).
-- Las celdas distinguen visualmente: período → valor numérico; acumulado → texto `"123 (acum.)"`. Ranking solo incluye unidades con período real.
-
-**Snapshots históricos en TELEMETRIA_HISTORICO**
-- `VehiculoRepository.guardarSnapshotsDiarios(cacheVolvo)`: cruza VIN→patente, escribe doc por unidad por día con id `{patente}_{YYYY-MM-DD}`. Last-write-wins. Batch write.
-- `AutoSyncService` llama después de cada ciclo exitoso (cada 60s). Idempotente.
-- `ReportConsumoService` lee `TELEMETRIA_HISTORICO` con query rango ampliado `[desde-30d, hasta+1d]`. Por cada unidad busca snapshot ≤ desde (inicio) y ≤ hasta (fin), calcula `litros_periodo = fin - inicio`. Si no hay datos suficientes, modo acumulado con marca `"(acum.)"`.
-
-### Sprint 8 — Bot de WhatsApp Fases 1-3
-
-Subcarpeta `whatsapp-bot/` con bot Node.js + `whatsapp-web.js`. Ver **sección 8** para setup completo.
-
-**Fase 1 — Manual** (la app encola; el bot envía con delay anti-baneo):
-- `WhatsAppColaService` en la app — escribe a `COLA_WHATSAPP` con metadata para auditoría.
-- Botón "AUTOMÁTICO" en `vencimiento_editor_sheet.dart` al lado del manual. `_resolverDestinatario()` extraído.
-- `AdminWhatsAppColaScreen` (`/whatsapp_cola`): contadores por estado + lista de los últimos 100 con timestamps, retry para ERROR, eliminar para PENDIENTE/ERROR.
-- Bot Node.js (`whatsapp-bot/src/`): firebase-admin + wwebjs con `LocalAuth`, escucha `COLA_WHATSAPP`, valida horario hábil, delay 15-60s, envía, marca ENVIADO con `wa_message_id` o ERROR.
-
-**Fase 2 — Cron automático** (`AUTO_AVISOS_ENABLED=true`):
-- `cron.js` cada `CRON_INTERVAL_MINUTES` (60) recorre EMPLEADOS y VEHICULOS, calcula urgencia (preventivo 16-30d / recordatorio 8-15d / urgente 1-7d / hoy 0d), filtra por `AVISOS_AUTOMATICOS_HISTORICO` (idempotencia), construye con `aviso_builder.js` (port del Dart) y encola.
-- Vencidos NO se procesan (queda como mejora futura).
-
-**Fase 3 — Respuestas que se convierten en revisiones** (`AUTO_RESPUESTAS_ENABLED=true`):
-- `message_handler.js` registra listener `message`. Filtra grupos/status/propios. Identifica chofer cruzando teléfono con `EMPLEADOS`.
-- Asociación con aviso: prioridad al **quote** (`wa_message_id`), fallback a único aviso reciente ≤72h, sino → `RESPUESTAS_BOT_AMBIGUAS`.
-- Media → Firebase Storage en `RESPUESTAS_BOT/{dni}_{ts}.{ext}`.
-- Fecha extraída del texto con `fecha_extractor.js` (port del `OcrService`).
-- Crea `REVISIONES` con `origen: 'BOT_WHATSAPP'`. Admin aprueba/rechaza desde la pantalla habitual.
-- Ambiguos → `AdminBotBandejaScreen` (`/bot_bandeja`): preview + lista de candidatos + botón "Convertir en revisión" con sheet de selección + batch atómico.
-
-### Sesión 2026-04-29 — Auditoría de seguridad y fixes
-
-**Hallazgos críticos cerrados**:
-- 🔴 **`serviceAccountKey.json` en git history** (commit `58a72ff`): la private key de Firebase Admin estaba accesible para cualquiera con acceso al repo.
-  - **Acción 1**: rotada vía Firebase Console (eliminada la key vieja `15a96f5b...`, generada nueva). La key vieja queda invalidada en cualquier lado donde haya quedado.
-  - **Acción 2**: historial git limpiado con `git-filter-repo --invert-paths --path serviceAccountKey.json --force`. 45 commits reescritos. `git log --all --full-history -- serviceAccountKey.json` ya no devuelve nada.
-  - **Acción 3**: force-push al remote (GitHub repo privado `rodriguezreysantiago/logistica_app_profesional`) para que el historial remoto también quede limpio.
-  - **Backup pre-cleanup**: `../backup-pre-cleanup.git` (mirror del repo antes de filter-repo).
-- 🔴 **Sin `firestore.rules` ni `storage.rules`**: ambas creadas en raíz del repo. Bloquean escritura desde cliente a colecciones que solo el bot debería tocar (`AVISOS_AUTOMATICOS_HISTORICO`, `RESPUESTAS_BOT/...` en Storage). Catch-all `if false` al final para que cualquier colección nueva quede bloqueada por default. **Pendiente**: `firebase deploy --only firestore:rules,storage`.
-
-**Fixes en el bot**:
-- **`message_handler._resolverChofer`**: cambiado match por sufijo de 8 dígitos por match estricto (exacto o uno termina con el otro con mínimo 10 dígitos). Cierra vulnerabilidad de spoofing donde dos números no relacionados con últimos 8 dígitos iguales matcheaban.
-- **`message_handler._subirMedia`**: sanitiza `dni` con `replace(/[^0-9]/g, '')` antes de construir path Storage. Defense-in-depth contra path traversal.
-- **`whatsapp.tieneWhatsApp`**: ya no traga errores. Devuelve `false` solo cuando WhatsApp confirma que el número no existe (terminal). Si hay timeout/sesión caída → relanza para que el caller decida reintentar. Antes confundía "no tiene WhatsApp" con "WhatsApp no respondió".
-- **`whatsapp.js`**: reconexión con backoff exponencial (1s → 2s → 4s → 8s → 16s, máximo 5 intentos). Después sale para que el supervisor reinicie limpio. Reset del contador cuando `ready`. Antes podía hacer "100 reconexiones por minuto" si WhatsApp cerraba la sesión repetidamente.
-- **`index.js` shutdown**: SIGINT/SIGTERM espera hasta 10 segundos a que termine el envío en curso antes de `process.exit`. Evita dejar docs en `PROCESANDO`.
-- **`index.js` retry**: si `tieneWhatsApp` lanza, devuelve el doc a `PENDIENTE` para que el listener vuelva a intentar (no se queda en ERROR permanente por timeout transient).
-- **`cron.js`**: índice inverso `choferByPatente` pre-computado al inicio del ciclo. Lookups O(1) en vez de iterar empleados por cada vencimiento.
-- **`aviso_builder.build`**: `destinatarioNombre` saneado con `replace(/\s+/g, ' ').trim().slice(0, 40)`. Evita que un nombre con saltos rompa el formato.
-
-**Fixes en la app**:
-- **`AppConfirmDialog`**: migrado de `Colors.redAccent`/`Colors.greenAccent`/`Colors.green` a `AppColors.accentRed` / `AppColors.accentGreen` / `AppColors.success`. Empieza la migración incremental que estaba en el roadmap.
-
-**Falsos positivos del audit (descartados)**:
-- "Stream subscription leak en `admin_panel_screen.dart:71`" — el código ya cancela el subscription antes de reasignar.
-- "DNI logueado en plain text" — `auth_service.dart` ya hashea con `dni.hashCode`.
-- "`secrets.json` commiteado" — `git log` confirma que nunca se commiteó.
-
-**Verificación final**: `flutter analyze` → 0 issues. `flutter test` → 38 verdes. `node --check` en los 6 archivos del bot tocados → OK.
-
-### Bugs arreglados destacados
-- DNI vacío al solicitar cambio de equipo (`findAncestorStateOfType` fallaba dentro de bottom sheet → propagación explícita).
-- Aprobar revisión con campos vacíos crashearba (`document path must be a non-empty string`) → guards defensivos + auto-borrado de solicitudes corruptas.
-- Backspace en input de fecha "no funcionaba" en Windows → cursor del formatter ahora se preserva en posición lógica.
-- Volvo no devolvía combustible/autonomía → faltaba `additionalContent` en el query y los paths anidados estaban mal.
-- `Scrollbar` sin controller en JSON viewer del diagnóstico → controller dedicado.
+### 6.8 OCR para detectar fechas (Sprint bot)
+- **`OcrService`** en `lib/shared/utils/ocr_service.dart`: `detectarFecha(path)` con Google ML Kit on-device. Regex para `DD/MM/YYYY`, `DD-MM-YYYY`, `DD.MM.YYYY`. Devuelve la fecha más lejana en el futuro (asume que el último vencimiento es el de renovación). Property `soportado` para ocultar UI en Web/Windows.
 
 ## 7. Pendientes / roadmap
 
-### Bloqueante de plataforma — iOS
-- **`ios/` no existe en el repo**. La app no es compilable para iPhone hoy. Para habilitarlo:
-  1. Conseguir una Mac (compilar iOS no se puede desde Windows; ni siquiera con codemagic / cloud build se evita el setup inicial).
-  2. Cuenta Apple Developer ($99/año) si se quiere distribuir.
-  3. `flutter create --platforms=ios .` desde la raíz del proyecto.
-  4. Bajar `GoogleService-Info.plist` de Firebase Console (proyecto `logisticaapp-e539a` → iOS app) y dejarlo en `ios/Runner/`.
-  5. Editar `ios/Runner/Info.plist` con los permisos: `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`, `NSPhotoLibraryAddUsageDescription`, `LSApplicationQueriesSchemes` (para `wa.me` con `url_launcher`).
-  6. `Podfile`: `platform :ios, '13.0'` o superior (Firebase requiere ≥13).
-  7. Cambiar el bundle ID a algo real, no `com.example.*` (ej. `ar.com.smartlogistica.flota`).
+### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
+- ✅ Cloud Function `loginConDni` callable Gen2 deployada en us-central1 (Node.js 20 + bcrypt server-side).
+- ✅ `AuthService` llama vía **HTTPS directo con Dio** (no `cloud_functions` plugin) porque ese plugin no tiene implementación nativa para Windows desktop. El protocolo callable (`{"data": ...}` request, `{"result": ...}` response) se maneja a mano.
+- ✅ `AuthGuard` con doble check (PrefsService + FirebaseAuth.currentUser).
+- ✅ `firestore.rules` y `storage.rules` reescritas con `isAdmin()` por custom claim — DEPLOYADAS.
+- ✅ Probado en producción: admin login + chofer login + migración silenciosa SHA-256→bcrypt.
 
-### Próximo paso lógico
-- **Desplegar `firestore.rules` y `storage.rules`** (ya creadas en raíz): probar primero en el simulador de Firebase Console y después `firebase deploy --only firestore:rules,storage`. Bloquea escritura desde cliente a colecciones que solo el bot debería tocar.
-- **Validar el bot de WhatsApp en producción** durante unos días con `AUTO_AVISOS_ENABLED=false` y `AUTO_RESPUESTAS_ENABLED=false` (solo Fase 1 — envío manual desde la app). Cuando el ritmo de envío y el comportamiento del número descartable inspire confianza, activar Fase 2 y 3.
-- **Configurar autostart del bot en la PC de oficina** (Task Scheduler de Windows o `nssm` — ver sección 8) para que el bot levante solo cuando se prende la PC y reinicie ante caídas.
-- **Mails automáticos escalonados** como complemento del bot (defensa en profundidad). Requiere:
-  - Plan Blaze de Firebase (Cloud Functions con scheduler).
-  - Proveedor: SendGrid (free 100/día) o Resend (free 3000/mes) o SMTP de Workspace.
-  - Destinatario: aún por definir (chofer, admin, ambos).
+**Gotchas críticos encontrados durante el deploy** (anotar para próximas funciones Gen2):
 
-### Roadmap medio plazo (auditoría)
-1. Migrar a **Firebase Auth** (custom token desde Cloud Function) para poder habilitar `firestore.rules`. **Bloqueante** de varios items: vista de invitado del dueño, rate limiting confiable, firestore.rules reales.
-2. **Rate limiting** en login (Cloud Function + colección `LOGIN_ATTEMPTS`).
-3. Mover credenciales Volvo Connect a Cloud Function proxy (hoy se inyectan vía `--dart-define-from-file=secrets.json`, OK para dev).
-4. **`flutter_secure_storage`** para sesión en lugar de SharedPreferences plano.
-5. Refactor: `admin_personal_lista_screen.dart` (1200+ líneas con audit log y formatters; sigue creciendo).
-6. **Modo offline para checklist** del chofer (sqflite/Hive + cola de sync). Útil en ruta sin señal.
-7. **Biometría para login del chofer** (`local_auth`, huella en mobile).
-8. **Vista de invitado del dueño** — link público read-only con dashboard. Requiere Firebase Auth primero.
+1. **Cloud Build SA permissions**: en proyectos Firebase post-abril 2024, la SA por default `<PROJECT_NUMBER>-compute@developer.gserviceaccount.com` no recibe permisos automáticos. Hay que asignarle como mínimo: `Cloud Functions Developer`, `Cloud Run Admin`, `Service Account User`, `Cloud Build Service Account`, y `Editor` (o roles equivalentes más finos).
+2. **`allUsers` invoker**: las Functions Gen2 NO son invocables públicamente por default (a diferencia de Gen1). Para callables públicos como `loginConDni`, hay que agregar `allUsers` con rol **`Cloud Run Invoker`** en Cloud Run permissions (no en la pantalla de Functions, no aparece "Cloud Functions Invoker" — Gen2 corre sobre Cloud Run).
+3. **`signBlob` permission para `createCustomToken`**: la SA de runtime necesita el rol **`Service Account Token Creator`** **sobre sí misma**. Sin esto, `auth.createCustomToken()` falla con `iam.serviceAccounts.signBlob denied`.
+4. **`cloud_functions` Dart package no soporta Windows**: si se agrega y se importa, tira `Unable to establish connection on channel: dev.flutter.pigeon.cloud_functions_platform_interface.CloudFunctionsHostApi.call`. Solución: llamar la function por HTTPS plano con Dio respetando el protocolo callable.
 
-### Roadmap UI/UX largo
-- **Push notifications agendadas** al chofer ("Tu licencia vence en 5 días") sin necesidad de WhatsApp del admin. `flutter_local_notifications` ya está instalado.
-- **Búsqueda Ctrl+K**: extender para indexar revisiones pendientes (hoy solo choferes y vehículos).
-- **`AppColors`** — migración incremental: cada vez que se toque un archivo, reemplazar `Colors.greenAccent` / `Colors.redAccent` etc. por las constantes centralizadas.
+### Roadmap medio plazo (auditoría AUDITORIA_2026-04-28.md)
+1. **Rate limiting** en login (Cloud Function + colección `LOGIN_ATTEMPTS`).
+2. Mover credenciales Volvo Connect a Cloud Function proxy (hoy se inyectan vía `--dart-define-from-file=secrets.json`, OK para dev).
+3. **`flutter_secure_storage`** para sesión en lugar de SharedPreferences plano.
+4. Refactor: `admin_personal_lista_screen.dart` (1000+ líneas).
+5. Mover **escritura de `TELEMETRIA_HISTORICO` y `AUDITORIA_ACCIONES`** al bot Node.js (hoy las escribe el cliente).
 
 ### Roadmap largo plazo (Volvo)
-- **Anti-robo nocturno** con `wheelBasedSpeed > 0` fuera de horario operativo + push notification al admin.
+- **Anti-robo nocturno**: `wheelBasedSpeed > 0` fuera de horario operativo + push notification al admin.
 - **Mantenimiento preventivo** vía endpoint VDDS `serviceDistance`.
 - **Alertas de conducción** (descanso, conducción continua excedida) — requiere taquógrafo digital activo en los camiones.
 
-## 8. Bot de WhatsApp — guía completa
+### Decisiones del backlog (sin urgencia)
+- Reemplazar `AVISOS_VENCIMIENTOS.streamHistorial` server-side con índice compuesto si llega a haber miles de avisos.
+- Migrar `notification_service` a FCM (push real) cuando se sumen choferes con la app móvil.
 
-> ⚠️ **Aviso operativo**. WhatsApp prohíbe explícitamente bots no oficiales (TOS). El número que usás para automatizar puede ser baneado sin aviso. **Usar solo con un número descartable** que NO sea el de la oficina principal. Si Meta detecta el patrón y banea, conseguimos otro chip y volvemos a vincular — `.wwebjs_auth/` se invalida y el bot pide QR de nuevo.
-
-### 8.1 Cómo funciona
-
-```
-[App Flutter]                    [Firestore]                 [Bot Node.js]
-admin → "AUTOMÁTICO"   →    COLA_WHATSAPP/                 escucha la cola
-                              { telefono,                ←  toma cada PENDIENTE
-                                mensaje,                     espera 15-60s
-                                estado: PENDIENTE }    →    envía vía wwebjs
-                                                            marca ENVIADO/ERROR
-
-cada 60min (cron, Fase 2)    EMPLEADOS, VEHICULOS  ←   recorre vencimientos
-                                                       calcula urgencia
-                              AVISOS_AUTOMATICOS_HIST  →  filtra ya-enviados
-                              COLA_WHATSAPP            ←  encola los nuevos
-
-chofer responde   →   bot recibe (Fase 3)         →   sube foto a Storage
-con foto al aviso     identifica chofer/aviso         extrae fecha del texto
-                      por quote o contexto reciente   crea REVISIONES o
-                                                      RESPUESTAS_BOT_AMBIGUAS
-```
-
-La app **no** habla directo con WhatsApp. Solo escribe a Firestore. Si el bot está caído, los mensajes quedan PENDIENTE y se envían cuando vuelve.
-
-### 8.2 Pre-requisitos
-
-- **Node.js 18+** instalado.
-- **`serviceAccountKey.json`** (el mismo que usan los scripts Python).
-- **Teléfono Android/iPhone descartable** con WhatsApp y un chip que NO sea el de la oficina.
-
-### 8.3 Setup paso a paso
-
-```powershell
-cd C:\Users\santi\logistica_app_profesional\whatsapp-bot
-
-# Instalar dependencias (~5 min la primera vez — baja Chromium)
-npm install
-
-# Copiar .env de ejemplo y editar
-copy .env.example .env
-copy ..\serviceAccountKey.json serviceAccountKey.json
-notepad .env
-```
-
-En el `.env`:
-```env
-FIREBASE_CREDENTIALS_PATH=./serviceAccountKey.json
-FIREBASE_PROJECT_ID=logisticaapp-e539a
-
-# Empezar SIN avisos automáticos ni respuestas auto
-AUTO_AVISOS_ENABLED=false
-AUTO_RESPUESTAS_ENABLED=false
-
-WORKING_HOURS_START=8
-WORKING_HOURS_END=21
-DELAY_MIN_MS=15000
-DELAY_MAX_MS=60000
-CRON_INTERVAL_MINUTES=60
-```
-
-### 8.4 Primera ejecución (escanear QR)
-
-```powershell
-npm start
-```
-
-Aparece QR ASCII. Escanealo desde WhatsApp del teléfono descartable: `Ajustes → Dispositivos vinculados → Vincular un dispositivo`. La sesión queda guardada en `.wwebjs_auth/` y no hay que volver a escanear.
-
-### 8.5 Pre-cargar contactos (anti-baneo)
-
-Antes de avisos masivos, **agendá los teléfonos de los choferes en los contactos del teléfono descartable**. WhatsApp es más permisivo con contactos guardados.
-
-### 8.6 Calentar el número
-
-Antes de poner en producción, mandar mensajes manuales por 2-3 días desde el número del bot. Un número silencioso que de repente manda 30 mensajes es la señal más fuerte de bot.
-
-### 8.7 Activar Fase 2 (cron de avisos automáticos)
-
-```env
-AUTO_AVISOS_ENABLED=true
-```
-
-Reiniciar bot. En logs:
-```
-[INFO] Cron de avisos automáticos HABILITADO (cada 60 min).
-```
-
-Cada hora escanea Firestore, calcula urgencia (preventivo / recordatorio / urgente / hoy), filtra por `AVISOS_AUTOMATICOS_HISTORICO` (idempotencia) y encola en `COLA_WHATSAPP`. Cada (chofer, papel, urgencia, fechaVenc) se manda una sola vez.
-
-### 8.8 Activar Fase 3 (respuestas → revisiones)
-
-```env
-AUTO_RESPUESTAS_ENABLED=true
-```
-
-El bot recibe mensajes, identifica chofer (cruce con EMPLEADOS por teléfono), asocia con aviso vía quote o contexto reciente ≤72h, descarga foto a Storage, extrae fecha del texto, crea `REVISIONES` con `origen: 'BOT_WHATSAPP'`. Si ambiguo, va a `RESPUESTAS_BOT_AMBIGUAS` y aparece en pantalla "Bandeja del Bot".
-
-### 8.9 Autostart en Windows
-
-**Task Scheduler** (sin instalar nada):
-- Trigger: `When the computer starts`
-- Program: `C:\Program Files\nodejs\node.exe`
-- Arguments: `src/index.js`
-- Start in: `C:\Users\santi\logistica_app_profesional\whatsapp-bot`
-- Settings → Restart on failure cada 1 min × 3 intentos
-
-**`nssm`** (recomendado, más robusto):
-```powershell
-choco install nssm
-nssm install SmartLogisticaWhatsAppBot "C:\Program Files\nodejs\node.exe"
-# UI: AppDirectory, AppParameters: src/index.js, Auto-restart 5000ms
-nssm start SmartLogisticaWhatsAppBot
-```
-
-### 8.10 Diagnóstico
-
-- **Pantalla "Cola de WhatsApp"** en la app: ENVIADO / PROCESANDO / ERROR / PENDIENTE con timestamps.
-- **Pantalla "Bandeja del Bot"**: respuestas que no se pudieron asociar.
-- Colección `AVISOS_AUTOMATICOS_HISTORICO`: qué generó el cron.
-- Logs del proceso (consola o archivo si redirigís stdout).
-
-### 8.11 Limitaciones
-
-- Sin OCR sobre la foto (solo regex sobre el texto).
-- Sin diálogo interactivo. Si hay ambigüedad → bandeja manual.
-- Vencidos no se procesan automáticamente en Fase 2.
-- Solo papeles del chofer, no cambios de equipo.
-
----
-
-## 9. Setup en una máquina nueva
+## 8. Setup en una máquina nueva
 
 ### Pre-requisitos
 - Flutter SDK 3.0+
-- Node.js 18+ (para el bot — ver sección 8)
-- Python 3.10+ (solo si vas a correr scripts de migración)
+- Python 3.10+ (solo para scripts de migración)
 - Cuenta Firebase del proyecto `logisticaapp-e539a`
 - Editor: VS Code con extensiones Dart + Flutter
 
 ### Pasos
 ```powershell
-# 1. Clonar y entrar
+# 1. Clonar
 git clone <url-del-repo> logistica_app_profesional
 cd logistica_app_profesional
 
-# 2. Recrear archivos sensibles (NO están en git, copiá desde Bitwarden / Drive privado)
-#    - secrets.json              → credenciales Volvo Connect
-#    - serviceAccountKey.json    → Firebase Admin SDK (para scripts y bot)
+# 2. Recrear archivos sensibles (NO están en git)
+#    - secrets.json            (credenciales Volvo Connect)
+#    - serviceAccountKey.json  (solo para scripts de admin)
+# Copiarlos desde Bitwarden / Drive privado
 
 # 3. Instalar dependencias Flutter
 flutter pub get
 
-# 4. (Opcional) Instalar deps Python para scripts admin
+# 4. (Opcional) Para scripts Python
 pip install firebase-admin
 
 # 5. Correr la app (Windows)
 flutter run -d windows --dart-define-from-file=secrets.json
-
-# 6. (Opcional) Setup del bot — ver sección 8 para detalle
-cd whatsapp-bot
-npm install
-copy .env.example .env
-copy ..\serviceAccountKey.json serviceAccountKey.json
-npm start  # primera vez: escanear QR
+# (en VS Code F5 ya tiene el flag configurado en .vscode/launch.json)
 ```
 
 ### Archivos sensibles que necesitás recrear
-- `secrets.json` — formato en `secrets.example.json`. `VOLVO_USERNAME` y `VOLVO_PASSWORD`.
-- `serviceAccountKey.json` — bajar de Firebase Console → Service Accounts → Generate new private key. Va en raíz Y en `whatsapp-bot/`.
-- `whatsapp-bot/.env` — copiar de `.env.example`.
-- `whatsapp-bot/.wwebjs_auth/` — se genera al escanear QR. NO está en git (cookies de sesión).
+| Archivo | Para qué | Cómo |
+|---|---|---|
+| `secrets.json` | Credenciales Volvo Connect | Plantilla en `secrets.example.json`. Contenido en Bitwarden. |
+| `serviceAccountKey.json` | Admin SDK Firebase para scripts y bot | Generar en Firebase Console → Project Settings → Service accounts → Generate new private key. |
 
-## 10. Cómo retomar contexto en Claude / Cowork
+## 9. Cómo retomar contexto en Claude / Cowork
 
-Si abrís una conversación nueva en otra máquina (Cowork no sincroniza historial entre desktops), **pegá el siguiente prompt al iniciar** para que tenga el contexto:
+Cowork no sincroniza historial entre desktops. Para una conversación nueva (otra máquina, o nuevo Claude), pegale al iniciar:
 
-> Hola Claude. Vengo trabajando en una app Flutter de gestión de flota llamada **logistica_app_profesional** (S.M.A.R.T. Logística, empresa Vecchi en Bahía Blanca). Tiene además un bot de WhatsApp en `whatsapp-bot/` (Node.js + whatsapp-web.js). Antes de empezar, leé `ESTADO_PROYECTO.md` y `AUDITORIA_2026-04-28.md` — ahí tenés contexto completo: arquitectura, convenciones, lo que está hecho, lo que queda pendiente y las decisiones tomadas. Trabajamos siguiendo esas convenciones (input de fecha DD/MM/AAAA con `pickFecha`, listas centralizadas en `AppVencimientos`/`AppTiposVehiculo`, feedback con `AppFeedback`, confirmaciones destructivas con `AppConfirmDialog`, audit log en acciones críticas, mensajes de WhatsApp con firma "_mensaje automático del sistema_", port del builder de avisos sincronizado entre Dart y JS). El próximo paso pendiente es <X>. ¿Listo para arrancar?
+> Hola Claude. Vengo trabajando en una app Flutter de gestión de flota llamada **logistica_app_profesional** (S.M.A.R.T. Logística, empresa Vecchi en Bahía Blanca). Antes de empezar, leé `ESTADO_PROYECTO.md` y `AUDITORIA_2026-04-28.md` que están en la raíz del repo — ahí tenés el contexto completo: arquitectura, convenciones, lo que está hecho, lo que queda pendiente y las decisiones tomadas con sus razones. Trabajamos siguiendo esas convenciones (input de fecha DD/MM/AAAA con `pickFecha`, listas centralizadas en `AppVencimientos` y `AppTiposVehiculo`, mensajes con firma "_mensaje automático del sistema_", `AppFeedback` para SnackBars, `AppLoadingDialog` para loadings, `AppConfirmDialog` para confirmaciones, `AppColors` en lugar de hardcodear, etc). El próximo paso pendiente es <X>. ¿Listo para arrancar?
 
 Reemplazá `<X>` con lo que quieras hacer ese día.
 
-## 11. Comandos útiles que uso seguido
-
-### App Flutter
+## 10. Comandos útiles
 
 ```powershell
 # Correr la app en debug
 flutter run -d windows --dart-define-from-file=secrets.json
 
-# Correr en Chrome (Web)
-flutter run -d chrome --dart-define-from-file=secrets.json
-
 # Build de release Windows
 flutter build windows --release --dart-define-from-file=secrets.json
 
-# Análisis estático y tests
+# Análisis estático
 flutter analyze
-flutter test
 
 # Migración Firestore (idempotente, soporta --dry-run)
 python scripts/migrar_psicofisico_a_preocupacional.py --dry-run
-```
 
-### Bot de WhatsApp
+# Bajar/subir cambios entre máquinas
+git pull                           # antes de empezar
+git add . ; git commit -m "..."    # cuando termines
+git push
 
-```powershell
-cd whatsapp-bot
+# Si la rama divergió por history rewrite (force push) en otra máquina:
+git fetch origin
+git branch backup-pre-reset
+git reset --hard origin/main
+git clean -fd
+flutter pub get
 
-# Primer arranque (escanear QR)
-npm install
-npm start
-
-# Operación normal
-npm start
-
-# Re-escanear QR (si el número fue baneado o cambiaste de chip)
-Remove-Item -Recurse -Force .wwebjs_auth
-npm start
-```
-
-### Firebase (deploy de rules)
-
-```bash
-# Pre-requisito una vez:
-npm install -g firebase-tools
-firebase login
-
-# Deploy de rules
-firebase deploy --only firestore:rules
-firebase deploy --only storage
-firebase deploy --only firestore:rules,storage   # ambos juntos
-
-# Probar en simulador antes de deploy:
-# Firebase Console → Firestore → Rules → Playground
-```
-
-### Rotación de service account (cuando hace falta)
-
-```
-1. Firebase Console → Project Settings → Service Accounts.
-2. Click en `firebase-adminsdk-fbsvc@...`.
-3. Pestaña KEYS → Add Key → Create new key (JSON) → guardar.
-4. Reemplazar `serviceAccountKey.json` en raíz Y en `whatsapp-bot/`.
-5. Reiniciar el bot, verificar que arranca sin errores.
-6. Volver a la consola → en la fila de la key vieja → ⋮ → Delete.
-```
-
-### Limpiar key del git history (después de rotar)
-
-```powershell
-pip install git-filter-repo
-
-# Backup
-git clone --mirror . ../backup-pre-cleanup.git
-
-# Limpiar (filter-repo borra el remote por seguridad — hay que re-agregarlo)
-& "C:\Users\santi\AppData\Roaming\Python\Python314\Scripts\git-filter-repo.exe" --invert-paths --path serviceAccountKey.json --force
-
-# Verificar limpio
-git log --all --full-history -- serviceAccountKey.json   # debe estar vacío
-
-# Re-agregar remote y forzar push
-git remote add origin https://github.com/<usuario>/<repo>
-git push --force --all origin
-git push --force --tags origin
-```
-
-### Git
-
-```bash
 # Ver últimos commits
-git log --oneline -15
-
-# Recordar qué cambió en la última sesión
-git log --since='1 day ago' --stat
+git log --oneline -10
 ```
+
+## 11. Notas operativas que no son obvias
+
+- **El bot Node.js es un proceso vivo separado**: si nadie lo levanta en un servidor, los mensajes de la cola **NO se envían**. La app sola no manda WhatsApp automático — solo encola. Click-to-Chat (`wa.me`) sí funciona porque abre WhatsApp del admin.
+- **Las pantallas del bot WhatsApp no están en `app_router.dart`**: el agente sospecha que se acceden desde un menú interno del `admin_shell` o por feature flag. Si querés agregarlas al menú principal, hay que registrar las rutas y sumar tiles en `admin_panel_screen.dart`.
+- **`secrets.json` está congelado a una versión vieja de credenciales Volvo**: si Volvo rota el password en su portal, hay que actualizar `secrets.json` y rebuildear la app (no es runtime). Ver email de Volvo en Bitwarden.
+- **Si se agrega una colección Firestore nueva**: sumarla a `firestore.rules` ANTES de hacer deploy de la app. El fallback `if false` la cerraría.
+- **El primer ciclo del AutoSync corre al instante** al abrir la app (no espera 60 seg). Después cada minuto.
+- **Los choferes tienen formato `APELLIDO NOMBRE...`**: el saludo del WhatsApp toma `partes[1]`. Si un legajo viene con orden invertido, el aviso lo va a llamar por el apellido. La app tiene fallback a "Hola" genérico si solo hay un token.
 
 ---
 
-*Última actualización: 2026-04-29 — auditoría de seguridad + rotación de key + git history limpio + `firestore.rules`/`storage.rules` + fixes en bot. Actualizar este archivo cuando se completen pendientes grandes o se sumen features importantes.*
+*Documento mantenido por el equipo + agentes de IA. Actualizar cuando se completen pendientes grandes o se sumen features importantes (especialmente cambios al bot, las rules, o los specs centralizados).*

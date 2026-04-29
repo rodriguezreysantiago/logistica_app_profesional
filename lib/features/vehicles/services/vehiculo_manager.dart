@@ -105,8 +105,7 @@ class VehiculoManager {
       if (metrosCache != null && metrosCache > 0) {
         final km = metrosCache / 1000;
         await _repo.actualizarKilometraje(patente: patente, km: km);
-        debugPrint(
-            "✅ Sync (cache) $patente → ${km.toStringAsFixed(1)} km");
+        // Log de éxito desactivado — visible desde el dashboard de sync.
         return;
       }
 
@@ -130,12 +129,7 @@ class VehiculoManager {
         nivelCombustiblePct: tele.nivelCombustiblePct,
         autonomiaKm: tele.autonomiaKm,
       );
-
-      debugPrint(
-          "✅ Sync $patente → "
-          "km=${km?.toStringAsFixed(1) ?? '?'}, "
-          "fuel=${tele.nivelCombustiblePct?.toStringAsFixed(0) ?? '?'}%, "
-          "auton=${tele.autonomiaKm?.toStringAsFixed(0) ?? '?'}km");
+      // Log de éxito desactivado — visible desde el dashboard de sync.
     } catch (e, stack) {
       debugPrint("❌ Sync error $patente: $e");
       debugPrint(stack.toString());

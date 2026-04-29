@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../features/vehicles/providers/vehiculo_provider.dart';
 import '../../features/sync_dashboard/providers/sync_dashboard_provider.dart';
+import 'prefs_service.dart';
 
 /// Sincroniza periódicamente la flota Volvo con la API de Volvo Connect
 /// y reporta cada paso al [SyncDashboardProvider] para que el admin pueda
@@ -60,6 +62,17 @@ class AutoSyncService {
 
   Future<void> _sync() async {
     if (_running) return;
+
+    // Las rules de Firestore requieren `isAdmin()` para escribir en
+    // VEHICULOS y TELEMETRIA_HISTORICO. Si no hay usuario logueado o el
+    // rol no es ADMIN, salimos en silencio — evita logs llenos de
+    // "Permission denied" cuando un chofer abre la app o cuando la app
+    // arranca antes de que el AuthGuard redirija al login.
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || PrefsService.rol != 'ADMIN') {
+      return;
+    }
+
     _running = true;
 
     int procesados = 0;

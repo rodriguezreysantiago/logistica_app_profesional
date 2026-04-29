@@ -346,10 +346,9 @@ class VolvoApiService {
         if (statuses is List && statuses.isNotEmpty) {
           final tele = _parseStatus(statuses[0]);
           if (tele.tieneAlgunDato) {
-            debugPrint(
-                "✅ [VOLVO TELE $cleanVin] km=${tele.odometroMetros != null ? (tele.odometroMetros! / 1000).toStringAsFixed(0) : '?'} "
-                "fuel=${tele.nivelCombustiblePct?.toStringAsFixed(0) ?? '?'}% "
-                "auton=${tele.autonomiaKm?.toStringAsFixed(0) ?? '?'}km");
+            // Log de éxito por vehículo desactivado: el dashboard de
+            // sync ya muestra la info por unidad (km/fuel/autonomía).
+            // Si necesitás re-debuggear, descomentar.
             return tele;
           }
         }

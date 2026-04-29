@@ -1,6 +1,9 @@
 // Firebase Storage Security Rules — S.M.A.R.T. Logística
 //
-// La app usa Storage para:
+// Mismo modelo de auth que firestore.rules: Firebase Auth con custom
+// tokens, UID = DNI, rol en custom claim `request.auth.token.rol`.
+//
+// Paths usados por la app:
 //   - PERFILES/{dni}.jpg                — foto del chofer
 //   - perfiles/{dni}.jpg                — variante legacy con minúsculas
 //   - vehiculos/{patente}/foto.jpg      — foto de la unidad
@@ -9,32 +12,104 @@
 //   - EMPLEADOS_DOCS/                   — comprobantes (auditoría)
 //   - VEHICULOS_DOCS/                   — comprobantes (auditoría)
 //   - REVISIONES/                       — comprobantes que sube el chofer
-//   - RESPUESTAS_BOT/{dni}_{ts}.{ext}   — fotos que llegan vía bot (Fase 3)
+//   - RESPUESTAS_BOT/{dni}_{ts}.{ext}   — fotos que llegan vía bot
 //
 // DEPLOY:
 //   firebase deploy --only storage
-//
-// MISMA limitación que firestore.rules: la app no usa Firebase Auth, así
-// que `request.auth` es null. Las reglas reales requieren la migración.
 
 rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // RESPUESTAS_BOT lo sube SOLO el bot (firebase-admin bypasea).
-    // Lectura permitida porque la app necesita mostrar la foto al admin.
-    match /RESPUESTAS_BOT/{archivo} {
-      allow read: if true;
-      allow write: if false;  // ✅ solo Admin SDK
+    // ========================================================================
+    // FUNCIONES DE PERMISOS
+    // ========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // El resto de los paths siguen abiertos hasta la migración a Auth.
-    // TODO: cuando haya Firebase Auth, restringir a isAdmin() o al
-    // dueño del archivo (chofer puede subir su propio comprobante).
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.rol == 'ADMIN';
+    }
+
+    // ========================================================================
+    // RESPUESTAS_BOT — solo el bot sube (Admin SDK), admin las lee
+    // ========================================================================
+
+    match /RESPUESTAS_BOT/{archivo=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ========================================================================
+    // PERFILES — foto del chofer
+    // ========================================================================
+    // El chofer puede ver su propia foto, el admin todas. Solo el admin
+    // la sube (alta de chofer + cambio de foto desde la pantalla de
+    // gestión de personal).
+    //
+    // Soportamos dos paths legacy + nuevo (mayúsculas/minúsculas).
+
+    match /PERFILES/{archivo} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /perfiles/{archivo} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // VEHICULOS — foto + comprobantes (RTO, Seguro, extintores)
+    // ========================================================================
+
+    match /vehiculos/{patente}/{archivo=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // EMPLEADOS — papeles del chofer reemplazados por admin
+    // ========================================================================
+
+    match /EMPLEADOS/{dni}/{archivo=**} {
+      // Solo admin reemplaza papeles (sin pasar por el flujo de
+      // revisión). El chofer NO escribe acá (lo hace en REVISIONES).
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == dni);
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // EMPLEADOS_DOCS / VEHICULOS_DOCS — auditoría (sube al guardar)
+    // ========================================================================
+
+    match /EMPLEADOS_DOCS/{archivo=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /VEHICULOS_DOCS/{archivo=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // REVISIONES — el chofer sube comprobante al renovar un papel
+    // ========================================================================
+
+    match /REVISIONES/{archivo=**} {
+      allow read: if isSignedIn();
+      // Cualquier signedIn (chofer) puede subir su comprobante.
+      // El admin lo aprueba/rechaza desde la app.
+      allow write: if isSignedIn();
+    }
+
+    // ========================================================================
+    // FALLBACK — paths no listados quedan bloqueados
+    // ========================================================================
     match /{allPaths=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if false;
     }
   }
 }

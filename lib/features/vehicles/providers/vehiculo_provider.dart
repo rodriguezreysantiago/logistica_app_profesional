@@ -109,7 +109,7 @@ class VehiculoProvider extends ChangeNotifier {
       _success.add(patente);
       marcarSync(patente);
 
-      debugPrint("🚀 Sync OK provider: $patente");
+      // Log de éxito desactivado — visible desde el dashboard de sync.
 
       // 🔥 limpiar success automáticamente (UX limpia)
       Future.delayed(const Duration(seconds: 3), () {

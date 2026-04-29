@@ -1,30 +1,24 @@
 // Firestore Security Rules — S.M.A.R.T. Logística
 //
-// CONTEXTO:
-//   La app autentica con DNI + bcrypt directo contra Firestore (no usa
-//   Firebase Auth todavía). Eso significa que `request.auth` siempre es
-//   null para los clientes, así que no podemos hacer `if isAdmin()` real
-//   acá hasta que migremos.
+// Modelo de auth:
+//   La app usa Firebase Auth con custom tokens emitidos por la
+//   Cloud Function `loginConDni`. El UID es el DNI del chofer y el
+//   rol viaja como CUSTOM CLAIM en el JWT (`request.auth.token.rol`).
+//   Eso permite chequear `isAdmin()` SIN tocar Firestore en cada
+//   regla (ahorra una lectura por regla y por documento).
 //
-//   Estas reglas son la PRIMERA capa de defensa de profundidad. Mientras
-//   no haya Firebase Auth:
+// Convenciones:
+//   - `isSignedIn()`: usuario logueado (cualquier rol).
+//   - `isAdmin()`: rol = 'ADMIN' en el custom claim.
+//   - `isSelf(dni)`: el UID del JWT coincide con el dni del path.
 //
-//   - Las colecciones que SOLO se escriben desde el bot (Admin SDK
-//     bypasea reglas) pueden ser read/write: false desde el cliente.
-//     Si un atacante con la apiKey pública intenta escribir en
-//     TELEMETRIA_HISTORICO o AUDITORIA_ACCIONES, le tira permission-denied.
-//
-//   - Las colecciones que la app necesita escribir (EMPLEADOS, VEHICULOS,
-//     REVISIONES, CHECKLISTS, AVISOS_VENCIMIENTOS, COLA_WHATSAPP) quedan
-//     abiertas hasta la migración. La defensa real depende de no exponer
-//     la apiKey y de validar inputs en el cliente.
+// IMPORTANTE: si un admin cambia el ROL de un chofer en `EMPLEADOS`,
+//   el custom claim queda desactualizado hasta el próximo login. Si
+//   se necesita propagar más rápido, el cliente puede forzar
+//   `await currentUser.getIdToken(true)` después de un cambio.
 //
 // DEPLOY:
 //   firebase deploy --only firestore:rules
-//
-// IMPORTANTE: probar antes de desplegar usando el emulador o el simulador
-// de la consola de Firebase. Una regla mal escrita puede romper la app
-// en producción.
 
 rules_version = '2';
 
@@ -32,90 +26,141 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ========================================================================
-    // COLECCIONES ESCRITAS SOLO POR EL BOT (Admin SDK)
+    // FUNCIONES DE PERMISOS
     // ========================================================================
-    // El bot Node.js (whatsapp-bot/) usa firebase-admin que bypasea las
-    // reglas. La app NO necesita escribir en estas colecciones — solo
-    // leerlas para mostrar histórico al admin. Bloqueamos escritura
-    // desde cliente.
 
-    // Bitácora de acciones del admin. La escribe `AuditLog.registrar(...)`
-    // en la app — pero ahí es escritura desde cliente. Mantener escritura
-    // permitida hasta migrar el AuditLog al bot o a Cloud Functions.
-    match /AUDITORIA_ACCIONES/{doc=**} {
-      allow read: if true;
-      allow write: if true;  // TODO: restringir cuando AuditLog migre al backend
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Snapshots diarios de telemetría Volvo. El AutoSync de la app los
-    // escribe hoy — habría que pasarlos al bot o a una Cloud Function.
-    // Mientras tanto los dejamos abiertos.
-    match /TELEMETRIA_HISTORICO/{doc=**} {
-      allow read: if true;
-      allow write: if true;  // TODO: mover escritura al backend
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.rol == 'ADMIN';
     }
 
-    // Idempotencia del cron de avisos automáticos. SOLO el bot escribe.
-    // La app no necesita escribir — solo leer si quiere mostrar lo que
-    // ya se envió.
-    match /AVISOS_AUTOMATICOS_HISTORICO/{doc=**} {
-      allow read: if true;
-      allow write: if false;  // ✅ solo Admin SDK
-    }
-
-    // Bandeja del bot. Crea el bot, edita/borra el admin desde la app.
-    // Por ahora dejamos write abierto para que el admin pueda
-    // descartar / convertir desde la pantalla.
-    match /RESPUESTAS_BOT_AMBIGUAS/{doc=**} {
-      allow read: if true;
-      allow write: if true;  // TODO: solo read cliente cuando movamos las acciones al backend
+    function isSelf(dni) {
+      return isSignedIn() && request.auth.uid == dni;
     }
 
     // ========================================================================
-    // COLECCIONES OPERACIONALES — la app necesita read/write
+    // EMPLEADOS — cada chofer ve su propio legajo; el admin ve todos
     // ========================================================================
 
     match /EMPLEADOS/{dni} {
-      allow read: if true;
-      allow write: if true;  // TODO: isAdmin() cuando haya Firebase Auth
+      // Lectura: el dueño puede ver su legajo, el admin todos.
+      allow read: if isAdmin() || isSelf(dni);
+      // Escritura: solo admin (alta, edición, asignación de unidad,
+      // reemplazo de papel desde admin).
+      allow write: if isAdmin();
     }
+
+    // ========================================================================
+    // VEHICULOS — cualquier logueado lee, solo admin escribe
+    // ========================================================================
 
     match /VEHICULOS/{patente} {
-      allow read: if true;
-      allow write: if true;  // TODO: isAdmin() cuando haya Firebase Auth
+      // El chofer necesita leer su unidad asignada y los papeles del
+      // vehículo (RTO, Seguro). Acepta cualquier signedIn.
+      allow read: if isSignedIn();
+      // Alta, edición, sincronización Volvo (KM/combustible/autonomía):
+      // hoy lo dispara la app como admin. Cuando se mueva al bot, esto
+      // queda igual (el bot bypasea con Admin SDK).
+      allow write: if isAdmin();
     }
+
+    // ========================================================================
+    // REVISIONES — chofer crea solicitud, admin aprueba/rechaza
+    // ========================================================================
 
     match /REVISIONES/{doc} {
-      // Chofer crea, admin aprueba/rechaza, bot crea desde Fase 3.
-      allow read: if true;
-      allow write: if true;
+      allow read: if isSignedIn();
+      // Chofer crea su propia solicitud al renovar un papel.
+      // Admin actualiza/elimina al aprobar/rechazar.
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
+
+    // ========================================================================
+    // CHECKLISTS — chofer registra, admin lee histórico
+    // ========================================================================
 
     match /CHECKLISTS/{doc} {
-      // Chofer crea, admin lee. Histórico inmutable cuando se confirma.
-      allow read: if true;
-      allow write: if true;
+      allow read: if isSignedIn();
+      // El chofer crea su checklist mensual. NO debería poder editar
+      // checklists pasados (auditoría inmutable).
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
+
+    // ========================================================================
+    // AVISOS_VENCIMIENTOS — bitácora de avisos manuales del admin
+    // ========================================================================
 
     match /AVISOS_VENCIMIENTOS/{doc} {
-      // Historial de avisos manuales (canal WHATSAPP / WHATSAPP_BOT).
-      allow read: if true;
-      allow write: if true;
+      // Lectura: chofer ve su propio historial; admin ve todo.
+      // Por simplicidad permitimos a cualquier signedIn leer (los
+      // datos no son sensibles).
+      allow read: if isSignedIn();
+      // Solo admin registra (lo dispara el botón "Avisar por WhatsApp").
+      allow write: if isAdmin();
     }
 
+    // ========================================================================
+    // COLA_WHATSAPP — el admin encola, el bot Node.js procesa via Admin SDK
+    // ========================================================================
+
     match /COLA_WHATSAPP/{doc} {
-      // App encola, bot procesa. Mantener abierto hasta que tengamos
-      // backend que medie.
-      allow read: if true;
-      allow write: if true;
+      // El bot bypasea con Admin SDK; las rules valen solo para clientes.
+      // Solo admin desde la app puede ver/encolar/reintentar/eliminar.
+      allow read, write: if isAdmin();
+    }
+
+    // ========================================================================
+    // AUDITORIA_ACCIONES — bitácora del admin
+    // ========================================================================
+
+    match /AUDITORIA_ACCIONES/{doc} {
+      // Solo admin la escribe (la dispara `AuditLog.registrar` al
+      // ejecutar acciones admin) y solo admin la lee.
+      allow read, write: if isAdmin();
+    }
+
+    // ========================================================================
+    // TELEMETRIA_HISTORICO — snapshots Volvo para reporte de consumo
+    // ========================================================================
+
+    match /TELEMETRIA_HISTORICO/{doc=**} {
+      // Hoy escribe el AutoSync de la app (corre cuando el admin tiene
+      // la app abierta). Cuando se mueva al bot, esto queda igual
+      // porque el bot bypasea las rules.
+      // TODO: cambiar `write` a `if false` cuando se mueva al bot.
+      allow read, write: if isAdmin();
+    }
+
+    // ========================================================================
+    // AVISOS_AUTOMATICOS_HISTORICO — idempotencia del cron del bot
+    // ========================================================================
+
+    match /AVISOS_AUTOMATICOS_HISTORICO/{doc=**} {
+      // Solo el bot escribe (Admin SDK). La app solo lee.
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ========================================================================
+    // RESPUESTAS_BOT_AMBIGUAS — bandeja de respuestas del bot
+    // ========================================================================
+
+    match /RESPUESTAS_BOT_AMBIGUAS/{doc=**} {
+      // El bot las crea (Admin SDK). El admin las despacha desde la
+      // bandeja: actualiza el doc para descartar o convertir en revisión.
+      allow read, write: if isAdmin();
     }
 
     // ========================================================================
     // FALLBACK — todo lo demás bloqueado
     // ========================================================================
-    // Si en el futuro alguien crea una colección nueva, queda bloqueada
-    // por default hasta que se sume explícitamente arriba. Defensa de
-    // profundidad: no se le da carta blanca a colecciones sin definir.
+    // Si en el futuro alguien crea una colección nueva, queda
+    // bloqueada por default hasta que se sume explícitamente arriba.
     match /{document=**} {
       allow read, write: if false;
     }
