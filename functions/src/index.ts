@@ -42,10 +42,10 @@ const auth = getAuth();
 // el dato en el path del documento).
 //
 // El reset del contador es automático: cualquier login OK lo borra.
-// Después del bloqueo (15 min), el próximo intento fallido empieza un
-// nuevo ciclo desde 1.
+// Después del bloqueo, el próximo intento fallido empieza un nuevo
+// ciclo desde 1.
 const MAX_INTENTOS_FALLIDOS = 5;
-const BLOQUEO_DURACION_MS = 15 * 60 * 1000; // 15 minutos
+const BLOQUEO_DURACION_MS = 5 * 60 * 1000; // 5 minutos
 
 // ============================================================================
 // loginConDni
