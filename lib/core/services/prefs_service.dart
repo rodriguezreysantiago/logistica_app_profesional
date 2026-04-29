@@ -1,9 +1,29 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Servicio de preferencias del usuario logueado.
+///
+/// **Backend**: a partir de 2026-04-29 los datos viven en
+/// [FlutterSecureStorage] (almacén seguro nativo de cada plataforma —
+/// DPAPI en Windows, Keychain en iOS/macOS, KeyStore +
+/// EncryptedSharedPreferences en Android). Antes vivían en
+/// [SharedPreferences] (texto plano). El cambio defiende en profundidad
+/// contra acceso físico al disco; el JWT de Firebase Auth ya estaba en
+/// almacén seguro por el SDK, así que el riesgo previo era el de los
+/// metadatos identificatorios (DNI, nombre, rol).
+///
+/// **API pública**: se mantiene SÍNCRONA para no requerir cambios en
+/// los ~13 call sites repartidos por la app. Internamente, [init]
+/// carga todos los valores a un cache en memoria al arranque; los
+/// getters leen del cache, los setters escriben en cache y secure
+/// storage.
+///
+/// **Migración**: el primer arranque después del upgrade copia los
+/// valores que estaban en SharedPreferences hacia secure storage y
+/// limpia los originales. Idempotente.
 class PrefsService {
-  static late SharedPreferences _prefs;
-
-  // ✅ MEJORA PRO: Claves centralizadas para evitar errores de tipeo (Magic Strings)
+  // ─── Claves centralizadas ─────────────────────────────────────────
   static const String _keyDni = 'dni';
   static const String _keyNombre = 'nombre';
   static const String _keyRol = 'rol';
@@ -14,44 +34,144 @@ class PrefsService {
   /// La contraseña NO se guarda nunca (eso sería un riesgo de seguridad).
   static const String _keyLastDni = 'lastDni';
 
-  // Inicializar antes del runApp
+  /// Flag de migración: si está, ya copiamos los valores viejos.
+  /// Persistimos en secure storage para que sea idempotente entre
+  /// reinstalaciones (si el secure storage se borra, la migración
+  /// vuelve a correr — eso no rompe nada, solo lee SharedPreferences
+  /// vacío y no copia nada).
+  static const String _keyMigrationDone = '__migrated_from_shared_prefs_v1';
+
+  // ─── Backend storage ──────────────────────────────────────────────
+  static const FlutterSecureStorage _secure = FlutterSecureStorage(
+    // Opciones específicas por plataforma para activar mejor seguridad
+    // donde está disponible.
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
+  // ─── Cache en memoria (devuelto por los getters sync) ─────────────
+  static String _dni = '';
+  static String _nombre = '';
+  static String _rol = '';
+  static bool _isLoggedIn = false;
+  static String _lastDni = '';
+
+  /// Inicializar antes del runApp. Lee todos los valores a memoria.
+  /// Si es la primera ejecución después del upgrade, migra los datos
+  /// que estaban en SharedPreferences al storage seguro.
   static Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
+    await _migrarDesdeSharedPrefsSiHaceFalta();
+
+    _dni = await _secure.read(key: _keyDni) ?? '';
+    _nombre = await _secure.read(key: _keyNombre) ?? '';
+    _rol = await _secure.read(key: _keyRol) ?? '';
+    _lastDni = await _secure.read(key: _keyLastDni) ?? '';
+    final loggedRaw = await _secure.read(key: _keyIsLoggedIn);
+    _isLoggedIn = loggedRaw == 'true';
   }
 
-  // Guardar datos del login
+  /// Migración one-shot: si todavía no marcamos como migrado y existe
+  /// SharedPreferences viejo con datos, los copia a secure storage y
+  /// limpia el SharedPreferences. Si secure storage ya tiene la marca
+  /// o las prefs viejas están vacías, no hace nada.
+  static Future<void> _migrarDesdeSharedPrefsSiHaceFalta() async {
+    try {
+      final yaMigrado = await _secure.read(key: _keyMigrationDone);
+      if (yaMigrado == 'true') return;
+
+      final prefs = await SharedPreferences.getInstance();
+      final viejoDni = prefs.getString(_keyDni);
+      final viejoNombre = prefs.getString(_keyNombre);
+      final viejoRol = prefs.getString(_keyRol);
+      final viejoIsLogged = prefs.getBool(_keyIsLoggedIn);
+      final viejoLastDni = prefs.getString(_keyLastDni);
+
+      // Solo copiamos lo que efectivamente tenía valor — evitamos
+      // sobreescribir secure storage con strings vacíos si las prefs
+      // viejas estaban limpias.
+      if (viejoDni != null && viejoDni.isNotEmpty) {
+        await _secure.write(key: _keyDni, value: viejoDni);
+      }
+      if (viejoNombre != null && viejoNombre.isNotEmpty) {
+        await _secure.write(key: _keyNombre, value: viejoNombre);
+      }
+      if (viejoRol != null && viejoRol.isNotEmpty) {
+        await _secure.write(key: _keyRol, value: viejoRol);
+      }
+      if (viejoIsLogged != null) {
+        await _secure.write(
+            key: _keyIsLoggedIn, value: viejoIsLogged.toString());
+      }
+      if (viejoLastDni != null && viejoLastDni.isNotEmpty) {
+        await _secure.write(key: _keyLastDni, value: viejoLastDni);
+      }
+
+      // Limpiar las claves viejas — los datos ya están en secure storage.
+      // No hacemos prefs.clear() porque puede haber otras prefs no
+      // relacionadas (de plugins) que conviven en el mismo archivo.
+      await prefs.remove(_keyDni);
+      await prefs.remove(_keyNombre);
+      await prefs.remove(_keyRol);
+      await prefs.remove(_keyIsLoggedIn);
+      await prefs.remove(_keyLastDni);
+
+      await _secure.write(key: _keyMigrationDone, value: 'true');
+      debugPrint('PrefsService: migración SharedPreferences → SecureStorage OK');
+    } catch (e) {
+      // Si la migración falla por algún motivo (storage corrupto, etc),
+      // logueamos pero no bloqueamos el arranque — el usuario puede
+      // re-loguear y se regenera todo.
+      debugPrint('PrefsService: migración falló (no bloqueante): $e');
+    }
+  }
+
+  // ─── Getters sync (leen del cache) ────────────────────────────────
+  static String get dni => _dni;
+  static String get nombre => _nombre;
+  static String get rol => _rol;
+  static bool get isLoggedIn => _isLoggedIn;
+  static String get lastDni => _lastDni;
+
+  // ─── Setters ──────────────────────────────────────────────────────
+
+  /// Guardar datos del login. Actualiza cache + secure storage.
   static Future<void> guardarUsuario({
     required String dni,
     required String nombre,
     required String rol,
   }) async {
-    await _prefs.setString(_keyDni, dni);
-    await _prefs.setString(_keyNombre, nombre);
-    await _prefs.setString(_keyRol, rol);
-    await _prefs.setBool(_keyIsLoggedIn, true);
+    _dni = dni;
+    _nombre = nombre;
+    _rol = rol;
+    _isLoggedIn = true;
+    _lastDni = dni;
+
+    await _secure.write(key: _keyDni, value: dni);
+    await _secure.write(key: _keyNombre, value: nombre);
+    await _secure.write(key: _keyRol, value: rol);
+    await _secure.write(key: _keyIsLoggedIn, value: 'true');
     // Recordatorio del último DNI para auto-completar próximos logins.
-    await _prefs.setString(_keyLastDni, dni);
+    await _secure.write(key: _keyLastDni, value: dni);
   }
 
-  // Obtener datos guardados (Lectura segura)
-  static String get dni => _prefs.getString(_keyDni) ?? '';
-  static String get nombre => _prefs.getString(_keyNombre) ?? '';
-  static String get rol => _prefs.getString(_keyRol) ?? '';
-  static bool get isLoggedIn => _prefs.getBool(_keyIsLoggedIn) ?? false;
-  static String get lastDni => _prefs.getString(_keyLastDni) ?? '';
-
-  // Cerrar sesión (nombre más claro y borrado seguro)
+  /// Cierra sesión: limpia cache y storage de identidad. NO borra
+  /// `lastDni` para que la pantalla de login venga precargada.
   static Future<void> limpiarSesion() async {
-    await _prefs.remove(_keyDni);
-    await _prefs.remove(_keyNombre);
-    await _prefs.remove(_keyRol);
+    _dni = '';
+    _nombre = '';
+    _rol = '';
+    _isLoggedIn = false;
+
+    await _secure.delete(key: _keyDni);
+    await _secure.delete(key: _keyNombre);
+    await _secure.delete(key: _keyRol);
     // Aseguramos que el flag de logueo pase explícitamente a false
-    await _prefs.setBool(_keyIsLoggedIn, false);
+    // (no lo borramos para que getters lean 'false' explícito).
+    await _secure.write(key: _keyIsLoggedIn, value: 'false');
     // OJO: lastDni NO se borra a propósito — queremos recordarlo para
     // que el próximo login venga con el campo precargado.
   }
 
-  // Compatibilidad con código anterior (por si lo usaste en otras pantallas)
+  /// Compatibilidad con código anterior (algunos call sites usan `clear`).
   static Future<void> clear() async {
     await limpiarSesion();
   }

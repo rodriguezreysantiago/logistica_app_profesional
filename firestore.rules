@@ -119,9 +119,13 @@ service cloud.firestore {
     // ========================================================================
 
     match /AUDITORIA_ACCIONES/{doc} {
-      // Solo admin la escribe (la dispara `AuditLog.registrar` al
-      // ejecutar acciones admin) y solo admin la lee.
-      allow read, write: if isAdmin();
+      // Solo admin la lee. La escritura va EXCLUSIVAMENTE por la Cloud
+      // Function callable `auditLogWrite` (que valida server-side el
+      // rol ADMIN del JWT y toma `admin_dni` y `admin_nombre` del token,
+      // no del cliente). Eso evita que un admin con la consola abierta
+      // forje entradas falsas de bitácora.
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // ========================================================================

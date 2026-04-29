@@ -73,6 +73,14 @@ dependencies:
   # ================= SEGURIDAD =================
   crypto: ^3.0.3      # SHA-256 (legacy, mantener para verificar contraseñas viejas)
   bcrypt: ^1.1.3      # ✅ Hash con salt para nuevas contraseñas (more secure)
+  # flutter_secure_storage usa el almacén seguro nativo de cada plataforma:
+  #   - Windows: DPAPI (cifrado con la sesión activa de Windows)
+  #   - Android: KeyStore + EncryptedSharedPreferences
+  #   - iOS/macOS: Keychain
+  # Migramos `dni`/`nombre`/`rol`/`isLoggedIn`/`lastDni` desde
+  # SharedPreferences (texto plano) a este storage para defender en
+  # profundidad contra acceso físico al disco.
+  flutter_secure_storage: ^9.2.2
 
   # ================= UI EXTRAS =================
   table_calendar: ^3.1.2  # Vista calendario mensual para auditoría de vencimientos

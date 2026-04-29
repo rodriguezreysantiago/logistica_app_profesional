@@ -1,22 +1,14 @@
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-// `flutter/services` ya re-exporta Uint8List (dart:typed_data) además de
-// los TextInputFormatter, así que cubre los dos usos de este archivo.
+// `flutter/services` exporta los TextInputFormatter usados por
+// `_DatoEditableTexto` (DigitOnlyFormatter hereda de ahí).
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 
-import '../../../core/constants/app_constants.dart';
-import '../../../core/services/audit_log_service.dart';
-import '../../../core/services/storage_service.dart';
-import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
-import '../../../shared/widgets/fecha_dialog.dart';
 
+import '../services/empleado_actions.dart';
 import 'admin_personal_form_screen.dart';
 
 /// Pantalla de Gestión de Personal.
@@ -261,7 +253,7 @@ class _DetalleChofer extends StatelessWidget {
           inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
           keyboardType: TextInputType.number,
           aplicarMayusculas: false,
-          onSave: (v) => _Actualizar.dato(context, dni, 'DNI', v),
+          onSave: (v) => EmpleadoActions.dato(context, dni, 'DNI', v),
         ),
         _DatoEditableTexto(
           etiqueta: 'CUIL',
@@ -270,7 +262,7 @@ class _DetalleChofer extends StatelessWidget {
           keyboardType: TextInputType.number,
           aplicarMayusculas: false,
           // El AppFormatters muestra "20-12345678-9" pero guardamos crudo.
-          onSave: (v) => _Actualizar.dato(
+          onSave: (v) => EmpleadoActions.dato(
               context, dni, 'CUIL', v.replaceAll('-', '')),
         ),
         _DatoEditableTexto(
@@ -280,7 +272,7 @@ class _DetalleChofer extends StatelessWidget {
           // El mail va lowercase, no en MAYÚSCULAS como los demás campos.
           aplicarMayusculas: false,
           onSave: (v) =>
-              _Actualizar.dato(context, dni, 'MAIL', v.toLowerCase()),
+              EmpleadoActions.dato(context, dni, 'MAIL', v.toLowerCase()),
         ),
         _DatoEditableTexto(
           etiqueta: 'TELÉFONO',
@@ -292,11 +284,11 @@ class _DetalleChofer extends StatelessWidget {
           keyboardType: TextInputType.phone,
           aplicarMayusculas: false,
           onSave: (v) =>
-              _Actualizar.dato(context, dni, 'TELEFONO', v),
+              EmpleadoActions.dato(context, dni, 'TELEFONO', v),
         ),
         _DatoEditableEmpresa(
           valor: (data['EMPRESA'] ?? '-').toString(),
-          onSave: (v) => _Actualizar.dato(context, dni, 'EMPRESA', v),
+          onSave: (v) => EmpleadoActions.dato(context, dni, 'EMPRESA', v),
         ),
 
         const Divider(color: Colors.white10),
@@ -401,7 +393,7 @@ class _HeaderDetalle extends StatelessWidget {
               bottom: 0,
               right: 0,
               child: GestureDetector(
-                onTap: () => _Actualizar.fotoPerfil(context, dni, urlPerfil),
+                onTap: () => EmpleadoActions.fotoPerfil(context, dni, urlPerfil),
                 child: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: const BoxDecoration(
@@ -649,7 +641,7 @@ class _FilaVencimiento extends StatelessWidget {
     final tieneFecha = fecha != null && fecha.toString().isNotEmpty;
 
     return InkWell(
-      onTap: () => _Actualizar.documento(
+      onTap: () => EmpleadoActions.documento(
         context,
         dni: dni,
         etiqueta: etiqueta,
@@ -729,568 +721,7 @@ class _AsignacionUnidad extends StatelessWidget {
           style: const TextStyle(color: Colors.white, fontSize: 14)),
       trailing:
           const Icon(Icons.sync_alt, size: 20, color: Colors.greenAccent),
-      onTap: () => _Actualizar.unidad(context, dni, campo, actual),
-    );
-  }
-}
-
-// =============================================================================
-// SERVICIOS DE ACTUALIZACIÓN — NAMESPACE _Actualizar
-//
-// Centraliza las operaciones que tocan Firestore/Storage. Antes estaban
-// dispersas como métodos privados del state. Acá las agrupo en un namespace
-// para que sean fáciles de encontrar y, en el futuro, mover a un service.
-// =============================================================================
-
-enum _FuenteArchivoChofer { camara, galeria, archivo }
-
-class _Actualizar {
-  _Actualizar._();
-
-  /// Actualiza un campo simple en EMPLEADOS.
-  static Future<void> dato(
-    BuildContext context,
-    String dni,
-    String campo,
-    dynamic valor,
-  ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await FirebaseFirestore.instance
-          .collection('EMPLEADOS')
-          .doc(dni.trim())
-          .update({
-        campo: valor,
-        'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
-      });
-      unawaited(AuditLog.registrar(
-        accion: AuditAccion.editarChofer,
-        entidad: 'EMPLEADOS',
-        entidadId: dni.trim(),
-        detalles: {'campo': campo, 'nuevo_valor': valor?.toString() ?? ''},
-      ));
-      AppFeedback.successOn(messenger, 'Dato actualizado: $campo');
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error al actualizar: $e');
-    }
-  }
-
-  /// Abre un sheet con opciones para gestionar la foto de perfil.
-  static Future<void> fotoPerfil(
-    BuildContext context,
-    String dni,
-    String? urlActual,
-  ) async {
-    final picker = ImagePicker();
-    final navigator = Navigator.of(context);
-
-    // El Future de showModalBottomSheet se completa cuando el sheet
-    // se cierra. Acá solo lo abrimos y nos vamos — la lógica de subir
-    // la foto vive dentro de los onTap de los ListTile, no dependemos
-    // del valor de retorno.
-    unawaited(showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (bCtx) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(25)),
-          border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Foto de perfil',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 15),
-            ListTile(
-              leading: const Icon(Icons.visibility, color: Colors.blueAccent),
-              title: const Text('Ver foto actual',
-                  style: TextStyle(color: Colors.white)),
-              enabled: urlActual != null &&
-                  urlActual.isNotEmpty &&
-                  urlActual != '-',
-              onTap: () {
-                navigator.pop();
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PreviewScreen(
-                      url: urlActual!,
-                      titulo: 'Foto de $dni',
-                    ),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library,
-                  color: Colors.greenAccent),
-              title: const Text('Subir nueva desde galería',
-                  style: TextStyle(color: Colors.white)),
-              onTap: () async {
-                navigator.pop();
-                final image = await picker.pickImage(
-                  source: ImageSource.gallery,
-                  imageQuality: 50,
-                );
-                if (image != null && context.mounted) {
-                  // readAsBytes() es cross-platform; image.path en Web es un
-                  // blob URL que no se puede abrir como dart:io.File.
-                  final bytes = await image.readAsBytes();
-                  if (!context.mounted) return;
-                  await _subirArchivo(
-                    context,
-                    dni,
-                    bytes,
-                    image.name,
-                    'perfiles/$dni.jpg',
-                    'ARCHIVO_PERFIL',
-                  );
-                }
-              },
-            ),
-          ],
-        ),
-      ),
-    ));
-  }
-
-  /// Sube los bytes de un archivo a Storage y guarda la URL en Firestore.
-  /// Detecta el contentType según la extensión vía `StorageService` —
-  /// que es cross-platform (no usa `dart:io.File`).
-  static Future<void> _subirArchivo(
-    BuildContext context,
-    String id,
-    Uint8List bytes,
-    String nombreOriginal,
-    String storagePath,
-    String dbCampo,
-  ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      AppFeedback.infoOn(messenger, 'Subiendo archivo...');
-
-      final downloadUrl = await StorageService().subirArchivo(
-        bytes: bytes,
-        nombreOriginal: nombreOriginal,
-        rutaStorage: storagePath,
-      );
-
-      if (context.mounted) {
-        await dato(context, id, dbCampo, downloadUrl);
-      }
-    } catch (e) {
-      if (context.mounted) {
-        AppFeedback.errorOn(messenger, 'Error al subir: $e');
-      }
-    }
-  }
-
-  /// Abre un sheet para que el admin elija de dónde tomar el archivo
-  /// (cámara, galería, o PDF/imagen del dispositivo) y lo sube.
-  /// Pensado para reemplazar papeles del chofer (licencia, ART, etc.).
-  static Future<void> _reemplazarDocumentoChofer({
-    required BuildContext context,
-    required String dni,
-    required String etiqueta,
-    required String campoUrl,
-  }) async {
-    final picker = ImagePicker();
-
-    final fuente = await showModalBottomSheet<_FuenteArchivoChofer>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sCtx) => Container(
-        decoration: BoxDecoration(
-          color: Theme.of(sCtx).colorScheme.surface,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(25)),
-          border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text(
-                  etiqueta,
-                  style: const TextStyle(
-                    color: Colors.greenAccent,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-              ListTile(
-                leading:
-                    const Icon(Icons.camera_alt, color: Colors.greenAccent),
-                title: const Text('Tomar foto con la cámara',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () =>
-                    Navigator.pop(sCtx, _FuenteArchivoChofer.camara),
-              ),
-              ListTile(
-                leading:
-                    const Icon(Icons.photo_library, color: Colors.blueAccent),
-                title: const Text('Foto desde la galería',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () =>
-                    Navigator.pop(sCtx, _FuenteArchivoChofer.galeria),
-              ),
-              ListTile(
-                leading: const Icon(Icons.picture_as_pdf,
-                    color: Colors.redAccent),
-                title: const Text('PDF / archivo del dispositivo',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () =>
-                    Navigator.pop(sCtx, _FuenteArchivoChofer.archivo),
-              ),
-              const SizedBox(height: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (fuente == null) return;
-    if (!context.mounted) return;
-
-    Uint8List? bytes;
-    String nombreOriginal = '';
-    String extension = 'jpg';
-
-    switch (fuente) {
-      case _FuenteArchivoChofer.camara:
-      case _FuenteArchivoChofer.galeria:
-        final source = fuente == _FuenteArchivoChofer.camara
-            ? ImageSource.camera
-            : ImageSource.gallery;
-        final img = await picker.pickImage(source: source, imageQuality: 60);
-        if (img == null) return;
-        // readAsBytes(): cross-platform (Web devuelve blob bytes, no File).
-        bytes = await img.readAsBytes();
-        nombreOriginal = img.name;
-        extension = 'jpg';
-        break;
-      case _FuenteArchivoChofer.archivo:
-        // withData: true para que `bytes` venga poblado en Web también.
-        final res = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
-          withData: true,
-        );
-        final picked = res?.files.singleOrNull;
-        if (picked == null || picked.bytes == null) return;
-        bytes = picked.bytes;
-        nombreOriginal = picked.name;
-        extension = picked.extension?.toLowerCase() ?? 'pdf';
-        break;
-    }
-
-    // Después del picker viene otro await: revalidamos contra el mismo
-    // BuildContext que vamos a pasar a _subirArchivo (el lint pide eso).
-    if (!context.mounted) return;
-    if (bytes == null) return;
-    final storagePath =
-        'EMPLEADOS/$dni/${campoUrl}_${DateTime.now().millisecondsSinceEpoch}.$extension';
-    await _subirArchivo(
-        context, dni, bytes, nombreOriginal, storagePath, campoUrl);
-  }
-
-  /// Sheet con opciones para gestionar un documento (fecha + archivo).
-  static void documento(
-    BuildContext context, {
-    required String dni,
-    required String etiqueta,
-    required String campoFecha,
-    required String campoUrl,
-    required String? fechaActual,
-    required String? urlActual,
-  }) {
-    final navigator = Navigator.of(context);
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (bCtx) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(25)),
-          border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              etiqueta,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 15),
-            ListTile(
-              leading:
-                  const Icon(Icons.event_note, color: Colors.blueAccent),
-              title: const Text('Editar fecha de vencimiento',
-                  style: TextStyle(color: Colors.white)),
-              onTap: () {
-                navigator.pop();
-                _seleccionarFecha(context, dni, campoFecha, fechaActual);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.visibility, color: Colors.greenAccent),
-              title: const Text('Ver documento digital',
-                  style: TextStyle(color: Colors.white)),
-              enabled: urlActual != null &&
-                  urlActual.isNotEmpty &&
-                  urlActual != '-',
-              onTap: () {
-                navigator.pop();
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PreviewScreen(
-                      url: urlActual!,
-                      titulo: '$etiqueta - $dni',
-                    ),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.upload_file,
-                  color: Colors.orangeAccent),
-              title: Text(
-                urlActual != null &&
-                        urlActual.isNotEmpty &&
-                        urlActual != '-'
-                    ? 'Reemplazar archivo cargado'
-                    : 'Subir archivo nuevo',
-                style: const TextStyle(color: Colors.white),
-              ),
-              subtitle: const Text(
-                'Foto o PDF — sin pasar por el flujo de revisión',
-                style: TextStyle(color: Colors.white38, fontSize: 11),
-              ),
-              onTap: () {
-                navigator.pop();
-                _reemplazarDocumentoChofer(
-                  context: context,
-                  dni: dni,
-                  etiqueta: etiqueta,
-                  campoUrl: campoUrl,
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static Future<void> _seleccionarFecha(
-    BuildContext context,
-    String dni,
-    String campo,
-    String? fechaActual,
-  ) async {
-    final initial = DateTime.tryParse(fechaActual ?? '');
-    final picked = await pickFecha(
-      context,
-      initial: initial,
-      titulo: 'Vencimiento ${campo.replaceAll("VENCIMIENTO_", "").replaceAll("_", " ")}',
-    );
-    if (picked != null && context.mounted) {
-      final nuevaFecha = picked.toString().split(' ').first;
-      await dato(context, dni, campo, nuevaFecha);
-    }
-  }
-
-  /// Selector de unidad (tractor o enganche).
-  static void unidad(
-    BuildContext context,
-    String dni,
-    String campo,
-    String patenteActual,
-  ) {
-    final tipos = (campo == 'VEHICULO')
-        ? <String>[AppTiposVehiculo.tractor]
-        : AppTiposVehiculo.enganches;
-    // Capturamos el messenger del scaffold padre antes de abrir el dialog;
-    // lo usamos después del batch.commit para mostrar feedback al admin
-    // (ScaffoldMessenger.of(dCtx) no aplica una vez cerrado el dialog).
-    final messenger = ScaffoldMessenger.of(context);
-    final esTractor = campo == 'VEHICULO';
-    final etiquetaUnidad = esTractor ? 'tractor' : 'enganche';
-
-    showDialog(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        title: Text("Asignar $etiquetaUnidad"),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 350,
-          child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('VEHICULOS')
-                .where('TIPO', whereIn: tipos)
-                .snapshots(),
-            builder: (ctx, snap) {
-              if (!snap.hasData) {
-                return const Center(
-                  child: CircularProgressIndicator(
-                      color: Colors.greenAccent),
-                );
-              }
-
-              final unidades = snap.data!.docs;
-
-              Future<void> procesarCambio(String? nueva) async {
-                final db = FirebaseFirestore.instance;
-                final batch = db.batch();
-                final cleanActual = patenteActual.trim();
-
-                if (nueva != null && nueva != '-') {
-                  batch.update(
-                    db.collection('VEHICULOS').doc(nueva),
-                    {'ESTADO': 'OCUPADO'},
-                  );
-                  batch.update(
-                    db.collection('EMPLEADOS').doc(dni),
-                    {campo: nueva},
-                  );
-                } else {
-                  batch.update(
-                    db.collection('EMPLEADOS').doc(dni),
-                    {campo: '-'},
-                  );
-                }
-
-                try {
-                  await batch.commit();
-
-                  if (cleanActual.isNotEmpty &&
-                      cleanActual != '-' &&
-                      cleanActual != 'S/D') {
-                    try {
-                      await db
-                          .collection('VEHICULOS')
-                          .doc(cleanActual)
-                          .update({'ESTADO': 'LIBRE'});
-                    } catch (_) {
-                      // Unidad previa ya no existe / ya estaba libre
-                    }
-                  }
-
-                  unawaited(AuditLog.registrar(
-                    accion: (nueva == null || nueva == '-')
-                        ? AuditAccion.desvincularEquipo
-                        : AuditAccion.asignarEquipo,
-                    entidad: 'EMPLEADOS',
-                    entidadId: dni,
-                    detalles: {
-                      'campo': campo,
-                      'unidad_anterior': cleanActual,
-                      'unidad_nueva': nueva ?? '',
-                    },
-                  ));
-
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-
-                  // Feedback de éxito: distinto copy según haya sido
-                  // desvinculación o asignación nueva.
-                  final mensaje = (nueva == null || nueva == '-')
-                      ? 'Se desvinculó el $etiquetaUnidad de este chofer.'
-                      : 'Se asignó el $etiquetaUnidad $nueva.';
-                  AppFeedback.successOn(messenger, mensaje);
-                } catch (e) {
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-                  AppFeedback.errorOn(messenger, 'No se pudo guardar el cambio: $e');
-                }
-              }
-
-              return ListView.builder(
-                itemCount: unidades.length + 1,
-                itemBuilder: (ctx, idx) {
-                  if (idx == 0) {
-                    return ListTile(
-                      leading:
-                          const Icon(Icons.link_off, color: Colors.redAccent),
-                      title: const Text(
-                        'DESVINCULAR',
-                        style: TextStyle(
-                          color: Colors.redAccent,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      // Confirmación destructiva: desvincular cambia el
-                      // legajo del chofer Y libera la unidad. Si toca por
-                      // error y no avisamos, el equipo queda mal asignado
-                      // y nadie se entera hasta que el chofer reclame.
-                      onTap: () async {
-                        final ok = await AppConfirmDialog.show(
-                          context,
-                          title: '¿Desvincular $etiquetaUnidad?',
-                          message:
-                              'El chofer va a quedar sin $etiquetaUnidad asignado y la unidad vuelve a estado LIBRE.',
-                          confirmLabel: 'DESVINCULAR',
-                          destructive: true,
-                          icon: Icons.link_off,
-                        );
-                        if (ok == true) {
-                          await procesarCambio(null);
-                        }
-                      },
-                    );
-                  }
-
-                  final vDoc = unidades[idx - 1];
-                  final vData = vDoc.data() as Map<String, dynamic>;
-                  final patente = vDoc.id.trim();
-
-                  // Filtrar unidades ocupadas (excepto la actual del chofer)
-                  if (vData['ESTADO'] == 'OCUPADO' &&
-                      patente != patenteActual.trim()) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return ListTile(
-                    title: Text(
-                      patente,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 14),
-                    ),
-                    trailing: patente == patenteActual.trim()
-                        ? const Icon(Icons.check_circle,
-                            color: Colors.greenAccent)
-                        : null,
-                    onTap: () => procesarCambio(patente),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-      ),
+      onTap: () => EmpleadoActions.unidad(context, dni, campo, actual),
     );
   }
 }
