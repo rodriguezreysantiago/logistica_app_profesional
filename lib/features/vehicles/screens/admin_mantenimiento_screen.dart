@@ -501,18 +501,35 @@ class _TractorCard extends StatelessWidget {
     if (ok != true) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('VEHICULOS')
-          .doc(patente)
-          .update({
-        'ULTIMO_SERVICE_KM': kmActual,
-        'ULTIMO_SERVICE_FECHA':
-            fechaElegida.toString().split(' ').first,
-        'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
-      });
+      final db = FirebaseFirestore.instance;
+
+      // Hacemos los dos updates en paralelo: VEHICULOS (campo manual del
+      // último service) y MANTENIMIENTOS_AVISADOS (estado del badge).
+      // Sin el segundo, el badge del shell sigue mostrando VENCIDO hasta
+      // el próximo ciclo del AutoSync (60s). Bug C4 del code review.
+      const intervaloKm = AppMantenimiento.intervaloServiceKm;
+      await Future.wait([
+        db.collection('VEHICULOS').doc(patente).update({
+          'ULTIMO_SERVICE_KM': kmActual,
+          'ULTIMO_SERVICE_FECHA':
+              fechaElegida.toString().split(' ').first,
+          'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
+        }),
+        // Reset del estado: el tractor acaba de salir del taller. El
+        // próximo ciclo del AutoSync va a recalcular el estado real
+        // (que debería ser "OK" porque arranca un ciclo nuevo de 50.000 km).
+        db.collection('MANTENIMIENTOS_AVISADOS').doc(patente).set({
+          'patente': patente,
+          'ultimo_estado': 'OK',
+          'ultimo_service_distance_km': intervaloKm,
+          'service_registrado_at': FieldValue.serverTimestamp(),
+          'ultima_evaluacion_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)),
+      ]);
+
       AppFeedback.successOn(
         messenger,
-        'Service registrado para $patente. Próximo a ${(kmActual + AppMantenimiento.intervaloServiceKm).round()} km.',
+        'Service registrado para $patente. Próximo a ${(kmActual + intervaloKm).round()} km.',
       );
     } catch (e) {
       AppFeedback.errorOn(messenger, 'No se pudo guardar: $e');

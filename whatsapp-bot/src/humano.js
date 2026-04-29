@@ -14,6 +14,21 @@
  *
  * Si los valores no están definidos, default 8-21 hs. Mensajes a las
  * 3 AM son la señal más obvia de bot.
+ *
+ * **IMPORTANTE — Zona horaria:** `now.getHours()` devuelve la hora en
+ * la zona horaria LOCAL del proceso (PC donde corre el bot). El bot
+ * se diseñó para correr en una PC en Bahía Blanca, Argentina (ART,
+ * UTC-3). Si lo corrés en otra zona horaria (server cloud en UTC,
+ * Linux en otra TZ, etc.), los avisos saldrán a horas raras desde
+ * la perspectiva del chofer.
+ *
+ * Bug M9 del code review: si en el futuro se necesita correr en
+ * otra zona, hay dos opciones:
+ *   - Setear `TZ=America/Argentina/Buenos_Aires` en el entorno antes
+ *     de arrancar Node.
+ *   - Sumar variable BOT_TIMEZONE al .env y usar
+ *     `Intl.DateTimeFormat({ timeZone: ... }).formatToParts(now)`
+ *     para extraer la hora.
  */
 function enHorarioHabil(now = new Date()) {
   const inicio = parseInt(process.env.WORKING_HOURS_START || '8', 10);

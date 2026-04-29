@@ -129,7 +129,11 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   /// Abre el `pickFecha` para elegir cuándo se hizo el último service.
   /// La guardamos como String ISO ("YYYY-MM-DD") para ser consistentes
   /// con el resto de las fechas del proyecto.
+  ///
+  /// Restringe a fechas pasadas o de hoy — el último service no puede
+  /// estar en el futuro. Si lo eligen, lo rechazamos con feedback.
   Future<void> _seleccionarFechaUltimoService() async {
+    final messenger = ScaffoldMessenger.of(context);
     final initial = (_ultimoServiceFecha != null)
         ? DateTime.tryParse(_ultimoServiceFecha!)
         : null;
@@ -138,11 +142,22 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       initial: initial,
       titulo: 'Fecha del último service',
     );
-    if (picked != null && mounted) {
-      setState(() {
-        _ultimoServiceFecha = picked.toString().split(' ').first;
-      });
+    if (picked == null || !mounted) return;
+    // Bug B3: si el admin elige fecha futura por error (typo en el year),
+    // rechazamos. El picker no la limita por defecto.
+    final hoy = DateTime.now();
+    final hoyTruncado = DateTime(hoy.year, hoy.month, hoy.day);
+    final pickedTruncado = DateTime(picked.year, picked.month, picked.day);
+    if (pickedTruncado.isAfter(hoyTruncado)) {
+      AppFeedback.warningOn(
+        messenger,
+        'La fecha del último service no puede estar en el futuro.',
+      );
+      return;
     }
+    setState(() {
+      _ultimoServiceFecha = picked.toString().split(' ').first;
+    });
   }
 
   // ---------------------------------------------------------------------------

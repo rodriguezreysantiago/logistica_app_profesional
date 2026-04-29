@@ -218,13 +218,18 @@ class AppMantenimiento {
   /// `vehiclestatuses` no incluye el bloque `uptimeData` que contiene
   /// ese campo, así que dependemos del dato manual + KM en vivo.
   ///
-  /// Devuelve null si falta alguno de los inputs. Puede ser **negativo**
-  /// si el tractor ya pasó el momento del próximo service (vencido).
+  /// Devuelve null si falta alguno de los inputs **o si los datos son
+  /// inconsistentes** (ULTIMO_SERVICE_KM > KM_ACTUAL: el admin cargó
+  /// algo mal, ej. invirtió dígitos). Puede ser **negativo** si el
+  /// tractor ya pasó el momento del próximo service (vencido).
   static double? serviceDistanceDesdeManual({
     required double? ultimoServiceKm,
     required double? kmActual,
   }) {
     if (ultimoServiceKm == null || kmActual == null) return null;
+    // Defensa contra typo del admin: el último service no puede haber
+    // sido a más kilómetros de los que tiene el tractor ahora.
+    if (ultimoServiceKm > kmActual) return null;
     return (ultimoServiceKm + intervaloServiceKm) - kmActual;
   }
 }

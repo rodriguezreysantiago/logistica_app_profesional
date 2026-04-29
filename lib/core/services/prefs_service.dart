@@ -97,9 +97,15 @@ class PrefsService {
       if (viejoRol != null && viejoRol.isNotEmpty) {
         await _secure.write(key: _keyRol, value: viejoRol);
       }
+      // Bug A1 del code review: si viejoIsLogged era null, antes hacíamos
+      // .toString() que daba "null" como string, lo cual nunca matchea
+      // con `loggedRaw == 'true'` en init(). El check `!= null` ya
+      // estaba pero es redundante con el de la guard del bloque, lo
+      // mantengo explícito por claridad.
       if (viejoIsLogged != null) {
+        // viejoIsLogged es bool aquí, NO null. .toString() da 'true'/'false'.
         await _secure.write(
-            key: _keyIsLoggedIn, value: viejoIsLogged.toString());
+            key: _keyIsLoggedIn, value: viejoIsLogged ? 'true' : 'false');
       }
       if (viejoLastDni != null && viejoLastDni.isNotEmpty) {
         await _secure.write(key: _keyLastDni, value: viejoLastDni);

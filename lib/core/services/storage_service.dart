@@ -36,27 +36,29 @@ class StorageService {
     required String nombreOriginal,
     required String rutaStorage,
   }) async {
-    try {
-      final extension = nombreOriginal.split('.').last.toLowerCase();
-      final contentType = _obtenerContentType(extension);
+    final extension = nombreOriginal.split('.').last.toLowerCase();
+    final contentType = _obtenerContentType(extension);
 
-      final ref = _storage.ref().child(rutaStorage);
+    final ref = _storage.ref().child(rutaStorage);
 
-      // Timeout de 30s — evita que la app se congele en redes lentas (4G).
-      await ref
-          .putData(bytes, SettableMetadata(contentType: contentType))
-          .timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {
-          throw TimeoutException(
-              'La conexión es demasiado lenta para subir el archivo.');
-        },
-      );
+    // Bug M3 del code review: antes envolvíamos toda la subida en
+    // try/catch que rethrowába como Exception genérico, perdiendo el
+    // tipo original (TimeoutException, FirebaseException, etc.). Ahora
+    // dejamos propagar las excepciones nativas. El caller las puede
+    // discriminar (ej. mostrar mensaje específico para timeout).
+    //
+    // Timeout de 30s — evita que la app se congele en redes lentas (4G).
+    await ref
+        .putData(bytes, SettableMetadata(contentType: contentType))
+        .timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        throw TimeoutException(
+            'La conexión es demasiado lenta para subir el archivo.');
+      },
+    );
 
-      return await ref.getDownloadURL();
-    } catch (e) {
-      throw Exception('Error en FirebaseStorage: $e');
-    }
+    return await ref.getDownloadURL();
   }
 
   /// Borra un archivo de Storage por su path.

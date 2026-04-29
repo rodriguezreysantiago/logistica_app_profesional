@@ -102,21 +102,32 @@ class VehiculoManager {
     final cleanVin = vin.trim().toUpperCase();
 
     try {
-      // 1️⃣ CACHE LOCAL — fast path: si la precarga masiva (`/vehicles`)
-      //    ya nos dio el odómetro de esta unidad, evitamos un request
-      //    individual. La cache no incluye combustible/autonomía: si los
-      //    necesitamos frescos, hay que pegar al endpoint individual.
+      // 1️⃣ Pre-actualización de KM rápida desde el cache.
+      //    Si la precarga masiva (`/vehicles`) ya nos dio odómetro,
+      //    actualizamos el doc para que la UI tenga datos frescos
+      //    inmediatamente. No reemplaza el call individual: el cache
+      //    NO trae combustible, autonomía ni serviceDistance — para
+      //    eso necesitamos el endpoint `/vehiclestatuses`.
+      //
+      //    Antes había un fast path que hacía RETURN acá, lo cual
+      //    significaba que `serviceDistance` nunca se sincronizaba
+      //    para tractores en cache. Bug C3 del code review.
       final metrosCache = _buscarEnCache(cleanVin);
       if (metrosCache != null && metrosCache > 0) {
-        final km = metrosCache / 1000;
-        await _repo.actualizarKilometraje(patente: patente, km: km);
-        // Log de éxito desactivado — visible desde el dashboard de sync.
-        return;
+        final kmCache = metrosCache / 1000;
+        try {
+          await _repo.actualizarKilometraje(patente: patente, km: kmCache);
+        } catch (e) {
+          // No es bloqueante — si falla, igual seguimos al call individual
+          // que va a sobrescribir el campo.
+          debugPrint("⚠️ pre-update KM cache falló para $patente: $e");
+        }
       }
 
-      // 2️⃣ API individual: trae odómetro + combustible + autonomía en
-      //    un solo request. Es el camino que se ejecuta cuando el cache
-      //    no tiene la unidad o no tiene odómetro válido.
+      // 2️⃣ API individual: trae odómetro + combustible + autonomía +
+      //    serviceDistance (uptimeData) en un solo request. SIEMPRE
+      //    se llama, incluso si el cache ya tenía odómetro — los otros
+      //    campos solo vienen por este endpoint.
       final tele = await _api.traerTelemetria(cleanVin);
 
       if (!tele.tieneAlgunDato) {

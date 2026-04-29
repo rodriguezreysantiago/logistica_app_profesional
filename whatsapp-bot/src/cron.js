@@ -349,15 +349,33 @@ async function _runOnce(fs) {
 
       // Para la idempotencia usamos `ULTIMO_SERVICE_KM` como
       // "anclaje del ciclo": cuando se hace un service nuevo, ese
-      // valor cambia y el id se renueva. Si no hay manual cargado y
-      // sólo confiamos en el API, anclamos en redondeo de 50k para
-      // que cada ciclo nuevo (definido por bloques de 50000 km del
-      // odómetro) genere ids distintos.
-      const anclaCiclo =
-        v.ULTIMO_SERVICE_KM != null
-          ? Math.round(Number(v.ULTIMO_SERVICE_KM))
-          : Math.floor(Number(v.KM_ACTUAL || 0) / INTERVALO_SERVICE_KM) *
-            INTERVALO_SERVICE_KM;
+      // valor cambia y el id se renueva.
+      //
+      // Bug C7 del code review: antes el fallback (sin manual) usaba
+      // `Math.floor(KM_ACTUAL / 50000) * 50000`, que cambiaba al cruzar
+      // los 50k km y disparaba avisos duplicados. Ahora si no hay
+      // manual cargado, NO encolamos avisos preventivos — el admin
+      // tiene que cargar `ULTIMO_SERVICE_KM` desde la app para que
+      // la idempotencia funcione. Solo encolamos cuando viene de
+      // `SERVICE_DISTANCE_KM` directo del API (que tiene anclaje
+      // implícito en el endpoint Volvo).
+      let anclaCiclo;
+      if (v.ULTIMO_SERVICE_KM != null) {
+        anclaCiclo = Math.round(Number(v.ULTIMO_SERVICE_KM));
+      } else if (v.SERVICE_DISTANCE_KM != null) {
+        // Camino API: el dato viene de Volvo. Anclamos por la "fecha
+        // efectiva del próximo service" (KM_ACTUAL + serviceDistance),
+        // redondeado a int. Cuando el admin haga service y reset, ese
+        // anclaje cambia.
+        anclaCiclo = Math.round(
+          Number(v.KM_ACTUAL || 0) + Number(v.SERVICE_DISTANCE_KM || 0)
+        );
+      } else {
+        // Sin ningún anclaje confiable → no encolamos. El admin verá
+        // el tractor en estado "Sin datos" en la pantalla y debe
+        // cargar el último service.
+        continue;
+      }
 
       const params = {
         coleccion: 'VEHICULOS',
@@ -382,6 +400,14 @@ async function _runOnce(fs) {
         serviceDistanceKm,
         destinatarioNombre: nombre,
       });
+      // build() devuelve null si los datos no son válidos (NaN, patente
+      // vacía, etc). En ese caso saltamos sin encolar.
+      if (!mensaje) {
+        log.warn(
+          `Service ${patente}: datos inválidos (km=${serviceDistanceKm}), no encolo.`
+        );
+        continue;
+      }
 
       try {
         const colaRef = await db.collection(fs.COLECCION).add({

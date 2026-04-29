@@ -30,6 +30,20 @@ function build({
   serviceDistanceKm,
   destinatarioNombre,
 }) {
+  // Bug A10 del code review: si patente o serviceDistanceKm vienen
+  // inválidos (null/NaN/undefined), antes generábamos mensajes tipo
+  // "el tractor null necesita SERVICE en NaN km". Ahora devolvemos
+  // null y el caller decide (típicamente: no encolar el aviso).
+  const cleanPatente = String(patente || '').trim();
+  if (!cleanPatente) return null;
+  if (
+    serviceDistanceKm == null ||
+    typeof serviceDistanceKm !== 'number' ||
+    !Number.isFinite(serviceDistanceKm)
+  ) {
+    return null;
+  }
+
   const nombreSeguro = destinatarioNombre
     ? String(destinatarioNombre).replace(/\s+/g, ' ').trim().slice(0, 40)
     : null;
@@ -40,7 +54,11 @@ function build({
 
   // Identificador legible del tractor: "el VOLVO 460 (AB493CP)" si
   // tenemos marca+modelo, "el tractor AB493CP" como fallback.
-  const ref = construirReferenciaUnidad({ patente, marca, modelo });
+  const ref = construirReferenciaUnidad({
+    patente: cleanPatente,
+    marca,
+    modelo,
+  });
   const km = Math.round(serviceDistanceKm);
 
   const cuerpo = construirCuerpo({ saludo, ref, km });

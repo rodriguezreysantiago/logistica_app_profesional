@@ -63,14 +63,15 @@ async function procesarSiguiente() {
     }
 
     // ─── Validación: horario hábil ───
+    // Bug C6 del code review: antes hacíamos `await sleep(15 min)` con
+    // `procesando=true`, lo cual bloqueaba TODA la cola por 15 min
+    // aunque entraran nuevos docs en horario hábil. Ahora simplemente
+    // soltamos el doc — el polling cada 15s lo va a re-detectar cuando
+    // ya sea horario hábil. Sin sleep, sin bloqueo de cola.
     if (!enHorarioHabil()) {
       log.info(
-        `Fuera de horario hábil. ${docId} queda en cola para más tarde.`
+        `Fuera de horario hábil. ${docId} queda en estado PENDIENTE para que el polling lo reintente cuando vuelva el horario.`
       );
-      // Lo volvemos a encolar al final para reintentar después.
-      colaProcesar.push(docId);
-      // Esperamos 15 minutos antes de mirar de nuevo.
-      await sleep(15 * 60 * 1000);
       return;
     }
 
@@ -227,23 +228,33 @@ async function main() {
   // Manejo de señales para cerrar limpio.
   //
   // Grace period: si hay un mensaje en proceso (`procesando=true`),
-  // esperamos hasta 10 segundos a que termine antes de exit. Eso
-  // evita dejar docs en estado PROCESANDO sin avanzar cuando el
-  // admin reinicia el bot. Si después del grace sigue corriendo,
-  // forzamos exit igual para no quedar colgados indefinidamente.
+  // esperamos a que termine antes de exit. Como el delay anti-baneo
+  // puede ser hasta DELAY_MAX_MS (60s default) + el envío en sí,
+  // calculamos grace dinámico: max(delay) + 10s margen.
+  //
+  // Bug A9 del code review: antes era 10s fijo, lo cual era menos que
+  // el delay máximo y dejaba docs en PROCESANDO zombies si el shutdown
+  // ocurría justo durante el delay. Ahora damos al envío todo el
+  // tiempo razonable. Si igual no termina, hacemos rollback del doc
+  // a PENDIENTE para que el próximo arranque lo reintente.
+  const delayMaxMs = parseInt(process.env.DELAY_MAX_MS || '60000', 10);
+  const graceMs = delayMaxMs + 10000;
+
   const shutdown = async (sig) => {
-    log.info(`Recibido ${sig}, cerrando...`);
+    log.info(`Recibido ${sig}, cerrando (grace ${Math.round(graceMs / 1000)}s)...`);
     detenerPolling();
     cron.stop();
 
     // Esperar a que termine el item en curso (si lo hay).
     const start = Date.now();
-    const graceMs = 10000;
     while (procesando && Date.now() - start < graceMs) {
       await sleep(200);
     }
     if (procesando) {
-      log.warn('Grace period agotado; saliendo aunque hay un envío en curso.');
+      log.warn(
+        'Grace period agotado con un envío en curso. ' +
+        'El doc queda en PROCESANDO; revisalo manualmente al reiniciar.'
+      );
     } else {
       log.info('Cola en pausa, sin envíos en curso.');
     }

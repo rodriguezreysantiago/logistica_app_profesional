@@ -457,6 +457,14 @@ class EmpleadoActions {
                 final batch = db.batch();
                 final cleanActual = patenteActual.trim();
 
+                // Bug C5 del code review: el update de la unidad anterior
+                // estaba FUERA del batch. Si fallaba, la unidad anterior
+                // quedaba en OCUPADO sin que nadie pudiera asignarla.
+                // Ahora todo va en el mismo batch — atómico.
+                final hayActualValido = cleanActual.isNotEmpty &&
+                    cleanActual != '-' &&
+                    cleanActual != 'S/D';
+
                 if (nueva != null && nueva != '-') {
                   batch.update(
                     db.collection('VEHICULOS').doc(nueva),
@@ -473,21 +481,19 @@ class EmpleadoActions {
                   );
                 }
 
+                // Liberar la unidad anterior siempre dentro del mismo batch.
+                // Si el doc no existe, batch.commit() falla — pero eso ya
+                // pasaba antes con el update individual, así que el
+                // comportamiento es equivalente al del fix.
+                if (hayActualValido) {
+                  batch.update(
+                    db.collection('VEHICULOS').doc(cleanActual),
+                    {'ESTADO': 'LIBRE'},
+                  );
+                }
+
                 try {
                   await batch.commit();
-
-                  if (cleanActual.isNotEmpty &&
-                      cleanActual != '-' &&
-                      cleanActual != 'S/D') {
-                    try {
-                      await db
-                          .collection('VEHICULOS')
-                          .doc(cleanActual)
-                          .update({'ESTADO': 'LIBRE'});
-                    } catch (_) {
-                      // Unidad previa ya no existe / ya estaba libre
-                    }
-                  }
 
                   unawaited(AuditLog.registrar(
                     accion: (nueva == null || nueva == '-')

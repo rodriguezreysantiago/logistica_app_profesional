@@ -113,16 +113,40 @@ class VolvoApiService {
 
   // ============= CIRCUIT BREAKER =============
   // Si auth/permisos fallan 3 veces seguidas, dejamos de pegarle al
-  // proxy hasta que la app se reinicie (o el admin llame
-  // `resetAuthFailures()`). Cubre los casos:
+  // proxy. Cubre los casos:
   //   - admin sesión vencida (HTTP 401 en el callable)
   //   - chofer logueado intentando sync (HTTP 403 en el callable)
   //   - credenciales Volvo expiradas (HTTP 401 propagado del proxy)
+  //
+  // Bug M4 del code review: antes el circuit breaker se quedaba
+  // abierto hasta restart. Ahora se "abre temporalmente" — si pasaron
+  // más de `_circuitCooldownMin` minutos desde el último fail, el
+  // siguiente request ignora el circuit y reintenta. Si vuelve a
+  // fallar, el circuit se mantiene abierto por otro cooldown.
   int _consecutive401 = 0;
+  DateTime? _ultimoFailAt;
   static const int _max401 = 3;
-  bool get _circuitOpen => _consecutive401 >= _max401;
+  static const int _circuitCooldownMin = 5;
 
-  void resetAuthFailures() => _consecutive401 = 0;
+  bool get _circuitOpen {
+    if (_consecutive401 < _max401) return false;
+    final last = _ultimoFailAt;
+    if (last == null) return true;
+    final pasaron =
+        DateTime.now().difference(last).inMinutes >= _circuitCooldownMin;
+    if (pasaron) {
+      // Permitimos un intento. Si sale OK, _trackAuthState resetea.
+      // Si vuelve a fallar, _consecutive401 sigue en MAX y el ciclo
+      // continúa con cooldown.
+      return false;
+    }
+    return true;
+  }
+
+  void resetAuthFailures() {
+    _consecutive401 = 0;
+    _ultimoFailAt = null;
+  }
 
   // ============= DIO =============
   final Dio _dio = Dio(
@@ -207,11 +231,18 @@ class VolvoApiService {
   void _trackAuthState(int statusCode) {
     if (statusCode == 401 || statusCode == 403) {
       _consecutive401++;
+      _ultimoFailAt = DateTime.now();
       debugPrint(
           "🚨 [VOLVO AUTH] Rechazo de auth ($_consecutive401/$_max401). "
-          "${_circuitOpen ? 'Circuit breaker ABIERTO. Pausando llamadas.' : ''}");
+          "${_consecutive401 >= _max401 ? 'Circuit breaker ABIERTO. Pausando llamadas (cooldown ${_circuitCooldownMin}min).' : ''}");
     } else if (statusCode >= 200 && statusCode < 300) {
+      // Sale bien — resetea contador y timestamp para volver a estado
+      // sano completamente.
+      if (_consecutive401 > 0) {
+        debugPrint("✅ [VOLVO AUTH] Auth recuperada, reseteando circuit.");
+      }
       _consecutive401 = 0;
+      _ultimoFailAt = null;
     }
   }
 

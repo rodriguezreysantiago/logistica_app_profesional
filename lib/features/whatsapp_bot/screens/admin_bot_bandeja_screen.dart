@@ -157,10 +157,16 @@ class AdminBotBandejaScreen extends StatelessWidget {
     return AppScaffold(
       title: 'Bandeja del Bot',
       body: StreamBuilder<QuerySnapshot>(
+        // Bug A11 del code review: subimos el limit a 200 (antes 50).
+        // Si superan ese número, mostramos un banner indicando que hay
+        // más esperando — para implementar paginación real con cursor
+        // necesitaríamos refactorizar el stream a paginated futureBuilder.
+        // Por ahora 200 cubre el peor caso realista (un mes con 10
+        // ambiguos por día).
         stream: FirebaseFirestore.instance
             .collection(_coleccion)
             .orderBy('creado_en', descending: true)
-            .limit(50)
+            .limit(200)
             .snapshots(),
         builder: (ctx, snap) {
           if (snap.hasError) {
@@ -176,14 +182,35 @@ class AdminBotBandejaScreen extends StatelessWidget {
                   'Las respuestas que el bot no pueda asociar con un aviso van a aparecer acá.',
             );
           }
-          return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
-            itemCount: docs.length,
-            itemBuilder: (ctx, i) => _ItemAmbiguo(
-              doc: docs[i],
-              onConvertir: () => _convertirEnRevision(context, docs[i]),
-              onDescartar: () => _descartar(context, docs[i].id),
-            ),
+          // Si llegamos al límite, avisamos al admin que puede haber más.
+          final llegoAlLimite = docs.length >= 200;
+          return Column(
+            children: [
+              if (llegoAlLimite)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  color: Colors.amber.withAlpha(30),
+                  child: const Text(
+                    '⚠️ Mostrando los 200 más recientes. Procesá los antiguos para ver más.',
+                    style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
+                  itemCount: docs.length,
+                  itemBuilder: (ctx, i) => _ItemAmbiguo(
+                    doc: docs[i],
+                    onConvertir: () =>
+                        _convertirEnRevision(context, docs[i]),
+                    onDescartar: () => _descartar(context, docs[i].id),
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),

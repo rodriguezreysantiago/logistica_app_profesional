@@ -186,10 +186,17 @@ class NotificationService {
       ),
     );
 
-    final int idDinamico = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+    // Bug B1 del code review: antes usábamos un ID dinámico que no
+    // garantizaba idempotencia — si el flujo se reintentaba (error de
+    // red), el admin podía recibir dos notificaciones del mismo aviso.
+    // Ahora el ID es determinístico por chofer + documento + día, así
+    // re-intentos del mismo evento producen la MISMA notificación
+    // (que el plugin nativo deduplica al mostrar).
+    final hoyIso = DateTime.now().toIso8601String().split('T').first;
+    final id = _idDeterministico('admin_${chofer}_${documento}_$hoyIso');
 
     await _notificationsPlugin.show(
-      idDinamico, 
+      id,
       "Nueva Revisión Pendiente",
       "$chofer subió: $documento",
       platformDetails,

@@ -333,9 +333,10 @@ class _DetalleRevision extends StatelessWidget {
       return;
     }
 
-    // Cerrar el sheet inmediatamente para feedback visual
-    navigator.pop();
-
+    // Bug A7 del code review: antes cerrábamos el sheet ANTES del delete.
+    // Si fallaba el update/delete, el admin veía "operación aprobada"
+    // pero el doc seguía. Ahora primero hacemos el cambio, después
+    // cerramos el sheet con feedback de éxito o error real.
     try {
       if (aprobado) {
         if (esCambioEquipo) {
@@ -353,6 +354,7 @@ class _DetalleRevision extends StatelessWidget {
 
       // Audit fire-and-forget: una sola entrada por revisión, con tipo
       // (cambio de equipo o documento) en `detalles` para auditar luego.
+      // Solo se llama tras éxito real del cambio.
       unawaited(AuditLog.registrar(
         accion: aprobado
             ? AuditAccion.aprobarRevision
@@ -366,6 +368,9 @@ class _DetalleRevision extends StatelessWidget {
         },
       ));
 
+      // Cerrar sheet solo después del éxito.
+      if (context.mounted) navigator.pop();
+
       final mensaje = aprobado
           ? 'Operación aprobada y guardada'
           : 'Solicitud rechazada y eliminada';
@@ -378,10 +383,16 @@ class _DetalleRevision extends StatelessWidget {
       // Solicitudes corruptas (sin dni/patente/campo) — mensaje claro
       // en vez del críptico "document path must be a non-empty string".
       debugPrint('Solicitud corrupta: ${e.message}');
-      // StateError.message es String no-nullable, así que no hace falta `??`.
+      // En este caso sí cerramos el sheet (el doc se eliminó dentro de
+      // _aprobarCambioEquipo / _aprobarDocumento al detectar la
+      // corrupción).
+      if (context.mounted) navigator.pop();
       AppFeedback.warningOn(messenger, e.message);
     } catch (e) {
       debugPrint('Error procesando revisión: $e');
+      // En error genérico el sheet QUEDA abierto para que el admin
+      // vea que la operación falló y pueda reintentar o cancelar
+      // manualmente.
       AppFeedback.errorOn(messenger, 'Error en la base de datos: $e');
     }
   }

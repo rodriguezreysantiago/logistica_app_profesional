@@ -324,7 +324,27 @@ async function registrarIntentoFallido(
   return await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const data = snap.exists ? snap.data() ?? {} : {};
-    const intentos = ((data.intentos as number | undefined) ?? 0) + 1;
+
+    // Bug M1 del code review: race entre `chequearBloqueoActivo` (sin
+    // transacción) y este registro. Defensa adicional: si DENTRO de
+    // la transacción ya vemos `bloqueadoHasta` futuro, NO incrementamos
+    // más — el doc ya está bloqueado, sumar al contador no agrega
+    // nada y evita acumulación infinita en logins paralelos.
+    const yaBloqueado = data.bloqueadoHasta as Timestamp | undefined;
+    if (yaBloqueado && yaBloqueado.toMillis() > Date.now()) {
+      const intentosActuales = Number(data.intentos ?? 0);
+      return Number.isFinite(intentosActuales) ? intentosActuales : 0;
+    }
+
+    // Bug A2 del code review: el campo `intentos` debería ser number,
+    // pero por corrupción/migración podría venir como string. Hacemos
+    // coerción explícita y tolerante a cualquier tipo.
+    const rawIntentos = data.intentos;
+    const numIntentos =
+      typeof rawIntentos === "number" ?
+        rawIntentos :
+        Number(rawIntentos ?? 0);
+    const intentos = (Number.isFinite(numIntentos) ? numIntentos : 0) + 1;
     const update: Record<string, unknown> = {
       intentos,
       ultimoIntento: FieldValue.serverTimestamp(),
@@ -561,52 +581,69 @@ export const telemetriaSnapshotScheduled = onSchedule(
     // y `hrTotalVehicleDistance` hay que pegarle a `/vehicle/vehiclestatuses`
     // con `latestOnly=true` (devuelve el último snapshot de cada unidad
     // en una sola request).
+    // Bug M5 del code review: antes el fetch a Volvo se hacía una sola
+    // vez. Si fallaba transient (timeout, glitch del API, latencia)
+    // perdíamos el snapshot del día. Ahora hacemos hasta 3 intentos
+    // con backoff exponencial (5s, 15s) antes de abortar.
+    const qs = new URLSearchParams({
+      latestOnly: "true",
+      contentFilter: "ACCUMULATED,SNAPSHOT,UPTIME",
+      additionalContent: "VOLVOGROUPSNAPSHOT",
+    });
+    const url = `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
+
     let cache: unknown[] = [];
-    try {
-      // Pedimos explícitamente UPTIME para que venga `serviceDistance`
-      // en el response. Sin el contentFilter, algunas cuentas no
-      // reciben ese bloque por default.
-      const qs = new URLSearchParams({
-        latestOnly: "true",
-        contentFilter: "ACCUMULATED,SNAPSHOT,UPTIME",
-        additionalContent: "VOLVOGROUPSNAPSHOT",
-      });
-      const url =
-        `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Authorization": authHeader,
-          "Accept": ACCEPT_STATUSES,
-        },
-      });
-      if (!res.ok) {
-        logger.error("[telemetriaSnapshot] Volvo HTTP error", {
-          statusCode: res.status,
+    let intentos = 0;
+    const maxIntentos = 3;
+
+    while (intentos < maxIntentos) {
+      intentos++;
+      try {
+        const res = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Authorization": authHeader,
+            "Accept": ACCEPT_STATUSES,
+          },
         });
-        return;
+        if (!res.ok) {
+          logger.warn("[telemetriaSnapshot] Volvo HTTP error", {
+            statusCode: res.status,
+            intento: intentos,
+          });
+          if (intentos >= maxIntentos) return;
+          await new Promise((r) => setTimeout(r, 5000 * intentos));
+          continue;
+        }
+        const body = (await res.json()) as Record<string, unknown>;
+        const statusResponse = body?.vehicleStatusResponse as
+          | Record<string, unknown>
+          | undefined;
+        const list = statusResponse?.vehicleStatuses;
+        if (Array.isArray(list)) cache = list;
+        logger.info("[telemetriaSnapshot] estados recibidos", {
+          recibidos: cache.length,
+          intento: intentos,
+          sampleKeys: cache.length > 0 ?
+            Object.keys(cache[0] as object).slice(0, 20) :
+            [],
+        });
+        break;
+      } catch (e) {
+        logger.warn("[telemetriaSnapshot] error consultando Volvo", {
+          error: (e as Error).message,
+          intento: intentos,
+        });
+        if (intentos >= maxIntentos) {
+          logger.error("[telemetriaSnapshot] agotados los reintentos");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 5000 * intentos));
       }
-      const body = (await res.json()) as Record<string, unknown>;
-      const statusResponse = body?.vehicleStatusResponse as
-        | Record<string, unknown>
-        | undefined;
-      const list = statusResponse?.vehicleStatuses;
-      if (Array.isArray(list)) cache = list;
-      logger.info("[telemetriaSnapshot] estados recibidos", {
-        recibidos: cache.length,
-        sampleKeys: cache.length > 0 ?
-          Object.keys(cache[0] as object).slice(0, 20) :
-          [],
-      });
-    } catch (e) {
-      logger.error("[telemetriaSnapshot] error consultando Volvo", {
-        error: (e as Error).message,
-      });
-      return;
     }
 
     if (cache.length === 0) {
-      logger.warn("[telemetriaSnapshot] flota Volvo vacía, abortando");
+      logger.warn("[telemetriaSnapshot] flota Volvo vacía después de los reintentos, abortando");
       return;
     }
 
@@ -860,9 +897,14 @@ export const auditLogWrite = onCall(
       );
     }
 
-    // detalles debe ser objeto plano serializable. Validamos tamaño
-    // serializando con JSON.stringify — si tira por circular references
-    // o tipos no-serializables, rechazamos.
+    // detalles debe ser objeto plano serializable y NO vacío. Validamos
+    // tamaño serializando con JSON.stringify — si tira por circular
+    // references o tipos no-serializables, rechazamos.
+    //
+    // Bug A3 del code review: antes aceptábamos {} y null. Ahora si
+    // viene `detalles` debe tener al menos una key — sino, mejor
+    // omitirlo del request directamente.
+    let detallesPersistir: Record<string, unknown> | null = null;
     if (detalles != null) {
       if (typeof detalles !== "object" || Array.isArray(detalles)) {
         throw new HttpsError(
@@ -870,9 +912,16 @@ export const auditLogWrite = onCall(
           "`detalles` debe ser un objeto plano."
         );
       }
+      const detallesObj = detalles as Record<string, unknown>;
+      if (Object.keys(detallesObj).length === 0) {
+        throw new HttpsError(
+          "invalid-argument",
+          "`detalles` no puede ser un objeto vacío."
+        );
+      }
       let serializados: string;
       try {
-        serializados = JSON.stringify(detalles);
+        serializados = JSON.stringify(detallesObj);
       } catch {
         throw new HttpsError(
           "invalid-argument",
@@ -885,6 +934,7 @@ export const auditLogWrite = onCall(
           `\`detalles\` excede el límite (${AUDIT_MAX_DETALLES_BYTES} bytes).`
         );
       }
+      detallesPersistir = detallesObj;
     }
 
     // ─── Datos del admin desde el JWT ──────────────────────────────
@@ -905,8 +955,8 @@ export const auditLogWrite = onCall(
     if (entidadId) {
       doc.entidad_id = entidadId;
     }
-    if (detalles != null) {
-      doc.detalles = detalles;
+    if (detallesPersistir != null) {
+      doc.detalles = detallesPersistir;
     }
 
     try {
