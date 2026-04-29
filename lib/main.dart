@@ -8,7 +8,6 @@ import 'core/services/app_logger.dart';
 import 'core/services/prefs_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/auto_sync_service.dart';
-
 import 'routing/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/constants/app_constants.dart';
@@ -48,7 +47,6 @@ void main() async {
   // dejamos los defaults de Flutter (que loguean a consola) — los
   // try/catch puntuales del código siguen usando AppLogger.recordError.
   await AppLogger.init();
-
   await PrefsService.init();
   await NotificationService.init();
 
@@ -69,10 +67,7 @@ void main() async {
         ),
 
         // 🔹 PROVIDER UI
-        ChangeNotifierProxyProvider2<
-            VehiculoManager,
-            VehiculoRepository,
-            VehiculoProvider>(
+        ChangeNotifierProxyProvider2<VehiculoManager, VehiculoRepository, VehiculoProvider>(
           create: (context) => VehiculoProvider(
             manager: context.read<VehiculoManager>(),
             repository: context.read<VehiculoRepository>(),
@@ -142,10 +137,8 @@ class _LogisticaAppState extends State<LogisticaApp> {
     NotificationService.selectNotificationStream.stream
         .listen((String? payload) {
       if (payload == null) return;
-
       final nav = navigatorKey.currentState;
       if (nav == null) return;
-
       if (payload == 'vencimiento') {
         nav.pushNamed(AppRoutes.misVencimientos);
       } else if (payload == 'admin_revision') {
@@ -182,8 +175,16 @@ class _LogisticaAppState extends State<LogisticaApp> {
 
       theme: AppTheme.darkTheme,
 
-      initialRoute:
-          PrefsService.isLoggedIn ? AppRoutes.home : AppRoutes.login,
+      // Siempre arrancamos en /home. El AuthGuard (vía
+      // AppRouter.generateRoute) usa un StreamBuilder con
+      // authStateChanges() para esperar que Firebase Auth termine
+      // de restorear la sesión persistida en disco antes de decidir
+      // si mostrar la pantalla o redirigir a login. Esto es crítico
+      // en Windows desktop, donde el restore del C++ SDK es async y
+      // un check síncrono al startup (como teníamos antes, mirando
+      // solo `PrefsService.isLoggedIn`) podía bouncearte al login
+      // aunque el token estuviera vivo.
+      initialRoute: AppRoutes.home,
 
       routes: {
         AppRoutes.login: (_) => const LoginScreen(),

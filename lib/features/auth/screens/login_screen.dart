@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../services/auth_service.dart';
 
@@ -29,6 +30,27 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
   bool _obscurePass = true;
+
+  /// True si hay un DNI recordado de logins previos. Si es así, el
+  /// `_PassField` se autofocusea (el admin solo escribe la pass). Si
+  /// no hay DNI guardado, el `_DniField` autofocusea para arrancar de cero.
+  late final bool _hasLastDni;
+
+  @override
+  void initState() {
+    super.initState();
+    final lastDni = PrefsService.lastDni;
+    _hasLastDni = lastDni.isNotEmpty;
+    if (_hasLastDni) {
+      _dniController.text = lastDni;
+    }
+    // Nota: usamos `autofocus: true` en el TextField (ver build) en
+    // lugar de `FocusNode.requestFocus()` desde initState, porque
+    // en Windows desktop hay un race entre el postFrameCallback y el
+    // layout del EditableText que dispara una assertion. La forma
+    // idiomática (autofocus) usa el ciclo natural de Flutter y no
+    // tiene ese problema.
+  }
 
   @override
   void dispose() {
@@ -118,6 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       _DniField(
                         controller: _dniController,
                         focusNode: _dniFocus,
+                        autofocus: !_hasLastDni,
                         onSubmitted: () => FocusScope.of(context)
                             .requestFocus(_passFocus),
                       ),
@@ -125,6 +148,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       _PassField(
                         controller: _passController,
                         focusNode: _passFocus,
+                        autofocus: _hasLastDni,
                         obscure: _obscurePass,
                         onToggleVisibility: () =>
                             setState(() => _obscurePass = !_obscurePass),
@@ -220,12 +244,14 @@ class _LogoYTitulo extends StatelessWidget {
 class _DniField extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+  final bool autofocus;
   final VoidCallback onSubmitted;
 
   const _DniField({
     required this.controller,
     required this.focusNode,
     required this.onSubmitted,
+    this.autofocus = false,
   });
 
   @override
@@ -234,6 +260,7 @@ class _DniField extends StatelessWidget {
     return TextField(
       controller: controller,
       focusNode: focusNode,
+      autofocus: autofocus,
       keyboardType: TextInputType.number,
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       style: const TextStyle(
@@ -253,6 +280,7 @@ class _DniField extends StatelessWidget {
 class _PassField extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
+  final bool autofocus;
   final bool obscure;
   final VoidCallback onToggleVisibility;
   final VoidCallback onSubmitted;
@@ -263,6 +291,7 @@ class _PassField extends StatelessWidget {
     required this.obscure,
     required this.onToggleVisibility,
     required this.onSubmitted,
+    this.autofocus = false,
   });
 
   @override
@@ -271,6 +300,7 @@ class _PassField extends StatelessWidget {
     return TextField(
       controller: controller,
       focusNode: focusNode,
+      autofocus: autofocus,
       obscureText: obscure,
       style: const TextStyle(fontSize: 18, color: Colors.white),
       decoration: InputDecoration(

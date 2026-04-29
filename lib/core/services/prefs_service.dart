@@ -9,6 +9,11 @@ class PrefsService {
   static const String _keyRol = 'rol';
   static const String _keyIsLoggedIn = 'isLoggedIn';
 
+  /// DNI del último usuario que logueó OK. Se mantiene **incluso después
+  /// de logout** para auto-completar el campo en la pantalla de login.
+  /// La contraseña NO se guarda nunca (eso sería un riesgo de seguridad).
+  static const String _keyLastDni = 'lastDni';
+
   // Inicializar antes del runApp
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -24,6 +29,8 @@ class PrefsService {
     await _prefs.setString(_keyNombre, nombre);
     await _prefs.setString(_keyRol, rol);
     await _prefs.setBool(_keyIsLoggedIn, true);
+    // Recordatorio del último DNI para auto-completar próximos logins.
+    await _prefs.setString(_keyLastDni, dni);
   }
 
   // Obtener datos guardados (Lectura segura)
@@ -31,6 +38,7 @@ class PrefsService {
   static String get nombre => _prefs.getString(_keyNombre) ?? '';
   static String get rol => _prefs.getString(_keyRol) ?? '';
   static bool get isLoggedIn => _prefs.getBool(_keyIsLoggedIn) ?? false;
+  static String get lastDni => _prefs.getString(_keyLastDni) ?? '';
 
   // Cerrar sesión (nombre más claro y borrado seguro)
   static Future<void> limpiarSesion() async {
@@ -38,7 +46,9 @@ class PrefsService {
     await _prefs.remove(_keyNombre);
     await _prefs.remove(_keyRol);
     // Aseguramos que el flag de logueo pase explícitamente a false
-    await _prefs.setBool(_keyIsLoggedIn, false); 
+    await _prefs.setBool(_keyIsLoggedIn, false);
+    // OJO: lastDni NO se borra a propósito — queremos recordarlo para
+    // que el próximo login venga con el campo precargado.
   }
 
   // Compatibilidad con código anterior (por si lo usaste en otras pantallas)

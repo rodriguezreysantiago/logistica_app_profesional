@@ -6,14 +6,12 @@
             "request": "launch",
             "type": "dart",
             "program": "lib/main.dart",
-            // toolArgs son los flags que se le pasan a `flutter run`.
-            // --dart-define-from-file=secrets.json inyecta las credenciales
-            // VOLVO_USERNAME y VOLVO_PASSWORD desde el archivo secrets.json
-            // (que NO está en git). Sin esto, los requests a Volvo Connect
-            // fallan con "Faltan credenciales".
+            // Las credenciales Volvo viven en Secret Manager (Firebase
+            // Functions) desde 2026-04-29. El cliente las consume via
+            // la Cloud Function `volvoProxy`, así que ya no se inyecta
+            // nada local con --dart-define.
             "toolArgs": [
-                "-d", "windows",
-                "--dart-define-from-file=secrets.json"
+                "-d", "windows"
             ]
         },
         {
@@ -23,8 +21,7 @@
             "program": "lib/main.dart",
             "flutterMode": "profile",
             "toolArgs": [
-                "-d", "windows",
-                "--dart-define-from-file=secrets.json"
+                "-d", "windows"
             ]
         }
     ]
