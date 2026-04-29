@@ -1,7 +1,12 @@
 import 'dart:collection';
 import 'dart:async';
 import 'dart:math';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+
+import '../../../core/constants/app_constants.dart';
+import '../../../core/services/notification_service.dart';
 import 'vehiculo_repository.dart';
 import 'volvo_api_service.dart';
 
@@ -128,7 +133,15 @@ class VehiculoManager {
         km: km,
         nivelCombustiblePct: tele.nivelCombustiblePct,
         autonomiaKm: tele.autonomiaKm,
+        serviceDistanceKm: tele.serviceDistanceKm,
       );
+
+      // Mantenimiento preventivo: si el tractor cruzó al estado
+      // VENCIDO en este sync, disparamos notificación local + escribimos
+      // el evento para idempotencia. Fire-and-forget — un fallo acá NO
+      // debe romper el sync.
+      unawaited(_evaluarMantenimiento(patente, tele.serviceDistanceKm));
+
       // Log de éxito desactivado — visible desde el dashboard de sync.
     } catch (e, stack) {
       debugPrint("❌ Sync error $patente: $e");
@@ -164,5 +177,80 @@ class VehiculoManager {
   // ================================
   bool estaSincronizando(String patente) {
     return _sincronizando.contains(patente);
+  }
+
+  // ================================
+  // MANTENIMIENTO PREVENTIVO
+  // ================================
+  //
+  // Después de cada sync exitoso evaluamos si el tractor cruzó al
+  // estado VENCIDO. La idempotencia se maneja con el doc
+  // `MANTENIMIENTOS_AVISADOS/{patente}` que guarda el `ultimo_estado`
+  // que ya notificamos. El cruce VÁLIDO es: estado anterior !=
+  // VENCIDO  Y  estado nuevo == VENCIDO. En ese caso disparamos la
+  // notificación local y persistimos el nuevo estado.
+  //
+  // Si después de un service el tractor vuelve a OK y más adelante
+  // vuelve a vencer, la transición OK→VENCIDO disparará una nueva
+  // notificación (porque el `ultimo_estado` quedó en OK).
+  Future<void> _evaluarMantenimiento(
+    String patente,
+    double? serviceDistanceKm,
+  ) async {
+    if (serviceDistanceKm == null) {
+      // Sin datos no podemos clasificar — no escribimos nada.
+      return;
+    }
+    final nuevoEstado = AppMantenimiento.clasificar(serviceDistanceKm);
+
+    final db = FirebaseFirestore.instance;
+    final ref = db
+        .collection(AppCollections.mantenimientosAvisados)
+        .doc(patente.trim());
+
+    try {
+      final snap = await ref.get();
+      final data = snap.data();
+      final ultimoCodigo =
+          (data?['ultimo_estado'] as String?)?.toUpperCase();
+
+      // Solo notificamos cuando hay TRANSICIÓN a VENCIDO. Si el
+      // tractor ya estaba marcado como vencido y sigue vencido, no
+      // re-notificamos (sería spam).
+      final cruzoAVencido =
+          nuevoEstado == MantenimientoEstado.vencido &&
+              ultimoCodigo != MantenimientoEstado.vencido.name.toUpperCase();
+
+      // Persistimos el estado actual SIEMPRE (aunque no notifiquemos).
+      // Así, si en el próximo ciclo cambia, sabemos desde dónde venía.
+      final update = <String, dynamic>{
+        'patente': patente,
+        'ultimo_estado': nuevoEstado.name.toUpperCase(),
+        'ultimo_service_distance_km': serviceDistanceKm,
+        'ultima_evaluacion_at': FieldValue.serverTimestamp(),
+      };
+
+      if (cruzoAVencido) {
+        update['ultimo_aviso_vencido_at'] = FieldValue.serverTimestamp();
+        // Notificación local — el método ya hace kIsWeb / Platform check.
+        unawaited(NotificationService.mostrarAlertaMantenimiento(
+          patente: patente,
+        ));
+      }
+
+      await ref.set(update, SetOptions(merge: true));
+
+      if (cruzoAVencido) {
+        debugPrint(
+            "🔧 [MANTENIMIENTO] $patente cruzó a VENCIDO — notificación local enviada.");
+      }
+    } catch (e) {
+      // Si la idempotencia falla por algún motivo (rules / network),
+      // logueamos pero no rompemos el sync. La próxima evaluación
+      // volverá a intentarlo. Como no marcamos el aviso, podría
+      // re-notificar — preferimos eso a NO notificar si hay un
+      // service vencido real.
+      debugPrint("⚠️ [MANTENIMIENTO] Error evaluando $patente: $e");
+    }
   }
 }

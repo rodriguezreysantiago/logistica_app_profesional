@@ -162,6 +162,20 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // MANTENIMIENTOS_AVISADOS — idempotencia de notificación local
+    // ========================================================================
+    // El cliente Flutter (admin) escribe acá cada vez que evalúa el
+    // estado de service de un tractor después de un sync Volvo. Guarda
+    // `ultimo_estado` (VENCIDO / URGENTE / ...) para detectar cruces y
+    // no spamear notificaciones. Es estado interno operacional —
+    // bajo riesgo de manipulación. Si se "falsifica", lo único que pasa
+    // es que se re-notifica o no, sin afectar datos críticos.
+
+    match /MANTENIMIENTOS_AVISADOS/{patente} {
+      allow read, write: if isAdmin();
+    }
+
+    // ========================================================================
     // LOGIN_ATTEMPTS — rate limiting del login (solo Cloud Function)
     // ========================================================================
     // La function `loginConDni` escribe acá vía Admin SDK (bypasea rules).

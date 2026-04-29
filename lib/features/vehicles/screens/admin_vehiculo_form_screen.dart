@@ -50,6 +50,14 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   late final TextEditingController _vinCtrl;
   late final TextEditingController _kmCtrl;
 
+  // ─── Mantenimiento preventivo (campos manuales) ───────────────────
+  // Histórico del último service: lo carga el admin a mano cuando el
+  // taller termina la visita. Se muestra en la pantalla de
+  // mantenimiento como complemento al `serviceDistance` que viene de
+  // Volvo en tiempo real.
+  late final TextEditingController _ultimoServiceKmCtrl;
+  String? _ultimoServiceFecha;
+
   /// Estado de los vencimientos, indexado por el nombre del campo de
   /// Firestore. Usar maps en lugar de variables individuales nos permite
   /// agregar nuevos vencimientos en el futuro tocando SOLO la lista
@@ -83,6 +91,18 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     _kmCtrl =
         TextEditingController(text: d['KM_ACTUAL']?.toString() ?? '0');
 
+    // Campos manuales del último service. Pueden venir vacíos si nunca
+    // se cargaron (tractor recién dado de alta).
+    _ultimoServiceKmCtrl = TextEditingController(
+      text: d['ULTIMO_SERVICE_KM']?.toString() ?? '',
+    );
+    final fechaServiceRaw = d['ULTIMO_SERVICE_FECHA']?.toString();
+    _ultimoServiceFecha = (fechaServiceRaw != null &&
+            fechaServiceRaw.isNotEmpty &&
+            fechaServiceRaw != '-')
+        ? fechaServiceRaw
+        : null;
+
     _vencimientos = AppVencimientos.forTipo(d['TIPO']?.toString());
     for (final spec in _vencimientos) {
       _fechas[spec.campoFecha] = d[spec.campoFecha]?.toString();
@@ -102,7 +122,27 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     _empresaCtrl.dispose();
     _vinCtrl.dispose();
     _kmCtrl.dispose();
+    _ultimoServiceKmCtrl.dispose();
     super.dispose();
+  }
+
+  /// Abre el `pickFecha` para elegir cuándo se hizo el último service.
+  /// La guardamos como String ISO ("YYYY-MM-DD") para ser consistentes
+  /// con el resto de las fechas del proyecto.
+  Future<void> _seleccionarFechaUltimoService() async {
+    final initial = (_ultimoServiceFecha != null)
+        ? DateTime.tryParse(_ultimoServiceFecha!)
+        : null;
+    final picked = await pickFecha(
+      context,
+      initial: initial,
+      titulo: 'Fecha del último service',
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _ultimoServiceFecha = picked.toString().split(' ').first;
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -401,6 +441,16 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
         'KM_ACTUAL': double.tryParse(_kmCtrl.text) ?? 0.0,
         'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
       };
+      // Mantenimiento preventivo: campos manuales que el admin carga
+      // cuando el taller termina el service. Si el campo está vacío,
+      // guardamos null para limpiar el doc (no string vacío, así la
+      // pantalla de mantenimiento puede distinguir "nunca cargado"
+      // de "cargado en blanco").
+      final ultimoServiceKmRaw = _ultimoServiceKmCtrl.text.trim();
+      updates['ULTIMO_SERVICE_KM'] = ultimoServiceKmRaw.isEmpty
+          ? null
+          : double.tryParse(ultimoServiceKmRaw);
+      updates['ULTIMO_SERVICE_FECHA'] = _ultimoServiceFecha;
       // Persistimos cada vencimiento iterando la lista — sumar uno
       // nuevo a AppVencimientos lo guarda automáticamente.
       for (final spec in _vencimientos) {
@@ -438,6 +488,11 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   Widget build(BuildContext context) {
     final esVolvo =
         _marcaCtrl.text.toUpperCase().contains('VOLVO');
+    // El bloque de mantenimiento preventivo solo aplica a tractores —
+    // los enganches no tienen ciclo de service por kilometraje.
+    final esTractor =
+        (widget.datosIniciales['TIPO']?.toString().toUpperCase() ?? '') ==
+            'TRACTOR';
 
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
@@ -496,6 +551,32 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
                 empresa: _empresaCtrl.text,
                 onTap: _seleccionarEmpresa,
               ),
+              if (esTractor) ...[
+                const SizedBox(height: 28),
+                const _SectionTitle('Mantenimiento preventivo'),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    'Cargá los datos del último service realizado en el taller. '
+                    'La distancia al próximo service la calcula Volvo automáticamente.',
+                    style: TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _FInput(
+                  controller: _ultimoServiceKmCtrl,
+                  label: 'KM al hacer el último service',
+                  icon: Icons.build,
+                  isNumber: true,
+                ),
+                const SizedBox(height: 8),
+                _FechaTileSimple(
+                  label: 'Fecha del último service',
+                  fecha: _ultimoServiceFecha,
+                  icono: Icons.event_available,
+                  onTap: _seleccionarFechaUltimoService,
+                ),
+              ],
               const SizedBox(height: 28),
               const _SectionTitle('Auditoría de vencimientos'),
               // Tiles generados desde la lista de specs: sumar un
@@ -934,6 +1015,63 @@ class _BotonGuardar extends StatelessWidget {
             fontSize: 16,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Tile compacto para elegir una fecha. Versión simplificada de
+/// `_DateTile` (que asocia archivo al vencimiento). Lo usamos para el
+/// "último service" donde no hay comprobante asociado — solo fecha.
+class _FechaTileSimple extends StatelessWidget {
+  final String label;
+  final String? fecha;
+  final IconData icono;
+  final VoidCallback onTap;
+
+  const _FechaTileSimple({
+    required this.label,
+    required this.fecha,
+    required this.icono,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tiene = fecha != null && fecha!.isNotEmpty;
+    return AppCard(
+      onTap: onTap,
+      margin: EdgeInsets.zero,
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Icon(icono, color: Colors.greenAccent),
+          const SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  tiene
+                      ? AppFormatters.formatearFecha(fecha!)
+                      : 'Sin cargar',
+                  style: TextStyle(
+                    color: tiene ? Colors.white : Colors.white38,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.edit_calendar,
+              color: Colors.white24, size: 18),
+        ],
       ),
     );
   }

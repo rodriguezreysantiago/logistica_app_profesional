@@ -105,6 +105,60 @@ class NotificationService {
     await _notificationsPlugin.show(id, titulo, mensaje, platformDetails, payload: 'vencimiento');
   }
 
+  /// NOTIFICACIÓN PARA EL ADMIN (Mantenimiento vencido)
+  ///
+  /// Disparada por `VehiculoManager` cuando detecta que un tractor cruzó
+  /// al estado "VENCIDO" en `serviceDistance`. La idempotencia (no
+  /// notificar dos veces el mismo evento) la maneja el caller via la
+  /// colección `MANTENIMIENTOS_AVISADOS`.
+  static Future<void> mostrarAlertaMantenimiento({
+    required String patente,
+    String? marca,
+    String? modelo,
+  }) async {
+    if (kIsWeb) return;
+
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+      'mantenimiento_canal',
+      'Mantenimiento preventivo',
+      channelDescription:
+          'Avisos cuando un tractor cruza el umbral de service vencido.',
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Colors.redAccent,
+      ledColor: Colors.redAccent,
+      ledOnMs: 1000,
+      ledOffMs: 500,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentSound: true,
+      ),
+    );
+
+    final unidad = (marca != null && modelo != null)
+        ? '$marca $modelo ($patente)'
+        : patente;
+
+    // ID determinista por patente + día. Si por algún motivo el caller
+    // re-dispara sin pasar por la idempotencia de Firestore (ej. test),
+    // el plugin nativo deduplica con el mismo ID.
+    final id = _idDeterministico('mantenimiento_$patente');
+
+    await _notificationsPlugin.show(
+      id,
+      'Service vencido',
+      'El tractor $unidad pasó el momento de service. '
+          'Programá el ingreso al taller cuanto antes.',
+      platformDetails,
+      payload: 'mantenimiento_$patente',
+    );
+  }
+
   /// NOTIFICACIÓN PARA EL ADMIN (Nuevos Trámites)
   static Future<void> mostrarAvisoAdmin({
     required String chofer,

@@ -423,6 +423,15 @@ export const volvoProxy = onCall(
       const qs = new URLSearchParams({
         vin,
         latestOnly: "true",
+        // contentFilter pide explícitamente todos los bloques disponibles
+        // — ACCUMULATED (combustible total, distancia total),
+        //   SNAPSHOT (velocidad, % combustible, GPS),
+        //   UPTIME (serviceDistance, tellTaleInfo, engineCoolantTemp).
+        // Sin este parámetro, según la doc Volvo deberían venir todos
+        // pero algunas cuentas filtran UPTIME a menos que se pida explícito.
+        contentFilter: "ACCUMULATED,SNAPSHOT,UPTIME",
+        // additionalContent agrega contenido extra de Volvo Group
+        // dentro del bloque snapshot (ej. estimatedDistanceToEmpty).
         additionalContent: "VOLVOGROUPSNAPSHOT",
       });
       url = `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
@@ -443,7 +452,14 @@ export const volvoProxy = onCall(
       break;
     }
     case "estadosFlota": {
-      const qs = new URLSearchParams({ latestOnly: "true" });
+      const qs = new URLSearchParams({
+        latestOnly: "true",
+        // Mismo `contentFilter` que `telemetria`: pide explícitamente
+        // los 3 bloques. Necesario para que `uptimeData.serviceDistance`
+        // venga en el batch de toda la flota.
+        contentFilter: "ACCUMULATED,SNAPSHOT,UPTIME",
+        additionalContent: "VOLVOGROUPSNAPSHOT",
+      });
       url = `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
       accept = ACCEPT_STATUSES;
       break;
@@ -547,8 +563,16 @@ export const telemetriaSnapshotScheduled = onSchedule(
     // en una sola request).
     let cache: unknown[] = [];
     try {
+      // Pedimos explícitamente UPTIME para que venga `serviceDistance`
+      // en el response. Sin el contentFilter, algunas cuentas no
+      // reciben ese bloque por default.
+      const qs = new URLSearchParams({
+        latestOnly: "true",
+        contentFilter: "ACCUMULATED,SNAPSHOT,UPTIME",
+        additionalContent: "VOLVOGROUPSNAPSHOT",
+      });
       const url =
-        `${VOLVO_BASE}/vehicle/vehiclestatuses?latestOnly=true`;
+        `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
       const res = await fetch(url, {
         method: "GET",
         headers: {
@@ -664,21 +688,55 @@ export const telemetriaSnapshotScheduled = onSchedule(
       );
       const km = metros / 1000;
 
+      // serviceDistance — km al próximo service programado. Volvo lo
+      // entrega en metros y PUEDE SER NEGATIVO (vencido). Lo guardamos
+      // como `service_distance_km` para alimentar el dashboard de
+      // mantenimiento preventivo.
+      //
+      // Path oficial según doc Volvo Group Vehicle API v1.0.6:
+      //   vehicleStatuses[i].uptimeData.serviceDistance
+      // (junto con tellTaleInfo, engineCoolantTemperature).
+      // Probamos primero ese path y caemos a legacy si no aparece.
+      let serviceMetros: number | null = null;
+      const serviceCandidatos: unknown[] = [
+        (vehiculo.uptimeData as Record<string, unknown> | undefined)
+          ?.serviceDistance,
+        vehiculo.serviceDistance,
+        (vehiculo.snapshotData as Record<string, unknown> | undefined)
+          ?.serviceDistance,
+        ((vehiculo.snapshotData as Record<string, unknown> | undefined)
+          ?.volvoGroupSnapshot as Record<string, unknown> | undefined)
+          ?.serviceDistance,
+      ];
+      for (const c of serviceCandidatos) {
+        if (c == null) continue;
+        const n = typeof c === "number" ? c : Number(c);
+        if (!Number.isNaN(n)) {
+          serviceMetros = n;
+          break;
+        }
+      }
+      const serviceKm = serviceMetros != null ? serviceMetros / 1000 : null;
+
       // Sin telemetría útil no escribimos.
-      if (litros === 0 && km === 0) {
+      if (litros === 0 && km === 0 && serviceKm == null) {
         saltadosCeros++;
         continue;
       }
 
       const docId = `${patente}_${fechaTxt}`;
-      batch.set(db.collection("TELEMETRIA_HISTORICO").doc(docId), {
+      const doc: Record<string, unknown> = {
         patente,
         vin,
         fecha: Timestamp.fromDate(fechaMidnight),
         litros_acumulados: litros,
         km,
         timestamp: FieldValue.serverTimestamp(),
-      });
+      };
+      if (serviceKm != null) {
+        doc.service_distance_km = serviceKm;
+      }
+      batch.set(db.collection("TELEMETRIA_HISTORICO").doc(docId), doc);
       escritos++;
     }
 

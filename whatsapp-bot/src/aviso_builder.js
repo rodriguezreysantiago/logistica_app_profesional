@@ -56,13 +56,36 @@ function construirCuerpo({ item, saludo, esVehiculo, referencia, fechaFmt }) {
   const ref = esVehiculo ? `el ${item.tipoDoc} de ${referencia}` : referencia;
 
   if (item.dias < 0) {
-    // Vencido
+    // Vencido: el bot manda recordatorio diario hasta que se
+    // regularice. Escalamos el tono según los días pasados para que
+    // no se sienta como spam idéntico todos los días.
     const hace = -item.dias;
-    const tiempoTexto = hace === 1 ? 'ayer' : `hace ${hace} días`;
+    if (hace === 1) {
+      return (
+        `${saludo}. Te aviso desde la oficina: ` +
+        `${ref} venció ayer (era el ${fechaFmt}). ` +
+        'Es importante regularizarlo cuanto antes. ¿Cuándo podés acercarte a presentar el comprobante?'
+      );
+    }
+    if (hace <= 7) {
+      return (
+        `${saludo}. Recordatorio: ${ref} sigue vencido (venció hace ` +
+        `${hace} días, el ${fechaFmt}). Es importante que lo regularices ` +
+        'cuanto antes. ¿Cuándo lo podés presentar?'
+      );
+    }
+    if (hace <= 30) {
+      return (
+        `${saludo}. ATENCIÓN: ${ref} lleva ${hace} días vencido ` +
+        `(el ${fechaFmt}). Es urgente regularizarlo — coordiná con la ` +
+        'oficina cuanto antes para evitar problemas operativos.'
+      );
+    }
+    // > 30 días vencido — situación crítica
     return (
-      `${saludo}. Te aviso desde la oficina: ` +
-      `${ref} venció ${tiempoTexto} (era el ${fechaFmt}). ` +
-      'Es urgente regularizarlo. ¿Cuándo podés acercarte a presentar el comprobante?'
+      `${saludo}. URGENTE: ${ref} lleva más de un mes vencido ` +
+      `(${hace} días, era el ${fechaFmt}). La situación ya es crítica. ` +
+      'Por favor pasá HOY por la oficina para coordinar la renovación.'
     );
   }
 

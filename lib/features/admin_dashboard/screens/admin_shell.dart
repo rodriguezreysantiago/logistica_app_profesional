@@ -11,6 +11,7 @@ import '../../expirations/screens/admin_vencimientos_menu_screen.dart';
 import '../../reports/screens/admin_reports_screen.dart';
 import '../../revisions/screens/admin_revisiones_screen.dart';
 import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
+import '../../vehicles/screens/admin_mantenimiento_screen.dart';
 import '../../vehicles/screens/admin_vehiculos_lista_screen.dart';
 
 import 'admin_panel_screen.dart';
@@ -63,6 +64,20 @@ class _AdminShellState extends State<AdminShell> {
       icon: Icons.local_shipping_outlined,
       iconActive: Icons.local_shipping,
       build: () => const AdminVehiculosListaScreen(),
+    ),
+    _ShellSection(
+      label: 'Service',
+      icon: Icons.build_circle_outlined,
+      iconActive: Icons.build_circle,
+      // Badge: cuenta tractores que cruzaron a VENCIDO. La colección
+      // se popula desde VehiculoManager._evaluarMantenimiento; al
+      // sumar/sacar un tractor del estado, el badge se actualiza solo.
+      // Filtro simple por un solo campo, no necesita índice compuesto.
+      badgeStream: FirebaseFirestore.instance
+          .collection('MANTENIMIENTOS_AVISADOS')
+          .where('ultimo_estado', isEqualTo: 'VENCIDO')
+          .snapshots(),
+      build: () => const AdminMantenimientoScreen(),
     ),
     _ShellSection(
       label: 'Personal',

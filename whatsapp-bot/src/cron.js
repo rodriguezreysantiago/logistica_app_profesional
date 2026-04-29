@@ -14,7 +14,14 @@ const admin = require('firebase-admin');
 const log = require('./logger');
 const { enHorarioHabil } = require('./humano');
 const aviso = require('./aviso_builder');
+const avisoService = require('./aviso_service_builder');
 const hist = require('./historico');
+
+// Intervalo entre services programados de tractores Volvo, en KM.
+// Espejo de `AppMantenimiento.intervaloServiceKm` en el cliente Dart.
+// Si Vecchi cambia el plan a 25.000 o 75.000 km en el futuro, ajustar
+// acá Y en `lib/core/constants/app_constants.dart`.
+const INTERVALO_SERVICE_KM = 50000;
 
 // Documentos auditados de EMPLEADOS — replica del listado en
 // `lib/features/expirations/screens/admin_vencimientos_choferes_screen.dart`.
@@ -312,6 +319,100 @@ async function _runOnce(fs) {
       }
     }
 
+    // ─── 3) Service preventivo de TRACTORES ───
+    // Para cada tractor: resolvemos `serviceDistanceKm` con la misma
+    // lógica del cliente (API si está, sino calculado desde
+    // `ULTIMO_SERVICE_KM + 50.000 - KM_ACTUAL`). Si entra en alguno de
+    // los 4 niveles de urgencia, encolamos aviso al chofer asignado.
+    //
+    // Idempotencia: cuando el admin marca "service hecho" desde la app,
+    // `ULTIMO_SERVICE_KM` cambia → el id determinístico cambia → ciclo
+    // limpio para los próximos avisos.
+    for (const vDoc of vehiculosSnap.docs) {
+      const v = vDoc.data();
+      const tipo = String(v.TIPO || '').toUpperCase();
+      if (tipo !== 'TRACTOR') continue;
+
+      const patente = vDoc.id;
+      const chofer = choferByPatente.get(String(patente).trim().toUpperCase());
+      if (!chofer) continue;
+      const telefono = chofer.data.TELEFONO
+        ? String(chofer.data.TELEFONO)
+        : null;
+      if (!telefono) continue;
+      const nombre = aviso.extraerPrimerNombre(chofer.data.NOMBRE);
+
+      const serviceDistanceKm = _resolverServiceDistance(v);
+      if (serviceDistanceKm == null) continue;
+      const urgencia = hist.urgenciaServicePara(serviceDistanceKm);
+      if (!urgencia) continue;
+
+      // Para la idempotencia usamos `ULTIMO_SERVICE_KM` como
+      // "anclaje del ciclo": cuando se hace un service nuevo, ese
+      // valor cambia y el id se renueva. Si no hay manual cargado y
+      // sólo confiamos en el API, anclamos en redondeo de 50k para
+      // que cada ciclo nuevo (definido por bloques de 50000 km del
+      // odómetro) genere ids distintos.
+      const anclaCiclo =
+        v.ULTIMO_SERVICE_KM != null
+          ? Math.round(Number(v.ULTIMO_SERVICE_KM))
+          : Math.floor(Number(v.KM_ACTUAL || 0) / INTERVALO_SERVICE_KM) *
+            INTERVALO_SERVICE_KM;
+
+      const params = {
+        coleccion: 'VEHICULOS',
+        docId: patente,
+        campoBase: 'SERVICE',
+        urgencia: urgencia.codigo,
+        // El historico usa esta clave como `fechaVenc`, pero acá el
+        // "período" se identifica por el km del último service en
+        // lugar de una fecha. La función `buildId` lo concatena tal
+        // cual, así que un string del km nos sirve igual.
+        fechaVenc: String(anclaCiclo),
+      };
+      if (await hist.yaSeEnvio(db, params)) {
+        stats.salteados++;
+        continue;
+      }
+
+      const mensaje = avisoService.build({
+        patente,
+        marca: v.MARCA,
+        modelo: v.MODELO,
+        serviceDistanceKm,
+        destinatarioNombre: nombre,
+      });
+
+      try {
+        const colaRef = await db.collection(fs.COLECCION).add({
+          telefono: telefono.trim(),
+          mensaje,
+          estado: fs.ESTADO.pendiente,
+          encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+          enviado_en: null,
+          error: null,
+          intentos: 0,
+          origen: 'cron_aviso_service',
+          destinatario_coleccion: 'VEHICULOS',
+          destinatario_id: patente,
+          campo_base: 'SERVICE',
+          admin_dni: 'BOT',
+          admin_nombre: 'Bot automático',
+        });
+        await hist.registrar(db, params, colaRef.id);
+        stats.encolados++;
+        log.info(
+          `+ Encolado service: ${patente} (${urgencia.codigo}, ` +
+            `${Math.round(serviceDistanceKm)} km) → chofer ${chofer.id}`
+        );
+      } catch (e) {
+        stats.errores++;
+        log.error(
+          `No se pudo encolar service ${patente}: ${e.message}`
+        );
+      }
+    }
+
     log.info(
       `Cron ciclo cerrado: encolados=${stats.encolados} ` +
         `salteados=${stats.salteados} errores=${stats.errores}`
@@ -321,6 +422,35 @@ async function _runOnce(fs) {
   } finally {
     _running = false;
   }
+}
+
+/**
+ * Calcula `serviceDistanceKm` para un doc de VEHICULOS.
+ *
+ * Prioridad:
+ *  1. Si el doc tiene `SERVICE_DISTANCE_KM` (vino del API Volvo) → usar
+ *     ese (puede ser negativo para vencido).
+ *  2. Sino, si tiene `ULTIMO_SERVICE_KM` y `KM_ACTUAL` → calcular
+ *     `(ULTIMO_SERVICE_KM + 50.000) − KM_ACTUAL`.
+ *  3. Sino → null (sin datos suficientes).
+ *
+ * Espejo de `_resolverServiceDistance` en el cliente Dart.
+ */
+function _resolverServiceDistance(v) {
+  const api = Number(v.SERVICE_DISTANCE_KM);
+  if (!isNaN(api) && v.SERVICE_DISTANCE_KM != null) return api;
+
+  const ultimo = Number(v.ULTIMO_SERVICE_KM);
+  const actual = Number(v.KM_ACTUAL);
+  if (
+    !isNaN(ultimo) &&
+    !isNaN(actual) &&
+    v.ULTIMO_SERVICE_KM != null &&
+    v.KM_ACTUAL != null
+  ) {
+    return ultimo + INTERVALO_SERVICE_KM - actual;
+  }
+  return null;
 }
 
 // `_buscarChofer` removida — reemplazada por el índice inverso
@@ -334,4 +464,5 @@ module.exports = {
   calcularDiasRestantes,
   DOCS_EMPLEADO,
   DOCS_VEHICULO,
+  INTERVALO_SERVICE_KM,
 };

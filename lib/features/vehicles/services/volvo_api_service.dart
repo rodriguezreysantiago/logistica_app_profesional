@@ -40,6 +40,12 @@ class VolvoTelemetria {
   /// con el combustible actual antes de quedarse vacío.
   final double? autonomiaKm;
 
+  /// Distancia restante hasta el próximo mantenimiento programado,
+  /// en metros. Puede ser **negativa** si el service ya está vencido.
+  /// Volvo lo entrega como `serviceDistance` en el response (al primer
+  /// nivel o nested en `snapshotData`/`volvoGroupSnapshot`).
+  final double? serviceDistanceMetros;
+
   /// Timestamp del snapshot que recibimos del vehículo (no del momento
   /// en que llamamos al API).
   final DateTime? leidoEn;
@@ -48,14 +54,21 @@ class VolvoTelemetria {
     this.odometroMetros,
     this.nivelCombustiblePct,
     this.autonomiaKm,
+    this.serviceDistanceMetros,
     this.leidoEn,
   });
+
+  /// Atajo en KM (puede ser negativo si está vencido).
+  double? get serviceDistanceKm => serviceDistanceMetros != null
+      ? serviceDistanceMetros! / 1000
+      : null;
 
   /// True cuando el response trajo al menos un dato útil.
   bool get tieneAlgunDato =>
       odometroMetros != null ||
       nivelCombustiblePct != null ||
-      autonomiaKm != null;
+      autonomiaKm != null ||
+      serviceDistanceMetros != null;
 }
 
 /// Resultado interno del proxy. Mimicea la estructura mínima de [Response]
@@ -376,10 +389,33 @@ class VolvoApiService {
       leidoEn = DateTime.tryParse(ts);
     }
 
+    // serviceDistance: km al próximo mantenimiento programado. Volvo lo
+    // expone en METROS y puede ser negativo (servicio vencido).
+    //
+    // Path oficial según doc Volvo Group Vehicle API v1.0.6:
+    //   vehicleStatuses[i].uptimeData.serviceDistance
+    // (junto con tellTaleInfo, engineCoolantTemperature, etc.)
+    //
+    // Probamos primero el path oficial. Después caemos a paths legacy
+    // por si alguna unidad lo aplana distinto.
+    double? serviceDist;
+    final uptimeData = r['uptimeData'];
+    if (uptimeData is Map) {
+      serviceDist = _toDouble(uptimeData['serviceDistance']);
+    }
+    serviceDist ??= _toDouble(r['serviceDistance']);
+    if (serviceDist == null && snap is Map) {
+      serviceDist = _toDouble(snap['serviceDistance']);
+    }
+    if (serviceDist == null && volvoSnap is Map) {
+      serviceDist = _toDouble(volvoSnap['serviceDistance']);
+    }
+
     return VolvoTelemetria(
       odometroMetros: odoMetros,
       nivelCombustiblePct: fuelPct,
       autonomiaKm: autonomiaKm,
+      serviceDistanceMetros: serviceDist,
       leidoEn: leidoEn,
     );
   }

@@ -137,6 +137,62 @@ async function procesarSiguiente() {
   }
 }
 
+// ─── Polling de COLA_WHATSAPP ───────────────────────────────────────
+//
+// En vez de mantener un `onSnapshot` con stream gRPC abierto (que se
+// cae cada ~2 min en redes con NAT/firewall agresivo cortando
+// conexiones idle), hacemos polling con `get()` cada N segundos. Más
+// resiliente, menos elegante pero confiable.
+//
+// El intervalo lo configura POLLING_INTERVAL_SECONDS en .env (default
+// 15s). Cada ciclo:
+//   1. Consulta los docs en estado PENDIENTE.
+//   2. Para cada uno que NO esté ya en la cola en memoria, lo encola.
+//   3. La guardia `if (colaProcesar.includes(doc.id))` en `encolar`
+//      evita duplicados entre ciclos consecutivos.
+//
+// Si querés volver al modo onSnapshot (cuando la red lo soporte),
+// alcanza con revertir este commit.
+
+let _pollingTimer = null;
+
+async function pollearCola(db) {
+  try {
+    const qs = await db
+      .collection(fs.COLECCION)
+      .where('estado', '==', fs.ESTADO.pendiente)
+      .get();
+    qs.forEach((doc) => encolar(doc));
+  } catch (e) {
+    // Si una corrida falla, logueamos y seguimos con la próxima.
+    // No abandonamos el polling — la siguiente iteración intenta de
+    // nuevo. Esto resiste cortes de red transitorios sin necesitar
+    // reconexión explícita.
+    log.warn(`Polling Firestore falló: ${e.message}`);
+  }
+}
+
+function iniciarPolling(db) {
+  if (_pollingTimer) return; // idempotente
+  const intervaloSeg = parseInt(
+    process.env.POLLING_INTERVAL_SECONDS || '15',
+    10
+  );
+  log.info(
+    `Polling de ${fs.COLECCION} cada ${intervaloSeg}s (modo robusto: sin streams gRPC).`
+  );
+  // Primera corrida inmediata para no esperar 15s.
+  pollearCola(db);
+  _pollingTimer = setInterval(() => pollearCola(db), intervaloSeg * 1000);
+}
+
+function detenerPolling() {
+  if (_pollingTimer) {
+    clearInterval(_pollingTimer);
+    _pollingTimer = null;
+  }
+}
+
 async function main() {
   log.info('Iniciando whatsapp-bot...');
 
@@ -145,23 +201,7 @@ async function main() {
   log.info('Conectando a WhatsApp Web — esto puede demorar 10-30s...');
   await wa.inicializar();
 
-  log.info(`Listener activo sobre ${fs.COLECCION}/...`);
-  db.collection(fs.COLECCION)
-    .where('estado', '==', fs.ESTADO.pendiente)
-    .onSnapshot(
-      (qs) => {
-        // Solo nos interesan los `added` — los `modified` que pasan
-        // a `PROCESANDO` o `ENVIADO` los emite el bot mismo.
-        qs.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            encolar(change.doc);
-          }
-        });
-      },
-      (err) => {
-        log.error(`Error en stream de Firestore: ${err.message}`);
-      }
-    );
+  iniciarPolling(db);
 
   // Cron de avisos automáticos (Fase 2). Solo arranca si
   // AUTO_AVISOS_ENABLED=true en .env. Es idempotente: si ya se mandó
@@ -193,6 +233,7 @@ async function main() {
   // forzamos exit igual para no quedar colgados indefinidamente.
   const shutdown = async (sig) => {
     log.info(`Recibido ${sig}, cerrando...`);
+    detenerPolling();
     cron.stop();
 
     // Esperar a que termine el item en curso (si lo hay).

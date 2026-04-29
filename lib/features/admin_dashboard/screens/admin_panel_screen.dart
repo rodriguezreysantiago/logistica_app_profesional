@@ -151,11 +151,25 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             ruta: '/admin_vencimientos_menu',
           ),
           const _AdminTile(
+            titulo: 'REVISIONES PENDIENTES',
+            subtitulo: 'Aprobar/rechazar trámites cargados por choferes',
+            icono: Icons.fact_check_outlined,
+            color: Colors.tealAccent,
+            ruta: '/admin_revisiones',
+          ),
+          const _AdminTile(
             titulo: 'CENTRO DE REPORTES',
             subtitulo: 'Exportar Excel y analítica de flota',
             icono: Icons.analytics_outlined,
             color: Colors.amberAccent,
             ruta: '/admin_reportes',
+          ),
+          const _AdminTile(
+            titulo: 'MANTENIMIENTO PREVENTIVO',
+            subtitulo: 'Próximos services de la flota Volvo',
+            icono: Icons.build_circle_outlined,
+            color: Colors.deepOrangeAccent,
+            ruta: AppRoutes.adminMantenimiento,
           ),
           const _AdminTile(
             titulo: 'SYNC OBSERVABILITY',

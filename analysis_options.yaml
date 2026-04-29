@@ -9,6 +9,22 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # Excluimos del análisis código que no es nuestro:
+  #   - node_modules/: dependencias Node de firebase-tools / whatsapp-bot.
+  #     Algunas traen archivos Dart de templates que no compilan acá
+  #     y no deberían ser analizados.
+  #   - functions/: las Cloud Functions son TypeScript, no Dart.
+  #   - whatsapp-bot/: el bot es Node.js puro, no tiene Dart.
+  #   - build/: salida del compilador.
+  exclude:
+    - "**/node_modules/**"
+    - "node_modules/**"
+    - "functions/**"
+    - "whatsapp-bot/**"
+    - "build/**"
+    - "**/.dart_tool/**"
+
 linter:
   # Lints adicionales habilitados (2026-04-28) sobre la base de
   # flutter_lints. La razón está al lado de cada uno.

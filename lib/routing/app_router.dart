@@ -17,6 +17,7 @@ import '../features/expirations/screens/user_mis_vencimientos_screen.dart';
 import '../features/admin_dashboard/screens/admin_shell.dart';
 import '../features/employees/screens/admin_personal_lista_screen.dart';
 import '../features/vehicles/screens/admin_vehiculos_lista_screen.dart';
+import '../features/vehicles/screens/admin_mantenimiento_screen.dart';
 import '../features/expirations/screens/admin_vencimientos_menu_screen.dart';
 import '../features/revisions/screens/admin_revisiones_screen.dart';
 import '../features/reports/screens/admin_reports_screen.dart';
@@ -165,6 +166,15 @@ class AppRouter {
       case AppRoutes.syncDashboard:
         return _buildRoute(
           _protegerAdmin(const SyncDashboardScreen()),
+          settings,
+        );
+
+      // ================= MANTENIMIENTO PREVENTIVO =================
+      // Lista de tractores ordenados por urgencia de service
+      // (basado en `serviceDistance` que viene del API Volvo).
+      case AppRoutes.adminMantenimiento:
+        return _buildRoute(
+          _protegerAdmin(const AdminMantenimientoScreen()),
           settings,
         );
 

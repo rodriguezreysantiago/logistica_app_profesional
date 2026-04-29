@@ -70,6 +70,7 @@ class VehiculoRepository {
     double? km,
     double? nivelCombustiblePct,
     double? autonomiaKm,
+    double? serviceDistanceKm,
   }) async {
     final updates = <String, dynamic>{
       'ULTIMA_SINCRO': FieldValue.serverTimestamp(),
@@ -82,6 +83,12 @@ class VehiculoRepository {
       updates['ULTIMA_LECTURA_COMBUSTIBLE'] = FieldValue.serverTimestamp();
     }
     if (autonomiaKm != null) updates['AUTONOMIA_KM'] = autonomiaKm;
+    // serviceDistance puede ser negativo (vencido) — lo guardamos igual.
+    // El consumidor (pantalla de mantenimiento) lo interpreta como KM
+    // restantes al próximo service programado.
+    if (serviceDistanceKm != null) {
+      updates['SERVICE_DISTANCE_KM'] = serviceDistanceKm;
+    }
 
     // Solo escribimos si hay algo más que el timestamp; sino estaríamos
     // tocando Firestore sin razón.
