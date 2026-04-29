@@ -229,12 +229,17 @@ Reporte: `AUDITORIA_2026-04-28.md`. Resueltos: credenciales Volvo hardcodeadas, 
 3. **`signBlob` permission para `createCustomToken`**: la SA de runtime necesita el rol **`Service Account Token Creator`** **sobre sí misma**. Sin esto, `auth.createCustomToken()` falla con `iam.serviceAccounts.signBlob denied`.
 4. **`cloud_functions` Dart package no soporta Windows**: si se agrega y se importa, tira `Unable to establish connection on channel: dev.flutter.pigeon.cloud_functions_platform_interface.CloudFunctionsHostApi.call`. Solución: llamar la function por HTTPS plano con Dio respetando el protocolo callable.
 
-### Roadmap medio plazo (auditoría AUDITORIA_2026-04-28.md)
-1. **Rate limiting** en login (Cloud Function + colección `LOGIN_ATTEMPTS`).
-2. Mover credenciales Volvo Connect a Cloud Function proxy (hoy se inyectan vía `--dart-define-from-file=secrets.json`, OK para dev).
-3. **`flutter_secure_storage`** para sesión en lugar de SharedPreferences plano.
-4. Refactor: `admin_personal_lista_screen.dart` (1000+ líneas).
-5. Mover **escritura de `TELEMETRIA_HISTORICO` y `AUDITORIA_ACCIONES`** al bot Node.js (hoy las escribe el cliente).
+### Hardening de seguridad — ✅ COMPLETADO 2026-04-29 PM
+1. ✅ **Rate limiting** en login: 5 intentos fallidos consecutivos → bloqueo 5 min. Implementado en `loginConDni` con colección `LOGIN_ATTEMPTS/{dniHash}` (clave hasheada para no exponer DNI). Reset automático al login OK. Rule: `write: if false`.
+2. ✅ **Volvo credentials → Secret Manager** + Cloud Function `volvoProxy` (callable, requiere admin auth). El cliente Flutter llama al proxy por HTTPS con Bearer ID-token; el proxy valida `request.auth.token.rol === 'ADMIN'`, agrega Basic Auth Volvo y forwardea. Operaciones: `flota`, `telemetria`, `kilometraje`, `estadosFlota`. Secrets seteados con `firebase functions:secrets:set VOLVO_USERNAME/VOLVO_PASSWORD`.
+3. ✅ **TELEMETRIA_HISTORICO movido al server**: `telemetriaSnapshotScheduled` corre cada 6h, llama `/vehicle/vehiclestatuses?latestOnly=true` (NO `/vehicle/vehicles` — bug latente del original que no traía telemetría real), escribe doc idempotente por `{patente}_{YYYY-MM-DD}` con `engineTotalFuelUsed/1000` (mL→L) y `hrTotalVehicleDistance/1000` (m→km). Rule: `write: if false`.
+4. ✅ **Cloud Functions runtime → Node.js 22** (Node 20 deprecation = 2026-04-30, decommission = 2026-10-30). Bumpeado en `firebase.json` y `functions/package.json`.
+5. ✅ **Auto-login + recordar último DNI**: `PrefsService.lastDni` sobrevive al logout para precargar el campo. `AuthGuard` reescrito como StatefulWidget con grace period de 1.5s (Firebase Auth en Windows desktop emite `null` primero y el user persistido ~500-1500ms después; sin grace period, el guard bouncea al login antes de tiempo). `_PassField`/`_DniField` usan `autofocus: true` idiomático (no `requestFocus` desde initState que dispara assertion `RenderBox was not laid out` en Windows).
+
+### Roadmap medio plazo pendiente
+1. **Refactor `admin_personal_lista_screen.dart`** (1140 líneas). Plan: extraer la clase interna `_Actualizar` (líneas 743-1140, ~400 líneas) a `lib/features/employees/services/empleado_actions.dart` y renombrar a `EmpleadoActions`. **Intentado 2026-04-29 PM y revertido** porque el sandbox de Cowork leía el archivo truncado y la extracción cortó mid-método `unidad`. Esperar a un sandbox fresco (sesión nueva) o hacerlo en VS Code a mano.
+2. **`flutter_secure_storage`** para `dni`/`nombre`/`rol` en SharedPreferences. Marginal: el JWT de Firebase Auth (que es lo único sensible) ya está en almacenamiento seguro nativo del SDK. Bajaríamos riesgo solo si la PC se compromete físicamente.
+3. **Mover `AUDITORIA_ACCIONES` al server**. Hoy la escribe el cliente desde varias acciones admin (cambiar rol, aprobar revisión, etc). Mover a server requiere migrar esas acciones a Cloud Functions, ~3-4h.
 
 ### Roadmap largo plazo (Volvo)
 - **Anti-robo nocturno**: `wheelBasedSpeed > 0` fuera de horario operativo + push notification al admin.
@@ -327,8 +332,42 @@ git log --oneline -10
 - **`secrets.json` está congelado a una versión vieja de credenciales Volvo**: si Volvo rota el password en su portal, hay que actualizar `secrets.json` y rebuildear la app (no es runtime). Ver email de Volvo en Bitwarden.
 - **Si se agrega una colección Firestore nueva**: sumarla a `firestore.rules` ANTES de hacer deploy de la app. El fallback `if false` la cerraría.
 - **El primer ciclo del AutoSync corre al instante** al abrir la app (no espera 60 seg). Después cada minuto.
-- **Los choferes tienen formato `APELLIDO NOMBRE...`**: el saludo del WhatsApp toma `partes[1]`. Si un legajo viene con orden invertido, el aviso lo va a llamar por el apellido. La app tiene fallback a "Hola" genérico si solo hay un token.
+- **Los choferes tienen formato `APELLIDO NOMBRE...`**: el saludo del WhatsApp toma `partes[1]`. Si un legajo viene con ord
 
----
+## 12. Bugs del sandbox de Cowork (workarounds)
 
-*Documento mantenido por el equipo + agentes de IA. Actualizar cuando se completen pendientes grandes o se sumen features importantes (especialmente cambios al bot, las rules, o los specs centralizados).*
+### Síntoma: lectura truncada de archivos grandes
+
+El sandbox Linux de Cowork está montado sobre el filesystem Windows y a
+veces queda con una **vista desactualizada** de archivos que se editaron
+fuera de la sesión (por VS Code, builds, `flutter pub get`). Síntomas:
+
+- `Read` tool del agent muestra el archivo cortado mid-línea o mid-método.
+- `wc -l` desde el sandbox devuelve menos líneas que `Get-Content | Measure-Object -Line` desde PowerShell.
+- Edits con el `Edit` tool fallan con "String to replace not found" porque el match no existe en la vista parcial.
+
+### Síntoma: bytes NULL al final del archivo tras un Write
+
+Cuando el agent escribe un archivo más corto que la versión previa,
+el `Write` tool a veces no truncar el backing file y queda relleno con
+`\x00` al final. El TypeScript/Dart compiler tira *Invalid character*.
+
+### Workarounds que probamos y funcionan
+
+1. **Para reads de archivos > 500 líneas**: usar `python3 -c "with open(...)"` desde Bash. Lee directo del filesystem syscall y suele ver la versión actualizada.
+2. **Para writes/edits con riesgo**: usar `python3 << 'EOF' ... EOF` con `read()`/`replace()`/`write()` y al final hacer `data.rstrip(b'\x00').rstrip() + EOL.encode()`. Eso elimina nulos residuales y garantiza un newline final limpio.
+3. **Para refactors grandes**: hacelo a mano en VS Code, no le pidas al agent que mueva código entre archivos. El agent puede asistir con instrucciones de qué cortar/pegar.
+4. **Verificación periódica**: cuando dudes, pegale `Get-Content archivo.dart | Measure-Object -Line` desde PowerShell y compará con `wc -l` del agent. Si difieren, agarra la vista de PowerShell como autoridad.
+5. **Sandbox fresco**: cerrar la conversación de Cowork y abrir una nueva re-monta el filesystem y suele resolver la staleness. Hacerlo entre sesiones grandes (ej. fin de día → mañana siguiente).
+
+### Cómo arrancar una sesión fresca
+
+Al abrir una conversación nueva de Cowork sobre este proyecto:
+
+1. Pedile al agent que ejecute (ejemplo de prompt): *"verificá con python que `lib/features/employees/screens/admin_personal_lista_screen.dart` tiene 1140 líneas en disco. Si es menos, decime y esperamos."*
+2. Si el conteo coincide con `Get-Content | Measure-Object -Line`, la vista está fresca y se puede laburar normal.
+3. Si difiere, pasale al agent el contenido completo del archivo por chat (vía `Get-Content archivo | Out-Host`) para que opere desde texto explícito en vez de la vista del filesystem.
+
+### Refactor pendiente que se trabó por este bug
+
+- `admin_personal_lista_screen.dart` → extraer `_Actualizar` a `services/empleado_actions.dart`. Ver sección 7. Plan listo, ejecutar en sandbox fresco o a mano.
