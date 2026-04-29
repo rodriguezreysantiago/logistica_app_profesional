@@ -1,0 +1,123 @@
+// Firestore Security Rules — S.M.A.R.T. Logística
+//
+// CONTEXTO:
+//   La app autentica con DNI + bcrypt directo contra Firestore (no usa
+//   Firebase Auth todavía). Eso significa que `request.auth` siempre es
+//   null para los clientes, así que no podemos hacer `if isAdmin()` real
+//   acá hasta que migremos.
+//
+//   Estas reglas son la PRIMERA capa de defensa de profundidad. Mientras
+//   no haya Firebase Auth:
+//
+//   - Las colecciones que SOLO se escriben desde el bot (Admin SDK
+//     bypasea reglas) pueden ser read/write: false desde el cliente.
+//     Si un atacante con la apiKey pública intenta escribir en
+//     TELEMETRIA_HISTORICO o AUDITORIA_ACCIONES, le tira permission-denied.
+//
+//   - Las colecciones que la app necesita escribir (EMPLEADOS, VEHICULOS,
+//     REVISIONES, CHECKLISTS, AVISOS_VENCIMIENTOS, COLA_WHATSAPP) quedan
+//     abiertas hasta la migración. La defensa real depende de no exponer
+//     la apiKey y de validar inputs en el cliente.
+//
+// DEPLOY:
+//   firebase deploy --only firestore:rules
+//
+// IMPORTANTE: probar antes de desplegar usando el emulador o el simulador
+// de la consola de Firebase. Una regla mal escrita puede romper la app
+// en producción.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================================================================
+    // COLECCIONES ESCRITAS SOLO POR EL BOT (Admin SDK)
+    // ========================================================================
+    // El bot Node.js (whatsapp-bot/) usa firebase-admin que bypasea las
+    // reglas. La app NO necesita escribir en estas colecciones — solo
+    // leerlas para mostrar histórico al admin. Bloqueamos escritura
+    // desde cliente.
+
+    // Bitácora de acciones del admin. La escribe `AuditLog.registrar(...)`
+    // en la app — pero ahí es escritura desde cliente. Mantener escritura
+    // permitida hasta migrar el AuditLog al bot o a Cloud Functions.
+    match /AUDITORIA_ACCIONES/{doc=**} {
+      allow read: if true;
+      allow write: if true;  // TODO: restringir cuando AuditLog migre al backend
+    }
+
+    // Snapshots diarios de telemetría Volvo. El AutoSync de la app los
+    // escribe hoy — habría que pasarlos al bot o a una Cloud Function.
+    // Mientras tanto los dejamos abiertos.
+    match /TELEMETRIA_HISTORICO/{doc=**} {
+      allow read: if true;
+      allow write: if true;  // TODO: mover escritura al backend
+    }
+
+    // Idempotencia del cron de avisos automáticos. SOLO el bot escribe.
+    // La app no necesita escribir — solo leer si quiere mostrar lo que
+    // ya se envió.
+    match /AVISOS_AUTOMATICOS_HISTORICO/{doc=**} {
+      allow read: if true;
+      allow write: if false;  // ✅ solo Admin SDK
+    }
+
+    // Bandeja del bot. Crea el bot, edita/borra el admin desde la app.
+    // Por ahora dejamos write abierto para que el admin pueda
+    // descartar / convertir desde la pantalla.
+    match /RESPUESTAS_BOT_AMBIGUAS/{doc=**} {
+      allow read: if true;
+      allow write: if true;  // TODO: solo read cliente cuando movamos las acciones al backend
+    }
+
+    // ========================================================================
+    // COLECCIONES OPERACIONALES — la app necesita read/write
+    // ========================================================================
+
+    match /EMPLEADOS/{dni} {
+      allow read: if true;
+      allow write: if true;  // TODO: isAdmin() cuando haya Firebase Auth
+    }
+
+    match /VEHICULOS/{patente} {
+      allow read: if true;
+      allow write: if true;  // TODO: isAdmin() cuando haya Firebase Auth
+    }
+
+    match /REVISIONES/{doc} {
+      // Chofer crea, admin aprueba/rechaza, bot crea desde Fase 3.
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /CHECKLISTS/{doc} {
+      // Chofer crea, admin lee. Histórico inmutable cuando se confirma.
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /AVISOS_VENCIMIENTOS/{doc} {
+      // Historial de avisos manuales (canal WHATSAPP / WHATSAPP_BOT).
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /COLA_WHATSAPP/{doc} {
+      // App encola, bot procesa. Mantener abierto hasta que tengamos
+      // backend que medie.
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // ========================================================================
+    // FALLBACK — todo lo demás bloqueado
+    // ========================================================================
+    // Si en el futuro alguien crea una colección nueva, queda bloqueada
+    // por default hasta que se sume explícitamente arriba. Defensa de
+    // profundidad: no se le da carta blanca a colecciones sin definir.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

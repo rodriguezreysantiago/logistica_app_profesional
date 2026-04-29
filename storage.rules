@@ -1,0 +1,40 @@
+// Firebase Storage Security Rules — S.M.A.R.T. Logística
+//
+// La app usa Storage para:
+//   - PERFILES/{dni}.jpg                — foto del chofer
+//   - perfiles/{dni}.jpg                — variante legacy con minúsculas
+//   - vehiculos/{patente}/foto.jpg      — foto de la unidad
+//   - vehiculos/{patente}/{nombre}      — comprobantes RTO/Seguro/Extintores
+//   - EMPLEADOS/{dni}/{nombre}          — papeles del chofer (admin reemplaza)
+//   - EMPLEADOS_DOCS/                   — comprobantes (auditoría)
+//   - VEHICULOS_DOCS/                   — comprobantes (auditoría)
+//   - REVISIONES/                       — comprobantes que sube el chofer
+//   - RESPUESTAS_BOT/{dni}_{ts}.{ext}   — fotos que llegan vía bot (Fase 3)
+//
+// DEPLOY:
+//   firebase deploy --only storage
+//
+// MISMA limitación que firestore.rules: la app no usa Firebase Auth, así
+// que `request.auth` es null. Las reglas reales requieren la migración.
+
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // RESPUESTAS_BOT lo sube SOLO el bot (firebase-admin bypasea).
+    // Lectura permitida porque la app necesita mostrar la foto al admin.
+    match /RESPUESTAS_BOT/{archivo} {
+      allow read: if true;
+      allow write: if false;  // ✅ solo Admin SDK
+    }
+
+    // El resto de los paths siguen abiertos hasta la migración a Auth.
+    // TODO: cuando haya Firebase Auth, restringir a isAdmin() o al
+    // dueño del archivo (chofer puede subir su propio comprobante).
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}

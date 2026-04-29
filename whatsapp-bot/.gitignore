@@ -1,0 +1,22 @@
+# Dependencias instaladas
+node_modules/
+
+# Sesión de WhatsApp Web (escaneada con QR la primera vez).
+# Persistimos en disco para no escanear cada vez que reinicia,
+# pero NUNCA debe ir al repo: equivale a las cookies de sesión.
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Variables de entorno (rutas a credenciales, tokens).
+.env
+.env.local
+
+# Service account de Firebase — el bot lo lee desde la ruta que
+# defina .env. Si lo copiás al lado de package.json para simplificar,
+# este gitignore lo bloquea por las dudas.
+serviceAccountKey.json
+*service-account*.json
+
+# Logs
+*.log
+logs/

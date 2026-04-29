@@ -1,0 +1,19 @@
+{
+  "name": "smart-logistica-whatsapp-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot de WhatsApp para envío automatizado de avisos de vencimiento a choferes (S.M.A.R.T. Logística / Vecchi).",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^12.6.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.27.0"
+  }
+}

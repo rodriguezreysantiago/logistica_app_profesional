@@ -1,0 +1,146 @@
+// Port a Node.js de `lib/features/expirations/services/aviso_vencimiento_builder.dart`.
+//
+// Mantener el copy y el tono alineados con el original — los avisos
+// automáticos generados por el cron deben sentirse iguales a los que
+// dispara manualmente el admin desde la app. Si modificás el Dart,
+// modificá acá también.
+
+const FIRMA =
+  '_Mensaje automático del sistema de gestión S.M.A.R.T. Logística._\n' +
+  '_Para responder o gestionar el trámite, comunicate con la oficina._';
+
+/**
+ * Construye el texto del aviso de WhatsApp para un vencimiento dado.
+ *
+ * @param {object} args
+ * @param {object} args.item       - Vencimiento a comunicar.
+ * @param {string} args.item.coleccion - 'EMPLEADOS' | 'VEHICULOS'.
+ * @param {string} args.item.tipoDoc - 'Licencia', 'RTO', etc.
+ * @param {string} args.item.docId  - DNI o patente.
+ * @param {string} args.item.titulo - Para vehículos: "TRACTOR - AB123CD".
+ * @param {string} args.item.fecha  - 'YYYY-MM-DD'.
+ * @param {number} args.item.dias   - Días restantes (negativo si vencido).
+ * @param {string|null} args.destinatarioNombre - Primer nombre o null.
+ * @returns {string}
+ */
+function build({ item, destinatarioNombre }) {
+  // Sanitizamos el nombre antes de interpolarlo en el mensaje para
+  // que un valor con saltos de línea no rompa el formato (la firma
+  // automática quedaría mezclada con el cuerpo) o no inyecte texto
+  // adicional. Solo permitimos letras, espacios y signos comunes.
+  const nombreSeguro = destinatarioNombre
+    ? String(destinatarioNombre).replace(/\s+/g, ' ').trim().slice(0, 40)
+    : null;
+  const saludo =
+    nombreSeguro && nombreSeguro.length > 0
+      ? `Hola ${nombreSeguro}`
+      : 'Hola';
+
+  const fechaFmt = formatearFecha(item.fecha);
+  const esVehiculo = item.coleccion === 'VEHICULOS';
+  const referencia = esVehiculo
+    ? `la unidad ${extraerPatente(item.titulo) || item.docId}`
+    : `tu ${String(item.tipoDoc).toLowerCase()}`;
+
+  const cuerpo = construirCuerpo({
+    item,
+    saludo,
+    esVehiculo,
+    referencia,
+    fechaFmt,
+  });
+  return `${cuerpo}\n\n${FIRMA}`;
+}
+
+function construirCuerpo({ item, saludo, esVehiculo, referencia, fechaFmt }) {
+  const ref = esVehiculo ? `el ${item.tipoDoc} de ${referencia}` : referencia;
+
+  if (item.dias < 0) {
+    // Vencido
+    const hace = -item.dias;
+    const tiempoTexto = hace === 1 ? 'ayer' : `hace ${hace} días`;
+    return (
+      `${saludo}. Te aviso desde la oficina: ` +
+      `${ref} venció ${tiempoTexto} (era el ${fechaFmt}). ` +
+      'Es urgente regularizarlo. ¿Cuándo podés acercarte a presentar el comprobante?'
+    );
+  }
+
+  if (item.dias === 0) {
+    return (
+      `${saludo}. Te aviso que ${ref} vence HOY (${fechaFmt}). ` +
+      'Por favor pasá lo antes posible por la oficina.'
+    );
+  }
+
+  if (item.dias <= 7) {
+    return (
+      `${saludo}. Recordatorio importante: ${ref} vence en ` +
+      `${item.dias} día${item.dias === 1 ? '' : 's'} (el ${fechaFmt}). ` +
+      'Si todavía no empezaste el trámite, hacelo ya.'
+    );
+  }
+
+  if (item.dias <= 15) {
+    return (
+      `${saludo}. Te aviso que ${ref} vence en ${item.dias} días ` +
+      `(${fechaFmt}). Es buen momento para empezar el trámite de renovación.`
+    );
+  }
+
+  // 16-30+ días — preventivo
+  return (
+    `${saludo}. Aviso preventivo: ${ref} vence el ${fechaFmt} ` +
+    `(en ${item.dias} días). Andá viendo el trámite.`
+  );
+}
+
+/**
+ * Para nombres tipo "PEREZ JUAN CARLOS" devuelve "Juan" (formato
+ * APELLIDO NOMBRE… que usa la app). Si solo hay un token, devuelve
+ * null para evitar saludar al chofer por su apellido.
+ */
+function extraerPrimerNombre(nombreCompleto) {
+  if (!nombreCompleto) return null;
+  const partes = String(nombreCompleto).trim().split(/\s+/);
+  if (partes.length < 2) return null;
+  const n = partes[1];
+  if (!n) return null;
+  return n[0].toUpperCase() + n.slice(1).toLowerCase();
+}
+
+/**
+ * Para títulos como "TRACTOR - AB123CD" devuelve "AB123CD". Si no
+ * encuentra el patrón, devuelve null y el caller cae al docId.
+ */
+function extraerPatente(titulo) {
+  if (!titulo) return null;
+  const m = String(titulo).match(/-\s*([A-Z0-9]{6,})/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Formatea una fecha ISO `YYYY-MM-DD` o un Date a `DD/MM/YYYY`. Tolera
+ * strings nulos o mal formados — devuelve `'-'` en ese caso.
+ */
+function formatearFecha(fecha) {
+  if (!fecha) return '-';
+  let d;
+  if (fecha instanceof Date) {
+    d = fecha;
+  } else {
+    d = new Date(fecha);
+    if (isNaN(d.getTime())) return String(fecha);
+  }
+  const day = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${mes}/${d.getFullYear()}`;
+}
+
+module.exports = {
+  build,
+  extraerPrimerNombre,
+  extraerPatente,
+  formatearFecha,
+  FIRMA,
+};

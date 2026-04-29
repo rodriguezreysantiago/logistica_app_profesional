@@ -1,0 +1,97 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../../core/services/prefs_service.dart';
+
+/// Cliente para la cola de WhatsApp automatizado.
+///
+/// Es la otra punta del bot Node.js (subcarpeta `whatsapp-bot/`). La
+/// app escribe docs a `COLA_WHATSAPP` con la forma esperada y el bot
+/// los procesa de forma asincrónica. Mantener este formato sincronizado
+/// con `whatsapp-bot/src/firestore.js`.
+///
+/// Estados del workflow:
+/// - `PENDIENTE`: la app acaba de encolar; el bot todavía no lo tomó.
+/// - `PROCESANDO`: el bot lo levantó y está en el delay anti-bot.
+/// - `ENVIADO`: el mensaje salió. `enviado_en` tiene timestamp.
+/// - `ERROR`: algo falló. `error` tiene el detalle textual.
+///
+/// El admin puede reintentar un ERROR cambiándolo a PENDIENTE de nuevo
+/// (ver pantalla "Cola de WhatsApp").
+class WhatsAppColaService {
+  WhatsAppColaService({FirebaseFirestore? firestore})
+      : _db = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _db;
+
+  /// Nombre de la colección. Constante porque el bot también la usa.
+  static const String coleccion = 'COLA_WHATSAPP';
+
+  /// Encola un mensaje para que el bot lo envíe.
+  ///
+  /// [telefono]: en formato E.164 con `+` y código de país. Ej:
+  /// `'+5492914567890'`. El bot normaliza pero conviene guardar
+  /// limpio.
+  ///
+  /// [mensaje]: texto plano del mensaje. WhatsApp soporta markdown
+  /// ligero (`*bold*`, `_italic_`, `~strike~`).
+  ///
+  /// [origen], [destinatarioColeccion], [destinatarioId], [campoBase]
+  /// se persisten para auditoría. Sirven para que después el admin
+  /// pueda saber "¿de qué chofer y qué papel salió este aviso?".
+  ///
+  /// Devuelve el `id` del doc encolado.
+  Future<String> encolar({
+    required String telefono,
+    required String mensaje,
+    String origen = 'manual',
+    String? destinatarioColeccion,
+    String? destinatarioId,
+    String? campoBase,
+  }) async {
+    final ref = await _db.collection(coleccion).add({
+      'telefono': telefono.trim(),
+      'mensaje': mensaje,
+      'estado': 'PENDIENTE',
+      'encolado_en': FieldValue.serverTimestamp(),
+      'enviado_en': null,
+      'error': null,
+      'intentos': 0,
+      'origen': origen,
+      if (destinatarioColeccion != null)
+        'destinatario_coleccion': destinatarioColeccion,
+      if (destinatarioId != null) 'destinatario_id': destinatarioId,
+      if (campoBase != null) 'campo_base': campoBase,
+      'admin_dni': PrefsService.dni,
+      'admin_nombre': PrefsService.nombre,
+    });
+    return ref.id;
+  }
+
+  /// Reintenta un envío que terminó en ERROR. Cambia el estado a
+  /// `PENDIENTE` y limpia el mensaje de error. El bot lo levantará
+  /// en el próximo ciclo del listener.
+  Future<void> reintentar(String docId) async {
+    await _db.collection(coleccion).doc(docId).update({
+      'estado': 'PENDIENTE',
+      'error': null,
+      // No reseteamos `intentos` para que se vea cuántas veces se
+      // intentó — útil para detectar números problemáticos.
+    });
+  }
+
+  /// Borra un doc de la cola. Útil para limpiar históricos antiguos
+  /// o para cancelar un envío que el admin ya no quiere mandar.
+  Future<void> eliminar(String docId) async {
+    await _db.collection(coleccion).doc(docId).delete();
+  }
+
+  /// Stream con los últimos 100 docs ordenados por timestamp de
+  /// encolado descendente. Útil para la pantalla "Cola de WhatsApp".
+  Stream<QuerySnapshot> streamCola({int limit = 100}) {
+    return _db
+        .collection(coleccion)
+        .orderBy('encolado_en', descending: true)
+        .limit(limit)
+        .snapshots();
+  }
+}
