@@ -202,6 +202,12 @@ class AuthService {
       case 'FAILED_PRECONDITION':
       case 'failed-precondition':
         return 'El usuario no tiene contraseña configurada.';
+      case 'RESOURCE_EXHAUSTED':
+      case 'resource-exhausted':
+        // Rate limit del login (5 intentos fallidos → 15 min de bloqueo).
+        // El mensaje específico ("reintentá en X minutos") viene del
+        // server, esto es solo fallback genérico.
+        return 'Demasiados intentos fallidos. Esperá unos minutos antes de reintentar.';
       case 'UNAVAILABLE':
       case 'unavailable':
         return 'Servicio no disponible. Intentá de nuevo en un rato.';

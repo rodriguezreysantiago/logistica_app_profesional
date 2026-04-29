@@ -157,6 +157,19 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // LOGIN_ATTEMPTS — rate limiting del login (solo Cloud Function)
+    // ========================================================================
+    // La function `loginConDni` escribe acá vía Admin SDK (bypasea rules).
+    // Ningún cliente debe leer/escribir directo. La colección guarda
+    // intentos fallidos consecutivos por DNI (clave = hash corto del DNI)
+    // y un timestamp `bloqueadoHasta` que la function consulta antes de
+    // verificar la contraseña.
+
+    match /LOGIN_ATTEMPTS/{dniHash} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
     // FALLBACK — todo lo demás bloqueado
     // ========================================================================
     // Si en el futuro alguien crea una colección nueva, queda
