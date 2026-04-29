@@ -159,18 +159,12 @@ class AutoSyncService {
           '🔄 AutoSync ciclo cerrado: procesados=$procesados '
           'éxito=$exito error=$errores saltados=$saltados');
 
-      // Snapshot histórico diario — fire-and-forget. La cache Volvo ya
-      // está fresca (recién la usamos para sincronizar las unidades),
-      // así que el método es prácticamente gratis: solo cruza con
-      // Firestore y hace un batch write. Si falla, no afecta al ciclo
-      // siguiente; el AutoSync vuelve a tirar en 60s y el snapshot se
-      // sobreescribe (idempotente por día).
-      try {
-        final cache = await provider.repository.traerFlotaVolvo();
-        await provider.repository.guardarSnapshotsDiarios(cache);
-      } catch (e) {
-        debugPrint('⚠️ No se pudo guardar snapshot histórico: $e');
-      }
+      // Snapshot histórico TELEMETRIA_HISTORICO: ya NO se escribe desde
+      // el cliente. La Cloud Function `telemetriaSnapshotScheduled`
+      // corre cada 6 horas y lo hace server-side via Admin SDK.
+      // Las rules de TELEMETRIA_HISTORICO quedaron en `write: if false`,
+      // así que cualquier intento desde acá fallaría con
+      // permission-denied.
     } catch (e) {
       debugPrint('❌ AutoSync ciclo falló: $e');
       dashboard?.failCycle(e.toString());

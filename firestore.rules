@@ -129,11 +129,12 @@ service cloud.firestore {
     // ========================================================================
 
     match /TELEMETRIA_HISTORICO/{doc=**} {
-      // Hoy escribe el AutoSync de la app (corre cuando el admin tiene
-      // la app abierta). Cuando se mueva al bot, esto queda igual
-      // porque el bot bypasea las rules.
-      // TODO: cambiar `write` a `if false` cuando se mueva al bot.
-      allow read, write: if isAdmin();
+      // Solo escribe la scheduled function `telemetriaSnapshotScheduled`
+      // (cada 6 horas) vía Admin SDK. La app cliente NO escribe acá
+      // desde 2026-04-29 — el cliente solo lee para mostrar el reporte
+      // de consumo.
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     // ========================================================================

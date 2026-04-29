@@ -9,6 +9,7 @@
  */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { defineSecret } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
@@ -496,3 +497,205 @@ export const volvoProxy = onCall(
   }
 );
 
+// ============================================================================
+// telemetriaSnapshotScheduled
+// ============================================================================
+// Scheduled function que cada 6 horas:
+//   1) Llama Volvo `/vehicle/vehicles` con secrets server-side.
+//   2) Cruza con la colección VEHICULOS para mapear VIN → patente.
+//   3) Escribe un snapshot idempotente por día y patente en
+//      TELEMETRIA_HISTORICO (id `{patente}_{YYYY-MM-DD}`).
+//
+// Reemplaza la lógica que antes corría en el cliente Flutter
+// (`AutoSyncService` → `VehiculoRepository.guardarSnapshotsDiarios`).
+// Vivir server-side permite:
+//   - Cerrar `TELEMETRIA_HISTORICO` con `write: if false` en las rules
+//     (solo Admin SDK puede escribir).
+//   - Que el snapshot se capture aún cuando ningún admin tenga la app
+//     abierta.
+//
+// Frecuencia: cada 6 horas. El doc es idempotente por día, con lo cual
+// múltiples corridas se sobreescriben. La frecuencia da resiliencia
+// ante fallos puntuales sin generar costos significativos (4 calls
+// Volvo + 4 batch writes por día).
+
+export const telemetriaSnapshotScheduled = onSchedule(
+  {
+    schedule: "every 6 hours",
+    timeZone: "America/Argentina/Buenos_Aires",
+    secrets: [volvoUsername, volvoPassword],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async () => {
+    logger.info("[telemetriaSnapshot] iniciando ciclo");
+
+    // ─── 1. Fetch flota Volvo ──────────────────────────────────────
+    const authHeader = "Basic " + Buffer.from(
+      `${volvoUsername.value()}:${volvoPassword.value()}`
+    ).toString("base64");
+
+    // El endpoint `/vehicle/vehicles` NO trae telemetría (solo metadata
+    // como vin/marca/modelo). Para `accumulatedData.totalFuelConsumption`
+    // y `hrTotalVehicleDistance` hay que pegarle a `/vehicle/vehiclestatuses`
+    // con `latestOnly=true` (devuelve el último snapshot de cada unidad
+    // en una sola request).
+    let cache: unknown[] = [];
+    try {
+      const url =
+        `${VOLVO_BASE}/vehicle/vehiclestatuses?latestOnly=true`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Authorization": authHeader,
+          "Accept": ACCEPT_STATUSES,
+        },
+      });
+      if (!res.ok) {
+        logger.error("[telemetriaSnapshot] Volvo HTTP error", {
+          statusCode: res.status,
+        });
+        return;
+      }
+      const body = (await res.json()) as Record<string, unknown>;
+      const statusResponse = body?.vehicleStatusResponse as
+        | Record<string, unknown>
+        | undefined;
+      const list = statusResponse?.vehicleStatuses;
+      if (Array.isArray(list)) cache = list;
+      logger.info("[telemetriaSnapshot] estados recibidos", {
+        recibidos: cache.length,
+        sampleKeys: cache.length > 0 ?
+          Object.keys(cache[0] as object).slice(0, 20) :
+          [],
+      });
+    } catch (e) {
+      logger.error("[telemetriaSnapshot] error consultando Volvo", {
+        error: (e as Error).message,
+      });
+      return;
+    }
+
+    if (cache.length === 0) {
+      logger.warn("[telemetriaSnapshot] flota Volvo vacía, abortando");
+      return;
+    }
+
+    // ─── 2. Map VIN → patente desde Firestore ──────────────────────
+    const vehiculosSnap = await db.collection("VEHICULOS").get();
+    const vinToPatente = new Map<string, string>();
+    for (const doc of vehiculosSnap.docs) {
+      const data = doc.data();
+      const vin = (data.VIN ?? "").toString().trim().toUpperCase();
+      if (vin && vin !== "-") {
+        vinToPatente.set(vin, doc.id);
+      }
+    }
+
+    // ─── 3. Fecha del snapshot (midnight ARG) ──────────────────────
+    // Buenos Aires es UTC-3 sin DST. Construimos la fecha en TZ ARG
+    // para que `fechaTxt` y `fecha` Timestamp sean consistentes con la
+    // versión cliente original (que usaba DateTime.now() local).
+    const ahora = new Date();
+    const fechaTxt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(ahora); // "2026-04-29"
+    const [year, month, day] = fechaTxt.split("-").map(Number);
+    const fechaMidnight = new Date(Date.UTC(year, month - 1, day, 3, 0, 0));
+
+    // ─── 4. Batch write a TELEMETRIA_HISTORICO ─────────────────────
+    const batch = db.batch();
+    let escritos = 0;
+    let saltadosVin = 0;
+    let saltadosPatente = 0;
+    let saltadosCeros = 0;
+
+    for (const v of cache) {
+      const vehiculo = v as Record<string, unknown>;
+      const vin = (vehiculo.vin ?? "").toString().trim().toUpperCase();
+      if (!vin) {
+        saltadosVin++;
+        continue;
+      }
+      const patente = vinToPatente.get(vin);
+      if (!patente) {
+        saltadosPatente++;
+        continue;
+      }
+
+      // Litros acumulados — el endpoint vehiclestatuses lo expone como
+      // `engineTotalFuelUsed` al primer nivel **en MILILITROS**. Para
+      // que el campo `litros_acumulados` esté efectivamente en litros
+      // (consistente con su nombre y con el reporte de consumo),
+      // dividimos por 1000. Mantenemos `accumulatedData.totalFuelConsumption`
+      // como fallback por si en algún tipo de unidad viene nested.
+      let litrosMl = 0;
+      const top = vehiculo.engineTotalFuelUsed;
+      if (typeof top === "number") {
+        litrosMl = top;
+      } else if (top != null) {
+        litrosMl = Number(top);
+      } else {
+        const acc = vehiculo.accumulatedData;
+        if (acc && typeof acc === "object") {
+          const accObj = acc as Record<string, unknown>;
+          const total = accObj.totalFuelConsumption;
+          if (typeof total === "number") {
+            litrosMl = total;
+          } else if (total != null) {
+            litrosMl = Number(total);
+          }
+        }
+      }
+      if (Number.isNaN(litrosMl)) litrosMl = 0;
+      const litros = litrosMl / 1000;
+
+      // Odómetro — Volvo lo entrega en metros.
+      const metros = Number(
+        vehiculo.hrTotalVehicleDistance ?? vehiculo.lastKnownOdometer ?? 0
+      );
+      const km = metros / 1000;
+
+      // Sin telemetría útil no escribimos.
+      if (litros === 0 && km === 0) {
+        saltadosCeros++;
+        continue;
+      }
+
+      const docId = `${patente}_${fechaTxt}`;
+      batch.set(db.collection("TELEMETRIA_HISTORICO").doc(docId), {
+        patente,
+        vin,
+        fecha: Timestamp.fromDate(fechaMidnight),
+        litros_acumulados: litros,
+        km,
+        timestamp: FieldValue.serverTimestamp(),
+      });
+      escritos++;
+    }
+
+    if (escritos === 0) {
+      logger.info("[telemetriaSnapshot] sin datos útiles, nada que escribir", {
+        recibidos: cache.length,
+        saltadosVin,
+        saltadosPatente,
+        saltadosCeros,
+        vinesEnFirestore: vinToPatente.size,
+      });
+      return;
+    }
+
+    await batch.commit();
+    logger.info("[telemetriaSnapshot] OK", {
+      escritos,
+      fechaTxt,
+      recibidos: cache.length,
+      saltadosVin,
+      saltadosPatente,
+      saltadosCeros,
+    });
+  }
+);
