@@ -1,12 +1,16 @@
 /**
  * Cloud Functions de S.M.A.R.T. Logística.
  *
- * Por ahora solo expone `loginConDni`: el endpoint que reemplaza al
- * login del cliente que validaba contra Firestore directo.
+ * Endpoints expuestos:
+ *   - `loginConDni`: emite custom token de Firebase Auth a partir de
+ *     un par DNI + contraseña (con rate limit + migración bcrypt).
+ *   - `volvoProxy`: llama la API de Volvo Connect en nombre del admin
+ *     manteniendo las credenciales server-side (Secret Manager).
  */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { setGlobalOptions } from "firebase-functions/v2";
+import { defineSecret } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -332,3 +336,163 @@ async function registrarIntentoFallido(
     return intentos;
   });
 }
+
+// ============================================================================
+// volvoProxy
+// ============================================================================
+// Proxy server-side a la API de Volvo Connect. Mantiene las credenciales
+// (`VOLVO_USERNAME`/`VOLVO_PASSWORD`) en Secret Manager y solo permite
+// invocar a admins autenticados via Firebase Auth custom token.
+//
+// La function recibe `{operation, params}` y traduce a un GET autenticado
+// contra Volvo. Devuelve `{statusCode, data}` para que el cliente conserve
+// su capacidad de hacer parsing tolerante (paths legacy, etc).
+//
+// Setup inicial (una sola vez):
+//   firebase functions:secrets:set VOLVO_USERNAME
+//   firebase functions:secrets:set VOLVO_PASSWORD
+//
+// Operaciones soportadas:
+//   - "flota"        → GET /vehicle/vehicles
+//   - "telemetria"   → GET /vehicle/vehiclestatuses?vin=X&additionalContent=VOLVOGROUPSNAPSHOT
+//   - "kilometraje"  → GET /vehicle/vehiclestatuses?vin=X
+//   - "estadosFlota" → GET /vehicle/vehiclestatuses (todos)
+
+const volvoUsername = defineSecret("VOLVO_USERNAME");
+const volvoPassword = defineSecret("VOLVO_PASSWORD");
+
+const VOLVO_BASE = "https://api.volvotrucks.com";
+const ACCEPT_VEHICLES =
+  "application/x.volvogroup.com.vehicles.v1.0+json; UTF-8";
+const ACCEPT_STATUSES =
+  "application/x.volvogroup.com.vehiclestatuses.v1.0+json; UTF-8";
+
+interface VolvoProxyResult {
+  statusCode: number;
+  data: unknown;
+}
+
+export const volvoProxy = onCall(
+  {
+    secrets: [volvoUsername, volvoPassword],
+    timeoutSeconds: 30,
+  },
+  async (request): Promise<VolvoProxyResult> => {
+    // ─── Auth: solo admin logueado ─────────────────────────────────
+    const rol = request.auth?.token?.rol;
+    if (!request.auth || rol !== "ADMIN") {
+      logger.warn("[volvoProxy] llamada sin auth ADMIN", {
+        uid: request.auth?.uid ?? "no-uid",
+        rol: rol ?? "no-rol",
+      });
+      throw new HttpsError(
+        "permission-denied",
+        "Solo administradores pueden consultar Volvo."
+      );
+    }
+
+    // ─── Validación de input ───────────────────────────────────────
+    const operation = (request.data?.operation ?? "").toString();
+    const params = (request.data?.params ?? {}) as Record<string, unknown>;
+
+    if (!operation) {
+      throw new HttpsError("invalid-argument", "Falta `operation`.");
+    }
+
+    // ─── Routing por operación → URL Volvo ─────────────────────────
+    let url: string;
+    let accept: string;
+
+    switch (operation) {
+    case "flota": {
+      url = `${VOLVO_BASE}/vehicle/vehicles`;
+      accept = ACCEPT_VEHICLES;
+      break;
+    }
+    case "telemetria": {
+      const vin = (params.vin ?? "").toString().trim().toUpperCase();
+      if (!vin) {
+        throw new HttpsError("invalid-argument", "Falta `params.vin`.");
+      }
+      const qs = new URLSearchParams({
+        vin,
+        latestOnly: "true",
+        additionalContent: "VOLVOGROUPSNAPSHOT",
+      });
+      url = `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
+      accept = ACCEPT_STATUSES;
+      break;
+    }
+    case "kilometraje": {
+      const vin = (params.vin ?? "").toString().trim().toUpperCase();
+      if (!vin) {
+        throw new HttpsError("invalid-argument", "Falta `params.vin`.");
+      }
+      const qs = new URLSearchParams({
+        vin,
+        latestOnly: "true",
+      });
+      url = `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
+      accept = ACCEPT_STATUSES;
+      break;
+    }
+    case "estadosFlota": {
+      const qs = new URLSearchParams({ latestOnly: "true" });
+      url = `${VOLVO_BASE}/vehicle/vehiclestatuses?${qs.toString()}`;
+      accept = ACCEPT_STATUSES;
+      break;
+    }
+    default:
+      throw new HttpsError(
+        "invalid-argument",
+        `Operación '${operation}' no soportada.`
+      );
+    }
+
+    // ─── Llamada a Volvo ───────────────────────────────────────────
+    const authHeader = "Basic " + Buffer.from(
+      `${volvoUsername.value()}:${volvoPassword.value()}`
+    ).toString("base64");
+
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Authorization": authHeader,
+          "Accept": accept,
+        },
+      });
+
+      // Volvo a veces devuelve cuerpo no-JSON ante 401/406. Toleramos.
+      let body: unknown = null;
+      const text = await res.text();
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = { raw: text };
+        }
+      }
+
+      logger.info("[volvoProxy] OK", {
+        operation,
+        statusCode: res.status,
+      });
+
+      return {
+        statusCode: res.status,
+        data: body,
+      };
+    } catch (e) {
+      logger.error("[volvoProxy] error", {
+        operation,
+        error: (e as Error).message,
+      });
+      throw new HttpsError(
+        "unavailable",
+        "Error consultando Volvo. Reintentá en unos segundos."
+      );
+    }
+  }
+);
+

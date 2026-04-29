@@ -1,5 +1,5 @@
 import 'package:dio/dio.dart';
-import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 /// Resultado de un request de diagnóstico contra Volvo. Pensado para
@@ -58,72 +58,53 @@ class VolvoTelemetria {
       autonomiaKm != null;
 }
 
+/// Resultado interno del proxy. Mimicea la estructura mínima de [Response]
+/// para que las funciones públicas de [VolvoApiService] puedan parsear
+/// el body de Volvo igual que cuando llamábamos directo.
+class _ProxyResponse {
+  final int statusCode;
+  final dynamic data;
+  const _ProxyResponse({required this.statusCode, required this.data});
+}
+
 /// Servicio de integración con Volvo Connect — Volvo Group Vehicle API.
 ///
 /// 📚 BASADO EN DOC OFICIAL (Volvo Trucks Developer Portal):
 ///   - Volvo Group Vehicle API v1.0.6  →  /vehicle/...  (odómetro y estado)
 ///   - rFMS v2.1 (estándar abierto)    →  /rfms/...     (fallback)
 ///
-/// 🔐 AUTH: HTTP Basic Authentication. Sin OAuth, sin token, sin renovación.
-///   header: Authorization: Basic <base64(usuario:contraseña)>
+/// 🔐 AUTH: A partir de 2026-04-29 las credenciales NO viajan en el
+///   cliente. Toda llamada va a la Cloud Function `volvoProxy`, que
+///   valida que el caller sea admin (custom claim `rol == 'ADMIN'` en el
+///   JWT de Firebase Auth) y agrega el header Basic Auth contra Volvo
+///   con credenciales guardadas en Secret Manager
+///   (`VOLVO_USERNAME`/`VOLVO_PASSWORD`).
+///
+///   Setup inicial (una sola vez por proyecto):
+///     firebase functions:secrets:set VOLVO_USERNAME
+///     firebase functions:secrets:set VOLVO_PASSWORD
+///     firebase deploy --only functions:volvoProxy
 ///
 /// 📦 Campo de odómetro: `hrTotalVehicleDistance` en METROS, dentro de
 ///   vehicleStatusResponse.vehicleStatuses[i].hrTotalVehicleDistance
 ///
-/// ⚠️ Rate limit: 1 request cada 10 seg por endpoint y por usuario.
-/// 🔒 Producción: mover credenciales a Cloud Functions o --dart-define.
+/// ⚠️ Rate limit: 1 request cada 10 seg por endpoint y por usuario
+///   (lo aplica Volvo). El proxy NO agrega rate limit propio.
 class VolvoApiService {
-  // ============= CREDENCIALES =============
-  // Las credenciales se leen ÚNICAMENTE de variables de compilación
-  // (`--dart-define`). Nunca se hardcodean ni se compilan en el binario:
-  // si lo hicieran, cualquiera que descomprima el APK las obtendría.
-  //
-  // Para correr en desarrollo:
-  //   flutter run --dart-define-from-file=secrets.json
-  //
-  // `secrets.json` (NO commiteado — está en .gitignore) contiene:
-  //   {
-  //     "VOLVO_USERNAME": "tu_usuario",
-  //     "VOLVO_PASSWORD": "tu_contraseña"
-  //   }
-  //
-  // En producción las env vars deben inyectarse desde el pipeline de build
-  // (CI/CD), preferentemente migrando el flujo a una Cloud Function que
-  // actúe como proxy y mantenga las credenciales server-side.
-  static const String _envUsername =
-      String.fromEnvironment('VOLVO_USERNAME');
-  static const String _envPassword =
-      String.fromEnvironment('VOLVO_PASSWORD');
-
-  String get _username => _envUsername;
-  String get _password => _envPassword;
-
-  bool get _hasCredentials =>
-      _envUsername.isNotEmpty && _envPassword.isNotEmpty;
-
-  // ============= ENDPOINTS =============
-  // Volvo Group Vehicle API (la que tiene odómetro detallado).
-  static const String _baseUrl = 'https://api.volvotrucks.com';
-  static const String _vehiclesUrl = '$_baseUrl/vehicle/vehicles';
-  static const String _statusesUrl = '$_baseUrl/vehicle/vehiclestatuses';
-
-  // ============= ACCEPT HEADERS (exactos de la spec) =============
-  // Estos NO son intercambiables: Volvo rechaza con 406 si no coinciden.
-  static const String _acceptVehicles =
-      'application/x.volvogroup.com.vehicles.v1.0+json; UTF-8';
-  static const String _acceptStatuses =
-      'application/x.volvogroup.com.vehiclestatuses.v1.0+json; UTF-8';
-
-  // Header Basic Auth, calculado una sola vez. Si las credenciales no
-  // fueron inyectadas vía --dart-define, dejamos un valor vacío y los
-  // requests devuelven [] sin pegarle a Volvo (ver guard `_hasCredentials`).
-  late final String _authHeader = _hasCredentials
-      ? 'Basic ${base64Encode(utf8.encode('$_username:$_password'))}'
-      : '';
+  // ============= ENDPOINT DEL PROXY =============
+  // Cloud Function callable desplegada. Mismo project, misma región.
+  // Si en el futuro cambiamos a Gen1 o cambia el pattern, solo ajustamos
+  // esta constante.
+  static const String _proxyEndpoint =
+      'https://us-central1-logisticaapp-e539a.cloudfunctions.net/volvoProxy';
 
   // ============= CIRCUIT BREAKER =============
-  // Si la auth falla 3 veces seguidas con 401, dejamos de pegarle a Volvo
-  // hasta que la app se reinicie (o el admin llame resetAuthFailures()).
+  // Si auth/permisos fallan 3 veces seguidas, dejamos de pegarle al
+  // proxy hasta que la app se reinicie (o el admin llame
+  // `resetAuthFailures()`). Cubre los casos:
+  //   - admin sesión vencida (HTTP 401 en el callable)
+  //   - chofer logueado intentando sync (HTTP 403 en el callable)
+  //   - credenciales Volvo expiradas (HTTP 401 propagado del proxy)
   int _consecutive401 = 0;
   static const int _max401 = 3;
   bool get _circuitOpen => _consecutive401 >= _max401;
@@ -134,96 +115,119 @@ class VolvoApiService {
   final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 20),
-      receiveTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(seconds: 30),
       sendTimeout: const Duration(seconds: 20),
     ),
   );
 
-  // ============= LOGGING =============
+  // ===========================================================================
+  // HELPER: llamada al proxy
+  // ===========================================================================
 
-  void _logDioResult(String label, {Response? response, Object? error}) {
-    if (error != null) {
-      if (error is DioException) {
-        debugPrint("🚨 [VOLVO $label] DioException type: ${error.type}");
-        debugPrint("🚨 [VOLVO $label] message: ${error.message}");
-        debugPrint("🚨 [VOLVO $label] statusCode: ${error.response?.statusCode}");
-        debugPrint("🚨 [VOLVO $label] responseData: ${error.response?.data}");
-        debugPrint("🚨 [VOLVO $label] requestPath: ${error.requestOptions.uri}");
-      } else {
-        debugPrint("🚨 [VOLVO $label] Error inesperado: $error");
-      }
-      return;
+  /// Llama a la Cloud Function `volvoProxy` con auth de Firebase Auth.
+  /// Devuelve un [_ProxyResponse] con el statusCode HTTP que devolvió
+  /// Volvo (no el del proxy) y el body crudo de Volvo. Si el proxy
+  /// rechaza la llamada (no admin, sin token, etc) devuelve statusCode
+  /// 401/403 con `data = null`.
+  Future<_ProxyResponse> _callVolvoProxy({
+    required String operation,
+    Map<String, dynamic>? params,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      // Sin sesión Firebase no se puede llamar al proxy (rechaza con
+      // 401 igual). Cortamos antes para no quemar latencia de red.
+      return const _ProxyResponse(statusCode: 401, data: null);
     }
 
-    if (response != null &&
-        response.statusCode != null &&
-        response.statusCode! >= 400) {
-      debugPrint("⚠️ [VOLVO $label] HTTP ${response.statusCode}");
-      debugPrint("⚠️ [VOLVO $label] body: ${response.data}");
-      debugPrint("⚠️ [VOLVO $label] url: ${response.requestOptions.uri}");
+    try {
+      final idToken = await user.getIdToken();
+      final response = await _dio.post<Map<String, dynamic>>(
+        _proxyEndpoint,
+        data: {
+          // Protocolo callable: payload va envuelto en `data`.
+          'data': {
+            'operation': operation,
+            'params': params ?? const <String, dynamic>{},
+          },
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          validateStatus: (_) => true,
+          responseType: ResponseType.json,
+        ),
+      );
+
+      final httpStatus = response.statusCode ?? 500;
+
+      // Errores HTTP del proxy: body trae `{"error": {...}}`.
+      if (httpStatus >= 400) {
+        final err = response.data?['error'] as Map<String, dynamic>?;
+        debugPrint(
+            "🚨 [volvoProxy/$operation] HTTP $httpStatus → ${err?['status']}: ${err?['message']}");
+        return _ProxyResponse(statusCode: httpStatus, data: null);
+      }
+
+      // Respuesta OK del callable: body es `{"result": {statusCode, data}}`.
+      final result = response.data?['result'] as Map<String, dynamic>?;
+      if (result == null) {
+        return const _ProxyResponse(statusCode: 500, data: null);
+      }
+      final upstreamStatus =
+          (result['statusCode'] as num?)?.toInt() ?? 500;
+      final upstreamData = result['data'];
+      return _ProxyResponse(
+        statusCode: upstreamStatus,
+        data: upstreamData,
+      );
+    } catch (e) {
+      debugPrint("🚨 [volvoProxy/$operation] error: $e");
+      return const _ProxyResponse(statusCode: 500, data: null);
     }
   }
 
-  bool _trackAuthState(Response response) {
-    if (response.statusCode == 401) {
+  /// Reusa el contador del circuit breaker para los 3 modos de auth-fail
+  /// (proxy 401/403 o Volvo 401 propagado vía proxy 200 con statusCode 401).
+  void _trackAuthState(int statusCode) {
+    if (statusCode == 401 || statusCode == 403) {
       _consecutive401++;
       debugPrint(
-          "🚨 [VOLVO AUTH] Credenciales rechazadas ($_consecutive401/$_max401). "
+          "🚨 [VOLVO AUTH] Rechazo de auth ($_consecutive401/$_max401). "
           "${_circuitOpen ? 'Circuit breaker ABIERTO. Pausando llamadas.' : ''}");
-      return false;
-    }
-    if (response.statusCode != null &&
-        response.statusCode! >= 200 &&
-        response.statusCode! < 300) {
+    } else if (statusCode >= 200 && statusCode < 300) {
       _consecutive401 = 0;
-      return true;
     }
-    return false;
   }
 
   // ===========================================================================
-  // 1. LISTA DE VEHÍCULOS — /vehicle/vehicles
+  // 1. FLOTA — /vehicle/vehicles
   // ===========================================================================
 
   /// Devuelve la lista de vehículos asignados a la cuenta de API.
   /// Respuesta: vehicleResponse.vehicles[]
   Future<List<dynamic>> traerDatosFlota() async {
-    if (!_hasCredentials) {
-      debugPrint(
-          "⚠️ [VOLVO FLOTA] Sin credenciales (faltan VOLVO_USERNAME / VOLVO_PASSWORD en --dart-define).");
-      return [];
-    }
     if (_circuitOpen) {
       debugPrint("⏸️ [VOLVO FLOTA] Circuit breaker abierto. Saltando llamada.");
       return [];
     }
 
-    try {
-      final response = await _dio.get(
-        _vehiclesUrl,
-        options: Options(
-          headers: {
-            'Authorization': _authHeader,
-            'Accept': _acceptVehicles,
-          },
-          validateStatus: (s) => true,
-        ),
-      );
+    final res = await _callVolvoProxy(operation: 'flota');
+    _trackAuthState(res.statusCode);
 
-      _trackAuthState(response);
-
-      if (response.statusCode == 200 && response.data != null) {
-        final list = response.data['vehicleResponse']?['vehicles'] ?? [];
+    if (res.statusCode == 200 && res.data is Map) {
+      final body = res.data as Map;
+      final list = body['vehicleResponse']?['vehicles'] ?? [];
+      if (list is List) {
         debugPrint("📦 [VOLVO FLOTA] OK: ${list.length} unidades recibidas");
-        return list is List ? list : [];
+        return list;
       }
-
-      _logDioResult("FLOTA", response: response);
-      return [];
-    } catch (e) {
-      _logDioResult("FLOTA", error: e);
-      return [];
     }
+
+    debugPrint("⚠️ [VOLVO FLOTA] HTTP ${res.statusCode}");
+    return [];
   }
 
   // ===========================================================================
@@ -239,59 +243,38 @@ class VolvoApiService {
     final String cleanVin = vin.trim().toUpperCase();
     if (cleanVin.isEmpty) return null;
 
-    if (!_hasCredentials) {
-      debugPrint(
-          "⚠️ [VOLVO KM $cleanVin] Sin credenciales — saltando llamada.");
-      return null;
-    }
     if (_circuitOpen) {
       debugPrint("⏸️ [VOLVO KM $cleanVin] Circuit breaker abierto.");
       return null;
     }
 
-    try {
-      final res = await _dio.get(
-        _statusesUrl,
-        queryParameters: {
-          'vin': cleanVin,
-          'latestOnly': 'true',
-        },
-        options: Options(
-          headers: {
-            'Authorization': _authHeader,
-            'Accept': _acceptStatuses,
-          },
-          validateStatus: (s) => true,
-        ),
-      );
+    final res = await _callVolvoProxy(
+      operation: 'kilometraje',
+      params: {'vin': cleanVin},
+    );
+    _trackAuthState(res.statusCode);
 
-      _trackAuthState(res);
-
-      if (res.statusCode == 200 && res.data != null) {
-        final statuses = res.data['vehicleStatusResponse']?['vehicleStatuses'];
-        if (statuses is List && statuses.isNotEmpty) {
-          final s = statuses[0];
-          // Campo principal según doc oficial: hrTotalVehicleDistance (metros).
-          final odo = s['hrTotalVehicleDistance'];
-          if (odo != null) {
-            final m = double.tryParse(odo.toString());
-            if (m != null && m > 0) {
-              debugPrint(
-                  "✅ [VOLVO KM $cleanVin] ${(m / 1000).toStringAsFixed(0)} km");
-              return m;
-            }
+    if (res.statusCode == 200 && res.data is Map) {
+      final body = res.data as Map;
+      final statuses = body['vehicleStatusResponse']?['vehicleStatuses'];
+      if (statuses is List && statuses.isNotEmpty) {
+        final s = statuses[0];
+        final odo = s is Map ? s['hrTotalVehicleDistance'] : null;
+        if (odo != null) {
+          final m = double.tryParse(odo.toString());
+          if (m != null && m > 0) {
+            debugPrint(
+                "✅ [VOLVO KM $cleanVin] ${(m / 1000).toStringAsFixed(0)} km");
+            return m;
           }
         }
-        debugPrint("ℹ️ [VOLVO KM $cleanVin] Respuesta 200 pero sin odómetro.");
-        return null;
       }
-
-      _logDioResult("STATUS $cleanVin", response: res);
-      return null;
-    } catch (e) {
-      _logDioResult("STATUS $cleanVin", error: e);
+      debugPrint("ℹ️ [VOLVO KM $cleanVin] Respuesta 200 pero sin odómetro.");
       return null;
     }
+
+    debugPrint("⚠️ [VOLVO KM $cleanVin] HTTP ${res.statusCode}");
+    return null;
   }
 
   // ===========================================================================
@@ -309,60 +292,36 @@ class VolvoApiService {
     final String cleanVin = vin.trim().toUpperCase();
     if (cleanVin.isEmpty) return const VolvoTelemetria();
 
-    if (!_hasCredentials) {
-      debugPrint(
-          "⚠️ [VOLVO TELE $cleanVin] Sin credenciales — saltando llamada.");
-      return const VolvoTelemetria();
-    }
     if (_circuitOpen) {
       debugPrint("⏸️ [VOLVO TELE $cleanVin] Circuit breaker abierto.");
       return const VolvoTelemetria();
     }
 
-    try {
-      final res = await _dio.get(
-        _statusesUrl,
-        queryParameters: {
-          'vin': cleanVin,
-          'latestOnly': 'true',
-          // CRÍTICO: sin este parámetro la API devuelve solo el snapshot
-          // base (odómetro, posición) y OMITE fuelLevel + estimatedDistance.
-          // Con VOLVOGROUPSNAPSHOT vienen los campos del grupo Volvo.
-          'additionalContent': 'VOLVOGROUPSNAPSHOT',
-        },
-        options: Options(
-          headers: {
-            'Authorization': _authHeader,
-            'Accept': _acceptStatuses,
-          },
-          validateStatus: (s) => true,
-        ),
-      );
+    final res = await _callVolvoProxy(
+      operation: 'telemetria',
+      params: {'vin': cleanVin},
+    );
+    _trackAuthState(res.statusCode);
 
-      _trackAuthState(res);
-
-      if (res.statusCode == 200 && res.data != null) {
-        final statuses = res.data['vehicleStatusResponse']?['vehicleStatuses'];
-        if (statuses is List && statuses.isNotEmpty) {
-          final tele = _parseStatus(statuses[0]);
-          if (tele.tieneAlgunDato) {
-            // Log de éxito por vehículo desactivado: el dashboard de
-            // sync ya muestra la info por unidad (km/fuel/autonomía).
-            // Si necesitás re-debuggear, descomentar.
-            return tele;
-          }
+    if (res.statusCode == 200 && res.data is Map) {
+      final body = res.data as Map;
+      final statuses = body['vehicleStatusResponse']?['vehicleStatuses'];
+      if (statuses is List && statuses.isNotEmpty) {
+        final tele = _parseStatus(statuses[0]);
+        if (tele.tieneAlgunDato) {
+          // Log de éxito por vehículo desactivado: el dashboard de
+          // sync ya muestra la info por unidad (km/fuel/autonomía).
+          // Si necesitás re-debuggear, descomentar.
+          return tele;
         }
-        debugPrint(
-            "ℹ️ [VOLVO TELE $cleanVin] Respuesta 200 pero sin datos útiles.");
-        return const VolvoTelemetria();
       }
-
-      _logDioResult("TELE $cleanVin", response: res);
-      return const VolvoTelemetria();
-    } catch (e) {
-      _logDioResult("TELE $cleanVin", error: e);
+      debugPrint(
+          "ℹ️ [VOLVO TELE $cleanVin] Respuesta 200 pero sin datos útiles.");
       return const VolvoTelemetria();
     }
+
+    debugPrint("⚠️ [VOLVO TELE $cleanVin] HTTP ${res.statusCode}");
+    return const VolvoTelemetria();
   }
 
   /// Parser de un objeto `vehicleStatuses[i]` del response oficial.
@@ -388,41 +347,39 @@ class VolvoApiService {
   /// versión vieja del API los aplana al primer nivel.
   VolvoTelemetria _parseStatus(dynamic raw) {
     if (raw is! Map) return const VolvoTelemetria();
-
-    // 1) Odómetro (metros). Está al primer nivel del status.
-    final odo = _toDouble(raw['hrTotalVehicleDistance']);
-
-    final snap = raw['snapshotData'];
+    final r = raw;
+    final snap = r['snapshotData'];
     final volvoSnap = (snap is Map) ? snap['volvoGroupSnapshot'] : null;
 
-    // 2) Nivel de combustible — buscar en orden, primero el path real
-    //    confirmado, después fallbacks.
-    double? fuel;
-    if (snap is Map) fuel = _toDouble(snap['fuelLevel1']);
-    if (fuel == null) {
-      final fuelObj = raw['fuelLevel'];
-      if (fuelObj is Map) fuel = _toDouble(fuelObj['fuelLevel1']);
+    // Odómetro: doc oficial → hrTotalVehicleDistance al primer nivel.
+    final double? odoMetros = _toDouble(r['hrTotalVehicleDistance']);
+
+    // Nivel de combustible: snapshotData.fuelLevel1 (0..100). Algunos
+    // responses lo aplanan al primer nivel.
+    double? fuelPct;
+    if (snap is Map) {
+      fuelPct = _toDouble(snap['fuelLevel1']) ?? _toDouble(snap['fuelLevel']);
     }
-    fuel ??= _toDouble(raw['fuelLevel1']);
+    fuelPct ??= _toDouble(r['fuelLevel1']) ?? _toDouble(r['fuelLevel']);
 
-    // 3) Autonomía — el path real es snapshotData.volvoGroupSnapshot
-    //    .estimatedDistanceToEmpty.{fuel|total|gas|batteryPack} en metros.
-    //    Probamos varios contenedores por compatibilidad.
-    final autonMetros = _extraerAutonomiaMetros(raw, snap, volvoSnap);
-    final autonKm = autonMetros != null ? autonMetros / 1000 : null;
+    // Autonomía: estimatedDistanceToEmpty puede aparecer en muchos
+    // contenedores. _extraerAutonomiaMetros recorre todos los posibles
+    // y devuelve metros (luego convertimos a km).
+    final autonomiaMetros = _extraerAutonomiaMetros(r, snap, volvoSnap);
+    final autonomiaKm =
+        autonomiaMetros != null ? (autonomiaMetros / 1000) : null;
 
-    // 4) Timestamp del snapshot.
+    // Timestamp del snapshot — cualquiera de los path conocidos.
     DateTime? leidoEn;
-    final ts = raw['receivedDateTime'] ?? raw['createdDateTime'];
+    final ts = r['receivedDateTime'] ?? r['createdDateTime'];
     if (ts is String) {
       leidoEn = DateTime.tryParse(ts);
     }
 
     return VolvoTelemetria(
-      odometroMetros: (odo != null && odo > 0) ? odo : null,
-      nivelCombustiblePct:
-          (fuel != null && fuel >= 0 && fuel <= 100) ? fuel : null,
-      autonomiaKm: (autonKm != null && autonKm >= 0) ? autonKm : null,
+      odometroMetros: odoMetros,
+      nivelCombustiblePct: fuelPct,
+      autonomiaKm: autonomiaKm,
       leidoEn: leidoEn,
     );
   }
@@ -480,8 +437,8 @@ class VolvoApiService {
   /// algún campo no aparece y necesitamos ver qué viene literalmente.
   Future<VolvoDiagnostico> diagnosticarStatus(String vin) async {
     final cleanVin = vin.trim().toUpperCase();
-    final url = '$_statusesUrl?vin=$cleanVin&latestOnly=true'
-        '&additionalContent=VOLVOGROUPSNAPSHOT';
+    final urlInformativa =
+        'volvoProxy(telemetria, vin=$cleanVin)';
 
     if (cleanVin.isEmpty) {
       return VolvoDiagnostico(
@@ -490,59 +447,28 @@ class VolvoApiService {
         rawBody: null,
         errorMessage: 'VIN vacío.',
         duracion: Duration.zero,
-        urlConsultada: url,
-      );
-    }
-    if (!_hasCredentials) {
-      return VolvoDiagnostico(
-        statusCode: null,
-        statusMessage: null,
-        rawBody: null,
-        errorMessage:
-            'Faltan credenciales (VOLVO_USERNAME / VOLVO_PASSWORD en --dart-define).',
-        duracion: Duration.zero,
-        urlConsultada: url,
+        urlConsultada: urlInformativa,
       );
     }
 
     final stopwatch = Stopwatch()..start();
-    try {
-      final res = await _dio.get(
-        _statusesUrl,
-        queryParameters: {
-          'vin': cleanVin,
-          'latestOnly': 'true',
-          'additionalContent': 'VOLVOGROUPSNAPSHOT',
-        },
-        options: Options(
-          headers: {
-            'Authorization': _authHeader,
-            'Accept': _acceptStatuses,
-          },
-          validateStatus: (s) => true,
-        ),
-      );
-      stopwatch.stop();
-      _trackAuthState(res);
-      return VolvoDiagnostico(
-        statusCode: res.statusCode,
-        statusMessage: res.statusMessage,
-        rawBody: res.data,
-        errorMessage: null,
-        duracion: stopwatch.elapsed,
-        urlConsultada: url,
-      );
-    } catch (e) {
-      stopwatch.stop();
-      return VolvoDiagnostico(
-        statusCode: null,
-        statusMessage: null,
-        rawBody: null,
-        errorMessage: e.toString(),
-        duracion: stopwatch.elapsed,
-        urlConsultada: url,
-      );
-    }
+    final res = await _callVolvoProxy(
+      operation: 'telemetria',
+      params: {'vin': cleanVin},
+    );
+    stopwatch.stop();
+    _trackAuthState(res.statusCode);
+
+    return VolvoDiagnostico(
+      statusCode: res.statusCode,
+      statusMessage: null,
+      rawBody: res.data,
+      errorMessage: res.data == null && res.statusCode >= 400
+          ? 'Proxy rechazó o Volvo devolvió error (HTTP ${res.statusCode}).'
+          : null,
+      duracion: stopwatch.elapsed,
+      urlConsultada: urlInformativa,
+    );
   }
 
   // ===========================================================================
@@ -552,39 +478,21 @@ class VolvoApiService {
   /// Trae el último estado de TODAS las unidades en una sola llamada.
   /// Útil como caché previo a sincronizar uno por uno.
   Future<List<dynamic>> traerEstadosFlota() async {
-    if (!_hasCredentials) {
-      debugPrint("⚠️ [VOLVO STATUS-ALL] Sin credenciales — saltando llamada.");
-      return [];
-    }
     if (_circuitOpen) return [];
 
-    try {
-      final res = await _dio.get(
-        _statusesUrl,
-        queryParameters: {'latestOnly': 'true'},
-        options: Options(
-          headers: {
-            'Authorization': _authHeader,
-            'Accept': _acceptStatuses,
-          },
-          validateStatus: (s) => true,
-        ),
-      );
+    final res = await _callVolvoProxy(operation: 'estadosFlota');
+    _trackAuthState(res.statusCode);
 
-      _trackAuthState(res);
-
-      if (res.statusCode == 200 && res.data != null) {
-        final list =
-            res.data['vehicleStatusResponse']?['vehicleStatuses'] ?? [];
+    if (res.statusCode == 200 && res.data is Map) {
+      final body = res.data as Map;
+      final list = body['vehicleStatusResponse']?['vehicleStatuses'] ?? [];
+      if (list is List) {
         debugPrint("📦 [VOLVO STATUS] OK: ${list.length} estados recibidos");
-        return list is List ? list : [];
+        return list;
       }
-
-      _logDioResult("STATUS-ALL", response: res);
-      return [];
-    } catch (e) {
-      _logDioResult("STATUS-ALL", error: e);
-      return [];
     }
+
+    debugPrint("⚠️ [VOLVO STATUS-ALL] HTTP ${res.statusCode}");
+    return [];
   }
 }
