@@ -96,9 +96,12 @@ class _EmpleadoCard extends StatelessWidget {
     final area = (data['AREA'] ?? AppAreas.manejo).toString();
     final tractor = (data['VEHICULO'] ?? '-').toString();
     final enganche = (data['ENGANCHE'] ?? '-').toString();
-    // Solo mostramos vehículo/enganche si el rol es de manejo. Para
-    // PLANTA / SUPERVISOR / ADMIN no aplica.
-    final mostrarFlota = rol == AppRoles.chofer;
+    // Solo mostramos vehículo/enganche para empleados del área de
+    // MANEJO. Si el admin cambió el área (ej. a TALLER), la card
+    // refleja eso aunque el ROL siga siendo CHOFER. Eso permite
+    // descubrir inconsistencias visualmente — un CHOFER+TALLER es
+    // raro y conviene que el admin corrija el rol también.
+    final mostrarFlota = area == AppAreas.manejo;
     final urlPerfil = data['ARCHIVO_PERFIL']?.toString();
     final tieneFoto =
         urlPerfil != null && urlPerfil.isNotEmpty && urlPerfil != '-';
@@ -655,15 +658,3 @@ class _DatoEditableTexto extends StatelessWidget {
           ElevatedButton(
             onPressed: () {
               onSave(transform(controller.text));
-              Navigator.pop(dCtx);
-            },
-            child: const Text('GUARDAR'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DatoEditableEmpresa extends StatelessWidget {
-  final String 
