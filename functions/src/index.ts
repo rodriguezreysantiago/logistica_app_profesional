@@ -290,12 +290,12 @@ export const actualizarRolEmpleado = onCall(
 
     // ─── Validación de input ───────────────────────────────────────
     const dni = (request.data?.dni ?? "").toString().trim();
-    const rolNuevoRaw = request.data?.rol
-      ? request.data.rol.toString().toUpperCase()
-      : null;
-    const areaNuevaRaw = request.data?.area
-      ? request.data.area.toString().toUpperCase()
-      : null;
+    const rolNuevoRaw = request.data?.rol ?
+      request.data.rol.toString().toUpperCase() :
+      null;
+    const areaNuevaRaw = request.data?.area ?
+      request.data.area.toString().toUpperCase() :
+      null;
 
     if (!dni) {
       throw new HttpsError("invalid-argument", "Falta `dni`.");
@@ -956,4 +956,4 @@ export const telemetriaSnapshotScheduled = onSchedule(
 //     que sumarlo acá también (es una conscious choice — la auditoría
 //     no debería tener vocabulario abierto).
 //   - **Sanitización de tamaño**: payload total <= 10KB para defendernos
-//     de un caller que mande 
+//     de un caller que mande
