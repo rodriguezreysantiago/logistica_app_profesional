@@ -52,70 +52,81 @@ function build({ item, destinatarioNombre }) {
   return `${cuerpo}\n\n${FIRMA}`;
 }
 
+/**
+ * Elige una variante random del array `arr`. Usado por construirCuerpo
+ * para que el mismo nivel de urgencia no genere siempre el mismo texto
+ * — eso reduce la huella anti-baneo de WhatsApp (mensajes idénticos
+ * enviados a múltiples contactos en poco tiempo es señal de spam).
+ *
+ * Math.random() es suficiente — no necesitamos aleatoriedad
+ * criptográfica, solo distribución razonable.
+ */
+function _pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 function construirCuerpo({ item, saludo, esVehiculo, referencia, fechaFmt }) {
   const ref = esVehiculo ? `el ${item.tipoDoc} de ${referencia}` : referencia;
 
   if (item.dias < 0) {
-    // Vencido: el bot manda recordatorio diario hasta que se
-    // regularice. Escalamos el tono según los días pasados para que
-    // no se sienta como spam idéntico todos los días.
     const hace = -item.dias;
     if (hace === 1) {
-      return (
-        `${saludo}. Te aviso desde la oficina: ` +
-        `${ref} venció ayer (era el ${fechaFmt}). ` +
-        'Es importante regularizarlo cuanto antes. ¿Cuándo podés acercarte a presentar el comprobante?'
-      );
+      return _pick([
+        `${saludo}. Te aviso desde la oficina: ${ref} venció ayer (era el ${fechaFmt}). Es importante regularizarlo cuanto antes. ¿Cuándo podés acercarte a presentar el comprobante?`,
+        `${saludo}. ${ref} venció ayer (${fechaFmt}). Avisame cuándo podés pasar por la oficina con el comprobante.`,
+        `${saludo}, te escribo desde la oficina. ${ref} venció ayer (${fechaFmt}). Necesitamos regularizarlo lo antes posible — ¿podés acercarte hoy o mañana?`,
+      ]);
     }
     if (hace <= 7) {
-      return (
-        `${saludo}. Recordatorio: ${ref} sigue vencido (venció hace ` +
-        `${hace} días, el ${fechaFmt}). Es importante que lo regularices ` +
-        'cuanto antes. ¿Cuándo lo podés presentar?'
-      );
+      return _pick([
+        `${saludo}. Recordatorio: ${ref} sigue vencido (venció hace ${hace} días, el ${fechaFmt}). Es importante que lo regularices cuanto antes. ¿Cuándo lo podés presentar?`,
+        `${saludo}. ${ref} venció hace ${hace} días (${fechaFmt}). Pasá por la oficina con el comprobante para destrabarlo.`,
+        `${saludo}, recordatorio. ${ref} venció el ${fechaFmt} (${hace} días atrás). Coordiná un pase por la oficina lo antes posible.`,
+      ]);
     }
     if (hace <= 30) {
-      return (
-        `${saludo}. ATENCIÓN: ${ref} lleva ${hace} días vencido ` +
-        `(el ${fechaFmt}). Es urgente regularizarlo — coordiná con la ` +
-        'oficina cuanto antes para evitar problemas operativos.'
-      );
+      return _pick([
+        `${saludo}. ATENCIÓN: ${ref} lleva ${hace} días vencido (el ${fechaFmt}). Es urgente regularizarlo — coordiná con la oficina cuanto antes para evitar problemas operativos.`,
+        `${saludo}. ${ref} lleva ${hace} días vencido (${fechaFmt}). Coordiná con la oficina hoy mismo, sino se complica para asignarte trabajo.`,
+        `${saludo}, situación urgente. ${ref} venció hace ${hace} días (${fechaFmt}). Pasá YA por la oficina para destrabar.`,
+      ]);
     }
-    // > 30 días vencido — situación crítica
-    return (
-      `${saludo}. URGENTE: ${ref} lleva más de un mes vencido ` +
-      `(${hace} días, era el ${fechaFmt}). La situación ya es crítica. ` +
-      'Por favor pasá HOY por la oficina para coordinar la renovación.'
-    );
+    return _pick([
+      `${saludo}. URGENTE: ${ref} lleva más de un mes vencido (${hace} días, era el ${fechaFmt}). La situación ya es crítica. Por favor pasá HOY por la oficina para coordinar la renovación.`,
+      `${saludo}. ${ref} venció hace ${hace} días (${fechaFmt}) — más de un mes. Esto es crítico. Pasá HOY por la oficina sí o sí.`,
+    ]);
   }
 
   if (item.dias === 0) {
-    return (
-      `${saludo}. Te aviso que ${ref} vence HOY (${fechaFmt}). ` +
-      'Por favor pasá lo antes posible por la oficina.'
-    );
+    return _pick([
+      `${saludo}. Te aviso que ${ref} vence HOY (${fechaFmt}). Por favor pasá lo antes posible por la oficina.`,
+      `${saludo}. ${ref} vence HOY (${fechaFmt}). Necesitamos el comprobante hoy mismo.`,
+      `${saludo}, atención. Hoy (${fechaFmt}) vence ${ref}. Pasá por la oficina antes de que cierre.`,
+    ]);
   }
 
   if (item.dias <= 7) {
-    return (
-      `${saludo}. Recordatorio importante: ${ref} vence en ` +
-      `${item.dias} día${item.dias === 1 ? '' : 's'} (el ${fechaFmt}). ` +
-      'Si todavía no empezaste el trámite, hacelo ya.'
-    );
+    const dia = `día${item.dias === 1 ? '' : 's'}`;
+    return _pick([
+      `${saludo}. Recordatorio importante: ${ref} vence en ${item.dias} ${dia} (el ${fechaFmt}). Si todavía no empezaste el trámite, hacelo ya.`,
+      `${saludo}. ${ref} vence en ${item.dias} ${dia} (${fechaFmt}). Arrancá la renovación si todavía no la iniciaste.`,
+      `${saludo}, te aviso. ${ref} se vence el ${fechaFmt} (faltan ${item.dias} ${dia}). Es importante que ya estés en el trámite.`,
+    ]);
   }
 
   if (item.dias <= 15) {
-    return (
-      `${saludo}. Te aviso que ${ref} vence en ${item.dias} días ` +
-      `(${fechaFmt}). Es buen momento para empezar el trámite de renovación.`
-    );
+    return _pick([
+      `${saludo}. Te aviso que ${ref} vence en ${item.dias} días (${fechaFmt}). Es buen momento para empezar el trámite de renovación.`,
+      `${saludo}. ${ref} vence el ${fechaFmt} (en ${item.dias} días). Conviene que arranques con la renovación.`,
+      `${saludo}, recordatorio. Faltan ${item.dias} días para que venza ${ref} (${fechaFmt}). Andá iniciando el trámite.`,
+    ]);
   }
 
-  // 16-30+ días — preventivo
-  return (
-    `${saludo}. Aviso preventivo: ${ref} vence el ${fechaFmt} ` +
-    `(en ${item.dias} días). Andá viendo el trámite.`
-  );
+  return _pick([
+    `${saludo}. Aviso preventivo: ${ref} vence el ${fechaFmt} (en ${item.dias} días). Andá viendo el trámite.`,
+    `${saludo}. ${ref} vence el ${fechaFmt} (faltan ${item.dias} días). Te aviso con anticipación para que tengas margen.`,
+    `${saludo}, aviso anticipado. ${ref} vence en ${item.dias} días (${fechaFmt}). Empezá a pensar en la renovación.`,
+  ]);
 }
 
 /**

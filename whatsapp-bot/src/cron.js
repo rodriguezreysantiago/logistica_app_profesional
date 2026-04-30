@@ -174,6 +174,41 @@ async function _runOnce(fs) {
   const stats = { encolados: 0, salteados: 0, errores: 0 };
 
   try {
+    // ─── Throttle por chofer ─────────────────────────────────────
+    // Pre-cargamos cuántos avisos ya recibió cada teléfono HOY.
+    // Default 2 mensajes/día/chofer — evita ráfagas que disparan el
+    // detector de bots de WhatsApp.
+    const maxPorChoferDia = parseInt(
+      process.env.MAX_AVISOS_POR_CHOFER_DIA || '2',
+      10
+    );
+    const avisosHoyPorTel = new Map();
+    try {
+      const desde = _inicioDelDia();
+      const yaHoySnap = await db
+        .collection(fs.COLECCION)
+        .where('encolado_en', '>=', admin.firestore.Timestamp.fromDate(desde))
+        .get();
+      for (const d of yaHoySnap.docs) {
+        const tel = String(d.data().telefono || '').trim();
+        if (!tel) continue;
+        avisosHoyPorTel.set(tel, (avisosHoyPorTel.get(tel) || 0) + 1);
+      }
+      log.debug(`Throttle: ${avisosHoyPorTel.size} teléfonos con avisos hoy.`);
+    } catch (e) {
+      log.warn(`No pude pre-cargar throttle por chofer: ${e.message}`);
+    }
+
+    const yaSuperoTope = (tel) => {
+      if (!tel) return false;
+      return (avisosHoyPorTel.get(tel.trim()) || 0) >= maxPorChoferDia;
+    };
+    const bumpTope = (tel) => {
+      if (!tel) return;
+      const k = tel.trim();
+      avisosHoyPorTel.set(k, (avisosHoyPorTel.get(k) || 0) + 1);
+    };
+
     const empleadosSnap = await db.collection('EMPLEADOS').get();
     const empleadosByDni = new Map();
     // Índice inverso patente → empleado, pre-computado una vez por
@@ -222,6 +257,14 @@ async function _runOnce(fs) {
           continue;
         }
 
+        if (yaSuperoTope(telefono)) {
+          stats.salteados++;
+          log.debug(
+            `Throttle: ${dni} ya recibió ${maxPorChoferDia} avisos hoy, salto ${campoBase}.`
+          );
+          continue;
+        }
+
         const mensaje = aviso.build({
           item: {
             coleccion: 'EMPLEADOS',
@@ -251,6 +294,7 @@ async function _runOnce(fs) {
             admin_nombre: 'Bot automático',
           });
           await hist.registrar(db, params, colaRef.id);
+          bumpTope(telefono);
           stats.encolados++;
           log.info(
             `+ Encolado auto: ${etiqueta} de ${dni} (${urgencia.codigo}, ` +
@@ -302,6 +346,14 @@ async function _runOnce(fs) {
           continue;
         }
 
+        if (yaSuperoTope(telefono)) {
+          stats.salteados++;
+          log.debug(
+            `Throttle: chofer ${chofer.id} ya recibió ${maxPorChoferDia} avisos hoy, salto ${spec.campoBase}.`
+          );
+          continue;
+        }
+
         const mensaje = aviso.build({
           item: {
             coleccion: 'VEHICULOS',
@@ -331,6 +383,7 @@ async function _runOnce(fs) {
             admin_nombre: 'Bot automático',
           });
           await hist.registrar(db, params, colaRef.id);
+          bumpTope(telefono);
           stats.encolados++;
           log.info(
             `+ Encolado auto: ${spec.etiqueta} de ${patente} ` +
@@ -419,6 +472,14 @@ async function _runOnce(fs) {
         continue;
       }
 
+      if (yaSuperoTope(telefono)) {
+        stats.salteados++;
+        log.debug(
+          `Throttle: chofer ${chofer.id} ya recibió ${maxPorChoferDia} avisos hoy, salto SERVICE de ${patente}.`
+        );
+        continue;
+      }
+
       const mensaje = avisoService.build({
         patente,
         marca: v.MARCA,
@@ -452,6 +513,7 @@ async function _runOnce(fs) {
           admin_nombre: 'Bot automático',
         });
         await hist.registrar(db, params, colaRef.id);
+        bumpTope(telefono);
         stats.encolados++;
         log.info(
           `+ Encolado service: ${patente} (${urgencia.codigo}, ` +
@@ -508,4 +570,25 @@ function _resolverServiceDistance(v) {
 }
 
 // `_buscarChofer` removida — reemplazada por el índice inverso
-// `choferByPatente` que se construye un
+// `choferByPatente` que se construye una vez al inicio del ciclo y
+// permite lookup O(1) en lugar de O(n) por cada vencimiento.
+
+/**
+ * Devuelve un Date apuntando al inicio del día actual en zona local
+ * del server. Usado por el throttle por chofer para contar avisos de
+ * "hoy".
+ */
+function _inicioDelDia() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+module.exports = {
+  start,
+  stop,
+  // Exportados para tests / uso interno:
+  calcularDiasRestantes,
+  DOCS_EMPLEADO,
+  DOCS_VEHICULO,
+  INTERVALO_SERVICE_KM,
+};
