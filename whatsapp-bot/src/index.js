@@ -7,6 +7,9 @@
 
 require('dotenv').config();
 
+const fsNode = require('fs');
+const path = require('path');
+
 const log = require('./logger');
 const fs = require('./firestore');
 const wa = require('./whatsapp');
@@ -18,6 +21,65 @@ const {
   sleep,
   normalizarTelefonoAWid,
 } = require('./humano');
+
+// Limpieza preventiva al arrancar — desbloquea Chromium si quedó
+// medio muerto del proceso anterior.
+//
+// Bugs recurrentes de `whatsapp-web.js` cuando el proceso anterior no
+// cerró limpio (Ctrl+C contestando "S" a la pregunta de PowerShell,
+// crash, kill -9, etc.):
+//
+//   1. Cache corrupto en `.wwebjs_cache/` → arranque cuelga sin llegar
+//      a "WhatsApp listo".
+//   2. **SingletonLock / SingletonCookie / SingletonSocket** dentro de
+//      `.wwebjs_auth/session/` → Chromium nuevo cree que hay otra
+//      instancia viva y se queda esperando. ESTE es el más jodido
+//      porque NO se ve en el log; el bot queda en "Sesión autenticada"
+//      eternamente.
+//
+// La sesión real (cookies, login persistido) está en otros archivos
+// de `.wwebjs_auth/session/` que NO tocamos. Borrar SOLO los Singleton
+// locks no requiere reescanear QR.
+function limpiarLocksChromium() {
+  const root = path.resolve(__dirname, '..');
+
+  // (1) Cache: borrar la carpeta entera. Se reconstruye sola.
+  const cacheDir = path.join(root, '.wwebjs_cache');
+  if (fsNode.existsSync(cacheDir)) {
+    try {
+      fsNode.rmSync(cacheDir, { recursive: true, force: true });
+      log.info('Cache de Chromium limpiado (.wwebjs_cache/).');
+    } catch (e) {
+      log.warn(`No pude limpiar .wwebjs_cache/: ${e.message}`);
+    }
+  }
+
+  // (2) Singleton locks dentro de la sesión persistida. Si quedan
+  // de un proceso muerto, el nuevo Chromium se cuelga.
+  const sessionDir = path.join(root, '.wwebjs_auth', 'session');
+  const singletonFiles = [
+    'SingletonLock',
+    'SingletonCookie',
+    'SingletonSocket',
+  ];
+  let borrados = 0;
+  for (const name of singletonFiles) {
+    const p = path.join(sessionDir, name);
+    if (fsNode.existsSync(p)) {
+      try {
+        fsNode.rmSync(p, { force: true });
+        borrados++;
+      } catch (e) {
+        log.warn(`No pude borrar ${name}: ${e.message}`);
+      }
+    }
+  }
+  if (borrados > 0) {
+    log.info(
+      `Locks de Chromium previos limpiados (${borrados} archivos Singleton*).`
+    );
+  }
+}
 
 // Cola en memoria con los doc IDs pendientes en orden FIFO.
 // Procesamos uno a la vez para mantener el delay entre envíos
@@ -197,6 +259,9 @@ function detenerPolling() {
 async function main() {
   log.info('Iniciando whatsapp-bot...');
 
+  // Cleanup preventivo (cache + singleton locks) antes de levantar Chromium.
+  limpiarLocksChromium();
+
   const db = fs.inicializar();
 
   log.info('Conectando a WhatsApp Web — esto puede demorar 10-30s...');
@@ -207,66 +272,4 @@ async function main() {
   // Cron de avisos automáticos (Fase 2). Solo arranca si
   // AUTO_AVISOS_ENABLED=true en .env. Es idempotente: si ya se mandó
   // el mismo aviso (mismo nivel de urgencia, misma fecha de
-  // vencimiento), no se duplica.
-  cron.start(fs);
-
-  // Handler de respuestas (Fase 3). Cuando el chofer manda un
-  // comprobante por WhatsApp, el bot crea automáticamente la
-  // revisión para que el admin la apruebe desde la app.
-  const respuestasHabilitado =
-    String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() ===
-    'true';
-  if (respuestasHabilitado) {
-    log.info('Handler de respuestas HABILITADO.');
-    wa.onMensajeEntrante(messageHandler.crearHandler(fs, wa));
-  } else {
-    log.info(
-      'Handler de respuestas DESHABILITADO (AUTO_RESPUESTAS_ENABLED=false).'
-    );
-  }
-
-  // Manejo de señales para cerrar limpio.
-  //
-  // Grace period: si hay un mensaje en proceso (`procesando=true`),
-  // esperamos a que termine antes de exit. Como el delay anti-baneo
-  // puede ser hasta DELAY_MAX_MS (60s default) + el envío en sí,
-  // calculamos grace dinámico: max(delay) + 10s margen.
-  //
-  // Bug A9 del code review: antes era 10s fijo, lo cual era menos que
-  // el delay máximo y dejaba docs en PROCESANDO zombies si el shutdown
-  // ocurría justo durante el delay. Ahora damos al envío todo el
-  // tiempo razonable. Si igual no termina, hacemos rollback del doc
-  // a PENDIENTE para que el próximo arranque lo reintente.
-  const delayMaxMs = parseInt(process.env.DELAY_MAX_MS || '60000', 10);
-  const graceMs = delayMaxMs + 10000;
-
-  const shutdown = async (sig) => {
-    log.info(`Recibido ${sig}, cerrando (grace ${Math.round(graceMs / 1000)}s)...`);
-    detenerPolling();
-    cron.stop();
-
-    // Esperar a que termine el item en curso (si lo hay).
-    const start = Date.now();
-    while (procesando && Date.now() - start < graceMs) {
-      await sleep(200);
-    }
-    if (procesando) {
-      log.warn(
-        'Grace period agotado con un envío en curso. ' +
-        'El doc queda en PROCESANDO; revisalo manualmente al reiniciar.'
-      );
-    } else {
-      log.info('Cola en pausa, sin envíos en curso.');
-    }
-
-    await wa.destroy();
-    process.exit(0);
-  };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-}
-
-main().catch((e) => {
-  log.error(`Fatal: ${e.stack || e.message}`);
-  process.exit(1);
-});
+ 

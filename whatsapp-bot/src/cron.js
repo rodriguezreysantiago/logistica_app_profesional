@@ -27,7 +27,7 @@ const INTERVALO_SERVICE_KM = 50000;
 // `lib/features/expirations/screens/admin_vencimientos_choferes_screen.dart`.
 // Si en el futuro se centraliza en algún lado, leerlo de ahí.
 const DOCS_EMPLEADO = {
-  Licencia: 'LICENCIA_DE_CONDUCIR',
+  'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
   Preocupacional: 'PREOCUPACIONAL',
   'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
   ART: 'ART',
@@ -80,10 +80,31 @@ const DOCS_VEHICULO = {
 /**
  * Calcula los días restantes hasta `fechaIso` (`YYYY-MM-DD` o ISO).
  * Negativo si la fecha ya pasó. Devuelve `null` si la fecha es inválida.
+ *
+ * **Bug fixeado**: antes hacía `new Date("YYYY-MM-DD")` que JS parsea
+ * como UTC midnight. En zona ART (UTC-3) eso significaba que una
+ * licencia que vence el 30/05 quedaba "atrás un día" porque la
+ * medianoche UTC es las 21h del día anterior en ART. El cron
+ * recortaba 1 día por el shift de zona.
+ *
+ * Ahora parseamos los componentes YYYY-MM-DD a mano y construimos
+ * la fecha en zona local — el cálculo da exacto.
  */
 function calcularDiasRestantes(fechaIso) {
   if (!fechaIso) return null;
-  const venc = new Date(fechaIso);
+  // Parseo manual para evitar el shift UTC vs local.
+  const str = String(fechaIso).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+  let venc;
+  if (m) {
+    venc = new Date(
+      parseInt(m[1], 10),
+      parseInt(m[2], 10) - 1,
+      parseInt(m[3], 10)
+    );
+  } else {
+    venc = new Date(str);
+  }
   if (isNaN(venc.getTime())) return null;
   // Normalizamos a medianoche local para que el cálculo sea estable
   // independientemente de a qué hora corre el cron.
@@ -463,32 +484,4 @@ async function _runOnce(fs) {
  * Espejo de `_resolverServiceDistance` en el cliente Dart.
  */
 function _resolverServiceDistance(v) {
-  const api = Number(v.SERVICE_DISTANCE_KM);
-  if (!isNaN(api) && v.SERVICE_DISTANCE_KM != null) return api;
-
-  const ultimo = Number(v.ULTIMO_SERVICE_KM);
-  const actual = Number(v.KM_ACTUAL);
-  if (
-    !isNaN(ultimo) &&
-    !isNaN(actual) &&
-    v.ULTIMO_SERVICE_KM != null &&
-    v.KM_ACTUAL != null
-  ) {
-    return ultimo + INTERVALO_SERVICE_KM - actual;
-  }
-  return null;
-}
-
-// `_buscarChofer` removida — reemplazada por el índice inverso
-// `choferByPatente` que se construye una vez al inicio del ciclo y
-// permite lookup O(1) en lugar de O(n) por cada vencimiento.
-
-module.exports = {
-  start,
-  stop,
-  // Exportados para tests / uso interno:
-  calcularDiasRestantes,
-  DOCS_EMPLEADO,
-  DOCS_VEHICULO,
-  INTERVALO_SERVICE_KM,
-};
+  const api = Number(v.

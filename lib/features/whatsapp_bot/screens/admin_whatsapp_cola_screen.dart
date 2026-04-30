@@ -378,17 +378,4 @@ class _BadgeEstado extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withAlpha(25),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withAlpha(80)),
-      ),
-      child: Text(
-        estado,
-        style: TextStyle(
-          color: color,
-          fontSize: 9,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.8,
-        ),
-      ),
-    );
-  }
-}
+        border: Border.all(color: color.wi

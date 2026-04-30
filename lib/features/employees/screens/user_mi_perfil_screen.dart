@@ -560,14 +560,4 @@ class _InfoTile extends StatelessWidget {
 }
 
 class _SeparadorTile extends StatelessWidget {
-  const _SeparadorTile();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Divider(
-      color: Colors.white10,
-      indent: 60,
-      height: 1,
-    );
-  }
-}
+ 

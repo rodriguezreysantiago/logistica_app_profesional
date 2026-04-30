@@ -145,25 +145,12 @@ function extraerPatente(titulo) {
 /**
  * Formatea una fecha ISO `YYYY-MM-DD` o un Date a `DD/MM/YYYY`. Tolera
  * strings nulos o mal formados — devuelve `'-'` en ese caso.
- */
-function formatearFecha(fecha) {
-  if (!fecha) return '-';
-  let d;
-  if (fecha instanceof Date) {
-    d = fecha;
-  } else {
-    d = new Date(fecha);
-    if (isNaN(d.getTime())) return String(fecha);
-  }
-  const day = String(d.getDate()).padStart(2, '0');
-  const mes = String(d.getMonth() + 1).padStart(2, '0');
-  return `${day}/${mes}/${d.getFullYear()}`;
-}
-
-module.exports = {
-  build,
-  extraerPrimerNombre,
-  extraerPatente,
-  formatearFecha,
-  FIRMA,
-};
+ *
+ * **Bug histórico que fixeamos acá**: `new Date("2026-05-30")` parsea
+ * el string como UTC midnight. Cuando después llamamos `.getDate()` en
+ * zona local ART (UTC-3), devuelve 29 — porque la medianoche UTC es
+ * 21h del día anterior en ART. Resultado: la licencia que vence el
+ * 30/05 se mostraba como "29/05" en el WhatsApp.
+ *
+ * Ahora parseamos strings ISO YYYY-MM-DD literalmente (componente por
+ * componente) sin pasar por el constructor de Date — así no h

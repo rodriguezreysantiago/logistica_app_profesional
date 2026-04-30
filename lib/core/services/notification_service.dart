@@ -314,7 +314,8 @@ class NotificationService {
   }
 
   /// Texto del recordatorio según los días que faltan. Tono y verbo
-  /// alineados con `AvisoVencimientoBuilder` para que el chofer reciba
+  /// alineados con los avisos que manda el bot de WhatsApp
+  /// (`whatsapp-bot/src/aviso_builder.js`) para que el chofer reciba
   /// avisos consistentes vía push y vía WhatsApp.
   static String _mensajeRecordatorio(VencimientoAviso a, int diasAntes) {
     if (diasAntes == 1) {
@@ -371,7 +372,4 @@ class VencimientoAviso {
 
   const VencimientoAviso({
     required this.fecha,
-    required this.tipoDoc,
-    required this.campoBase,
-  });
-}
+    req

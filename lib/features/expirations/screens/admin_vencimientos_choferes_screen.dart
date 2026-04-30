@@ -25,7 +25,7 @@ class _AdminVencimientosChoferesScreenState
 
   /// Documentos a auditar (etiqueta visible → sufijo del campo Firestore).
   static const Map<String, String> _documentosAuditados = {
-    'Licencia': 'LICENCIA_DE_CONDUCIR',
+    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
     'Preocupacional': 'PREOCUPACIONAL',
     'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
     'ART': 'ART',
@@ -107,6 +107,4 @@ class _AdminVencimientosChoferesScreenState
           );
         },
       ),
-    );
-  }
-}
+ 

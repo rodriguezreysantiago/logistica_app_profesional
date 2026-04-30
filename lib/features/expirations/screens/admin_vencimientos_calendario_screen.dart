@@ -33,7 +33,7 @@ class _AdminVencimientosCalendarioScreenState
   /// `admin_vencimientos_choferes_screen.dart`. Si en el futuro se
   /// centraliza, conviene mover esto a `vencimientos_config.dart`.
   static const Map<String, String> _docsEmpleado = {
-    'Licencia': 'LICENCIA_DE_CONDUCIR',
+    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
     'Preocupacional': 'PREOCUPACIONAL',
     'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
     'ART': 'ART',
@@ -339,6 +339,4 @@ class _ListaVacia extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
+    

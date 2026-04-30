@@ -83,24 +83,4 @@ class WhatsAppColaService {
     await _db.collection(coleccion).doc(docId).update({
       'estado': 'PENDIENTE',
       'error': null,
-      // No reseteamos `intentos` para que se vea cuántas veces se
-      // intentó — útil para detectar números problemáticos.
-    });
-  }
-
-  /// Borra un doc de la cola. Útil para limpiar históricos antiguos
-  /// o para cancelar un envío que el admin ya no quiere mandar.
-  Future<void> eliminar(String docId) async {
-    await _db.collection(coleccion).doc(docId).delete();
-  }
-
-  /// Stream con los últimos 100 docs ordenados por timestamp de
-  /// encolado descendente. Útil para la pantalla "Cola de WhatsApp".
-  Stream<QuerySnapshot> streamCola({int limit = 100}) {
-    return _db
-        .collection(coleccion)
-        .orderBy('encolado_en', descending: true)
-        .limit(limit)
-        .snapshots();
-  }
-}
+      // No reseteamos `intentos` p

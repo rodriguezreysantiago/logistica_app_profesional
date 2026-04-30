@@ -39,7 +39,7 @@ class _UserMisVencimientosScreenState
   /// `admin_vencimientos_choferes_screen.dart`; si en el futuro se
   /// centraliza, mover a `vencimientos_config.dart`.
   static const Map<String, String> _docsAgendables = {
-    'Licencia': 'LICENCIA_DE_CONDUCIR',
+    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
     'Preocupacional': 'PREOCUPACIONAL',
     'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
     'ART': 'ART',
@@ -407,7 +407,7 @@ class _UserMisVencimientosScreenState
                 urlArchivo: data['ARCHIVO_LICENCIA_DE_CONDUCIR'],
                 idDoc: widget.dniUser,
                 onUpload: () => _iniciarTramite(
-                  etiqueta: 'LICENCIA',
+                  etiqueta: 'LICENCIA DE CONDUCIR',
                   campo: 'VENCIMIENTO_LICENCIA_DE_CONDUCIR',
                   idDoc: widget.dniUser,
                   coleccion: 'EMPLEADOS',
@@ -926,7 +926,4 @@ class _BotonDetectarFechaState extends State<_BotonDetectarFecha> {
             fontSize: 12,
           ),
         ),
-      ),
-    );
-  }
-}
+  

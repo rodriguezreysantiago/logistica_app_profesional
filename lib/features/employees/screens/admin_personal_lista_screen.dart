@@ -303,7 +303,7 @@ class _DetalleChofer extends StatelessWidget {
             icon: Icons.folder_shared, label: 'Vencimientos críticos'),
         _FilaVencimiento(
           dni: dni,
-          etiqueta: 'LICENCIA',
+          etiqueta: 'LICENCIA DE CONDUCIR',
           campoFecha: 'VENCIMIENTO_LICENCIA_DE_CONDUCIR',
           campoUrl: 'ARCHIVO_LICENCIA_DE_CONDUCIR',
           data: data,
@@ -722,13 +722,4 @@ class _AsignacionUnidad extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       leading: Icon(
         campo == 'VEHICULO' ? Icons.local_shipping : Icons.link,
-        color: tieneAsignacion ? Colors.greenAccent : Colors.white24,
-      ),
-      title: Text('$label: ${tieneAsignacion ? actual : "—"}',
-          style: const TextStyle(color: Colors.white, fontSize: 14)),
-      trailing:
-          const Icon(Icons.sync_alt, size: 20, color: Colors.greenAccent),
-      onTap: () => EmpleadoActions.unidad(context, dni, campo, actual),
-    );
-  }
-}
+        color: tieneAsignacion ? Colors.greenAccent : Colors.wh

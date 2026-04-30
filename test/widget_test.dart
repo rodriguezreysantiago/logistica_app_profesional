@@ -4,7 +4,6 @@
 //
 // Los tests útiles de la app son unitarios y viven en archivos vecinos:
 // - password_hasher_test.dart
-// - aviso_vencimiento_builder_test.dart
 // - ocr_service_test.dart
 //
 // Cuando agreguemos widget tests reales, conviene crear un harness

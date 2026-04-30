@@ -39,7 +39,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   /// `admin_vencimientos_choferes_screen.dart`. Si en el futuro se
   /// centraliza, mover a `vencimientos_config.dart`.
   static const Map<String, String> _docsEmpleado = {
-    'Licencia': 'LICENCIA_DE_CONDUCIR',
+    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
     'Preocupacional': 'PREOCUPACIONAL',
     'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
     'ART': 'ART',
@@ -625,6 +625,4 @@ class _AdminTile extends StatelessWidget {
               color: Colors.white24, size: 14),
         ],
       ),
-    );
-  }
-}
+    

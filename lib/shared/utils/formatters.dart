@@ -61,8 +61,24 @@ class AppFormatters {
       final List<String> partes = f.split('-');
       if (partes.length == 3) {
         if (partes[0].length == 4) {
-          // Formato YYYY-MM-DD (ISO)
-          return DateTime.tryParse(f);
+          // Formato YYYY-MM-DD (ISO).
+          //
+          // **Bug histórico fixeado**: antes hacíamos `DateTime.tryParse(f)`
+          // que en Dart parsea "2026-05-30" como UTC midnight. En zonas
+          // negativas (ART = UTC-3), al hacer `.toLocal()` o usar el
+          // DateTime en operaciones con DateTime.now() (que es local)
+          // el día se "atrasa" — la licencia que vence el 30/05 se
+          // mostraba como 29/05.
+          //
+          // Ahora construimos DateTime local explícito con los
+          // componentes manualmente, sin pasar por tryParse.
+          final anio = int.tryParse(partes[0]);
+          final mes = int.tryParse(partes[1]);
+          final dia = int.tryParse(partes[2]);
+          if (anio != null && mes != null && dia != null) {
+            return DateTime(anio, mes, dia);
+          }
+          return null;
         }
         // Formato DD-MM-YYYY: parseamos cada componente con tryParse.
         final dia = int.tryParse(partes[0]);
@@ -80,30 +96,4 @@ class AppFormatters {
 
   // --- FORMATEAR FECHA (DD/MM/YYYY) ---
   static String formatearFecha(dynamic fecha) {
-    final DateTime? parsed = _parseUniversalDate(fecha);
-    
-    if (parsed != null) {
-      return "${parsed.day.toString().padLeft(2, '0')}/${parsed.month.toString().padLeft(2, '0')}/${parsed.year}";
-    }
-    
-    // Si no pudo parsear, devuelve lo que ingresó por defecto
-    return fecha?.toString() ?? "Sin datos";
-  }
-
-  // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
-  static int calcularDiasRestantes(dynamic fecha) {
-    final DateTime? fVto = _parseUniversalDate(fecha);
-    
-    if (fVto == null) return 999;
-
-    try {
-      final vtoNormalizado = DateTime(fVto.year, fVto.month, fVto.day);
-      final ahora = DateTime.now();
-      final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);
-      
-      return vtoNormalizado.difference(hoyNormalizado).inDays;
-    } catch (_) { 
-      return 999; 
-    }
-  }
-}
+    final DateTime? parsed = _parseUniversalDate(fec

@@ -9,31 +9,55 @@
 // No podemos eliminar la huella de bot, pero la podemos suavizar.
 
 /**
- * Devuelve `true` si la hora local actual está dentro del rango hábil
- * configurado en `.env` (`WORKING_HOURS_START` y `WORKING_HOURS_END`).
+ * Devuelve `true` si el momento actual está dentro de la ventana hábil
+ * configurada para enviar mensajes automáticos.
  *
- * Si los valores no están definidos, default 8-21 hs. Mensajes a las
- * 3 AM son la señal más obvia de bot.
+ * Reglas hardcodeadas (configurables vía .env):
+ *   - **Días**: lunes a viernes (skip sábado y domingo).
+ *   - **Horas**: 8 a 20 (`WORKING_HOURS_START` y `WORKING_HOURS_END`).
+ *   - **Zona horaria**: `WORKING_TIMEZONE`, default
+ *     `America/Argentina/Buenos_Aires`.
  *
- * **IMPORTANTE — Zona horaria:** `now.getHours()` devuelve la hora en
- * la zona horaria LOCAL del proceso (PC donde corre el bot). El bot
- * se diseñó para correr en una PC en Bahía Blanca, Argentina (ART,
- * UTC-3). Si lo corrés en otra zona horaria (server cloud en UTC,
- * Linux en otra TZ, etc.), los avisos saldrán a horas raras desde
- * la perspectiva del chofer.
+ * Usa `Intl.DateTimeFormat` con zona explícita en lugar de
+ * `now.getHours()` — eso es CRÍTICO porque el servidor puede correr
+ * en otra TZ (cloud, contenedor, PC con reloj cambiado, etc.). Sin
+ * la TZ explícita, los avisos pueden salir a las 3 AM hora real.
  *
- * Bug M9 del code review: si en el futuro se necesita correr en
- * otra zona, hay dos opciones:
- *   - Setear `TZ=America/Argentina/Buenos_Aires` en el entorno antes
- *     de arrancar Node.
- *   - Sumar variable BOT_TIMEZONE al .env y usar
- *     `Intl.DateTimeFormat({ timeZone: ... }).formatToParts(now)`
- *     para extraer la hora.
+ * Para cambiar el horario, editá `whatsapp-bot/.env`:
+ *   WORKING_HOURS_START=8
+ *   WORKING_HOURS_END=20
+ *   WORKING_TIMEZONE=America/Argentina/Buenos_Aires
+ *
+ * Para incluir sábado/domingo (no recomendado, llama spam attention
+ * en WhatsApp), hay que comentar el `if (esFinDeSemana)` adentro.
  */
 function enHorarioHabil(now = new Date()) {
   const inicio = parseInt(process.env.WORKING_HOURS_START || '8', 10);
-  const fin = parseInt(process.env.WORKING_HOURS_END || '21', 10);
-  const hora = now.getHours();
+  const fin = parseInt(process.env.WORKING_HOURS_END || '20', 10);
+  const tz =
+    process.env.WORKING_TIMEZONE || 'America/Argentina/Buenos_Aires';
+
+  // Extraemos día de la semana y hora EN la zona horaria objetivo —
+  // independiente del reloj del proceso. Intl.DateTimeFormat es la
+  // forma estándar de hacer esto en Node desde v10+.
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    weekday: 'short', // 'Mon'..'Sun'
+    hour: '2-digit',
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const weekday = parts.find((p) => p.type === 'weekday')?.value || '';
+  const horaStr = parts.find((p) => p.type === 'hour')?.value || '0';
+  // Algunas implementaciones devuelven "24" para medianoche; lo
+  // normalizamos a 0.
+  let hora = parseInt(horaStr, 10);
+  if (hora === 24) hora = 0;
+
+  // Skip sábado y domingo.
+  const esFinDeSemana = weekday === 'Sat' || weekday === 'Sun';
+  if (esFinDeSemana) return false;
+
   return hora >= inicio && hora < fin;
 }
 
@@ -55,31 +79,4 @@ function delayAleatorioMs() {
  * `await sleep(ms)` para usar en async/await sin libs.
  */
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Convierte un número de teléfono al formato que espera WhatsApp Web
- * (`<numero>@c.us`). Acepta entradas con `+`, espacios y guiones.
- * Devuelve `null` si el número no parece válido.
- *
- * Ejemplos:
- *   "+54 291 456-7890"  → "5492914567890@c.us"
- *   "5492914567890"     → "5492914567890@c.us"
- *   "abc"               → null
- */
-function normalizarTelefonoAWid(telefono) {
-  if (!telefono) return null;
-  const digitos = String(telefono).replace(/\D+/g, '');
-  // Argentina suele tener 12 o 13 dígitos con el prefijo internacional
-  // (54). Mínimo razonable 10. Máximo 15 (E.164).
-  if (digitos.length < 10 || digitos.length > 15) return null;
-  return `${digitos}@c.us`;
-}
-
-module.exports = {
-  enHorarioHabil,
-  delayAleatorioMs,
-  sleep,
-  normalizarTelefonoAWid,
-};
+ 
