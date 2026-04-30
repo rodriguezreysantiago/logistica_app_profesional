@@ -438,3 +438,41 @@ Al abrir una conversación nueva de Cowork sobre este proyecto:
 ### Refactor pendiente que se trabó por este bug
 
 - `admin_personal_lista_screen.dart` → extraer `_Actualizar` a `services/empleado_actions.dart`. Ver sección 7. Plan listo, ejecutar en sandbox fresco o a mano.
+
+
+## 13. Pendientes para próximas sesiones — anotaciones del 2026-04-30 noche
+
+Al cerrar la sesión del 30 de abril, quedaron estos temas en el aire que conviene retomar en la próxima reunión con Claude (idealmente desde un chat nuevo para que el sandbox quede sincronizado limpio).
+
+### 13.1 Validaciones pendientes (importante)
+- **Validar la agrupación de mensajes**. Hoy se implementó la opción de mandar UN mensaje con la lista de papeles cuando un chofer tiene 2+ vencimientos. La lógica está deployada y commiteada (`13da5b2`) pero no se vio funcionar con datos reales. Plan: mandar `/forzar-cron` desde el celular admin al bot, esperar el ciclo, mirar el log buscando líneas como `+ Encolado AGRUPADO: <DNI> (N papeles) → ...`. Si aparece, abrir Firestore y ver el doc en COLA_WHATSAPP — debe tener `origen: 'cron_aviso_agrupado'` y campo `items_agrupados` poblado.
+- **Verificar el bug de timezone reportado**. La licencia de VICTOR RAUL JESUS (DNI 38303285) vence el 30/05 pero el bot le mandó "vence el 29/05". El fix de parseo manual `YYYY-MM-DD` ya está deployado en `cron.calcularDiasRestantes` y `aviso_builder.formatearFecha`, pero hay que confirmar en producción que ahora dice 30/05. Mirar el próximo aviso que mande el bot a ese DNI o forzar el cron.
+
+### 13.2 Mejoras al bot pendientes
+- **Alerta "chofer no respondió"**. Si un chofer recibió aviso crítico (≤7 días o vencido) y no contestó con comprobante en X días, alerta automática al admin. Implementación: en el cron, además del check de `yaSeEnvio`, agregar un check de "tiene aviso enviado hace > X días sin respuesta". Si sí, encolar mensaje al admin (no al chofer) con el tema. Requiere un campo `respondido` en el histórico que se llene con Fase 3.
+- **Habilitar Fase 3 con OCR**. Hoy `AUTO_RESPUESTAS_ENABLED=false`. Cuando lo activemos, el chofer puede mandar foto del comprobante y el bot crea automáticamente la revisión con la fecha extraída por OCR. Antes de activar, agregar OCR de la imagen (Cloud Vision o Tesseract local) — actualmente solo extrae fecha del texto del mensaje, no de la imagen. Implica testing con choferes reales. Ver `whatsapp-bot/src/message_handler.js` y `fecha_extractor.js`.
+- **Pantalla del bot mejorada — mostrar items_agrupados**. Cuando se inspecciona un mensaje agrupado en la pantalla "Estado del Bot" o "Cola WhatsApp", mostrar el detalle de qué papeles incluyó (ya está guardado en el doc, falta UI). Sin esto, ves "AGRUPADO" pelado.
+
+### 13.3 App Flutter
+- **Pantalla "Mi perfil del chofer"**. Hoy es mínima. Podría tener: foto, vencimientos personales con días restantes, contacto rápido al admin (botón WhatsApp), historial de revisiones del chofer.
+- **Sweep de hallazgos sospechosos del code-review** (no críticos):
+  - `notification_service.dart` línea 13: `selectNotificationStream` declarado y usado adentro pero verificar si alguien lo consume desde main.dart o routing/.
+  - `admin_bot_bandeja_screen.dart`: `import 'package:intl/intl.dart'` aparentemente no usado.
+- **Limpiar el drift del working tree**. Después de la sesión del 30-abril quedaron ~20 archivos del cliente Flutter como "modificados" en `git status` pero sin diferencias claras de contenido (mezcla de drift sandbox/PC + line endings LF/CRLF). Conviene resolverlo: `git diff --stat` para ver cuáles tienen cambios reales y cuáles son solo line endings. Si solo es line endings, se resuelve con `git config core.autocrlf input` o setear `.gitattributes` con `* text=auto eol=lf`.
+
+### 13.4 Producción / DevOps
+- **Deploy NSSM como servicio Windows** en el server dedicado. El script ya está en `whatsapp-bot/scripts/instalar_servicio.ps1` listo para correr cuando termine el ensayo en la PC de programación. Lo deja autostart al boot, auto-restart si crashea, logs rotados.
+- **Configurar AUTO_AVISOS_ENABLED en server**: hoy en `.env` está `true` pero conviene revisar antes del deploy en server para no mandar avisos durante setup.
+
+### 13.5 Volvo
+- **Anti-robo nocturno**: detectar `wheelBasedSpeed > 0` fuera de horario operativo + push al admin. Requiere FCM real porque hoy solo hay notificaciones locales (que no llegan si el admin no tiene la app abierta). Bloqueado por la pre-condición de FCM.
+- **Activar bloque UPTIME** en cuenta Volvo Connect: la API hoy no devuelve `uptimeData.serviceDistance` por restricción del paquete contratado. Hay un ticket abierto a Volvo. Mientras, el bot usa el Plan B (cálculo desde `ULTIMO_SERVICE_KM + 50.000 - KM_ACTUAL`).
+
+### 13.6 Comandos admin por WhatsApp — extensiones futuras
+- `/sync` para forzar sincronización Volvo de un tractor específico.
+- `/avisos hoy` para ver lista de avisos enviados hoy.
+- `/lid` para que el bot responda con tu LID actual (útil cuando reinstalás y se pierde el binding).
+
+---
+
+**Cómo retomar**: leer secciones 6.9 (todo lo del 30-abril) y 13 (este resumen). El estado del repo está en `796a237` (después del cleanup de docs) o el más reciente que aparezca con `git log -1`.

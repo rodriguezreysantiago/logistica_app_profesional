@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../providers/vehiculo_provider.dart';
@@ -406,18 +407,19 @@ class _DetalleVehiculo extends StatelessWidget {
 
         const SizedBox(height: 18),
         const _SectionTitle(icon: Icons.event_note, label: 'Vencimientos'),
-        _VencimientoRow(
-          etiqueta: 'RTO / VTV',
-          fecha: data['VENCIMIENTO_RTO'],
-          url: data['ARCHIVO_RTO'],
-          tituloVisor: 'RTO $patente',
-        ),
-        _VencimientoRow(
-          etiqueta: 'Póliza Seguro',
-          fecha: data['VENCIMIENTO_SEGURO'],
-          url: data['ARCHIVO_SEGURO'],
-          tituloVisor: 'Seguro $patente',
-        ),
+        // Iteramos AppVencimientos.forTipo() para que sumar un vencimiento
+        // nuevo a la config (ej. extintores en TRACTOR) aparezca automaticamente
+        // en la ficha sin tocar este archivo. Antes estaba hardcoded a RTO+Seguro
+        // y los extintores cargados en tractores no se veian aca aunque si en
+        // la pantalla del chofer y en el form de edicion.
+        for (final spec
+            in AppVencimientos.forTipo(data['TIPO']?.toString()))
+          _VencimientoRow(
+            etiqueta: spec.etiqueta,
+            fecha: data[spec.campoFecha],
+            url: data[spec.campoArchivo],
+            tituloVisor: '${spec.etiqueta} $patente',
+          ),
 
         if (data['ULTIMA_SINCRO'] != null) ...[
           const SizedBox(height: 18),

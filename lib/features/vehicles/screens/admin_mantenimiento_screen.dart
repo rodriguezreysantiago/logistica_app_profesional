@@ -40,6 +40,10 @@ class _AdminMantenimientoScreenState extends State<AdminMantenimientoScreen> {
   final TextEditingController _searchCtl = TextEditingController();
   String _query = '';
 
+  /// Filtro por estado de mantenimiento. null = sin filtro (mostrar todos).
+  /// Lo setean/limpian los chips de _BarraResumen via tap toggle.
+  MantenimientoEstado? _filtroEstado;
+
   @override
   void initState() {
     super.initState();
@@ -89,7 +93,12 @@ class _AdminMantenimientoScreenState extends State<AdminMantenimientoScreen> {
           final sorted = [...docs]
             ..sort((a, b) => a.id.compareTo(b.id));
 
-          // Filtro de búsqueda por patente / marca / modelo.
+          // Filtros encadenados: primero por search (patente/marca/modelo),
+          // despues por estado seleccionado en los chips. _filtroEstado
+          // null = no filtra. Los chips de _BarraResumen siguen mostrando
+          // los conteos GLOBALES (calculados sobre `sorted`) para que el
+          // admin sepa cuantos hay en cada estado aunque tenga otro filtro
+          // activo y pueda saltar de uno a otro.
           final filtrados = sorted.where((doc) {
             if (_query.isEmpty) return true;
             final data = doc.data() as Map<String, dynamic>;
@@ -98,6 +107,12 @@ class _AdminMantenimientoScreenState extends State<AdminMantenimientoScreen> {
                     '${data['MODELO'] ?? ''}'
                 .toUpperCase();
             return hay.contains(_query);
+          }).where((doc) {
+            if (_filtroEstado == null) return true;
+            final d = doc.data() as Map<String, dynamic>;
+            final servicio = _resolverServiceDistance(d);
+            return AppMantenimiento.clasificar(servicio.km) ==
+                _filtroEstado;
           }).toList();
 
           // Resumen agregado: cuántos vencidos / urgentes / etc.
@@ -114,7 +129,17 @@ class _AdminMantenimientoScreenState extends State<AdminMantenimientoScreen> {
 
           return Column(
             children: [
-              _BarraResumen(resumen: resumen),
+              _BarraResumen(
+                resumen: resumen,
+                filtroActivo: _filtroEstado,
+                onSeleccionar: (estado) {
+                  setState(() {
+                    // Tap mismo estado = limpiar; tap distinto = cambia.
+                    _filtroEstado =
+                        (_filtroEstado == estado) ? null : estado;
+                  });
+                },
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                 child: TextField(
@@ -659,7 +684,13 @@ class _Resumen {
 
 class _BarraResumen extends StatelessWidget {
   final _Resumen resumen;
-  const _BarraResumen({required this.resumen});
+  final MantenimientoEstado? filtroActivo;
+  final ValueChanged<MantenimientoEstado> onSeleccionar;
+  const _BarraResumen({
+    required this.resumen,
+    required this.filtroActivo,
+    required this.onSeleccionar,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -679,32 +710,50 @@ class _BarraResumen extends StatelessWidget {
             label: 'Vencidos',
             count: resumen.vencidos,
             color: Colors.redAccent,
+            estado: MantenimientoEstado.vencido,
+            activo: filtroActivo == MantenimientoEstado.vencido,
+            onTap: onSeleccionar,
           ),
           _Chip(
             label: 'Urgentes',
             count: resumen.urgentes,
             color: Colors.orangeAccent,
+            estado: MantenimientoEstado.urgente,
+            activo: filtroActivo == MantenimientoEstado.urgente,
+            onTap: onSeleccionar,
           ),
           _Chip(
             label: 'Programar',
             count: resumen.programar,
             color: Colors.amberAccent,
+            estado: MantenimientoEstado.programar,
+            activo: filtroActivo == MantenimientoEstado.programar,
+            onTap: onSeleccionar,
           ),
           _Chip(
             label: 'Falta poco',
             count: resumen.atencion,
             color: const Color(0xFFC6FF00),
+            estado: MantenimientoEstado.atencion,
+            activo: filtroActivo == MantenimientoEstado.atencion,
+            onTap: onSeleccionar,
           ),
           _Chip(
             label: 'OK',
             count: resumen.ok,
             color: Colors.greenAccent,
+            estado: MantenimientoEstado.ok,
+            activo: filtroActivo == MantenimientoEstado.ok,
+            onTap: onSeleccionar,
           ),
           if (resumen.sinDato > 0)
             _Chip(
               label: 'Sin datos',
               count: resumen.sinDato,
               color: Colors.white24,
+              estado: MantenimientoEstado.sinDato,
+              activo: filtroActivo == MantenimientoEstado.sinDato,
+              onTap: onSeleccionar,
             ),
         ],
       ),
@@ -716,42 +765,66 @@ class _Chip extends StatelessWidget {
   final String label;
   final int count;
   final Color color;
+  final MantenimientoEstado estado;
+  final bool activo;
+  final ValueChanged<MantenimientoEstado> onTap;
 
   const _Chip({
     required this.label,
     required this.count,
     required this.color,
+    required this.estado,
+    required this.activo,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withAlpha(20),
+    // Cuando el chip esta activo: fondo mas opaco + borde mas grueso
+    // y label en blanco/bold para que se note el filtro vigente.
+    final fondoAlpha = activo ? 60 : 20;
+    final bordeAlpha = activo ? 200 : 60;
+    final bordeWidth = activo ? 1.5 : 1.0;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withAlpha(60)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$count',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
+        onTap: () => onTap(estado),
+        child: Container(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withAlpha(fondoAlpha),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: color.withAlpha(bordeAlpha),
+              width: bordeWidth,
             ),
           ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: activo ? Colors.white : Colors.white70,
+                  fontSize: 11,
+                  fontWeight:
+                      activo ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

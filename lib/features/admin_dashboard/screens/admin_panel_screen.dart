@@ -133,57 +133,61 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           // Cada tile aparece solo si el rol logueado tiene la
           // capability correspondiente. SUPERVISOR ve la mayoría.
           // SYNC OBSERVABILITY queda solo para ADMIN.
-          if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
-            const _AdminTile(
-              titulo: 'GESTIÓN DE PERSONAL',
-              subtitulo: 'Lista de legajos y choferes',
-              icono: Icons.badge_outlined,
-              color: Colors.blueAccent,
-              ruta: '/admin_personal_lista',
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verListaFlota))
-            const _AdminTile(
-              titulo: 'GESTIÓN DE FLOTA',
-              subtitulo: 'Control de camiones y acoplados',
-              icono: Icons.local_shipping_outlined,
-              color: Colors.purpleAccent,
-              ruta: '/admin_vehiculos_lista',
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verVencimientos))
-            const _AdminTile(
-              titulo: 'AUDITORÍA DE VENCIMIENTOS',
-              subtitulo: 'Calendario y listas por categoría',
-              icono: Icons.event_note,
-              color: Colors.greenAccent,
-              ruta: '/admin_vencimientos_menu',
-            ),
+          // Los tiles de Accesos rapidos replican el ORDEN y los NOMBRES
+          // del sidebar (NavigationRail / BottomBar) para mantener
+          // coherencia visual: el admin reconoce cada item por el mismo
+          // label en cualquier parte de la app.
           if (Capabilities.can(PrefsService.rol, Capability.verRevisiones))
             const _AdminTile(
-              titulo: 'REVISIONES PENDIENTES',
+              titulo: 'REVISIONES',
               subtitulo: 'Aprobar/rechazar trámites cargados por choferes',
               icono: Icons.fact_check_outlined,
               color: Colors.tealAccent,
               ruta: '/admin_revisiones',
             ),
-          if (Capabilities.can(PrefsService.rol, Capability.verReportes))
+          if (Capabilities.can(PrefsService.rol, Capability.verListaFlota))
             const _AdminTile(
-              titulo: 'CENTRO DE REPORTES',
-              subtitulo: 'Exportar Excel y analítica de flota',
-              icono: Icons.analytics_outlined,
-              color: Colors.amberAccent,
-              ruta: '/admin_reportes',
+              titulo: 'FLOTA',
+              subtitulo: 'Control de camiones y acoplados',
+              icono: Icons.local_shipping_outlined,
+              color: Colors.purpleAccent,
+              ruta: '/admin_vehiculos_lista',
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verMantenimiento))
             const _AdminTile(
-              titulo: 'MANTENIMIENTO PREVENTIVO',
+              titulo: 'SERVICE',
               subtitulo: 'Próximos services de la flota Volvo',
               icono: Icons.build_circle_outlined,
               color: Colors.deepOrangeAccent,
               ruta: AppRoutes.adminMantenimiento,
             ),
+          if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
+            const _AdminTile(
+              titulo: 'PERSONAL',
+              subtitulo: 'Lista de legajos y choferes',
+              icono: Icons.badge_outlined,
+              color: Colors.blueAccent,
+              ruta: '/admin_personal_lista',
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verVencimientos))
+            const _AdminTile(
+              titulo: 'VENCIMIENTOS',
+              subtitulo: 'Calendario y listas por categoría',
+              icono: Icons.event_note,
+              color: Colors.greenAccent,
+              ruta: '/admin_vencimientos_menu',
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verReportes))
+            const _AdminTile(
+              titulo: 'REPORTES',
+              subtitulo: 'Exportar Excel y analítica de flota',
+              icono: Icons.analytics_outlined,
+              color: Colors.amberAccent,
+              ruta: '/admin_reportes',
+            ),
           if (Capabilities.can(PrefsService.rol, Capability.verSyncDashboard))
             const _AdminTile(
-              titulo: 'SYNC OBSERVABILITY',
+              titulo: 'SYNC',
               subtitulo: 'Monitoreo en tiempo real de sincronización',
               icono: Icons.monitor_heart_outlined,
               color: Colors.cyanAccent,
@@ -191,7 +195,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verEstadoBot))
             const _AdminTile(
-              titulo: 'ESTADO DEL BOT',
+              titulo: 'ESTADO BOT',
               subtitulo: 'Bot WhatsApp: cola, cron, errores y heartbeat',
               icono: Icons.smart_toy_outlined,
               color: Colors.lightGreenAccent,

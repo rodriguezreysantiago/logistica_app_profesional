@@ -14,6 +14,7 @@ import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
 import '../../vehicles/screens/admin_mantenimiento_screen.dart';
 import '../../vehicles/screens/admin_vehiculos_lista_screen.dart';
 
+import 'admin_estado_bot_screen.dart';
 import 'admin_panel_screen.dart';
 
 /// Shell principal del admin con navegación lateral.
@@ -102,6 +103,12 @@ class _AdminShellState extends State<AdminShell> {
       icon: Icons.monitor_heart_outlined,
       iconActive: Icons.monitor_heart,
       build: () => const SyncDashboardScreen(),
+    ),
+    _ShellSection(
+      label: 'Estado Bot',
+      icon: Icons.smart_toy_outlined,
+      iconActive: Icons.smart_toy,
+      build: () => const AdminEstadoBotScreen(),
     ),
   ];
 
