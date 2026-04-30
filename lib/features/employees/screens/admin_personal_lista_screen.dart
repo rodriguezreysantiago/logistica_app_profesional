@@ -353,14 +353,22 @@ class _DetalleChofer extends StatelessWidget {
             AppRoles.admin: 'Admin (control total)',
           },
           icono: Icons.badge_outlined,
-          onSave: (v) => EmpleadoActions.dato(context, dni, 'ROL', v),
+          // Cambio de ROL pasa por la Cloud Function `actualizarRolEmpleado`
+          // que valida (solo ADMIN), actualiza el doc Y refresca el
+          // custom claim del usuario afectado.
+          onSave: (v) =>
+              EmpleadoActions.actualizarRol(context, dni, nuevoRol: v),
         ),
         _DatoEditableEnum(
           etiqueta: 'ÁREA',
           valorActual: (data['AREA'] ?? AppAreas.manejo).toString(),
           opciones: AppAreas.etiquetas,
           icono: Icons.factory_outlined,
-          onSave: (v) => EmpleadoActions.dato(context, dni, 'AREA', v),
+          // El área no afecta permisos pero igual va por la callable
+          // para que el claim del usuario quede sincronizado (la app
+          // del afectado lo lee del JWT, no de Firestore).
+          onSave: (v) =>
+              EmpleadoActions.actualizarRol(context, dni, nuevaArea: v),
         ),
         _DatoEditableTexto(
           etiqueta: 'TELÉFONO',
@@ -658,20 +666,4 @@ class _DatoEditableTexto extends StatelessWidget {
 }
 
 class _DatoEditableEmpresa extends StatelessWidget {
-  final String valor;
-  final Function(String) onSave;
-
-  const _DatoEditableEmpresa({required this.valor, required this.onSave});
-
-  static const List<String> _empresas = [
-    'VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)',
-    'SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)',
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: const Text(
-        'EMPRESA',
-    
+  final String 

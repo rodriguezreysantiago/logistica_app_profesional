@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 // `flutter/services` re-exporta Uint8List (dart:typed_data) — lo usa
 // `_subirArchivo` para los uploads cross-platform.
@@ -60,6 +62,100 @@ class EmpleadoActions {
       AppFeedback.successOn(messenger, 'Dato actualizado: $campo');
     } catch (e) {
       AppFeedback.errorOn(messenger, 'Error al actualizar: $e');
+    }
+  }
+
+  /// Endpoint del callable `actualizarRolEmpleado`. Mismo patrón que
+  /// AuditLog y volvoProxy — llamamos por HTTPS directo con Dio porque
+  /// el plugin oficial `cloud_functions` no tiene impl Windows.
+  static const String _endpointActualizarRol =
+      'https://us-central1-logisticaapp-e539a.cloudfunctions.net/actualizarRolEmpleado';
+
+  static Dio? _dioCallable;
+  static Dio get _httpCallable => _dioCallable ??= Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 12),
+          sendTimeout: const Duration(seconds: 12),
+          receiveTimeout: const Duration(seconds: 12),
+        ),
+      );
+
+  /// Actualiza ROL y/o ÁREA de un empleado vía Cloud Function. La
+  /// function valida server-side que el caller sea ADMIN, actualiza
+  /// Firestore Y refresca el custom claim del usuario afectado para
+  /// que su próximo getIdToken(true) traiga el rol nuevo.
+  ///
+  /// Pasar `null` en alguno de los dos campos significa "no tocar".
+  /// Pero al menos uno debe venir poblado.
+  static Future<void> actualizarRol(
+    BuildContext context,
+    String dni, {
+    String? nuevoRol,
+    String? nuevaArea,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (nuevoRol == null && nuevaArea == null) return;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        AppFeedback.errorOn(messenger, 'Sin sesión activa.');
+        return;
+      }
+      final idToken = await user.getIdToken();
+      if (idToken == null || idToken.isEmpty) {
+        AppFeedback.errorOn(messenger, 'No se pudo obtener el token de sesión.');
+        return;
+      }
+
+      final response = await _httpCallable.post<Map<String, dynamic>>(
+        _endpointActualizarRol,
+        data: {
+          // Protocolo callable: payload va envuelto en `data`.
+          'data': {
+            'dni': dni.trim(),
+            if (nuevoRol != null) 'rol': nuevoRol,
+            if (nuevaArea != null) 'area': nuevaArea,
+          },
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          validateStatus: (_) => true,
+          responseType: ResponseType.json,
+        ),
+      );
+
+      if (response.statusCode == null || response.statusCode! >= 400) {
+        final err = response.data?['error'] as Map<String, dynamic>?;
+        final mensaje = err?['message']?.toString() ??
+            'Error ${response.statusCode} al actualizar rol.';
+        // 403 → permission denied; lo decimos en lenguaje del usuario.
+        final txtUI = response.statusCode == 403
+            ? 'Solo ADMIN puede cambiar roles.'
+            : mensaje;
+        AppFeedback.errorOn(messenger, txtUI);
+        return;
+      }
+
+      final result = response.data?['result'] as Map<String, dynamic>?;
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.editarChofer,
+        entidad: 'EMPLEADOS',
+        entidadId: dni.trim(),
+        detalles: {
+          'campo': nuevoRol != null ? 'ROL/AREA' : 'AREA',
+          'rol_nuevo': result?['rol']?.toString() ?? '',
+          'area_nueva': result?['area']?.toString() ?? '',
+        },
+      ));
+      final mensaje = nuevoRol != null
+          ? 'Rol actualizado a ${nuevoRol.toLowerCase()}'
+          : 'Área actualizada';
+      AppFeedback.successOn(messenger, mensaje);
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al actualizar rol: $e');
     }
   }
 
@@ -500,91 +596,4 @@ class EmpleadoActions {
                         ? AuditAccion.desvincularEquipo
                         : AuditAccion.asignarEquipo,
                     entidad: 'EMPLEADOS',
-                    entidadId: dni,
-                    detalles: {
-                      'campo': campo,
-                      'unidad_anterior': cleanActual,
-                      'unidad_nueva': nueva ?? '',
-                    },
-                  ));
-
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-
-                  // Feedback de éxito: distinto copy según haya sido
-                  // desvinculación o asignación nueva.
-                  final mensaje = (nueva == null || nueva == '-')
-                      ? 'Se desvinculó el $etiquetaUnidad de este chofer.'
-                      : 'Se asignó el $etiquetaUnidad $nueva.';
-                  AppFeedback.successOn(messenger, mensaje);
-                } catch (e) {
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-                  AppFeedback.errorOn(messenger, 'No se pudo guardar el cambio: $e');
-                }
-              }
-
-              return ListView.builder(
-                itemCount: unidades.length + 1,
-                itemBuilder: (ctx, idx) {
-                  if (idx == 0) {
-                    return ListTile(
-                      leading:
-                          const Icon(Icons.link_off, color: Colors.redAccent),
-                      title: const Text(
-                        'DESVINCULAR',
-                        style: TextStyle(
-                          color: Colors.redAccent,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      // Confirmación destructiva: desvincular cambia el
-                      // legajo del chofer Y libera la unidad. Si toca por
-                      // error y no avisamos, el equipo queda mal asignado
-                      // y nadie se entera hasta que el chofer reclame.
-                      onTap: () async {
-                        final ok = await AppConfirmDialog.show(
-                          context,
-                          title: '¿Desvincular $etiquetaUnidad?',
-                          message:
-                              'El chofer va a quedar sin $etiquetaUnidad asignado y la unidad vuelve a estado LIBRE.',
-                          confirmLabel: 'DESVINCULAR',
-                          destructive: true,
-                          icon: Icons.link_off,
-                        );
-                        if (ok == true) {
-                          await procesarCambio(null);
-                        }
-                      },
-                    );
-                  }
-
-                  final vDoc = unidades[idx - 1];
-                  final vData = vDoc.data() as Map<String, dynamic>;
-                  final patente = vDoc.id.trim();
-
-                  // Filtrar unidades ocupadas (excepto la actual del chofer)
-                  if (vData['ESTADO'] == 'OCUPADO' &&
-                      patente != patenteActual.trim()) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return ListTile(
-                    title: Text(
-                      patente,
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 14),
-                    ),
-                    trailing: patente == patenteActual.trim()
-                        ? const Icon(Icons.check_circle,
-                            color: Colors.greenAccent)
-                        : null,
-                    onTap: () => procesarCambio(patente),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
+ 

@@ -246,6 +246,138 @@ export const loginConDni = onCall(
 );
 
 // ============================================================================
+// actualizarRolEmpleado
+// ============================================================================
+//
+// Callable que cambia el ROL y/o ÁREA de un empleado. Hace dos cosas
+// que NO se pueden hacer desde el cliente:
+//   1. Validar que el caller sea ADMIN (no solo SUPERVISOR).
+//   2. Actualizar el custom claim del usuario afectado, para que su
+//      JWT refleje el nuevo rol en su próximo `getIdToken(true)` o
+//      después del expire del token (~1 hora).
+//
+// Si solo se actualiza AREA (que no afecta permisos), el cliente puede
+// hacerlo directo a Firestore. Esta callable es para cuando hay que
+// tocar ROL o ambos.
+//
+// Input: { dni, rol?, area? }. Si solo rol, mantiene area existente
+// y viceversa.
+
+const ROLES_VALIDOS = ["CHOFER", "PLANTA", "SUPERVISOR", "ADMIN"];
+const AREAS_VALIDAS = [
+  "MANEJO",
+  "ADMINISTRACION",
+  "PLANTA",
+  "TALLER",
+  "GOMERIA",
+];
+
+export const actualizarRolEmpleado = onCall(
+  { timeoutSeconds: 15 },
+  async (request) => {
+    // ─── Auth: solo ADMIN ──────────────────────────────────────────
+    const rolCaller = request.auth?.token?.rol;
+    if (!request.auth || rolCaller !== "ADMIN") {
+      logger.warn("[actualizarRolEmpleado] sin auth ADMIN", {
+        uid: request.auth?.uid ?? "no-uid",
+        rol: rolCaller ?? "no-rol",
+      });
+      throw new HttpsError(
+        "permission-denied",
+        "Solo ADMIN puede cambiar roles."
+      );
+    }
+
+    // ─── Validación de input ───────────────────────────────────────
+    const dni = (request.data?.dni ?? "").toString().trim();
+    const rolNuevoRaw = request.data?.rol
+      ? request.data.rol.toString().toUpperCase()
+      : null;
+    const areaNuevaRaw = request.data?.area
+      ? request.data.area.toString().toUpperCase()
+      : null;
+
+    if (!dni) {
+      throw new HttpsError("invalid-argument", "Falta `dni`.");
+    }
+    if (rolNuevoRaw === null && areaNuevaRaw === null) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Hay que pasar al menos `rol` o `area`."
+      );
+    }
+    if (rolNuevoRaw !== null && !ROLES_VALIDOS.includes(rolNuevoRaw)) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Rol inválido: ${rolNuevoRaw}. Esperado: ${ROLES_VALIDOS.join(", ")}.`
+      );
+    }
+    if (areaNuevaRaw !== null && !AREAS_VALIDAS.includes(areaNuevaRaw)) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Área inválida: ${areaNuevaRaw}. Esperado: ${AREAS_VALIDAS.join(", ")}.`
+      );
+    }
+
+    // ─── Lectura del doc actual ────────────────────────────────────
+    const empleadoRef = db.collection("EMPLEADOS").doc(dni);
+    const snap = await empleadoRef.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", `Empleado ${dni} no encontrado.`);
+    }
+    const data = snap.data() ?? {};
+
+    const rolFinal = rolNuevoRaw ?? (data.ROL ?? "CHOFER").toString().toUpperCase();
+    const areaFinal =
+      areaNuevaRaw ?? (data.AREA ?? "MANEJO").toString().toUpperCase();
+    const nombre = (data.NOMBRE ?? "Usuario").toString();
+
+    // ─── Update Firestore + custom claim ───────────────────────────
+    const updates: Record<string, unknown> = {
+      fecha_ultima_actualizacion: FieldValue.serverTimestamp(),
+    };
+    if (rolNuevoRaw !== null) updates.ROL = rolFinal;
+    if (areaNuevaRaw !== null) updates.AREA = areaFinal;
+
+    await empleadoRef.update(updates);
+
+    // setCustomUserClaims funciona aunque el usuario no esté logueado
+    // ahora — graba el claim para el próximo getIdToken(true) o expire.
+    // Si el UID no existe en Firebase Auth (caso de empleados que nunca
+    // hicieron login), lanzamos pero no rompemos: el claim se setea
+    // cuando hagan loginConDni la próxima vez.
+    try {
+      await auth.setCustomUserClaims(dni, {
+        rol: rolFinal,
+        area: areaFinal,
+        nombre,
+      });
+      logger.info("[actualizarRolEmpleado] claim actualizado", {
+        dniHash: hashId(dni),
+        rolNuevo: rolFinal,
+        areaNueva: areaFinal,
+      });
+    } catch (e) {
+      // Usuario sin Auth account todavía. El claim se va a aplicar la
+      // próxima vez que se loguee vía loginConDni que LEE ROL/AREA del
+      // doc EMPLEADOS y arma el token.
+      logger.info(
+        "[actualizarRolEmpleado] usuario sin Auth account, " +
+          "claim se aplicará al próximo login",
+        { dniHash: hashId(dni), error: (e as Error).message }
+      );
+    }
+
+    return {
+      ok: true,
+      dni,
+      rol: rolFinal,
+      area: areaFinal,
+    };
+  }
+);
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -824,151 +956,4 @@ export const telemetriaSnapshotScheduled = onSchedule(
 //     que sumarlo acá también (es una conscious choice — la auditoría
 //     no debería tener vocabulario abierto).
 //   - **Sanitización de tamaño**: payload total <= 10KB para defendernos
-//     de un caller que mande un detalles enorme y nos haga gastar
-//     espacio.
-//   - **Fire-and-forget cliente**: la function devuelve OK rápido. Si
-//     algo falla, el cliente loguea y sigue; nunca bloquea al admin.
-
-const AUDIT_ACCIONES_PERMITIDAS = new Set<string>([
-  // Personal
-  "CREAR_CHOFER",
-  "EDITAR_CHOFER",
-  "CAMBIAR_FOTO_PERFIL",
-  "REEMPLAZAR_PAPEL_CHOFER",
-  // Flota
-  "CREAR_VEHICULO",
-  "EDITAR_VEHICULO",
-  "CAMBIAR_FOTO_VEHICULO",
-  // Asignaciones
-  "ASIGNAR_EQUIPO",
-  "DESVINCULAR_EQUIPO",
-  // Revisiones
-  "APROBAR_REVISION",
-  "RECHAZAR_REVISION",
-]);
-
-const AUDIT_ENTIDADES_PERMITIDAS = new Set<string>([
-  "EMPLEADOS",
-  "VEHICULOS",
-  "REVISIONES",
-]);
-
-const AUDIT_MAX_DETALLES_BYTES = 10 * 1024; // 10KB
-
-interface AuditLogResult {
-  ok: true;
-  docId: string;
-}
-
-export const auditLogWrite = onCall(
-  {
-    enforceAppCheck: false, // todavía no está activado App Check
-  },
-  async (request): Promise<AuditLogResult> => {
-    // ─── Auth: solo admin logueado ─────────────────────────────────
-    const rol = request.auth?.token?.rol;
-    if (!request.auth || rol !== "ADMIN") {
-      logger.warn("[auditLog] llamada sin auth ADMIN", {
-        uid: request.auth?.uid ?? "no-uid",
-        rol: rol ?? "no-rol",
-      });
-      throw new HttpsError(
-        "permission-denied",
-        "Solo administradores pueden escribir bitácora."
-      );
-    }
-
-    // ─── Validación de input ───────────────────────────────────────
-    const data = request.data ?? {};
-    const accion = (data.accion ?? "").toString().trim();
-    const entidad = (data.entidad ?? "").toString().trim();
-    const entidadId = (data.entidadId ?? "").toString().trim();
-    const detalles = data.detalles;
-
-    if (!accion || !AUDIT_ACCIONES_PERMITIDAS.has(accion)) {
-      throw new HttpsError(
-        "invalid-argument",
-        `Acción '${accion}' no está en la whitelist.`
-      );
-    }
-
-    if (!entidad || !AUDIT_ENTIDADES_PERMITIDAS.has(entidad)) {
-      throw new HttpsError(
-        "invalid-argument",
-        `Entidad '${entidad}' no está en la whitelist.`
-      );
-    }
-
-    if (entidadId.length > 100) {
-      throw new HttpsError(
-        "invalid-argument",
-        "entidadId demasiado largo (máx 100 chars)."
-      );
-    }
-
-    // detalles debe ser objeto plano serializable y NO vacío. Validamos
-    // tamaño serializando con JSON.stringify — si tira por circular
-    // references o tipos no-serializables, rechazamos.
-    //
-    // Bug A3 del code review: antes aceptábamos {} y null. Ahora si
-    // viene `detalles` debe tener al menos una key — sino, mejor
-    // omitirlo del request directamente.
-    let detallesPersistir: Record<string, unknown> | null = null;
-    if (detalles != null) {
-      if (typeof detalles !== "object" || Array.isArray(detalles)) {
-        throw new HttpsError(
-          "invalid-argument",
-          "`detalles` debe ser un objeto plano."
-        );
-      }
-      const detallesObj = detalles as Record<string, unknown>;
-      if (Object.keys(detallesObj).length === 0) {
-        throw new HttpsError(
-          "invalid-argument",
-          "`detalles` no puede ser un objeto vacío."
-        );
-      }
-      let serializados: string;
-      try {
-        serializados = JSON.stringify(detallesObj);
-      } catch {
-        throw new HttpsError(
-          "invalid-argument",
-          "`detalles` no es serializable."
-        );
-      }
-      if (serializados.length > AUDIT_MAX_DETALLES_BYTES) {
-        throw new HttpsError(
-          "resource-exhausted",
-          `\`detalles\` excede el límite (${AUDIT_MAX_DETALLES_BYTES} bytes).`
-        );
-      }
-      detallesPersistir = detallesObj;
-    }
-
-    // ─── Datos del admin desde el JWT ──────────────────────────────
-    // request.auth.uid es el DNI gracias a loginConDni que setea uid=dni.
-    // request.auth.token.nombre es un custom claim también seteado en
-    // loginConDni. Si por algún motivo no está, fallback a "Admin".
-    const adminDni = request.auth.uid;
-    const adminNombre = (request.auth.token.nombre ?? "Admin").toString();
-
-    // ─── Escritura ─────────────────────────────────────────────────
-    const doc: Record<string, unknown> = {
-      accion,
-      entidad,
-      admin_dni: adminDni,
-      admin_nombre: adminNombre,
-      timestamp: FieldValue.serverTimestamp(),
-    };
-    if (entidadId) {
-      doc.entidad_id = entidadId;
-    }
-    if (detallesPersistir != null) {
-      doc.detalles = detallesPersistir;
-    }
-
-    try {
-      const ref = await db.collection("AUDITORIA_ACCIONES").add(doc);
-      logger.info("[auditLog] OK", {
- 
+//     de un caller que mande 
