@@ -25,8 +25,20 @@
 const path = require('path');
 const fsNode = require('fs');
 
-// Reusamos la config y el SDK del bot — corremos desde whatsapp-bot/.
-process.chdir(path.resolve(__dirname, '..', 'whatsapp-bot'));
+// Reusamos los node_modules y el .env del bot. Como el script vive en
+// `scripts/` (no tiene su propio node_modules), agregamos manualmente
+// el path de `whatsapp-bot/node_modules` al resolver para que los
+// require()s siguientes encuentren dotenv y firebase-admin.
+const botDir = path.resolve(__dirname, '..', 'whatsapp-bot');
+const botNodeModules = path.join(botDir, 'node_modules');
+if (!fsNode.existsSync(botNodeModules)) {
+  console.error(
+    `❌ No existe ${botNodeModules}. Corré 'npm install' en whatsapp-bot primero.`
+  );
+  process.exit(1);
+}
+module.paths.unshift(botNodeModules);
+process.chdir(botDir);
 require('dotenv').config();
 
 const admin = require('firebase-admin');
