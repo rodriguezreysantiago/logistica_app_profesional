@@ -29,6 +29,24 @@ function inicializar() {
       // dataPath default es .wwebjs_auth/ — lo dejamos así para
       // que el .gitignore que ya está cubra el caso.
     }),
+    // ─── webVersionCache remoto ───
+    // Crítico para evitar el bug "autenticado pero nunca ready".
+    // Default `local` cachea la versión de WhatsApp Web que vio en el
+    // primer login. WhatsApp del lado servidor cambió en enero 2026 y
+    // lanza A/B testing que deja a algunas versiones rotas. El cache
+    // remoto baja siempre una versión estable conocida del repo de
+    // wppconnect (que monitorea cuál anda y cuál no).
+    //
+    // Si el remotePath estuviera caído (servidor de wppconnect down),
+    // strict:false hace que caiga al default local — el bot no muere
+    // por una razón de cache. Es el balance correcto: preferimos boot
+    // funcional con versión vieja que crash por dependencia externa.
+    webVersionCache: {
+      type: 'remote',
+      remotePath:
+        'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html',
+      strict: false,
+    },
     puppeteer: {
       // headless: true es default en versions nuevas. Lo dejamos
       // implícito para que tome lo que la lib considere mejor.
@@ -53,6 +71,11 @@ function inicializar() {
   client.on('authenticated', () => {
     health.setEstadoCliente('AUTENTICADO');
     log.info('Sesión de WhatsApp autenticada y persistida en .wwebjs_auth/');
+    // Arranca el watchdog: si ready no llega en READY_TIMEOUT_SEC,
+    // matamos el cliente y reintentamos. Esto resuelve el bug
+    // conocido "autenticado pero never ready" del A/B testing de
+    // WhatsApp Web 2.3000.x.
+    _arrancarWatchdogReady();
   });
 
   client.on('auth_failure', (msg) => {
@@ -64,9 +87,9 @@ function inicializar() {
   client.on('ready', () => {
     listo = true;
     health.setEstadoCliente('LISTO');
-    // Reset del contador — si después de andar bien se desconecta,
-    // arrancamos los reintentos otra vez desde 0.
     _intentosReconexion = 0;
+    _intentosReadyTimeout = 0; // reset del watchdog también
+    _detenerWatchdogReady();
     log.info('WhatsApp listo para enviar.');
     callbacksAlEstarListo.splice(0).forEach((cb) => cb());
   });
@@ -136,60 +159,22 @@ function _intentarReconexion() {
   }, delayMs);
 }
 
-/**
- * Verifica si un número está registrado en WhatsApp.
- *
- * Devuelve:
- * - `true` cuando WhatsApp confirma que el número tiene cuenta.
- * - `false` cuando WhatsApp confirma que el número NO tiene cuenta
- *   (caso terminal: marcamos el doc como ERROR para que el admin
- *   sepa que tiene que cargar otro número).
- *
- * Lanza la excepción original cuando hay un error transient (timeout,
- * sesión caída, etc.) — el caller decide si reintentar. Antes
- * tragábamos esos errores y devolvíamos `false`, lo que confundía
- * "no tiene WhatsApp" con "WhatsApp no respondió".
- */
-async function tieneWhatsApp(wid) {
-  if (!client || !listo) throw new Error('Cliente no inicializado');
-  const numberId = await client.getNumberId(wid.replace('@c.us', ''));
-  return numberId !== null;
-}
+// ─── Watchdog de READY ─────────────────────────────────────────────
+//
+// Bug conocido (issue #5758, #127084 en wwebjs): después del evento
+// `authenticated`, a veces el `ready` nunca llega — el cliente queda
+// colgado en pantalla de carga al 99%. Causado por A/B testing del
+// lado de WhatsApp Web 2.3000.x.
+//
+// Mitigación: timeout configurable (default 90s). Si no llega `ready`,
+// matamos el cliente Chromium y reintentamos `initialize()`. La sesión
+// persistida en .wwebjs_auth/ NO se borra, así que no requiere
+// reescanear el QR.
+//
+// Si el watchdog dispara MAX_READY_TIMEOUTS veces seguidas, exit con
+// código 1 — en producción NSSM reinicia el proceso desde cero (que
+// puede limpiar más estado del que podemos limpiar internamente).
 
-/**
- * Envía un mensaje de texto. Devuelve el id de WhatsApp del mensaje
- * recién enviado, útil para asociar después respuestas con quote
- * (Fase 3). Lanza si el envío falla.
- */
-async function enviarMensaje(wid, texto) {
-  if (!client || !listo) throw new Error('Cliente no inicializado');
-  const sent = await client.sendMessage(wid, texto);
-  // `sent.id._serialized` es el id estable que después aparece como
-  // `quotedMsg.id._serialized` cuando alguien responde citando.
-  try {
-    return sent && sent.id && sent.id._serialized ? sent.id._serialized : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-/**
- * Registra un handler para mensajes entrantes. wwebjs emite todos los
- * mensajes que llegan al número del bot — el caller filtra los que le
- * importan (sender registrado, no de grupo, no propios, etc.).
- */
-function onMensajeEntrante(handler) {
-  if (!client) throw new Error('Cliente no inicializado');
-  client.on('message', handler);
-}
-
-/**
- * Cuando el bot recibe un mensaje, opcionalmente puede responder al
- * mismo hilo con una contestación corta. Lo usamos en Fase 3 para
- * acusar recibo: "Recibí, lo va a revisar la oficina."
- */
-async function responder(msg, texto) {
-  if (!client || !listo) throw new Error('Cliente no inicializado');
-  await msg.reply(texto);
-}
-
+let _readyWatchdogTimer = null;
+let _readyProgressTimer = null;
+let _intentosReadyTimeout

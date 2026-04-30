@@ -120,6 +120,28 @@ async function marcarError(docRef, mensaje) {
   });
 }
 
+/**
+ * Marca un doc para reintento: lo deja en PENDIENTE con un timestamp
+ * futuro `proximoIntentoEn`. El polling de COLA_WHATSAPP filtra por
+ * ese campo y solo encola docs cuyo `proximoIntentoEn` ya pasó.
+ *
+ * `intentos` ya fue incrementado por `marcarProcesando` antes del
+ * intento que falló — acá no lo tocamos. El error se guarda como `error`
+ * para que el admin vea por qué lo dejamos en cola otra vez.
+ *
+ * @param {FirebaseFirestore.DocumentReference} docRef
+ * @param {string} mensajeError - texto del error para mostrar al admin.
+ * @param {Date}   cuandoReintentar - fecha futura del próximo intento.
+ */
+async function marcarReintento(docRef, mensajeError, cuandoReintentar) {
+  await docRef.update({
+    estado: ESTADO.pendiente,
+    error: String(mensajeError).slice(0, 500),
+    error_en: admin.firestore.FieldValue.serverTimestamp(),
+    proximoIntentoEn: admin.firestore.Timestamp.fromDate(cuandoReintentar),
+  });
+}
+
 module.exports = {
   inicializar,
   subirAStorage,
@@ -128,4 +150,5 @@ module.exports = {
   marcarProcesando,
   marcarEnviado,
   marcarError,
+  marcarReintento,
 };

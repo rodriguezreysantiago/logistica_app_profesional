@@ -254,35 +254,59 @@ async function escribirHeartbeat() {
 
 /**
  * Cuenta los docs en COLA_WHATSAPP por estado. Devuelve un objeto con
- * `pendientes`, `procesando`, `error` (los estados que le interesan al
- * admin). Los `enviados` no los contamos porque el contador crece sin
- * límite y no aporta información útil en tiempo real.
+ * `pendientes`, `procesando`, `error`, `reintentando`. Los `enviados`
+ * no los contamos porque el contador crece sin límite y no aporta
+ * información útil en tiempo real.
  *
- * Uso `count()` cuando el SDK lo soporta — es una sola lectura por
- * agregación, mucho más barato que traer todos los docs.
+ * `reintentando` es un subset de `pendientes`: docs que están
+ * técnicamente en estado PENDIENTE pero con `proximoIntentoEn` en el
+ * futuro (vinieron de un reintento fallido y todavía esperan el
+ * próximo turno). La suma `pendientes + procesando + error` sigue
+ * siendo el total de la cola activa (sin doble contar).
+ *
+ * Para PENDIENTE traemos los docs (no count) porque necesitamos
+ * inspeccionar `proximoIntentoEn` campo a campo. La cola es chica
+ * (decenas, no miles) así que el costo es despreciable. Para
+ * PROCESANDO y ERROR usamos count() que es una sola lectura agregada.
  */
 async function _contarCola() {
   const colRef = _db.collection(_fs.COLECCION);
-  const estados = ['pendiente', 'procesando', 'error'];
+  const out = { pendientes: 0, procesando: 0, error: 0, reintentando: 0 };
 
-  const out = { pendientes: 0, procesando: 0, error: 0 };
-  for (const e of estados) {
+  // PENDIENTES + REINTENTANDO (mismo estado, distinguidos por proximoIntentoEn).
+  try {
+    const snap = await colRef.where('estado', '==', _fs.ESTADO.pendiente).get();
+    out.pendientes = snap.size;
+    const ahoraMs = Date.now();
+    snap.forEach((d) => {
+      const prox = d.data().proximoIntentoEn;
+      if (!prox) return;
+      const t = typeof prox.toMillis === 'function'
+        ? prox.toMillis()
+        : new Date(prox).getTime();
+      if (!isNaN(t) && t > ahoraMs) out.reintentando++;
+    });
+  } catch (err) {
+    // Si la query falla, dejamos los contadores en 0 — es preferible
+    // mostrar 0 que tirar el heartbeat entero por una lectura.
+  }
+
+  // PROCESANDO y ERROR — count() agregado.
+  for (const e of ['procesando', 'error']) {
     const valor = _fs.ESTADO[e];
     try {
       const snap = await colRef.where('estado', '==', valor).count().get();
       const n = snap.data().count;
-      if (e === 'pendiente') out.pendientes = n;
       if (e === 'procesando') out.procesando = n;
       if (e === 'error') out.error = n;
     } catch (err) {
-      // Fallback si count() no está disponible.
       const snap = await colRef.where('estado', '==', valor).get();
       const n = snap.size;
-      if (e === 'pendiente') out.pendientes = n;
       if (e === 'procesando') out.procesando = n;
       if (e === 'error') out.error = n;
     }
   }
+
   return out;
 }
 

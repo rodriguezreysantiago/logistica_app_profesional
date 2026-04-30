@@ -33,14 +33,13 @@ const {
 //   1. Cache corrupto en `.wwebjs_cache/` → arranque cuelga sin llegar
 //      a "WhatsApp listo".
 //   2. **SingletonLock / SingletonCookie / SingletonSocket** dentro de
-//      `.wwebjs_auth/session/` → Chromium nuevo cree que hay otra
-//      instancia viva y se queda esperando. ESTE es el más jodido
-//      porque NO se ve en el log; el bot queda en "Sesión autenticada"
-//      eternamente.
+//      `.wwebjs_auth/` → Chromium nuevo cree que hay otra instancia
+//      viva y se queda esperando. ESTE es el más jodido porque NO se
+//      ve en el log; el bot queda en "Sesión autenticada" eternamente.
 //
 // La sesión real (cookies, login persistido) está en otros archivos
-// de `.wwebjs_auth/session/` que NO tocamos. Borrar SOLO los Singleton
-// locks no requiere reescanear QR.
+// que NO empiezan con "Singleton". Borrar los Singleton* no requiere
+// reescanear QR.
 function limpiarLocksChromium() {
   const root = path.resolve(__dirname, '..');
 
@@ -55,50 +54,111 @@ function limpiarLocksChromium() {
     }
   }
 
-  // (2) Singleton locks dentro de la sesión persistida. Si quedan
-  // de un proceso muerto, el nuevo Chromium se cuelga.
-  const sessionDir = path.join(root, '.wwebjs_auth', 'session');
-  const singletonFiles = [
-    'SingletonLock',
-    'SingletonCookie',
-    'SingletonSocket',
-  ];
+  // (2) Singleton locks dentro de la sesión persistida.
+  // wwebjs los guarda dentro de `.wwebjs_auth/` en una ubicación que
+  // depende de la versión (`session/`, `session/Default/`, etc).
+  // Búsqueda RECURSIVA para cubrir cualquier layout. Solo borramos
+  // archivos que matchean "Singleton*" — la sesión real (Cookies,
+  // Local State, Login Data) NO tiene ese prefijo y queda intacta.
+  const authRoot = path.join(root, '.wwebjs_auth');
   let borrados = 0;
-  for (const name of singletonFiles) {
-    const p = path.join(sessionDir, name);
-    if (fsNode.existsSync(p)) {
+  if (fsNode.existsSync(authRoot)) {
+    const stack = [authRoot];
+    while (stack.length > 0) {
+      const dir = stack.pop();
+      let entries;
       try {
-        fsNode.rmSync(p, { force: true });
-        borrados++;
-      } catch (e) {
-        log.warn(`No pude borrar ${name}: ${e.message}`);
+        entries = fsNode.readdirSync(dir, { withFileTypes: true });
+      } catch (_) {
+        continue;
+      }
+      for (const ent of entries) {
+        const full = path.join(dir, ent.name);
+        if (ent.isDirectory()) {
+          stack.push(full);
+        } else if (ent.name.startsWith('Singleton')) {
+          try {
+            fsNode.rmSync(full, { force: true });
+            borrados++;
+          } catch (e) {
+            log.warn(`No pude borrar ${full}: ${e.message}`);
+          }
+        }
       }
     }
   }
   if (borrados > 0) {
-    log.info(
-      `Locks de Chromium previos limpiados (${borrados} archivos Singleton*).`
-    );
+    log.info(`Locks de Chromium previos limpiados (${borrados} archivos Singleton*).`);
+  } else {
+    log.info('No había locks Singleton* previos (sesión limpia).');
   }
 }
 
 // Cola en memoria con los doc IDs pendientes en orden FIFO.
-// Procesamos uno a la vez para mantener el delay entre envíos
-// determinístico y para no abrir múltiples sesiones de envío en
-// paralelo (que dispararía el detector de bots).
 const colaProcesar = [];
 let procesando = false;
 
-/**
- * Encola un doc para envío y arranca el loop si no estaba corriendo.
- */
 function encolar(doc) {
-  // Evitamos duplicados si por algún motivo Firestore emite el mismo
-  // change dos veces (nos pasó con cambios de estado intermedios).
   if (colaProcesar.includes(doc.id)) return;
   colaProcesar.push(doc.id);
   log.info(`+ Encolado ${doc.id} (total en cola: ${colaProcesar.length})`);
   if (!procesando) procesarSiguiente();
+}
+
+// ─── Reintentos automáticos con backoff ──────────────────────────────
+const _PATRONES_TRANSITORIOS = [
+  /timeout/i,
+  /timed out/i,
+  /network/i,
+  /econn(reset|refused|aborted)/i,
+  /etimedout/i,
+  /socket hang up/i,
+  /cliente no inicializado/i,
+  /session closed/i,
+  /protocol error/i,
+  /target closed/i,
+  /execution context was destroyed/i,
+  /evaluate failed/i,
+];
+
+function _esErrorTransitorio(error) {
+  const msg = (error && error.message) || String(error || '');
+  return _PATRONES_TRANSITORIOS.some((re) => re.test(msg));
+}
+
+function _backoffSegundos(intento) {
+  const raw = process.env.RETRY_BACKOFF_SEC || '30,120,600';
+  const arr = raw
+    .split(',')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n) && n > 0);
+  if (arr.length === 0) return 60;
+  const idx = Math.min(Math.max(intento - 1, 0), arr.length - 1);
+  return arr[idx];
+}
+
+async function _despacharFalloEnvio(docRef, error) {
+  const maxRetries = parseInt(process.env.MAX_RETRIES || '3', 10);
+  const transitorio = _esErrorTransitorio(error);
+  const snap = await docRef.get();
+  const intentos = (snap.exists && snap.data().intentos) || 0;
+
+  if (transitorio && intentos < maxRetries) {
+    const backoffSeg = _backoffSegundos(intentos);
+    const cuando = new Date(Date.now() + backoffSeg * 1000);
+    await fs.marcarReintento(docRef, error.message, cuando);
+    log.info(
+      `↻ Reintento ${intentos}/${maxRetries} de ${docRef.id} en ${backoffSeg}s ` +
+        `(${cuando.toISOString()})`
+    );
+    return;
+  }
+
+  const motivo = transitorio
+    ? `agotados ${maxRetries} reintentos`
+    : 'error no transitorio';
+  await fs.marcarError(docRef, `${error.message} (${motivo})`);
+  log.warn(`✗ ${docRef.id}: ERROR definitivo (${motivo}).`);
 }
 
 async function procesarSiguiente() {
@@ -111,9 +171,6 @@ async function procesarSiguiente() {
   const docRef = db.collection(fs.COLECCION).doc(docId);
 
   try {
-    // Releemos el doc — el estado puede haber cambiado entre que
-    // entró al array y que llegamos a procesarlo (ej. el admin
-    // canceló desde la app).
     const snap = await docRef.get();
     if (!snap.exists) {
       log.warn(`${docId} ya no existe; salto.`);
@@ -125,15 +182,11 @@ async function procesarSiguiente() {
       return;
     }
 
-    // ─── Validación: horario hábil ───
     if (!enHorarioHabil()) {
-      log.info(
-        `Fuera de horario hábil. ${docId} queda en estado PENDIENTE para que el polling lo reintente cuando vuelva el horario.`
-      );
+      log.info(`Fuera de horario hábil. ${docId} queda PENDIENTE para que el polling lo reintente.`);
       return;
     }
 
-    // ─── Validación: número ───
     const wid = normalizarTelefonoAWid(data.telefono);
     if (!wid) {
       log.warn(`${docId} con teléfono inválido: ${data.telefono}`);
@@ -144,7 +197,6 @@ async function procesarSiguiente() {
       return;
     }
 
-    // ─── Validación: el número tiene WhatsApp ───
     let existe;
     try {
       existe = await wa.tieneWhatsApp(wid);
@@ -159,12 +211,9 @@ async function procesarSiguiente() {
       return;
     }
 
-    // ─── Marca PROCESANDO + delay anti-bot + envío ───
     await fs.marcarProcesando(docRef);
     const delay = delayAleatorioMs();
-    log.info(
-      `→ Enviando ${docId} a ${data.telefono} en ${Math.round(delay / 1000)}s...`
-    );
+    log.info(`→ Enviando ${docId} a ${data.telefono} en ${Math.round(delay / 1000)}s...`);
     await sleep(delay);
 
     const waMessageId = await wa.enviarMensaje(wid, data.mensaje);
@@ -175,9 +224,9 @@ async function procesarSiguiente() {
     log.error(`✗ Falló ${docId}: ${e.message}`);
     health.registrarError('envio', `${docId}: ${e.message}`);
     try {
-      await fs.marcarError(docRef, e.message);
+      await _despacharFalloEnvio(docRef, e);
     } catch (e2) {
-      log.error(`No se pudo marcar como ERROR: ${e2.message}`);
+      log.error(`No se pudo despachar fallo de envío: ${e2.message}`);
     }
   } finally {
     procesando = false;
@@ -189,12 +238,6 @@ async function procesarSiguiente() {
 }
 
 // ─── Polling de COLA_WHATSAPP ───────────────────────────────────────
-//
-// En vez de mantener un `onSnapshot` con stream gRPC abierto (que se
-// cae cada ~2 min en redes con NAT/firewall agresivo cortando
-// conexiones idle), hacemos polling con `get()` cada N segundos. Más
-// resiliente, menos elegante pero confiable.
-
 let _pollingTimer = null;
 
 async function pollearCola(db) {
@@ -203,21 +246,27 @@ async function pollearCola(db) {
       .collection(fs.COLECCION)
       .where('estado', '==', fs.ESTADO.pendiente)
       .get();
-    qs.forEach((doc) => encolar(doc));
+    const ahora = Date.now();
+    qs.forEach((doc) => {
+      const data = doc.data();
+      const prox = data.proximoIntentoEn;
+      if (prox) {
+        const t = typeof prox.toMillis === 'function'
+          ? prox.toMillis()
+          : new Date(prox).getTime();
+        if (!isNaN(t) && t > ahora) return;
+      }
+      encolar(doc);
+    });
   } catch (e) {
     log.warn(`Polling Firestore falló: ${e.message}`);
   }
 }
 
 function iniciarPolling(db) {
-  if (_pollingTimer) return; // idempotente
-  const intervaloSeg = parseInt(
-    process.env.POLLING_INTERVAL_SECONDS || '15',
-    10
-  );
-  log.info(
-    `Polling de ${fs.COLECCION} cada ${intervaloSeg}s (modo robusto: sin streams gRPC).`
-  );
+  if (_pollingTimer) return;
+  const intervaloSeg = parseInt(process.env.POLLING_INTERVAL_SECONDS || '15', 10);
+  log.info(`Polling de ${fs.COLECCION} cada ${intervaloSeg}s (modo robusto: sin streams gRPC).`);
   pollearCola(db);
   _pollingTimer = setInterval(() => pollearCola(db), intervaloSeg * 1000);
 }
@@ -231,8 +280,6 @@ function detenerPolling() {
 
 async function main() {
   log.info('Iniciando whatsapp-bot...');
-
-  // Cleanup preventivo (cache + singleton locks) antes de levantar Chromium.
   limpiarLocksChromium();
 
   const db = fs.inicializar();
@@ -242,28 +289,19 @@ async function main() {
 
   iniciarPolling(db);
 
-  // Heartbeat a BOT_HEALTH/main para que la app pueda mostrar estado
-  // del bot en vivo. Arranca después de que WhatsApp esté listo
-  // (asegura que health.setEstadoCliente('LISTO') ya se llamó).
   health.iniciar(db, fs, wa);
 
-  // Cron de avisos automáticos (Fase 2).
   cron.start(fs);
 
-  // Handler de respuestas (Fase 3).
   const respuestasHabilitado =
-    String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() ===
-    'true';
+    String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() === 'true';
   if (respuestasHabilitado) {
     log.info('Handler de respuestas HABILITADO.');
     wa.onMensajeEntrante(messageHandler.crearHandler(fs, wa));
   } else {
-    log.info(
-      'Handler de respuestas DESHABILITADO (AUTO_RESPUESTAS_ENABLED=false).'
-    );
+    log.info('Handler de respuestas DESHABILITADO (AUTO_RESPUESTAS_ENABLED=false).');
   }
 
-  // Manejo de señales para cerrar limpio.
   const delayMaxMs = parseInt(process.env.DELAY_MAX_MS || '60000', 10);
   const graceMs = delayMaxMs + 10000;
 

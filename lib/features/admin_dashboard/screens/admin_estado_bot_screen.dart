@@ -283,14 +283,23 @@ class _CardCola extends StatelessWidget {
     final pendientes = (cola['pendientes'] ?? 0) as int;
     final procesando = (cola['procesando'] ?? 0) as int;
     final error = (cola['error'] ?? 0) as int;
+    final reintentando = (cola['reintentando'] ?? 0) as int;
+    // Pendientes "frescos" = total pendientes - los que están en
+    // espera de retry. Para que la UI no haga doble conteo.
+    final pendientesFrescos =
+        (pendientes - reintentando).clamp(0, pendientes);
 
     return _BloqueDatos(
       titulo: 'Cola de envío',
       icono: Icons.queue_outlined,
       filas: [
-        _Fila('Pendientes', '$pendientes',
-            color: pendientes > 0 ? Colors.orangeAccent : Colors.white70),
+        _Fila('Pendientes', '$pendientesFrescos',
+            color:
+                pendientesFrescos > 0 ? Colors.orangeAccent : Colors.white70),
         _Fila('En proceso', '$procesando'),
+        _Fila('Reintentando', '$reintentando',
+            color:
+                reintentando > 0 ? Colors.amberAccent : Colors.white70),
         _Fila('Con error', '$error',
             color: error > 0 ? Colors.redAccent : Colors.white70),
       ],
@@ -635,22 +644,4 @@ class _Mensaje extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icono, color: color, size: 48),
-            const SizedBox(height: 16),
-            Text(
-              texto,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: color, fontSize: 14),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-         
+      child: Padding
