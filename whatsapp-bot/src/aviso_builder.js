@@ -150,6 +150,102 @@ function resolverNombreSaludo(empleadoData) {
   return extraerPrimerNombre(empleadoData.NOMBRE);
 }
 
+
+/**
+ * Construye un mensaje AGRUPADO con varios vencimientos del mismo
+ * chofer. Se usa cuando el cron detecta que un chofer tiene 2+ items
+ * para avisar en el mismo ciclo — en lugar de mandar 2+ mensajes
+ * separados (que es signal fuerte de bot ante WhatsApp), mandamos
+ * uno solo con la lista completa.
+ *
+ * @param {object} args
+ * @param {string|null} args.destinatarioNombre - Apodo o primer nombre.
+ * @param {Array<object>} args.items - Cada item:
+ *   - tipoDoc: 'Licencia de Conducir', 'RTO', 'Service', etc.
+ *   - referencia: 'tu' | 'la unidad <patente>' | etc. (cómo introducirlo).
+ *   - dias: días restantes (negativo si vencido). Para service preventivo,
+ *           dias representa los KM restantes (lo formateamos distinto).
+ *   - fecha: string YYYY-MM-DD para vencimientos. Para service no se usa.
+ *   - tipo: 'vencimiento' (default) | 'service'.
+ * @returns {string}
+ */
+function buildAgrupado({ destinatarioNombre, items }) {
+  const nombreSeguro = destinatarioNombre
+    ? String(destinatarioNombre).replace(/\s+/g, ' ').trim().slice(0, 40)
+    : null;
+  const saludo =
+    nombreSeguro && nombreSeguro.length > 0
+      ? `Hola ${nombreSeguro}`
+      : 'Hola';
+
+  // Ordenamos por urgencia: más urgente primero (vencidos hace más).
+  // Eso pone al chofer la info crítica al inicio.
+  const ordenados = [...items].sort((a, b) => (a.dias || 0) - (b.dias || 0));
+
+  const lineas = ordenados.map(_lineaItem);
+
+  // Tono del cierre según el item más grave.
+  const masGrave = ordenados[0];
+  let cierre;
+  if (masGrave && masGrave.dias != null && masGrave.dias < 0) {
+    cierre = 'Pasá por la oficina lo antes posible para regularizar.';
+  } else if (masGrave && masGrave.dias != null && masGrave.dias <= 7) {
+    cierre = 'Es importante que arranques con la renovación de los más próximos. Coordiná con la oficina.';
+  } else {
+    cierre = 'Te aviso con anticipación para que tengas margen. Coordiná con la oficina cuando puedas.';
+  }
+
+  const cuerpo =
+    `${saludo}, te aviso desde la oficina que tenés varios papeles para gestionar:\n\n` +
+    lineas.join('\n') +
+    `\n\n${cierre}`;
+
+  return `${cuerpo}\n\n${FIRMA}`;
+}
+
+/**
+ * Arma una línea descriptiva para un item del mensaje agrupado.
+ * Formato: "<emoji> <Tipo> — <detalle de fecha o km>".
+ */
+function _lineaItem(item) {
+  const dias = item.dias;
+  const tipo = item.tipo || 'vencimiento';
+  const tipoDoc = item.tipoDoc || 'documento';
+  const ref = item.referencia ? ` (${item.referencia})` : '';
+
+  // Service preventivo: `dias` es KM, formato distinto.
+  if (tipo === 'service') {
+    const km = Math.round(dias);
+    if (km <= 0) {
+      return `🚨 Service${ref} — VENCIDO (${Math.abs(km)} km pasados)`;
+    }
+    if (km <= 1000) {
+      return `⚠️ Service${ref} — urgente (faltan ${km} km)`;
+    }
+    return `📅 Service${ref} — faltan ${km.toLocaleString('es-AR')} km`;
+  }
+
+  // Vencimiento normal: `dias` es días, `fecha` es string ISO.
+  const fechaFmt = formatearFecha(item.fecha);
+  if (dias == null) {
+    return `📄 ${tipoDoc}${ref} — ${fechaFmt}`;
+  }
+  if (dias < 0) {
+    const hace = -dias;
+    if (hace === 1) {
+      return `🚨 ${tipoDoc}${ref} — venció ayer (${fechaFmt})`;
+    }
+    return `🚨 ${tipoDoc}${ref} — vencido hace ${hace} días (${fechaFmt})`;
+  }
+  if (dias === 0) {
+    return `⚠️ ${tipoDoc}${ref} — vence HOY (${fechaFmt})`;
+  }
+  if (dias <= 7) {
+    return `⚠️ ${tipoDoc}${ref} — vence en ${dias} día${dias === 1 ? '' : 's'} (${fechaFmt})`;
+  }
+  return `📅 ${tipoDoc}${ref} — vence en ${dias} días (${fechaFmt})`;
+}
+
 /**
  * Para nombres tipo "PEREZ JUAN CARLOS" devuelve "Juan" (formato
  * APELLIDO NOMBRE… que usa la app). Si solo hay un token, devuelve
@@ -209,6 +305,7 @@ function formatearFecha(fecha) {
 
 module.exports = {
   build,
+  buildAgrupado,
   extraerPrimerNombre,
   resolverNombreSaludo,
   extraerPatente,
