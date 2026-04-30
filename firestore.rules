@@ -162,6 +162,21 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // BOT_HEALTH — heartbeat del bot Node.js
+    // ========================================================================
+    // El bot escribe `BOT_HEALTH/main` cada ~60s (vía Admin SDK) con
+    // estado del cliente WA, cola, último ciclo del cron, errores
+    // recientes, etc. La pantalla "Estado del Bot" del admin lo lee en
+    // vivo. Como el doc tiene info operacional (cantidad de mensajes,
+    // patrón de errores) y el contenido podría exponer detalles internos,
+    // restringimos lectura a ADMIN.
+
+    match /BOT_HEALTH/{doc} {
+      allow read: if isAdmin();
+      allow write: if false; // solo el bot vía Admin SDK
+    }
+
+    // ========================================================================
     // MANTENIMIENTOS_AVISADOS — idempotencia de notificación local
     // ========================================================================
     // El cliente Flutter (admin) escribe acá cada vez que evalúa el
@@ -179,22 +194,4 @@ service cloud.firestore {
     // LOGIN_ATTEMPTS — rate limiting del login (solo Cloud Function)
     // ========================================================================
     // La function `loginConDni` escribe acá vía Admin SDK (bypasea rules).
-    // Ningún cliente debe leer/escribir directo. La colección guarda
-    // intentos fallidos consecutivos por DNI (clave = hash corto del DNI)
-    // y un timestamp `bloqueadoHasta` que la function consulta antes de
-    // verificar la contraseña.
-
-    match /LOGIN_ATTEMPTS/{dniHash} {
-      allow read, write: if false;
-    }
-
-    // ========================================================================
-    // FALLBACK — todo lo demás bloqueado
-    // ========================================================================
-    // Si en el futuro alguien crea una colección nueva, queda
-    // bloqueada por default hasta que se sume explícitamente arriba.
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
+    // Ningún clie

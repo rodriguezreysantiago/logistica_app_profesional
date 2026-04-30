@@ -15,6 +15,7 @@ import '../features/employees/screens/user_mi_perfil_screen.dart';
 import '../features/expirations/screens/user_mis_vencimientos_screen.dart';
 
 import '../features/admin_dashboard/screens/admin_shell.dart';
+import '../features/admin_dashboard/screens/admin_estado_bot_screen.dart';
 import '../features/employees/screens/admin_personal_lista_screen.dart';
 import '../features/vehicles/screens/admin_vehiculos_lista_screen.dart';
 import '../features/vehicles/screens/admin_mantenimiento_screen.dart';
@@ -178,6 +179,15 @@ class AppRouter {
           settings,
         );
 
+      // ================= ESTADO DEL BOT =================
+      // Dashboard en vivo del bot Node.js de WhatsApp. Lee de
+      // BOT_HEALTH/main que el bot escribe cada 60s.
+      case AppRoutes.adminEstadoBot:
+        return _buildRoute(
+          _protegerAdmin(const AdminEstadoBotScreen()),
+          settings,
+        );
+
       default:
         return null;
     }
@@ -187,20 +197,4 @@ class AppRouter {
     return MaterialPageRoute(
       builder: (context) => Scaffold(
         appBar: AppBar(
-          title: const Text(AppTexts.rutaNoEncontrada),
-        ),
-        body: Center(
-          child: ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pushNamedAndRemoveUntil(
-                AppRoutes.login,
-                (_) => false,
-              );
-            },
-            child: const Text("VOLVER AL INICIO"),
-          ),
-        ),
-      ),
-    );
-  }
-}
+   

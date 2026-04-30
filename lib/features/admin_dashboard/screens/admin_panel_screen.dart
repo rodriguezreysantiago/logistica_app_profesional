@@ -178,6 +178,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
             color: Colors.cyanAccent,
             ruta: AppRoutes.syncDashboard,
           ),
+          const _AdminTile(
+            titulo: 'ESTADO DEL BOT',
+            subtitulo: 'Bot WhatsApp: cola, cron, errores y heartbeat',
+            icono: Icons.smart_toy_outlined,
+            color: Colors.lightGreenAccent,
+            ruta: AppRoutes.adminEstadoBot,
+          ),
           const SizedBox(height: 28),
           const Center(
             child: Text(
@@ -615,14 +622,4 @@ class _AdminTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   subtitulo,
-                  style: const TextStyle(
-                      color: Colors.white60, fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-          const Icon(Icons.arrow_forward_ios,
-              color: Colors.white24, size: 14),
-        ],
-      ),
-    
+   

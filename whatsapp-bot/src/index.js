@@ -14,6 +14,7 @@ const log = require('./logger');
 const fs = require('./firestore');
 const wa = require('./whatsapp');
 const cron = require('./cron');
+const health = require('./health');
 const messageHandler = require('./message_handler');
 const {
   enHorarioHabil,
@@ -125,11 +126,6 @@ async function procesarSiguiente() {
     }
 
     // ─── Validación: horario hábil ───
-    // Bug C6 del code review: antes hacíamos `await sleep(15 min)` con
-    // `procesando=true`, lo cual bloqueaba TODA la cola por 15 min
-    // aunque entraran nuevos docs en horario hábil. Ahora simplemente
-    // soltamos el doc — el polling cada 15s lo va a re-detectar cuando
-    // ya sea horario hábil. Sin sleep, sin bloqueo de cola.
     if (!enHorarioHabil()) {
       log.info(
         `Fuera de horario hábil. ${docId} queda en estado PENDIENTE para que el polling lo reintente cuando vuelva el horario.`
@@ -149,17 +145,10 @@ async function procesarSiguiente() {
     }
 
     // ─── Validación: el número tiene WhatsApp ───
-    // tieneWhatsApp devuelve false solo cuando WhatsApp confirma que
-    // el número NO tiene cuenta. Si lanza, es un error transient
-    // (timeout, sesión caída) — lo dejamos propagar para que el catch
-    // exterior haga retry vía el listener de Firestore.
     let existe;
     try {
       existe = await wa.tieneWhatsApp(wid);
     } catch (e) {
-      // Volvemos a poner el doc en PENDIENTE para que el listener lo
-      // levante en el próximo cambio. Si el problema es la sesión, se
-      // resuelve cuando wwebjs reconecte.
       log.warn(`Verificación de ${wid} falló (transient): ${e.message}`);
       await docRef.update({ estado: fs.ESTADO.pendiente });
       return;
@@ -180,9 +169,11 @@ async function procesarSiguiente() {
 
     const waMessageId = await wa.enviarMensaje(wid, data.mensaje);
     await fs.marcarEnviado(docRef, { waMessageId });
+    health.registrarEnvio();
     log.info(`✓ Enviado ${docId} (wa_id: ${waMessageId || '?'})`);
   } catch (e) {
     log.error(`✗ Falló ${docId}: ${e.message}`);
+    health.registrarError('envio', `${docId}: ${e.message}`);
     try {
       await fs.marcarError(docRef, e.message);
     } catch (e2) {
@@ -190,10 +181,7 @@ async function procesarSiguiente() {
     }
   } finally {
     procesando = false;
-    // Si quedan más, seguimos.
     if (colaProcesar.length > 0) {
-      // Pequeña pausa entre items para evitar que un error rápido
-      // genere un loop tight de marcado de errores.
       await sleep(500);
       procesarSiguiente();
     }
@@ -206,16 +194,6 @@ async function procesarSiguiente() {
 // cae cada ~2 min en redes con NAT/firewall agresivo cortando
 // conexiones idle), hacemos polling con `get()` cada N segundos. Más
 // resiliente, menos elegante pero confiable.
-//
-// El intervalo lo configura POLLING_INTERVAL_SECONDS en .env (default
-// 15s). Cada ciclo:
-//   1. Consulta los docs en estado PENDIENTE.
-//   2. Para cada uno que NO esté ya en la cola en memoria, lo encola.
-//   3. La guardia `if (colaProcesar.includes(doc.id))` en `encolar`
-//      evita duplicados entre ciclos consecutivos.
-//
-// Si querés volver al modo onSnapshot (cuando la red lo soporte),
-// alcanza con revertir este commit.
 
 let _pollingTimer = null;
 
@@ -227,10 +205,6 @@ async function pollearCola(db) {
       .get();
     qs.forEach((doc) => encolar(doc));
   } catch (e) {
-    // Si una corrida falla, logueamos y seguimos con la próxima.
-    // No abandonamos el polling — la siguiente iteración intenta de
-    // nuevo. Esto resiste cortes de red transitorios sin necesitar
-    // reconexión explícita.
     log.warn(`Polling Firestore falló: ${e.message}`);
   }
 }
@@ -244,7 +218,6 @@ function iniciarPolling(db) {
   log.info(
     `Polling de ${fs.COLECCION} cada ${intervaloSeg}s (modo robusto: sin streams gRPC).`
   );
-  // Primera corrida inmediata para no esperar 15s.
   pollearCola(db);
   _pollingTimer = setInterval(() => pollearCola(db), intervaloSeg * 1000);
 }
@@ -269,7 +242,58 @@ async function main() {
 
   iniciarPolling(db);
 
-  // Cron de avisos automáticos (Fase 2). Solo arranca si
-  // AUTO_AVISOS_ENABLED=true en .env. Es idempotente: si ya se mandó
-  // el mismo aviso (mismo nivel de urgencia, misma fecha de
- 
+  // Heartbeat a BOT_HEALTH/main para que la app pueda mostrar estado
+  // del bot en vivo. Arranca después de que WhatsApp esté listo
+  // (asegura que health.setEstadoCliente('LISTO') ya se llamó).
+  health.iniciar(db, fs, wa);
+
+  // Cron de avisos automáticos (Fase 2).
+  cron.start(fs);
+
+  // Handler de respuestas (Fase 3).
+  const respuestasHabilitado =
+    String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() ===
+    'true';
+  if (respuestasHabilitado) {
+    log.info('Handler de respuestas HABILITADO.');
+    wa.onMensajeEntrante(messageHandler.crearHandler(fs, wa));
+  } else {
+    log.info(
+      'Handler de respuestas DESHABILITADO (AUTO_RESPUESTAS_ENABLED=false).'
+    );
+  }
+
+  // Manejo de señales para cerrar limpio.
+  const delayMaxMs = parseInt(process.env.DELAY_MAX_MS || '60000', 10);
+  const graceMs = delayMaxMs + 10000;
+
+  const shutdown = async (sig) => {
+    log.info(`Recibido ${sig}, cerrando (grace ${Math.round(graceMs / 1000)}s)...`);
+    detenerPolling();
+    cron.stop();
+    health.detener();
+
+    const start = Date.now();
+    while (procesando && Date.now() - start < graceMs) {
+      await sleep(200);
+    }
+    if (procesando) {
+      log.warn(
+        'Grace period agotado con un envío en curso. ' +
+        'El doc queda en PROCESANDO; revisalo manualmente al reiniciar.'
+      );
+    } else {
+      log.info('Cola en pausa, sin envíos en curso.');
+    }
+
+    await wa.destroy();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+main().catch((e) => {
+  log.error(`Fatal: ${e.stack || e.message}`);
+  process.exit(1);
+});

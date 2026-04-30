@@ -16,6 +16,7 @@ const { enHorarioHabil } = require('./humano');
 const aviso = require('./aviso_builder');
 const avisoService = require('./aviso_service_builder');
 const hist = require('./historico');
+const health = require('./health');
 
 // Intervalo entre services programados de tractores Volvo, en KM.
 // Espejo de `AppMantenimiento.intervaloServiceKm` en el cliente Dart.
@@ -464,8 +465,10 @@ async function _runOnce(fs) {
       `Cron ciclo cerrado: encolados=${stats.encolados} ` +
         `salteados=${stats.salteados} errores=${stats.errores}`
     );
+    health.registrarCicloCron(stats);
   } catch (e) {
     log.error(`Cron falló: ${e.stack || e.message}`);
+    health.registrarError('cron', e.message);
   } finally {
     _running = false;
   }
@@ -484,4 +487,32 @@ async function _runOnce(fs) {
  * Espejo de `_resolverServiceDistance` en el cliente Dart.
  */
 function _resolverServiceDistance(v) {
-  const api = Number(v.
+  const api = Number(v.SERVICE_DISTANCE_KM);
+  if (!isNaN(api) && v.SERVICE_DISTANCE_KM != null) return api;
+
+  const ultimo = Number(v.ULTIMO_SERVICE_KM);
+  const actual = Number(v.KM_ACTUAL);
+  if (
+    !isNaN(ultimo) &&
+    !isNaN(actual) &&
+    v.ULTIMO_SERVICE_KM != null &&
+    v.KM_ACTUAL != null
+  ) {
+    return ultimo + INTERVALO_SERVICE_KM - actual;
+  }
+  return null;
+}
+
+// `_buscarChofer` removida — reemplazada por el índice inverso
+// `choferByPatente` que se construye una vez al inicio del ciclo y
+// permite lookup O(1) en lugar de O(n) por cada vencimiento.
+
+module.exports = {
+  start,
+  stop,
+  // Exportados para tests / uso interno:
+  calcularDiasRestantes,
+  DOCS_EMPLEADO,
+  DOCS_VEHICULO,
+  INTERVALO_SERVICE_KM,
+};

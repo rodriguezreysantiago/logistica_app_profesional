@@ -7,6 +7,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const log = require('./logger');
+const health = require('./health');
 
 let client = null;
 let listo = false;
@@ -41,6 +42,7 @@ function inicializar() {
   });
 
   client.on('qr', (qr) => {
+    health.setEstadoCliente('AUTH_PENDIENTE');
     log.info(
       'QR recibido — escaneá desde WhatsApp en el teléfono descartable.'
     );
@@ -49,15 +51,19 @@ function inicializar() {
   });
 
   client.on('authenticated', () => {
+    health.setEstadoCliente('AUTENTICADO');
     log.info('Sesión de WhatsApp autenticada y persistida en .wwebjs_auth/');
   });
 
   client.on('auth_failure', (msg) => {
+    health.setEstadoCliente('AUTH_FALLO');
+    health.registrarError('cliente_wa', `Auth failure: ${msg}`);
     log.error(`Auth failure: ${msg}`);
   });
 
   client.on('ready', () => {
     listo = true;
+    health.setEstadoCliente('LISTO');
     // Reset del contador — si después de andar bien se desconecta,
     // arrancamos los reintentos otra vez desde 0.
     _intentosReconexion = 0;
@@ -67,6 +73,8 @@ function inicializar() {
 
   client.on('disconnected', (reason) => {
     listo = false;
+    health.setEstadoCliente('DESCONECTADO');
+    health.registrarError('cliente_wa', `Cliente desconectado: ${reason}`);
     log.warn(`Cliente desconectado: ${reason}.`);
     _intentarReconexion();
   });
@@ -185,25 +193,3 @@ async function responder(msg, texto) {
   await msg.reply(texto);
 }
 
-/**
- * Cierra ordenadamente el cliente. Llamar en SIGINT/SIGTERM para
- * que la sesión guardada quede consistente.
- */
-async function destroy() {
-  if (client) {
-    try {
-      await client.destroy();
-    } catch (e) {
-      log.warn(`Error cerrando cliente: ${e.message}`);
-    }
-  }
-}
-
-module.exports = {
-  inicializar,
-  tieneWhatsApp,
-  enviarMensaje,
-  onMensajeEntrante,
-  responder,
-  destroy,
-};

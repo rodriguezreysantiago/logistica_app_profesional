@@ -19,6 +19,7 @@ class AppRoutes {
   static const String adminReportes = '/admin_reportes';
   static const String adminMantenimiento = '/admin_mantenimiento';
   static const String syncDashboard = '/sync_dashboard';
+  static const String adminEstadoBot = '/admin_estado_bot';
 
 
   // Auditorías
@@ -244,6 +245,4 @@ enum MantenimientoEstado {
   ok('OK'),
   sinDato('Sin datos');
 
-  final String etiqueta;
-  const MantenimientoEstado(this.etiqueta);
-}
+  final Strin
