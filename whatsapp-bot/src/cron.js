@@ -583,12 +583,7 @@ function _inicioDelDia() {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-module.exports = {
-  start,
-  stop,
-  // Exportados para tests / uso interno:
-  calcularDiasRestantes,
-  DOCS_EMPLEADO,
-  DOCS_VEHICULO,
-  INTERVALO_SERVICE_KM,
-};
+/**
+ * Fuerza una corrida del cron AHORA, ignorando el setInterval. Usado
+ * por el comando admin /forzar-cron de WhatsApp. Devuelve las stats
+ * del ciclo ({encola

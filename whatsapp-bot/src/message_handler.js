@@ -29,6 +29,9 @@
 const admin = require('firebase-admin');
 const log = require('./logger');
 const fechaExtractor = require('./fecha_extractor');
+const commands = require('./commands');
+const control = require('./control');
+const cron = require('./cron');
 
 // Mapeo de teléfono normalizado (solo dígitos) → DNI del chofer.
 // Se rebuilds cada vez que llega un mensaje porque las altas/bajas
@@ -214,6 +217,15 @@ function crearHandler(fs, wa) {
       if (msg.isStatus) return; // status updates
       if (msg.from && msg.from.endsWith('@g.us')) return; // grupo
       if (!msg.from || !msg.from.endsWith('@c.us')) return; // broadcast / unknown
+
+      // ─── Comandos admin (early return si matchea) ───
+      // Si el mensaje empieza con `/` y viene de un admin autorizado
+      // (whitelist en .env: ADMIN_PHONES), lo procesamos como comando
+      // y NO seguimos al flujo de Fase 3.
+      const eraComando = await commands.manejarSiEsComando(msg, {
+        db, fs, control, cron,
+      });
+      if (eraComando) return;
 
       // ─── Identificar al chofer ───
       const fromNumber = msg.from.replace('@c.us', '');
