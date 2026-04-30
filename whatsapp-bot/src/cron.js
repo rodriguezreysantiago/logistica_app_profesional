@@ -586,4 +586,22 @@ function _inicioDelDia() {
 /**
  * Fuerza una corrida del cron AHORA, ignorando el setInterval. Usado
  * por el comando admin /forzar-cron de WhatsApp. Devuelve las stats
- * del ciclo ({encola
+ * del ciclo ({encolados, salteados, errores}) o null si ya estaba
+ * corriendo.
+ */
+async function forzarRunOnce(fs) {
+  if (_running) return null;
+  await _runOnce(fs);
+  return null; // _runOnce no devuelve, las stats van a logs/health
+}
+
+module.exports = {
+  start,
+  stop,
+  forzarRunOnce,
+  // Exportados para tests / uso interno:
+  calcularDiasRestantes,
+  DOCS_EMPLEADO,
+  DOCS_VEHICULO,
+  INTERVALO_SERVICE_KM,
+};

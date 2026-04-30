@@ -190,4 +190,50 @@ class AppRouter {
       case AppRoutes.syncDashboard:
         return _buildRoute(
           _protegerSoloAdmin(const SyncDashboardScreen()),
-   
+          settings,
+        );
+
+      // ================= MANTENIMIENTO PREVENTIVO =================
+      // Lista de tractores ordenados por urgencia de service
+      // (basado en `serviceDistance` que viene del API Volvo).
+      case AppRoutes.adminMantenimiento:
+        return _buildRoute(
+          _protegerAdmin(const AdminMantenimientoScreen()),
+          settings,
+        );
+
+      // ================= ESTADO DEL BOT =================
+      // Dashboard en vivo del bot Node.js de WhatsApp. Lee de
+      // BOT_HEALTH/main que el bot escribe cada 60s.
+      case AppRoutes.adminEstadoBot:
+        return _buildRoute(
+          _protegerAdmin(const AdminEstadoBotScreen()),
+          settings,
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  static Route<dynamic> unknownRoute(RouteSettings settings) {
+    return MaterialPageRoute(
+      builder: (context) => Scaffold(
+        appBar: AppBar(
+          title: const Text(AppTexts.rutaNoEncontrada),
+        ),
+        body: Center(
+          child: ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pushNamedAndRemoveUntil(
+                AppRoutes.login,
+                (_) => false,
+              );
+            },
+            child: const Text("VOLVER AL INICIO"),
+          ),
+        ),
+      ),
+    );
+  }
+}

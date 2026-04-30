@@ -653,4 +653,257 @@ class _DatoEditableTexto extends StatelessWidget {
             ),
           ),
           // Permite enviar con Enter sin tener que ir al botón.
-    
+          onSubmitted: (_) {
+            onSave(transform(controller.text));
+            Navigator.pop(dCtx);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: const Text('CANCELAR'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              onSave(transform(controller.text));
+              Navigator.pop(dCtx);
+            },
+            child: const Text('GUARDAR'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DatoEditableEmpresa extends StatelessWidget {
+  final String valor;
+  final Function(String) onSave;
+
+  const _DatoEditableEmpresa({required this.valor, required this.onSave});
+
+  static const List<String> _empresas = [
+    'VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)',
+    'SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: const Text(
+        'EMPRESA',
+        style: TextStyle(fontSize: 11, color: Colors.white38),
+      ),
+      subtitle: Text(
+        valor,
+        style: const TextStyle(fontSize: 12, color: Colors.white),
+      ),
+      trailing: const Icon(Icons.business_center,
+          size: 20, color: Colors.greenAccent),
+      onTap: () => _mostrarSelector(context),
+    );
+  }
+
+  void _mostrarSelector(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Seleccionar empresa'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _empresas
+              .map(
+                (e) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(e,
+                      style: const TextStyle(
+                          fontSize: 12, color: Colors.white)),
+                  onTap: () {
+                    onSave(e);
+                    Navigator.pop(dCtx);
+                  },
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+  }
+}
+
+/// Editor genérico de campos enum (rol, área, etc) — un ListTile que
+/// muestra el valor actual y al tocar abre un dialog con las opciones.
+/// Sigue el mismo patrón visual que `_DatoEditableEmpresa`.
+class _DatoEditableEnum extends StatelessWidget {
+  final String etiqueta;
+  final String valorActual;
+  /// Mapa `value → label visible` con todas las opciones válidas.
+  final Map<String, String> opciones;
+  final IconData icono;
+  final ValueChanged<String> onSave;
+
+  const _DatoEditableEnum({
+    required this.etiqueta,
+    required this.valorActual,
+    required this.opciones,
+    required this.icono,
+    required this.onSave,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = opciones[valorActual] ?? valorActual;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(
+        etiqueta,
+        style: const TextStyle(fontSize: 11, color: Colors.white38),
+      ),
+      subtitle: Text(
+        label,
+        style: const TextStyle(fontSize: 12, color: Colors.white),
+      ),
+      trailing: Icon(icono, size: 20, color: Colors.greenAccent),
+      onTap: () => _mostrarSelector(context),
+    );
+  }
+
+  void _mostrarSelector(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: Text('Seleccionar ${etiqueta.toLowerCase()}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: opciones.entries.map((e) {
+            final esActual = e.key == valorActual;
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                esActual ? Icons.radio_button_checked : Icons.radio_button_off,
+                color: esActual ? Colors.greenAccent : Colors.white38,
+                size: 18,
+              ),
+              title: Text(
+                e.value,
+                style: const TextStyle(fontSize: 13, color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(dCtx);
+                if (!esActual) onSave(e.key);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilaVencimiento extends StatelessWidget {
+  final String dni;
+  final String etiqueta;
+  final String campoFecha;
+  final String campoUrl;
+  final Map<String, dynamic> data;
+
+  const _FilaVencimiento({
+    required this.dni,
+    required this.etiqueta,
+    required this.campoFecha,
+    required this.campoUrl,
+    required this.data,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fecha = data[campoFecha];
+    final url = data[campoUrl]?.toString();
+    final tieneFecha = fecha != null && fecha.toString().isNotEmpty;
+
+    return InkWell(
+      onTap: () => EmpleadoActions.documento(
+        context,
+        dni: dni,
+        etiqueta: etiqueta,
+        campoFecha: campoFecha,
+        campoUrl: campoUrl,
+        fechaActual: fecha?.toString(),
+        urlActual: url,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            AppFileThumbnail(
+              url: url,
+              tituloVisor: '$etiqueta - $dni',
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    etiqueta,
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 11),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    tieneFecha
+                        ? AppFormatters.formatearFecha(fecha)
+                        : 'Sin fecha',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            VencimientoBadge(fecha: fecha),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right,
+                color: Colors.white24, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AsignacionUnidad extends StatelessWidget {
+  final String dni;
+  final String campo;
+  final String label;
+  final String actual;
+
+  const _AsignacionUnidad({
+    required this.dni,
+    required this.campo,
+    required this.label,
+    required this.actual,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tieneAsignacion =
+        actual.isNotEmpty && actual != '-' && actual != 'SIN ASIGNAR';
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        campo == 'VEHICULO' ? Icons.local_shipping : Icons.link,
+        color: tieneAsignacion ? Colors.greenAccent : Colors.white24,
+      ),
+      title: Text('$label: ${tieneAsignacion ? actual : "—"}',
+          style: const TextStyle(color: Colors.white, fontSize: 14)),
+      trailing:
+          const Icon(Icons.sync_alt, size: 20, color: Colors.greenAccent),
+      onTap: () => EmpleadoActions.unidad(context, dni, campo, actual),
+    );
+  }
+}

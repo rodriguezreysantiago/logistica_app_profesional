@@ -258,4 +258,93 @@ class AppMantenimiento {
 
   /// Intervalo entre services programados, en KM. Volvo aplica el plan
   /// estándar de 50.000 km a la flota Vecchi. Si en el futuro hay
-  /// tractores con plan distinto, podríamos agregar un campo
+  /// tractores con plan distinto, podríamos agregar un campo
+  /// `INTERVALO_SERVICE_KM` en VEHICULOS y caer a esta constante como
+  /// default.
+  static const double intervaloServiceKm = 50000;
+
+  /// Niveles de urgencia ordenados de menor a mayor severidad.
+  /// Usados por el badge y la lista de mantenimiento para sortear.
+  static MantenimientoEstado clasificar(double? serviceDistanceKm) {
+    if (serviceDistanceKm == null) return MantenimientoEstado.sinDato;
+    if (serviceDistanceKm <= 0) return MantenimientoEstado.vencido;
+    if (serviceDistanceKm <= urgenteKm) return MantenimientoEstado.urgente;
+    if (serviceDistanceKm <= programarKm) return MantenimientoEstado.programar;
+    if (serviceDistanceKm <= atencionKm) return MantenimientoEstado.atencion;
+    return MantenimientoEstado.ok;
+  }
+
+  /// Calcula el KM al que se hizo el último service de un tractor.
+  ///
+  /// Fórmula: `KM_ACTUAL + serviceDistance − intervaloServiceKm`.
+  ///
+  /// Ejemplo: si un tractor tiene 380.000 km y `serviceDistance: 12.000`,
+  /// el próximo service es a 392.000 km y el último fue a 342.000 km.
+  ///
+  /// Devuelve null si falta alguno de los dos inputs (no hay manera de
+  /// estimar sin ambos).
+  static double? calcularKmUltimoService({
+    required double? kmActual,
+    required double? serviceDistanceKm,
+  }) {
+    if (kmActual == null || serviceDistanceKm == null) return null;
+    final resultado = kmActual + serviceDistanceKm - intervaloServiceKm;
+    // Si el cálculo da negativo (tractor con menos de 50k km) significa
+    // que todavía está en su primer ciclo de service, no tuvo "anterior".
+    if (resultado < 0) return null;
+    return resultado;
+  }
+
+  /// KM recorridos desde el último service. Útil para mostrar en la card
+  /// "X km recorridos desde el último service".
+  static double? kmDesdeUltimoService({
+    required double? kmActual,
+    required double? serviceDistanceKm,
+  }) {
+    final kmUltimo = calcularKmUltimoService(
+      kmActual: kmActual,
+      serviceDistanceKm: serviceDistanceKm,
+    );
+    if (kmUltimo == null || kmActual == null) return null;
+    return kmActual - kmUltimo;
+  }
+
+  /// Calcula `serviceDistance` (KM al próximo service) a partir del
+  /// último service cargado manualmente y el odómetro actual.
+  ///
+  /// Fórmula: `(ULTIMO_SERVICE_KM + intervaloServiceKm) − KM_ACTUAL`.
+  ///
+  /// Útil cuando la API de Volvo NO entrega `serviceDistance` para la
+  /// cuenta (paquete API limitado). Caso real de Vecchi: el response
+  /// `vehiclestatuses` no incluye el bloque `uptimeData` que contiene
+  /// ese campo, así que dependemos del dato manual + KM en vivo.
+  ///
+  /// Devuelve null si falta alguno de los inputs **o si los datos son
+  /// inconsistentes** (ULTIMO_SERVICE_KM > KM_ACTUAL: el admin cargó
+  /// algo mal, ej. invirtió dígitos). Puede ser **negativo** si el
+  /// tractor ya pasó el momento del próximo service (vencido).
+  static double? serviceDistanceDesdeManual({
+    required double? ultimoServiceKm,
+    required double? kmActual,
+  }) {
+    if (ultimoServiceKm == null || kmActual == null) return null;
+    // Defensa contra typo del admin: el último service no puede haber
+    // sido a más kilómetros de los que tiene el tractor ahora.
+    if (ultimoServiceKm > kmActual) return null;
+    return (ultimoServiceKm + intervaloServiceKm) - kmActual;
+  }
+}
+
+/// Estados del mantenimiento preventivo, ordenados por severidad.
+/// El `index` se usa para sortear (menor índice = más urgente).
+enum MantenimientoEstado {
+  vencido('Servicio vencido'),
+  urgente('Servicio urgente'),
+  programar('Programar servicio'),
+  atencion('Falta poco'),
+  ok('OK'),
+  sinDato('Sin datos');
+
+  final String etiqueta;
+  const MantenimientoEstado(this.etiqueta);
+}

@@ -174,4 +174,31 @@ class Empleado {
     String? archivoPreocupacional,
     DateTime? vencimientoManejo,
     String? archivoManejo,
-    DateTime? vencim
+    DateTime? vencimientoArt,
+    String? archivoArt,
+  }) {
+    return Empleado(
+      id: id ?? this.id,
+      nombre: nombre ?? this.nombre,
+      rol: rol ?? this.rol,
+      area: area ?? this.area,
+      cuil: cuil ?? this.cuil,
+      activo: activo ?? this.activo,
+      empresa: empresa ?? this.empresa,
+      telefono: telefono ?? this.telefono,
+      contrasena: contrasena ?? this.contrasena,
+      apodo: apodo ?? this.apodo,
+      archivoPerfil: archivoPerfil ?? this.archivoPerfil,
+      vehiculo: vehiculo ?? this.vehiculo,
+      enganche: enganche ?? this.enganche,
+      vencimientoLicencia: vencimientoLicencia ?? this.vencimientoLicencia,
+      archivoLicencia: archivoLicencia ?? this.archivoLicencia,
+      vencimientoPreocupacional: vencimientoPreocupacional ?? this.vencimientoPreocupacional,
+      archivoPreocupacional: archivoPreocupacional ?? this.archivoPreocupacional,
+      vencimientoManejo: vencimientoManejo ?? this.vencimientoManejo,
+      archivoManejo: archivoManejo ?? this.archivoManejo,
+      vencimientoArt: vencimientoArt ?? this.vencimientoArt,
+      archivoArt: archivoArt ?? this.archivoArt,
+    );
+  }
+}

@@ -196,4 +196,55 @@ service cloud.firestore {
     // ========================================================================
     // BOT_CONTROL — kill-switch del bot (pausar / reanudar desde la app)
     // ========================================================================
-    // Estado simple: `pausado: bool` + metadata (quié
+    // Estado simple: `pausado: bool` + metadata (quién, cuándo, motivo).
+    // El bot polea este doc cada ~10s desde su src/control.js. Si está
+    // pausado, salta el procesamiento de la cola y deja los docs en
+    // PENDIENTE — los retoma cuando se reanude.
+    //
+    // Lectura: admin y supervisor (para que ambos vean el estado en la
+    // pantalla 'Estado del Bot'). Escritura: solo ADMIN, porque pausar
+    // detiene los envíos a choferes y debe ser una decisión deliberada
+    // del responsable, no del SUPERVISOR de turno.
+
+    match /BOT_CONTROL/{doc} {
+      allow read: if isAdminOrSupervisor();
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // MANTENIMIENTOS_AVISADOS — idempotencia de notificación local
+    // ========================================================================
+    // El cliente Flutter (admin) escribe acá cada vez que evalúa el
+    // estado de service de un tractor después de un sync Volvo. Guarda
+    // `ultimo_estado` (VENCIDO / URGENTE / ...) para detectar cruces y
+    // no spamear notificaciones. Es estado interno operacional —
+    // bajo riesgo de manipulación. Si se "falsifica", lo único que pasa
+    // es que se re-notifica o no, sin afectar datos críticos.
+
+    match /MANTENIMIENTOS_AVISADOS/{patente} {
+      allow read, write: if isAdminOrSupervisor();
+    }
+
+    // ========================================================================
+    // LOGIN_ATTEMPTS — rate limiting del login (solo Cloud Function)
+    // ========================================================================
+    // La function `loginConDni` escribe acá vía Admin SDK (bypasea rules).
+    // Ningún cliente debe leer/escribir directo. La colección guarda
+    // intentos fallidos consecutivos por DNI (clave = hash corto del DNI)
+    // y un timestamp `bloqueadoHasta` que la function consulta antes de
+    // verificar la contraseña.
+
+    match /LOGIN_ATTEMPTS/{dniHash} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
+    // FALLBACK — todo lo demás bloqueado
+    // ========================================================================
+    // Si en el futuro alguien crea una colección nueva, queda
+    // bloqueada por default hasta que se sume explícitamente arriba.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

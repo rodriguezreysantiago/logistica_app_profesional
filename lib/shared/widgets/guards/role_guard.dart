@@ -83,4 +83,40 @@ class RoleGuard extends StatelessWidget {
         }
 
         if (!snapshot.hasData || !snapshot.data!.exists) {
-          return _denegarAcceso(conte
+          return _denegarAcceso(context, "Usuario no encontrado en el sistema");
+        }
+
+        final data = snapshot.data!.data() as Map<String, dynamic>;
+        final String rolActual =
+            (data['ROL'] ?? '').toString().trim().toUpperCase();
+
+        if (!autoriza(rolActual)) {
+          return _denegarAcceso(
+              context, "No tenés permisos para esta sección");
+        }
+
+        return child;
+      },
+    );
+  }
+
+  Widget _denegarAcceso(BuildContext context, String mensaje) {
+    // Usamos addPostFrameCallback para no disparar la navegación en medio del build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted) return;
+
+      AppFeedback.error(context, mensaje);
+
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        AppRoutes.home, // ✅ MEJORA: Ruta centralizada
+        (_) => false,
+      );
+    });
+
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+  }
+}

@@ -79,4 +79,31 @@ function delayAleatorioMs() {
  * `await sleep(ms)` para usar en async/await sin libs.
  */
 function sleep(ms) {
- 
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Convierte un número de teléfono al formato que espera WhatsApp Web
+ * (`<numero>@c.us`). Acepta entradas con `+`, espacios y guiones.
+ * Devuelve `null` si el número no parece válido.
+ *
+ * Ejemplos:
+ *   "+54 291 456-7890"  → "5492914567890@c.us"
+ *   "5492914567890"     → "5492914567890@c.us"
+ *   "abc"               → null
+ */
+function normalizarTelefonoAWid(telefono) {
+  if (!telefono) return null;
+  const digitos = String(telefono).replace(/\D+/g, '');
+  // Argentina suele tener 12 o 13 dígitos con el prefijo internacional
+  // (54). Mínimo razonable 10. Máximo 15 (E.164).
+  if (digitos.length < 10 || digitos.length > 15) return null;
+  return `${digitos}@c.us`;
+}
+
+module.exports = {
+  enHorarioHabil,
+  delayAleatorioMs,
+  sleep,
+  normalizarTelefonoAWid,
+};

@@ -96,4 +96,30 @@ class AppFormatters {
 
   // --- FORMATEAR FECHA (DD/MM/YYYY) ---
   static String formatearFecha(dynamic fecha) {
-    final DateTime? parsed = _parseUniversalDate(fec
+    final DateTime? parsed = _parseUniversalDate(fecha);
+    
+    if (parsed != null) {
+      return "${parsed.day.toString().padLeft(2, '0')}/${parsed.month.toString().padLeft(2, '0')}/${parsed.year}";
+    }
+    
+    // Si no pudo parsear, devuelve lo que ingresó por defecto
+    return fecha?.toString() ?? "Sin datos";
+  }
+
+  // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
+  static int calcularDiasRestantes(dynamic fecha) {
+    final DateTime? fVto = _parseUniversalDate(fecha);
+    
+    if (fVto == null) return 999;
+
+    try {
+      final vtoNormalizado = DateTime(fVto.year, fVto.month, fVto.day);
+      final ahora = DateTime.now();
+      final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);
+      
+      return vtoNormalizado.difference(hoyNormalizado).inDays;
+    } catch (_) { 
+      return 999; 
+    }
+  }
+}

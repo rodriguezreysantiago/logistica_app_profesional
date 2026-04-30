@@ -337,4 +337,20 @@ async function main() {
     if (procesando) {
       log.warn(
         'Grace period agotado con un envío en curso. ' +
-        'El doc queda en PROCESANDO; revisalo manualmente al reinicia
+        'El doc queda en PROCESANDO; revisalo manualmente al reiniciar.'
+      );
+    } else {
+      log.info('Cola en pausa, sin envíos en curso.');
+    }
+
+    await wa.destroy();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+main().catch((e) => {
+  log.error(`Fatal: ${e.stack || e.message}`);
+  process.exit(1);
+});

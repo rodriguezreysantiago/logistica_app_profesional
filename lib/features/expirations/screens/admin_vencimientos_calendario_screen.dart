@@ -339,4 +339,6 @@ class _ListaVacia extends StatelessWidget {
           ],
         ),
       ),
-    
+    );
+  }
+}

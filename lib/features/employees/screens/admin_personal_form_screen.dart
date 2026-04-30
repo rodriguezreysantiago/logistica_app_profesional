@@ -384,4 +384,182 @@ class _DropdownEmpresa extends StatelessWidget {
         child: DropdownButton<String>(
           value: value,
           isExpanded: true,
-          dropdownColor: Theme.of(
+          dropdownColor: Theme.of(context).colorScheme.surface,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          items: empresas
+              .map(
+                (e) => DropdownMenuItem(
+                  value: e,
+                  child: Text(e, overflow: TextOverflow.ellipsis),
+                ),
+              )
+              .toList(),
+          onChanged: enabled ? onChanged : null,
+        ),
+      ),
+    );
+  }
+}
+
+/// Selector de rol del sistema. Migramos de SegmentedButton (binario)
+/// a Dropdown porque ahora tenemos 4 roles que no entran cómodos en
+/// segments horizontales:
+///
+///   CHOFER     → empleado de manejo con vehículo asignado.
+///   PLANTA     → empleado sin vehículo (planta, taller, gomería).
+///   SUPERVISOR → mando medio con permisos de gestión (no admin).
+///   ADMIN      → control total.
+class _RoleSelector extends StatelessWidget {
+  final String rol;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  const _RoleSelector({
+    required this.rol,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  /// Etiqueta auxiliar para describir cada rol en el dropdown.
+  static String _descripcion(String r) {
+    switch (r) {
+      case AppRoles.chofer:
+        return 'Personal de manejo (con vehículo)';
+      case AppRoles.planta:
+        return 'Sin vehículo (planta / taller / gomería)';
+      case AppRoles.supervisor:
+        return 'Gestión operativa (sin crear admins)';
+      case AppRoles.admin:
+        return 'Control total del sistema';
+    }
+    return '';
+  }
+
+  static IconData _icono(String r) {
+    switch (r) {
+      case AppRoles.chofer:
+        return Icons.drive_eta;
+      case AppRoles.planta:
+        return Icons.engineering;
+      case AppRoles.supervisor:
+        return Icons.supervisor_account;
+      case AppRoles.admin:
+        return Icons.security;
+    }
+    return Icons.person;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String>(
+      initialValue: rol,
+      decoration: const InputDecoration(
+        prefixIcon: Icon(Icons.badge_outlined),
+      ),
+      items: AppRoles.todos.map((r) {
+        return DropdownMenuItem(
+          value: r,
+          child: Row(
+            children: [
+              Icon(_icono(r), size: 18, color: Colors.greenAccent),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    AppRoles.etiquetas[r] ?? r,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    _descripcion(r),
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+      onChanged: enabled ? (val) => val == null ? null : onChanged(val) : null,
+    );
+  }
+}
+
+/// Selector de área organizacional. Independiente del rol — define
+/// dónde trabaja la persona (descriptivo, no afecta permisos).
+class _DropdownArea extends StatelessWidget {
+  final String value;
+  final bool enabled;
+  final ValueChanged<String?> onChanged;
+
+  const _DropdownArea({
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      decoration: const InputDecoration(
+        prefixIcon: Icon(Icons.factory_outlined),
+      ),
+      items: AppAreas.todas.map((a) {
+        return DropdownMenuItem(
+          value: a,
+          child: Text(
+            AppAreas.etiquetas[a] ?? a,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        );
+      }).toList(),
+      onChanged: enabled ? onChanged : null,
+    );
+  }
+}
+
+class _BotonGuardar extends StatelessWidget {
+  final bool guardando;
+  final VoidCallback onPressed;
+
+  const _BotonGuardar({
+    required this.guardando,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 55,
+      child: ElevatedButton.icon(
+        onPressed: guardando ? null : onPressed,
+        icon: guardando
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.black,
+                ),
+              )
+            : const Icon(Icons.person_add_alt_1),
+        label: Text(
+          guardando ? 'PROCESANDO...' : 'CREAR LEGAJO',
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+      ),
+    );
+  }
+}

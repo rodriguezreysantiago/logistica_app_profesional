@@ -596,4 +596,91 @@ class EmpleadoActions {
                         ? AuditAccion.desvincularEquipo
                         : AuditAccion.asignarEquipo,
                     entidad: 'EMPLEADOS',
- 
+                    entidadId: dni,
+                    detalles: {
+                      'campo': campo,
+                      'unidad_anterior': cleanActual,
+                      'unidad_nueva': nueva ?? '',
+                    },
+                  ));
+
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+
+                  // Feedback de éxito: distinto copy según haya sido
+                  // desvinculación o asignación nueva.
+                  final mensaje = (nueva == null || nueva == '-')
+                      ? 'Se desvinculó el $etiquetaUnidad de este chofer.'
+                      : 'Se asignó el $etiquetaUnidad $nueva.';
+                  AppFeedback.successOn(messenger, mensaje);
+                } catch (e) {
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  AppFeedback.errorOn(messenger, 'No se pudo guardar el cambio: $e');
+                }
+              }
+
+              return ListView.builder(
+                itemCount: unidades.length + 1,
+                itemBuilder: (ctx, idx) {
+                  if (idx == 0) {
+                    return ListTile(
+                      leading:
+                          const Icon(Icons.link_off, color: Colors.redAccent),
+                      title: const Text(
+                        'DESVINCULAR',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      // Confirmación destructiva: desvincular cambia el
+                      // legajo del chofer Y libera la unidad. Si toca por
+                      // error y no avisamos, el equipo queda mal asignado
+                      // y nadie se entera hasta que el chofer reclame.
+                      onTap: () async {
+                        final ok = await AppConfirmDialog.show(
+                          context,
+                          title: '¿Desvincular $etiquetaUnidad?',
+                          message:
+                              'El chofer va a quedar sin $etiquetaUnidad asignado y la unidad vuelve a estado LIBRE.',
+                          confirmLabel: 'DESVINCULAR',
+                          destructive: true,
+                          icon: Icons.link_off,
+                        );
+                        if (ok == true) {
+                          await procesarCambio(null);
+                        }
+                      },
+                    );
+                  }
+
+                  final vDoc = unidades[idx - 1];
+                  final vData = vDoc.data() as Map<String, dynamic>;
+                  final patente = vDoc.id.trim();
+
+                  // Filtrar unidades ocupadas (excepto la actual del chofer)
+                  if (vData['ESTADO'] == 'OCUPADO' &&
+                      patente != patenteActual.trim()) {
+                    return const SizedBox.shrink();
+                  }
+
+                  return ListTile(
+                    title: Text(
+                      patente,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 14),
+                    ),
+                    trailing: patente == patenteActual.trim()
+                        ? const Icon(Icons.check_circle,
+                            color: Colors.greenAccent)
+                        : null,
+                    onTap: () => procesarCambio(patente),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -926,4 +926,7 @@ class _BotonDetectarFechaState extends State<_BotonDetectarFecha> {
             fontSize: 12,
           ),
         ),
-  
+      ),
+    );
+  }
+}

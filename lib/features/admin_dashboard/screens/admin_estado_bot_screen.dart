@@ -640,3 +640,172 @@ class _Mensaje extends StatelessWidget {
   final Color color;
   final String texto;
   const _Mensaje({
+    required this.icono,
+    required this.color,
+    required this.texto,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icono, color: color, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              texto,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: color, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// KILL-SWITCH (Pausar / Reanudar bot)
+// =============================================================================
+
+/// Toggle que permite al admin pausar el envío automático del bot
+/// sin tocar la PC donde corre. Escribe `BOT_CONTROL/main.pausado` y el
+/// bot lo lee en su próximo polling (cache TTL ~10s, ver
+/// `whatsapp-bot/src/control.js`).
+///
+/// Visible solo a ADMIN — las rules de `BOT_CONTROL` solo permiten
+/// write a `isAdmin()`. Si SUPERVISOR llega a tocarlo, falla con
+/// permission-denied.
+class _ToggleKillSwitch extends StatelessWidget {
+  const _ToggleKillSwitch();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('BOT_CONTROL')
+          .doc('main')
+          .snapshots(),
+      builder: (ctx, snap) {
+        // Si la lectura falla (rules, network), tratamos como NO pausado
+        // para no asustar — la pantalla principal ya muestra heartbeat
+        // como fuente de verdad del estado real del bot.
+        final data = snap.data?.data() as Map<String, dynamic>?;
+        final pausado = data?['pausado'] == true;
+        final motivo = (data?['motivo'] ?? '').toString().trim();
+        return AppCard(
+          padding: const EdgeInsets.all(14),
+          borderColor: pausado ? Colors.orangeAccent.withAlpha(160) : null,
+          highlighted: pausado,
+          child: Row(
+            children: [
+              Icon(
+                pausado ? Icons.pause_circle_filled : Icons.power_settings_new,
+                color: pausado ? Colors.orangeAccent : Colors.greenAccent,
+                size: 28,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pausado ? 'Bot pausado por admin' : 'Bot operando normal',
+                      style: TextStyle(
+                        color: pausado ? Colors.orangeAccent : Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      pausado
+                          ? (motivo.isEmpty
+                              ? 'No envía mensajes hasta reanudar.'
+                              : 'Motivo: $motivo')
+                          : 'Tocá el toggle para pausar el envío.',
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: pausado,
+                activeThumbColor: Colors.orangeAccent,
+                onChanged: (nuevoValor) =>
+                    _confirmarYTogglear(context, pausado, nuevoValor),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Pide confirmación antes de pausar (la acción es operacional —
+  /// detiene envíos a choferes). Reanudar también pide confirmación
+  /// para evitar toques accidentales.
+  Future<void> _confirmarYTogglear(
+    BuildContext context,
+    bool pausadoActual,
+    bool nuevoValor,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final accion = nuevoValor ? 'PAUSAR' : 'REANUDAR';
+    final detalle = nuevoValor
+        ? 'El bot dejará de enviar mensajes hasta que reanudes. Los avisos pendientes quedan en cola.'
+        : 'El bot va a retomar el envío de los mensajes pendientes en su próximo ciclo (~15s).';
+
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: Text('$accion bot'),
+        content: Text(detalle),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('CANCELAR'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor:
+                  nuevoValor ? Colors.orangeAccent : Colors.greenAccent,
+            ),
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: Text(accion),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('BOT_CONTROL')
+          .doc('main')
+          .set(
+        {
+          'pausado': nuevoValor,
+          'pausado_en': nuevoValor ? FieldValue.serverTimestamp() : null,
+          'pausado_por': nuevoValor ? PrefsService.dni : null,
+          'pausado_por_nombre': nuevoValor ? PrefsService.nombre : null,
+          'reanudado_en': nuevoValor ? null : FieldValue.serverTimestamp(),
+          'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+      AppFeedback.successOn(
+        messenger,
+        nuevoValor ? 'Bot pausado.' : 'Bot reanudado.',
+      );
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al actualizar control: $e');
+    }
+  }
+}

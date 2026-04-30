@@ -372,4 +372,7 @@ class VencimientoAviso {
 
   const VencimientoAviso({
     required this.fecha,
-    req
+    required this.tipoDoc,
+    required this.campoBase,
+  });
+}
