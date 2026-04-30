@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/phone_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../services/whatsapp_cola_service.dart';
 
@@ -214,7 +215,10 @@ class _ItemCola extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = doc.data() as Map<String, dynamic>;
     final estado = (data['estado'] ?? 'PENDIENTE').toString();
-    final telefono = (data['telefono'] ?? '').toString();
+    // Mostramos el teléfono en formato local (sin prefijo 549).
+    // El doc en Firestore lo guarda completo porque el bot lo necesita
+    // así para WhatsApp Web.
+    final telefono = PhoneFormatter.paraMostrar(data['telefono']?.toString());
     final mensaje = (data['mensaje'] ?? '').toString();
     final encoladoTs = data['encolado_en'];
     final enviadoTs = data['enviado_en'];

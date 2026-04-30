@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
+import '../../../shared/utils/phone_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 import '../services/empleado_actions.dart';
@@ -276,15 +277,21 @@ class _DetalleChofer extends StatelessWidget {
         ),
         _DatoEditableTexto(
           etiqueta: 'TELÉFONO',
-          valor: (data['TELEFONO'] ?? '-').toString(),
-          // Teléfono: solo dígitos. El normalizador de WhatsApp tolera
-          // espacios y guiones, pero conviene guardar limpio para que el
-          // wa.me no falle por caracteres raros.
+          // Mostramos sin el prefijo 549. El admin reconoce los números
+          // por código de área (291, 11, etc), no por código de país.
+          // Al guardar, paraGuardar() agrega 549 automáticamente.
+          valor: PhoneFormatter.paraMostrar(data['TELEFONO']?.toString()),
+          // Teléfono: solo dígitos. El admin puede tipear con/sin 549,
+          // con/sin guiones, etc. — `paraGuardar` normaliza al persistir.
           inputFormatters: [DigitOnlyFormatter()],
           keyboardType: TextInputType.phone,
           aplicarMayusculas: false,
-          onSave: (v) =>
-              EmpleadoActions.dato(context, dni, 'TELEFONO', v),
+          onSave: (v) => EmpleadoActions.dato(
+            context,
+            dni,
+            'TELEFONO',
+            PhoneFormatter.paraGuardar(v),
+          ),
         ),
         _DatoEditableEmpresa(
           valor: (data['EMPRESA'] ?? '-').toString(),

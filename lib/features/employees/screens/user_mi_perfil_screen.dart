@@ -8,6 +8,7 @@ import '../../../core/services/storage_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/password_hasher.dart';
+import '../../../shared/utils/phone_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Perfil del chofer (vista del usuario, no admin).
@@ -502,7 +503,9 @@ class _DatosCard extends StatelessWidget {
           const _SeparadorTile(),
           _InfoTile(
             label: 'TELÉFONO',
-            valor: (data['TELEFONO'] ?? '—').toString(),
+            // Mostramos sin el prefijo 549 que guardamos en Firestore
+            // (más legible para el chofer).
+            valor: PhoneFormatter.paraMostrar(data['TELEFONO']?.toString()),
             icon: Icons.phone_android,
           ),
           const _SeparadorTile(),

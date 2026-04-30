@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/utils/phone_formatter.dart';
 
 /// Cliente para la cola de WhatsApp automatizado.
 ///
@@ -28,9 +29,13 @@ class WhatsAppColaService {
 
   /// Encola un mensaje para que el bot lo envíe.
   ///
-  /// [telefono]: en formato E.164 con `+` y código de país. Ej:
-  /// `'+5492914567890'`. El bot normaliza pero conviene guardar
-  /// limpio.
+  /// [telefono]: cualquier formato razonable AR — con o sin `+54 9`,
+  /// con o sin guiones/espacios. `PhoneFormatter.paraGuardar` lo
+  /// normaliza al formato canónico `549<área><nro>` que necesita el
+  /// bot para WhatsApp Web. Si el dato no es un teléfono válido, el
+  /// doc igual se encola con telefono vacío y el bot lo va a marcar
+  /// como ERROR (defensa en profundidad — no fallamos la encolada
+  /// silenciosamente para que el admin vea el problema en pantalla).
   ///
   /// [mensaje]: texto plano del mensaje. WhatsApp soporta markdown
   /// ligero (`*bold*`, `_italic_`, `~strike~`).
@@ -48,8 +53,12 @@ class WhatsAppColaService {
     String? destinatarioId,
     String? campoBase,
   }) async {
+    // Normalización defensiva: aunque casi todos los callers ya pasan
+    // teléfonos guardados (que vienen de EMPLEADOS.TELEFONO normalizado),
+    // si alguno llega con formato distinto se arregla acá.
+    final telefonoNorm = PhoneFormatter.paraGuardar(telefono);
     final ref = await _db.collection(coleccion).add({
-      'telefono': telefono.trim(),
+      'telefono': telefonoNorm.isNotEmpty ? telefonoNorm : telefono.trim(),
       'mensaje': mensaje,
       'estado': 'PENDIENTE',
       'encolado_en': FieldValue.serverTimestamp(),
