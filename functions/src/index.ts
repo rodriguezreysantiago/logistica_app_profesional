@@ -214,16 +214,24 @@ export const loginConDni = onCall(
     // ─── Emisión del custom token ──────────────────────────────────
     // UID = DNI para que `request.auth.uid` en las rules sea el DNI.
     const nombre = (empleado.NOMBRE ?? "Usuario").toString();
-    const rol = (empleado.ROL ?? "USUARIO").toString();
+    const area = (empleado.AREA ?? "MANEJO").toString();
+    // Normalizamos roles: el legacy USUARIO se trata como CHOFER.
+    // Lista válida nueva: CHOFER, PLANTA, SUPERVISOR, ADMIN.
+    const rolRaw = (empleado.ROL ?? "CHOFER").toString().toUpperCase();
+    const rolesValidos = ["CHOFER", "PLANTA", "SUPERVISOR", "ADMIN"];
+    let rol = rolRaw;
+    if (rolRaw === "USUARIO" || rolRaw === "USER") rol = "CHOFER";
+    if (!rolesValidos.includes(rol)) rol = "CHOFER";
 
     const token = await auth.createCustomToken(dni, {
       rol,
+      area,
       // Nombre como custom claim ahorra una lectura de Firestore en el
       // cliente cada vez que necesita mostrar el nombre del logueado.
       nombre,
     });
 
-    logger.info("[login] OK", { dniHash: hashId(dni), rol });
+    logger.info("[login] OK", { dniHash: hashId(dni), rol, area });
 
     return {
       token,
@@ -232,6 +240,7 @@ export const loginConDni = onCall(
       dni,
       nombre,
       rol,
+      area,
     };
   }
 );
@@ -962,23 +971,4 @@ export const auditLogWrite = onCall(
     try {
       const ref = await db.collection("AUDITORIA_ACCIONES").add(doc);
       logger.info("[auditLog] OK", {
-        accion,
-        entidad,
-        entidadId: entidadId || undefined,
-        adminDni,
-        docId: ref.id,
-      });
-      return { ok: true, docId: ref.id };
-    } catch (e) {
-      logger.error("[auditLog] error escribiendo", {
-        accion,
-        entidad,
-        error: (e as Error).message,
-      });
-      throw new HttpsError(
-        "internal",
-        "No se pudo registrar la acción en bitácora."
-      );
-    }
-  }
-);
+ 

@@ -3,10 +3,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class Empleado {
   final String id; // DNI
   final String nombre;
+  /// Rol del sistema: CHOFER / PLANTA / SUPERVISOR / ADMIN.
+  /// Define QUÉ puede hacer en la app.
   final String rol;
+  /// Área organizacional: MANEJO / ADMINISTRACION / PLANTA / TALLER /
+  /// GOMERIA. Define DÓNDE trabaja la persona. No afecta permisos.
+  /// Default 'MANEJO' por retrocompatibilidad con datos viejos.
+  final String area;
   final String cuil;
   final bool activo;
-  
+
   // Datos Personales / Operativos
   final String? empresa;
   final String? telefono;
@@ -39,6 +45,7 @@ class Empleado {
     required this.nombre,
     required this.rol,
     required this.cuil,
+    this.area = 'MANEJO',
     this.activo = true,
     this.empresa,
     this.telefono,
@@ -65,6 +72,7 @@ class Empleado {
     return {
       'NOMBRE': nombre.toUpperCase(),
       'ROL': rol.toUpperCase(),
+      'AREA': area.toUpperCase(),
       'CUIL': cuil,
       'ACTIVO': activo,
       'EMPRESA': empresa?.toUpperCase(),
@@ -96,9 +104,13 @@ class Empleado {
   
   factory Empleado.fromMap(Map<String, dynamic> map, String documentId) {
     return Empleado(
-      id: documentId, 
+      id: documentId,
       nombre: map['NOMBRE'] ?? '',
-      rol: map['ROL'] ?? 'USUARIO',
+      rol: map['ROL'] ?? 'CHOFER',
+      // Default 'MANEJO' para que choferes existentes que no tienen
+      // AREA cargada todavía sigan funcionando. La migración los
+      // setea explícitamente en otra pasada.
+      area: (map['AREA'] ?? 'MANEJO').toString(),
       cuil: map['CUIL'] ?? '',
       // Protección de tipo por si alguien carga un string "true" en lugar de boolean
       activo: map['ACTIVO'] is bool ? map['ACTIVO'] : true, 
@@ -146,6 +158,7 @@ class Empleado {
     String? id,
     String? nombre,
     String? rol,
+    String? area,
     String? cuil,
     bool? activo,
     String? empresa,
@@ -161,21 +174,4 @@ class Empleado {
     String? archivoPreocupacional,
     DateTime? vencimientoManejo,
     String? archivoManejo,
-    DateTime? vencimientoArt,
-    String? archivoArt,
-  }) {
-    return Empleado(
-      id: id ?? this.id,
-      nombre: nombre ?? this.nombre,
-      rol: rol ?? this.rol,
-      cuil: cuil ?? this.cuil,
-      activo: activo ?? this.activo,
-      empresa: empresa ?? this.empresa,
-      telefono: telefono ?? this.telefono,
-      contrasena: contrasena ?? this.contrasena,
-      apodo: apodo ?? this.apodo,
-      archivoPerfil: archivoPerfil ?? this.archivoPerfil,
-      vehiculo: vehiculo ?? this.vehiculo,
-      enganche: enganche ?? this.enganche,
-      vencimientoLicencia: vencimientoLicencia ?? this.vencimientoLicencia,
-      archivoLicencia: arch
+    DateTime? vencim

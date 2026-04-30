@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
@@ -30,7 +31,8 @@ class _AdminPersonalFormScreenState
   final _mailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
 
-  String _rol = 'USER';
+  String _rol = AppRoles.chofer;
+  String _area = AppAreas.manejo;
   String _empresa =
       'VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)';
   bool _guardando = false;
@@ -96,6 +98,7 @@ class _AdminPersonalFormScreenState
         'MAIL': _mailCtrl.text.trim().toLowerCase(),
         'CONTRASEÑA': passwordHash,
         'ROL': _rol,
+        'AREA': _area,
         'EMPRESA': _empresa,
         'VEHICULO': '-',
         'ENGANCHE': '-',
@@ -114,6 +117,7 @@ class _AdminPersonalFormScreenState
         detalles: {
           'nombre': _nombreCtrl.text.trim().toUpperCase(),
           'rol': _rol,
+          'area': _area,
           'empresa': _empresa,
         },
       ));
@@ -122,7 +126,7 @@ class _AdminPersonalFormScreenState
       // no usamos messenger ni navigator (sus referencias quedaron stale).
       if (!mounted) return;
 
-      AppFeedback.successOn(messenger, 'Chofer creado con éxito');
+      AppFeedback.successOn(messenger, 'Empleado creado con éxito');
       navigator.pop();
     } catch (e) {
       if (!mounted) return;
@@ -210,7 +214,22 @@ class _AdminPersonalFormScreenState
                 _RoleSelector(
                   rol: _rol,
                   enabled: !_guardando,
-                  onChanged: (val) => setState(() => _rol = val),
+                  // Al cambiar el rol, sugerimos el área default
+                  // coherente (CHOFER → MANEJO, ADMIN → ADMINISTRACION,
+                  // etc). El admin puede sobreescribir con el dropdown
+                  // de área de abajo si quiere.
+                  onChanged: (val) => setState(() {
+                    _rol = val;
+                    _area = AppAreas.defaultParaRol(val);
+                  }),
+                ),
+                const SizedBox(height: 25),
+                const _CampoLabel('Área en la empresa'),
+                _DropdownArea(
+                  value: _area,
+                  enabled: !_guardando,
+                  onChanged: (val) =>
+                      setState(() => _area = val ?? _area),
                 ),
                 const SizedBox(height: 40),
                 _BotonGuardar(
@@ -365,37 +384,4 @@ class _DropdownEmpresa extends StatelessWidget {
         child: DropdownButton<String>(
           value: value,
           isExpanded: true,
-          dropdownColor: Theme.of(context).colorScheme.surface,
-          style: const TextStyle(color: Colors.white, fontSize: 13),
-          items: empresas
-              .map(
-                (e) => DropdownMenuItem(
-                  value: e,
-                  child: Text(e, overflow: TextOverflow.ellipsis),
-                ),
-              )
-              .toList(),
-          onChanged: enabled ? onChanged : null,
-        ),
-      ),
-    );
-  }
-}
-
-class _RoleSelector extends StatelessWidget {
-  final String rol;
-  final bool enabled;
-  final ValueChanged<String> onChanged;
-
-  const _RoleSelector({
-    required this.rol,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: SegmentedButton<String>(
-        segment
+          dropdownColor: Theme.of(

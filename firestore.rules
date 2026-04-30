@@ -37,6 +37,20 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.rol == 'ADMIN';
     }
 
+    /// Mando medio: gestiona personal, flota, vencimientos, revisiones,
+    /// bot. NO puede crear admins ni cambiar roles. Usar
+    /// `isAdminOrSupervisor()` para reglas que ambos pueden.
+    function isSupervisor() {
+      return isSignedIn() && request.auth.token.rol == 'SUPERVISOR';
+    }
+
+    /// Helper combinado — la mayoría de reglas del panel admin
+    /// (escritura de EMPLEADOS, VEHICULOS, REVISIONES, etc) aplican
+    /// a ambos roles.
+    function isAdminOrSupervisor() {
+      return isAdmin() || isSupervisor();
+    }
+
     function isSelf(dni) {
       return isSignedIn() && request.auth.uid == dni;
     }
@@ -46,11 +60,13 @@ service cloud.firestore {
     // ========================================================================
 
     match /EMPLEADOS/{dni} {
-      // Lectura: el dueño puede ver su legajo, el admin todos.
-      allow read: if isAdmin() || isSelf(dni);
-      // Escritura: solo admin (alta, edición, asignación de unidad,
-      // reemplazo de papel desde admin).
-      allow write: if isAdmin();
+      // Lectura: el dueño puede ver su legajo, admin/supervisor todos.
+      allow read: if isAdminOrSupervisor() || isSelf(dni);
+      // Escritura: admin y supervisor. ADMIN exclusivo solo para
+      // cambiar el campo ROL/AREA de otros (eso lo manejamos con
+      // Cloud Function `cambiarRolEmpleado` para validar que
+      // SUPERVISOR no se auto-eleve).
+      allow write: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -62,9 +78,8 @@ service cloud.firestore {
       // vehículo (RTO, Seguro). Acepta cualquier signedIn.
       allow read: if isSignedIn();
       // Alta, edición, sincronización Volvo (KM/combustible/autonomía):
-      // hoy lo dispara la app como admin. Cuando se mueva al bot, esto
-      // queda igual (el bot bypasea con Admin SDK).
-      allow write: if isAdmin();
+      // admin o supervisor. El bot bypasea con Admin SDK.
+      allow write: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -74,9 +89,9 @@ service cloud.firestore {
     match /REVISIONES/{doc} {
       allow read: if isSignedIn();
       // Chofer crea su propia solicitud al renovar un papel.
-      // Admin actualiza/elimina al aprobar/rechazar.
+      // Admin/supervisor aprueban o rechazan.
       allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow update, delete: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -88,7 +103,7 @@ service cloud.firestore {
       // El chofer crea su checklist mensual. NO debería poder editar
       // checklists pasados (auditoría inmutable).
       allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow update, delete: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -110,8 +125,8 @@ service cloud.firestore {
 
     match /COLA_WHATSAPP/{doc} {
       // El bot bypasea con Admin SDK; las rules valen solo para clientes.
-      // Solo admin desde la app puede ver/encolar/reintentar/eliminar.
-      allow read, write: if isAdmin();
+      // Admin y supervisor pueden ver/encolar/reintentar/eliminar.
+      allow read, write: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -156,9 +171,9 @@ service cloud.firestore {
     // ========================================================================
 
     match /RESPUESTAS_BOT_AMBIGUAS/{doc=**} {
-      // El bot las crea (Admin SDK). El admin las despacha desde la
-      // bandeja: actualiza el doc para descartar o convertir en revisión.
-      allow read, write: if isAdmin();
+      // El bot las crea (Admin SDK). Admin/supervisor las despachan
+      // desde la bandeja: descartar o convertir en revisión.
+      allow read, write: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -172,26 +187,13 @@ service cloud.firestore {
     // restringimos lectura a ADMIN.
 
     match /BOT_HEALTH/{doc} {
-      allow read: if isAdmin();
-      allow write: if false; // solo el bot vía Admin SDK
+      // Admin y supervisor pueden ver el estado del bot. Solo el bot
+      // vía Admin SDK escribe — write:false del lado cliente.
+      allow read: if isAdminOrSupervisor();
+      allow write: if false;
     }
 
     // ========================================================================
     // MANTENIMIENTOS_AVISADOS — idempotencia de notificación local
     // ========================================================================
-    // El cliente Flutter (admin) escribe acá cada vez que evalúa el
-    // estado de service de un tractor después de un sync Volvo. Guarda
-    // `ultimo_estado` (VENCIDO / URGENTE / ...) para detectar cruces y
-    // no spamear notificaciones. Es estado interno operacional —
-    // bajo riesgo de manipulación. Si se "falsifica", lo único que pasa
-    // es que se re-notifica o no, sin afectar datos críticos.
-
-    match /MANTENIMIENTOS_AVISADOS/{patente} {
-      allow read, write: if isAdmin();
-    }
-
-    // ========================================================================
-    // LOGIN_ATTEMPTS — rate limiting del login (solo Cloud Function)
-    // ========================================================================
-    // La function `loginConDni` escribe acá vía Admin SDK (bypasea rules).
-    // Ningún clie
+    // El cliente Flutter (admin) escribe acá cada vez que 

@@ -59,8 +59,108 @@ class AppCollections {
 class AppRoles {
   AppRoles._();
 
+  // ─── Roles del sistema (definen QUÉ puede hacer cada usuario) ───
+  // 4 roles ordenados de menor a mayor poder. Cada uno hereda los
+  // permisos del anterior y suma los suyos:
+  //
+  //   CHOFER     — empleado de manejo con vehículo asignado.
+  //                Ve sus vencimientos personales + su unidad.
+  //   PLANTA     — empleado sin vehículo (planta, taller, gomería,
+  //                administración). Solo ve sus vencimientos
+  //                personales. NO ve "Mi unidad".
+  //   SUPERVISOR — gestiona personal + flota + vencimientos +
+  //                revisiones + bot. NO puede crear/borrar admins
+  //                ni cambiar roles de otros.
+  //   ADMIN      — control total. Crea admins, cambia roles, audita.
+  //
+  // Compatibilidad: 'USUARIO' es el rol legacy que tenían los choferes
+  // antes de esta migración. Se mantiene como alias hasta que el
+  // script de migración de datos los pase todos a CHOFER.
+  static const String chofer = 'CHOFER';
+  static const String planta = 'PLANTA';
+  static const String supervisor = 'SUPERVISOR';
   static const String admin = 'ADMIN';
-  static const String chofer = 'USUARIO'; // O 'CHOFER', según uses en tu base
+
+  /// Rol legacy. Tratar como CHOFER hasta que los datos viejos migren.
+  static const String usuarioLegacy = 'USUARIO';
+
+  /// Lista de todos los roles válidos (para validar entradas).
+  static const List<String> todos = [chofer, planta, supervisor, admin];
+
+  /// Etiqueta legible para mostrar en UI.
+  static const Map<String, String> etiquetas = {
+    chofer: 'Chofer',
+    planta: 'Planta',
+    supervisor: 'Supervisor',
+    admin: 'Admin',
+  };
+
+  /// `true` si este rol tiene vehículo/enganche asignable. Usado por
+  /// el form para mostrar/ocultar los campos VEHICULO y ENGANCHE.
+  static bool tieneVehiculo(String rol) =>
+      rol == chofer || rol == usuarioLegacy;
+
+  /// Normaliza el rol legacy (USUARIO → CHOFER) para que el resto del
+  /// código pueda asumir solo los 4 valores nuevos.
+  static String normalizar(String? rol) {
+    final r = (rol ?? '').toUpperCase();
+    if (r == usuarioLegacy) return chofer;
+    if (todos.contains(r)) return r;
+    return chofer; // fallback conservador
+  }
+}
+
+// ===========================================================================
+// ÁREAS — Dónde trabaja el empleado (info organizacional, no permisos)
+// ===========================================================================
+//
+// Independiente del ROL. Un empleado puede ser SUPERVISOR + TALLER (jefe
+// de taller) o PLANTA + GOMERIA (gomero) o ADMIN + ADMINISTRACION (vos).
+//
+// Esta lista la lee el dropdown del form de personal y los filtros de
+// la lista. Si Vecchi suma un sector nuevo, se agrega acá únicamente.
+
+class AppAreas {
+  AppAreas._();
+
+  static const String manejo = 'MANEJO';
+  static const String administracion = 'ADMINISTRACION';
+  static const String planta = 'PLANTA';
+  static const String taller = 'TALLER';
+  static const String gomeria = 'GOMERIA';
+
+  static const List<String> todas = [
+    manejo,
+    administracion,
+    planta,
+    taller,
+    gomeria,
+  ];
+
+  /// Etiqueta legible (capitalizada) para mostrar en UI.
+  static const Map<String, String> etiquetas = {
+    manejo: 'Manejo',
+    administracion: 'Administración',
+    planta: 'Planta',
+    taller: 'Taller',
+    gomeria: 'Gomería',
+  };
+
+  /// Devuelve el área default sugerido según el rol elegido.
+  /// Optimiza el flow del form: al elegir CHOFER, sugerimos MANEJO.
+  static String defaultParaRol(String rol) {
+    switch (rol) {
+      case AppRoles.chofer:
+      case AppRoles.usuarioLegacy:
+        return manejo;
+      case AppRoles.admin:
+      case AppRoles.supervisor:
+        return administracion;
+      case AppRoles.planta:
+        return planta;
+    }
+    return manejo;
+  }
 }
 
 // ===========================================================================
@@ -158,91 +258,4 @@ class AppMantenimiento {
 
   /// Intervalo entre services programados, en KM. Volvo aplica el plan
   /// estándar de 50.000 km a la flota Vecchi. Si en el futuro hay
-  /// tractores con plan distinto, podríamos agregar un campo
-  /// `INTERVALO_SERVICE_KM` en VEHICULOS y caer a esta constante como
-  /// default.
-  static const double intervaloServiceKm = 50000;
-
-  /// Niveles de urgencia ordenados de menor a mayor severidad.
-  /// Usados por el badge y la lista de mantenimiento para sortear.
-  static MantenimientoEstado clasificar(double? serviceDistanceKm) {
-    if (serviceDistanceKm == null) return MantenimientoEstado.sinDato;
-    if (serviceDistanceKm <= 0) return MantenimientoEstado.vencido;
-    if (serviceDistanceKm <= urgenteKm) return MantenimientoEstado.urgente;
-    if (serviceDistanceKm <= programarKm) return MantenimientoEstado.programar;
-    if (serviceDistanceKm <= atencionKm) return MantenimientoEstado.atencion;
-    return MantenimientoEstado.ok;
-  }
-
-  /// Calcula el KM al que se hizo el último service de un tractor.
-  ///
-  /// Fórmula: `KM_ACTUAL + serviceDistance − intervaloServiceKm`.
-  ///
-  /// Ejemplo: si un tractor tiene 380.000 km y `serviceDistance: 12.000`,
-  /// el próximo service es a 392.000 km y el último fue a 342.000 km.
-  ///
-  /// Devuelve null si falta alguno de los dos inputs (no hay manera de
-  /// estimar sin ambos).
-  static double? calcularKmUltimoService({
-    required double? kmActual,
-    required double? serviceDistanceKm,
-  }) {
-    if (kmActual == null || serviceDistanceKm == null) return null;
-    final resultado = kmActual + serviceDistanceKm - intervaloServiceKm;
-    // Si el cálculo da negativo (tractor con menos de 50k km) significa
-    // que todavía está en su primer ciclo de service, no tuvo "anterior".
-    if (resultado < 0) return null;
-    return resultado;
-  }
-
-  /// KM recorridos desde el último service. Útil para mostrar en la card
-  /// "X km recorridos desde el último service".
-  static double? kmDesdeUltimoService({
-    required double? kmActual,
-    required double? serviceDistanceKm,
-  }) {
-    final kmUltimo = calcularKmUltimoService(
-      kmActual: kmActual,
-      serviceDistanceKm: serviceDistanceKm,
-    );
-    if (kmUltimo == null || kmActual == null) return null;
-    return kmActual - kmUltimo;
-  }
-
-  /// Calcula `serviceDistance` (KM al próximo service) a partir del
-  /// último service cargado manualmente y el odómetro actual.
-  ///
-  /// Fórmula: `(ULTIMO_SERVICE_KM + intervaloServiceKm) − KM_ACTUAL`.
-  ///
-  /// Útil cuando la API de Volvo NO entrega `serviceDistance` para la
-  /// cuenta (paquete API limitado). Caso real de Vecchi: el response
-  /// `vehiclestatuses` no incluye el bloque `uptimeData` que contiene
-  /// ese campo, así que dependemos del dato manual + KM en vivo.
-  ///
-  /// Devuelve null si falta alguno de los inputs **o si los datos son
-  /// inconsistentes** (ULTIMO_SERVICE_KM > KM_ACTUAL: el admin cargó
-  /// algo mal, ej. invirtió dígitos). Puede ser **negativo** si el
-  /// tractor ya pasó el momento del próximo service (vencido).
-  static double? serviceDistanceDesdeManual({
-    required double? ultimoServiceKm,
-    required double? kmActual,
-  }) {
-    if (ultimoServiceKm == null || kmActual == null) return null;
-    // Defensa contra typo del admin: el último service no puede haber
-    // sido a más kilómetros de los que tiene el tractor ahora.
-    if (ultimoServiceKm > kmActual) return null;
-    return (ultimoServiceKm + intervaloServiceKm) - kmActual;
-  }
-}
-
-/// Estados del mantenimiento preventivo, ordenados por severidad.
-/// El `index` se usa para sortear (menor índice = más urgente).
-enum MantenimientoEstado {
-  vencido('Servicio vencido'),
-  urgente('Servicio urgente'),
-  programar('Programar servicio'),
-  atencion('Falta poco'),
-  ok('OK'),
-  sinDato('Sin datos');
-
-  final Strin
+  /// tractores con plan distinto, podríamos agregar un campo

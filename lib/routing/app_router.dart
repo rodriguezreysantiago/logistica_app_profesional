@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../features/sync_dashboard/screens/sync_dashboard_screen.dart'; // ✅ OK (ahora se usa)
 
 import '../core/services/prefs_service.dart';
+import '../core/services/capabilities.dart';
 import '../core/constants/app_constants.dart';
 
 import '../shared/widgets/guards/auth_guard.dart';
@@ -36,8 +37,27 @@ class AppRouter {
   }
 
   static Widget _protegerAdmin(Widget child) {
+    // Cambio: antes pedíamos rol literal ADMIN. Ahora pedimos la
+    // capability `verPanelAdmin` — la tienen ADMIN y SUPERVISOR. Cada
+    // pantalla del panel oculta los tiles que el rol no puede usar
+    // (ver admin_panel_screen).
     return AuthGuard(
-      child: RoleGuard(child: child),
+      child: RoleGuard(
+        requiredCapability: Capability.verPanelAdmin,
+        child: child,
+      ),
+    );
+  }
+
+  /// Para pantallas reservadas EXCLUSIVAMENTE a ADMIN (ej. Sync
+  /// Dashboard, Gestión de roles). Usá esta en vez de `_protegerAdmin`
+  /// cuando ni siquiera SUPERVISOR debe entrar.
+  static Widget _protegerSoloAdmin(Widget child) {
+    return AuthGuard(
+      child: RoleGuard(
+        requiredRole: AppRoles.admin,
+        child: child,
+      ),
     );
   }
 
@@ -164,37 +184,10 @@ class AppRouter {
         );
 
       // ================= 🔥 NUEVO: SYNC DASHBOARD =================
+      // Restringido a ADMIN (no SUPERVISOR): muestra info técnica de
+      // sincronización y operaciones potencialmente disruptivas. Los
+      // supervisores no la necesitan para su día a día.
       case AppRoutes.syncDashboard:
         return _buildRoute(
-          _protegerAdmin(const SyncDashboardScreen()),
-          settings,
-        );
-
-      // ================= MANTENIMIENTO PREVENTIVO =================
-      // Lista de tractores ordenados por urgencia de service
-      // (basado en `serviceDistance` que viene del API Volvo).
-      case AppRoutes.adminMantenimiento:
-        return _buildRoute(
-          _protegerAdmin(const AdminMantenimientoScreen()),
-          settings,
-        );
-
-      // ================= ESTADO DEL BOT =================
-      // Dashboard en vivo del bot Node.js de WhatsApp. Lee de
-      // BOT_HEALTH/main que el bot escribe cada 60s.
-      case AppRoutes.adminEstadoBot:
-        return _buildRoute(
-          _protegerAdmin(const AdminEstadoBotScreen()),
-          settings,
-        );
-
-      default:
-        return null;
-    }
-  }
-
-  static Route<dynamic> unknownRoute(RouteSettings settings) {
-    return MaterialPageRoute(
-      builder: (context) => Scaffold(
-        appBar: AppBar(
+          _protegerSoloAdmin(const SyncDashboardScreen()),
    

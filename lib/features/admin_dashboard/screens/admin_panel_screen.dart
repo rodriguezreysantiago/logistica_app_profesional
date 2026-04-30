@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../core/services/capabilities.dart';
 import '../../../core/services/notification_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/formatters.dart';
@@ -129,62 +130,73 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           // ------- Accesos directos (legacy) -------
           const _SeccionLabel('Accesos rápidos'),
           const SizedBox(height: 8),
-          const _AdminTile(
-            titulo: 'GESTIÓN DE PERSONAL',
-            subtitulo: 'Lista de legajos y choferes',
-            icono: Icons.badge_outlined,
-            color: Colors.blueAccent,
-            ruta: '/admin_personal_lista',
-          ),
-          const _AdminTile(
-            titulo: 'GESTIÓN DE FLOTA',
-            subtitulo: 'Control de camiones y acoplados',
-            icono: Icons.local_shipping_outlined,
-            color: Colors.purpleAccent,
-            ruta: '/admin_vehiculos_lista',
-          ),
-          const _AdminTile(
-            titulo: 'AUDITORÍA DE VENCIMIENTOS',
-            subtitulo: 'Calendario y listas por categoría',
-            icono: Icons.event_note,
-            color: Colors.greenAccent,
-            ruta: '/admin_vencimientos_menu',
-          ),
-          const _AdminTile(
-            titulo: 'REVISIONES PENDIENTES',
-            subtitulo: 'Aprobar/rechazar trámites cargados por choferes',
-            icono: Icons.fact_check_outlined,
-            color: Colors.tealAccent,
-            ruta: '/admin_revisiones',
-          ),
-          const _AdminTile(
-            titulo: 'CENTRO DE REPORTES',
-            subtitulo: 'Exportar Excel y analítica de flota',
-            icono: Icons.analytics_outlined,
-            color: Colors.amberAccent,
-            ruta: '/admin_reportes',
-          ),
-          const _AdminTile(
-            titulo: 'MANTENIMIENTO PREVENTIVO',
-            subtitulo: 'Próximos services de la flota Volvo',
-            icono: Icons.build_circle_outlined,
-            color: Colors.deepOrangeAccent,
-            ruta: AppRoutes.adminMantenimiento,
-          ),
-          const _AdminTile(
-            titulo: 'SYNC OBSERVABILITY',
-            subtitulo: 'Monitoreo en tiempo real de sincronización',
-            icono: Icons.monitor_heart_outlined,
-            color: Colors.cyanAccent,
-            ruta: AppRoutes.syncDashboard,
-          ),
-          const _AdminTile(
-            titulo: 'ESTADO DEL BOT',
-            subtitulo: 'Bot WhatsApp: cola, cron, errores y heartbeat',
-            icono: Icons.smart_toy_outlined,
-            color: Colors.lightGreenAccent,
-            ruta: AppRoutes.adminEstadoBot,
-          ),
+          // Cada tile aparece solo si el rol logueado tiene la
+          // capability correspondiente. SUPERVISOR ve la mayoría.
+          // SYNC OBSERVABILITY queda solo para ADMIN.
+          if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
+            const _AdminTile(
+              titulo: 'GESTIÓN DE PERSONAL',
+              subtitulo: 'Lista de legajos y choferes',
+              icono: Icons.badge_outlined,
+              color: Colors.blueAccent,
+              ruta: '/admin_personal_lista',
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verListaFlota))
+            const _AdminTile(
+              titulo: 'GESTIÓN DE FLOTA',
+              subtitulo: 'Control de camiones y acoplados',
+              icono: Icons.local_shipping_outlined,
+              color: Colors.purpleAccent,
+              ruta: '/admin_vehiculos_lista',
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verVencimientos))
+            const _AdminTile(
+              titulo: 'AUDITORÍA DE VENCIMIENTOS',
+              subtitulo: 'Calendario y listas por categoría',
+              icono: Icons.event_note,
+              color: Colors.greenAccent,
+              ruta: '/admin_vencimientos_menu',
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verRevisiones))
+            const _AdminTile(
+              titulo: 'REVISIONES PENDIENTES',
+              subtitulo: 'Aprobar/rechazar trámites cargados por choferes',
+              icono: Icons.fact_check_outlined,
+              color: Colors.tealAccent,
+              ruta: '/admin_revisiones',
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verReportes))
+            const _AdminTile(
+              titulo: 'CENTRO DE REPORTES',
+              subtitulo: 'Exportar Excel y analítica de flota',
+              icono: Icons.analytics_outlined,
+              color: Colors.amberAccent,
+              ruta: '/admin_reportes',
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verMantenimiento))
+            const _AdminTile(
+              titulo: 'MANTENIMIENTO PREVENTIVO',
+              subtitulo: 'Próximos services de la flota Volvo',
+              icono: Icons.build_circle_outlined,
+              color: Colors.deepOrangeAccent,
+              ruta: AppRoutes.adminMantenimiento,
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verSyncDashboard))
+            const _AdminTile(
+              titulo: 'SYNC OBSERVABILITY',
+              subtitulo: 'Monitoreo en tiempo real de sincronización',
+              icono: Icons.monitor_heart_outlined,
+              color: Colors.cyanAccent,
+              ruta: AppRoutes.syncDashboard,
+            ),
+          if (Capabilities.can(PrefsService.rol, Capability.verEstadoBot))
+            const _AdminTile(
+              titulo: 'ESTADO DEL BOT',
+              subtitulo: 'Bot WhatsApp: cola, cron, errores y heartbeat',
+              icono: Icons.smart_toy_outlined,
+              color: Colors.lightGreenAccent,
+              ruta: AppRoutes.adminEstadoBot,
+            ),
           const SizedBox(height: 28),
           const Center(
             child: Text(
@@ -578,40 +590,4 @@ class _KpiCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                valor,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 30,
-                  fontWeight: FontWeight.bold,
-                  height: 1,
-                ),
-              ),
-              if (sublabel != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  sublabel!,
-                  style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// =========================================================
+ 

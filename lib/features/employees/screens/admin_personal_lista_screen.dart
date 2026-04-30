@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 // `_DatoEditableTexto` (DigitOnlyFormatter hereda de ahí).
 import 'package:flutter/services.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/phone_formatter.dart';
@@ -90,9 +91,14 @@ class _EmpleadoCard extends StatelessWidget {
     final dni = doc.id;
     final nombre = (data['NOMBRE'] ?? 'Sin nombre').toString();
     final apodo = (data['APODO'] ?? '').toString().trim();
-    final rol = (data['ROL'] ?? 'USUARIO').toString();
+    // Normalizamos para que datos viejos con ROL='USER' caigan a CHOFER.
+    final rol = AppRoles.normalizar(data['ROL']?.toString());
+    final area = (data['AREA'] ?? AppAreas.manejo).toString();
     final tractor = (data['VEHICULO'] ?? '-').toString();
     final enganche = (data['ENGANCHE'] ?? '-').toString();
+    // Solo mostramos vehículo/enganche si el rol es de manejo. Para
+    // PLANTA / SUPERVISOR / ADMIN no aplica.
+    final mostrarFlota = rol == AppRoles.chofer;
     final urlPerfil = data['ARCHIVO_PERFIL']?.toString();
     final tieneFoto =
         urlPerfil != null && urlPerfil.isNotEmpty && urlPerfil != '-';
@@ -140,31 +146,47 @@ class _EmpleadoCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (rol.toUpperCase() == 'ADMIN')
-                      _RolBadge(rol: rol),
+                    // Mostramos badge solo cuando el rol no es CHOFER.
+                    // CHOFER es el caso esperado por default — agregar
+                    // un chip "CHOFER" sería ruido visual.
+                    if (rol != AppRoles.chofer) _RolBadge(rol: rol),
                   ],
                 ),
                 const SizedBox(height: 4),
-                Row(
-                  children: [
-                    const Icon(Icons.local_shipping,
-                        size: 11, color: Colors.white38),
-                    const SizedBox(width: 4),
-                    Text(
-                      tractor,
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 11),
-                    ),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.link, size: 11, color: Colors.white38),
-                    const SizedBox(width: 4),
-                    Text(
-                      enganche,
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 11),
-                    ),
-                  ],
-                ),
+                if (mostrarFlota)
+                  Row(
+                    children: [
+                      const Icon(Icons.local_shipping,
+                          size: 11, color: Colors.white38),
+                      const SizedBox(width: 4),
+                      Text(
+                        tractor,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 11),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(Icons.link, size: 11, color: Colors.white38),
+                      const SizedBox(width: 4),
+                      Text(
+                        enganche,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 11),
+                      ),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      const Icon(Icons.factory_outlined,
+                          size: 11, color: Colors.white38),
+                      const SizedBox(width: 4),
+                      Text(
+                        AppAreas.etiquetas[area] ?? area,
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 11),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -175,23 +197,40 @@ class _EmpleadoCard extends StatelessWidget {
   }
 }
 
+/// Badge que indica el rol del empleado en la lista.
+/// Color por rol — rojo para ADMIN (atención), naranja para SUPERVISOR
+/// (mando medio), gris claro para PLANTA (no es excepcional). CHOFER no
+/// muestra badge: es el caso esperado por default.
 class _RolBadge extends StatelessWidget {
   final String rol;
   const _RolBadge({required this.rol});
 
+  Color _color() {
+    switch (rol) {
+      case AppRoles.admin:
+        return Colors.redAccent;
+      case AppRoles.supervisor:
+        return Colors.orangeAccent;
+      case AppRoles.planta:
+        return Colors.lightBlueAccent;
+    }
+    return Colors.white60;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final color = _color();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.redAccent.withAlpha(30),
+        color: color.withAlpha(30),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.redAccent.withAlpha(80)),
+        border: Border.all(color: color.withAlpha(80)),
       ),
       child: Text(
-        rol.toUpperCase(),
-        style: const TextStyle(
-          color: Colors.redAccent,
+        (AppRoles.etiquetas[rol] ?? rol).toUpperCase(),
+        style: TextStyle(
+          color: color,
           fontSize: 9,
           fontWeight: FontWeight.bold,
           letterSpacing: 0.8,
@@ -303,6 +342,25 @@ class _DetalleChofer extends StatelessWidget {
           aplicarMayusculas: false,
           onSave: (v) => EmpleadoActions.dato(
               context, dni, 'APODO', v.trim().isEmpty ? null : v.trim()),
+        ),
+        _DatoEditableEnum(
+          etiqueta: 'ROL',
+          valorActual: AppRoles.normalizar(data['ROL']?.toString()),
+          opciones: const {
+            AppRoles.chofer: 'Chofer (con vehículo)',
+            AppRoles.planta: 'Planta (sin vehículo)',
+            AppRoles.supervisor: 'Supervisor (gestión)',
+            AppRoles.admin: 'Admin (control total)',
+          },
+          icono: Icons.badge_outlined,
+          onSave: (v) => EmpleadoActions.dato(context, dni, 'ROL', v),
+        ),
+        _DatoEditableEnum(
+          etiqueta: 'ÁREA',
+          valorActual: (data['AREA'] ?? AppAreas.manejo).toString(),
+          opciones: AppAreas.etiquetas,
+          icono: Icons.factory_outlined,
+          onSave: (v) => EmpleadoActions.dato(context, dni, 'AREA', v),
         ),
         _DatoEditableTexto(
           etiqueta: 'TELÉFONO',
@@ -616,90 +674,4 @@ class _DatoEditableEmpresa extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       title: const Text(
         'EMPRESA',
-        style: TextStyle(fontSize: 11, color: Colors.white38),
-      ),
-      subtitle: Text(
-        valor,
-        style: const TextStyle(fontSize: 12, color: Colors.white),
-      ),
-      trailing: const Icon(Icons.business_center,
-          size: 20, color: Colors.greenAccent),
-      onTap: () => _mostrarSelector(context),
-    );
-  }
-
-  void _mostrarSelector(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        title: const Text('Seleccionar empresa'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: _empresas
-              .map(
-                (e) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(e,
-                      style: const TextStyle(
-                          fontSize: 12, color: Colors.white)),
-                  onTap: () {
-                    onSave(e);
-                    Navigator.pop(dCtx);
-                  },
-                ),
-              )
-              .toList(),
-        ),
-      ),
-    );
-  }
-}
-
-class _FilaVencimiento extends StatelessWidget {
-  final String dni;
-  final String etiqueta;
-  final String campoFecha;
-  final String campoUrl;
-  final Map<String, dynamic> data;
-
-  const _FilaVencimiento({
-    required this.dni,
-    required this.etiqueta,
-    required this.campoFecha,
-    required this.campoUrl,
-    required this.data,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final fecha = data[campoFecha];
-    final url = data[campoUrl]?.toString();
-    final tieneFecha = fecha != null && fecha.toString().isNotEmpty;
-
-    return InkWell(
-      onTap: () => EmpleadoActions.documento(
-        context,
-        dni: dni,
-        etiqueta: etiqueta,
-        campoFecha: campoFecha,
-        campoUrl: campoUrl,
-        fechaActual: fecha?.toString(),
-        urlActual: url,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Row(
-          children: [
-            AppFileThumbnail(
-              url: url,
-              tituloVisor: '$etiqueta - $dni',
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    etiqueta,
-                    style: const TextStyle(
-                        color: C
+    
