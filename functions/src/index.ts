@@ -360,6 +360,42 @@ export const actualizarRolEmpleado = onCall(
 
     await empleadoRef.update(updates);
 
+    // Si liberamos unidades en EMPLEADOS, también las marcamos como
+    // LIBRE en VEHICULOS para que aparezcan disponibles al reasignarlas
+    // a otro chofer. Si no, quedaban en estado OCUPADO sin titular.
+    //
+    // Updates tolerantes a 'doc no existe' (la patente vieja podría haber
+    // sido eliminada): try/catch individual por update para que un
+    // problema con una unidad no bloquee la otra.
+    if (yaNoManeja) {
+      if (teniaVehiculo) {
+        try {
+          await db
+            .collection("VEHICULOS")
+            .doc(String(data.VEHICULO))
+            .update({ ESTADO: "LIBRE" });
+        } catch (e) {
+          logger.warn(
+            "[actualizarRolEmpleado] no pude liberar VEHICULO " + data.VEHICULO,
+            { error: (e as Error).message }
+          );
+        }
+      }
+      if (teniaEnganche) {
+        try {
+          await db
+            .collection("VEHICULOS")
+            .doc(String(data.ENGANCHE))
+            .update({ ESTADO: "LIBRE" });
+        } catch (e) {
+          logger.warn(
+            "[actualizarRolEmpleado] no pude liberar ENGANCHE " + data.ENGANCHE,
+            { error: (e as Error).message }
+          );
+        }
+      }
+    }
+
     // setCustomUserClaims funciona aunque el usuario no esté logueado
     // ahora — graba el claim para el próximo getIdToken(true) o expire.
     // Si el UID no existe en Firebase Auth (caso de empleados que nunca
