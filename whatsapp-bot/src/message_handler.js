@@ -227,6 +227,14 @@ function crearHandler(fs, wa) {
       });
       if (eraComando) return;
 
+      // ─── Gating de Fase 3 (respuestas de choferes con foto) ───
+      // Si AUTO_RESPUESTAS_ENABLED=false, no procesamos como Fase 3.
+      // El handler igual se registró para que los comandos admin
+      // funcionen — pero las respuestas de choferes se ignoran.
+      const respuestasHabilitado =
+        String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() === 'true';
+      if (!respuestasHabilitado) return;
+
       // ─── Identificar al chofer ───
       const fromNumber = msg.from.replace('@c.us', '');
       const chofer = await _resolverChofer(db, fromNumber);

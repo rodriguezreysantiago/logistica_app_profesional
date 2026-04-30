@@ -307,14 +307,19 @@ async function main() {
 
   cron.start(fs);
 
+  // Handler de mensajes entrantes — registrado SIEMPRE para que los
+  // comandos admin (/estado, /pausar, etc) funcionen aunque
+  // AUTO_RESPUESTAS_ENABLED esté en false. La lógica de Fase 3
+  // (respuestas de choferes que se convierten en revisiones) es lo
+  // que se gatea por el flag — no la captura del mensaje.
   const respuestasHabilitado =
     String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() === 'true';
-  if (respuestasHabilitado) {
-    log.info('Handler de respuestas HABILITADO.');
-    wa.onMensajeEntrante(messageHandler.crearHandler(fs, wa));
-  } else {
-    log.info('Handler de respuestas DESHABILITADO (AUTO_RESPUESTAS_ENABLED=false).');
-  }
+  log.info(
+    respuestasHabilitado
+      ? 'Handler de mensajes entrantes: comandos admin + Fase 3.'
+      : 'Handler de mensajes entrantes: solo comandos admin (Fase 3 deshabilitada).'
+  );
+  wa.onMensajeEntrante(messageHandler.crearHandler(fs, wa));
 
   const delayMaxMs = parseInt(process.env.DELAY_MAX_MS || '60000', 10);
   const graceMs = delayMaxMs + 10000;
@@ -332,20 +337,4 @@ async function main() {
     if (procesando) {
       log.warn(
         'Grace period agotado con un envío en curso. ' +
-        'El doc queda en PROCESANDO; revisalo manualmente al reiniciar.'
-      );
-    } else {
-      log.info('Cola en pausa, sin envíos en curso.');
-    }
-
-    await wa.destroy();
-    process.exit(0);
-  };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-}
-
-main().catch((e) => {
-  log.error(`Fatal: ${e.stack || e.message}`);
-  process.exit(1);
-});
+        'El doc queda en PROCESANDO; revisalo manualmente al reinicia
