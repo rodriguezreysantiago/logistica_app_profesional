@@ -259,9 +259,6 @@ export const loginConDni = onCall(
 // Si solo se actualiza AREA (que no afecta permisos), el cliente puede
 // hacerlo directo a Firestore. Esta callable es para cuando hay que
 // tocar ROL o ambos.
-//
-// Input: { dni, rol?, area? }. Si solo rol, mantiene area existente
-// y viceversa.
 
 const ROLES_VALIDOS = ["CHOFER", "PLANTA", "SUPERVISOR", "ADMIN"];
 const AREAS_VALIDAS = [
@@ -327,9 +324,10 @@ export const actualizarRolEmpleado = onCall(
     }
     const data = snap.data() ?? {};
 
-    const rolFinal = rolNuevoRaw ?? (data.ROL ?? "CHOFER").toString().toUpperCase();
-    const areaFinal =
-      areaNuevaRaw ?? (data.AREA ?? "MANEJO").toString().toUpperCase();
+    const rolFinal = rolNuevoRaw ??
+      (data.ROL ?? "CHOFER").toString().toUpperCase();
+    const areaFinal = areaNuevaRaw ??
+      (data.AREA ?? "MANEJO").toString().toUpperCase();
     const nombre = (data.NOMBRE ?? "Usuario").toString();
 
     // ─── Update Firestore + custom claim ───────────────────────────
@@ -338,6 +336,27 @@ export const actualizarRolEmpleado = onCall(
     };
     if (rolNuevoRaw !== null) updates.ROL = rolFinal;
     if (areaNuevaRaw !== null) updates.AREA = areaFinal;
+
+    // Si después del cambio el empleado deja de ser CHOFER+MANEJO,
+    // libera las unidades asignadas. Esto evita que un tractor quede
+    // "atado" a alguien que ya no maneja, bloqueando que otro chofer
+    // lo tome. Solo limpiamos si TENÍA algo cargado, para no crear
+    // ruido en la auditoría con updates triviales.
+    const yaNoManeja = rolFinal !== "CHOFER" || areaFinal !== "MANEJO";
+    const teniaVehiculo = data.VEHICULO && data.VEHICULO !== "-";
+    const teniaEnganche = data.ENGANCHE && data.ENGANCHE !== "-";
+    if (yaNoManeja && (teniaVehiculo || teniaEnganche)) {
+      updates.VEHICULO = "-";
+      updates.ENGANCHE = "-";
+      logger.info(
+        "[actualizarRolEmpleado] liberadas unidades asignadas",
+        {
+          dniHash: hashId(dni),
+          vehiculoAnterior: data.VEHICULO,
+          engancheAnterior: data.ENGANCHE,
+        }
+      );
+    }
 
     await empleadoRef.update(updates);
 
@@ -358,9 +377,6 @@ export const actualizarRolEmpleado = onCall(
         areaNueva: areaFinal,
       });
     } catch (e) {
-      // Usuario sin Auth account todavía. El claim se va a aplicar la
-      // próxima vez que se loguee vía loginConDni que LEE ROL/AREA del
-      // doc EMPLEADOS y arma el token.
       logger.info(
         "[actualizarRolEmpleado] usuario sin Auth account, " +
           "claim se aplicará al próximo login",
@@ -956,4 +972,170 @@ export const telemetriaSnapshotScheduled = onSchedule(
 //     que sumarlo acá también (es una conscious choice — la auditoría
 //     no debería tener vocabulario abierto).
 //   - **Sanitización de tamaño**: payload total <= 10KB para defendernos
-//     de un caller que mande
+//     de un caller que mande un detalles enorme y nos haga gastar
+//     espacio.
+//   - **Fire-and-forget cliente**: la function devuelve OK rápido. Si
+//     algo falla, el cliente loguea y sigue; nunca bloquea al admin.
+
+const AUDIT_ACCIONES_PERMITIDAS = new Set<string>([
+  // Personal
+  "CREAR_CHOFER",
+  "EDITAR_CHOFER",
+  "CAMBIAR_FOTO_PERFIL",
+  "REEMPLAZAR_PAPEL_CHOFER",
+  // Flota
+  "CREAR_VEHICULO",
+  "EDITAR_VEHICULO",
+  "CAMBIAR_FOTO_VEHICULO",
+  // Asignaciones
+  "ASIGNAR_EQUIPO",
+  "DESVINCULAR_EQUIPO",
+  // Revisiones
+  "APROBAR_REVISION",
+  "RECHAZAR_REVISION",
+]);
+
+const AUDIT_ENTIDADES_PERMITIDAS = new Set<string>([
+  "EMPLEADOS",
+  "VEHICULOS",
+  "REVISIONES",
+]);
+
+const AUDIT_MAX_DETALLES_BYTES = 10 * 1024; // 10KB
+
+interface AuditLogResult {
+  ok: true;
+  docId: string;
+}
+
+export const auditLogWrite = onCall(
+  {
+    enforceAppCheck: false, // todavía no está activado App Check
+  },
+  async (request): Promise<AuditLogResult> => {
+    // ─── Auth: solo admin logueado ─────────────────────────────────
+    const rol = request.auth?.token?.rol;
+    if (!request.auth || rol !== "ADMIN") {
+      logger.warn("[auditLog] llamada sin auth ADMIN", {
+        uid: request.auth?.uid ?? "no-uid",
+        rol: rol ?? "no-rol",
+      });
+      throw new HttpsError(
+        "permission-denied",
+        "Solo administradores pueden escribir bitácora."
+      );
+    }
+
+    // ─── Validación de input ───────────────────────────────────────
+    const data = request.data ?? {};
+    const accion = (data.accion ?? "").toString().trim();
+    const entidad = (data.entidad ?? "").toString().trim();
+    const entidadId = (data.entidadId ?? "").toString().trim();
+    const detalles = data.detalles;
+
+    if (!accion || !AUDIT_ACCIONES_PERMITIDAS.has(accion)) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Acción '${accion}' no está en la whitelist.`
+      );
+    }
+
+    if (!entidad || !AUDIT_ENTIDADES_PERMITIDAS.has(entidad)) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Entidad '${entidad}' no está en la whitelist.`
+      );
+    }
+
+    if (entidadId.length > 100) {
+      throw new HttpsError(
+        "invalid-argument",
+        "entidadId demasiado largo (máx 100 chars)."
+      );
+    }
+
+    // detalles debe ser objeto plano serializable y NO vacío. Validamos
+    // tamaño serializando con JSON.stringify — si tira por circular
+    // references o tipos no-serializables, rechazamos.
+    //
+    // Bug A3 del code review: antes aceptábamos {} y null. Ahora si
+    // viene `detalles` debe tener al menos una key — sino, mejor
+    // omitirlo del request directamente.
+    let detallesPersistir: Record<string, unknown> | null = null;
+    if (detalles != null) {
+      if (typeof detalles !== "object" || Array.isArray(detalles)) {
+        throw new HttpsError(
+          "invalid-argument",
+          "`detalles` debe ser un objeto plano."
+        );
+      }
+      const detallesObj = detalles as Record<string, unknown>;
+      if (Object.keys(detallesObj).length === 0) {
+        throw new HttpsError(
+          "invalid-argument",
+          "`detalles` no puede ser un objeto vacío."
+        );
+      }
+      let serializados: string;
+      try {
+        serializados = JSON.stringify(detallesObj);
+      } catch {
+        throw new HttpsError(
+          "invalid-argument",
+          "`detalles` no es serializable."
+        );
+      }
+      if (serializados.length > AUDIT_MAX_DETALLES_BYTES) {
+        throw new HttpsError(
+          "resource-exhausted",
+          `\`detalles\` excede el límite (${AUDIT_MAX_DETALLES_BYTES} bytes).`
+        );
+      }
+      detallesPersistir = detallesObj;
+    }
+
+    // ─── Datos del admin desde el JWT ──────────────────────────────
+    // request.auth.uid es el DNI gracias a loginConDni que setea uid=dni.
+    // request.auth.token.nombre es un custom claim también seteado en
+    // loginConDni. Si por algún motivo no está, fallback a "Admin".
+    const adminDni = request.auth.uid;
+    const adminNombre = (request.auth.token.nombre ?? "Admin").toString();
+
+    // ─── Escritura ─────────────────────────────────────────────────
+    const doc: Record<string, unknown> = {
+      accion,
+      entidad,
+      admin_dni: adminDni,
+      admin_nombre: adminNombre,
+      timestamp: FieldValue.serverTimestamp(),
+    };
+    if (entidadId) {
+      doc.entidad_id = entidadId;
+    }
+    if (detallesPersistir != null) {
+      doc.detalles = detallesPersistir;
+    }
+
+    try {
+      const ref = await db.collection("AUDITORIA_ACCIONES").add(doc);
+      logger.info("[auditLog] OK", {
+        accion,
+        entidad,
+        entidadId: entidadId || undefined,
+        adminDni,
+        docId: ref.id,
+      });
+      return { ok: true, docId: ref.id };
+    } catch (e) {
+      logger.error("[auditLog] error escribiendo", {
+        accion,
+        entidad,
+        error: (e as Error).message,
+      });
+      throw new HttpsError(
+        "internal",
+        "No se pudo registrar la acción en bitácora."
+      );
+    }
+  }
+);

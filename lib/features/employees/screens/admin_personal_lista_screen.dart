@@ -293,6 +293,12 @@ class _DetalleChofer extends StatelessWidget {
   }
 
   Widget _buildBody(BuildContext context, Map<String, dynamic> data) {
+    // Mostramos la sección de asignación de unidades solo si el
+    // empleado pertenece al área de MANEJO. Si lo movieron a TALLER,
+    // GOMERIA, etc, no tiene sentido mostrar tractor/enganche.
+    final area = (data['AREA'] ?? AppAreas.manejo).toString();
+    final esDeManejo = area == AppAreas.manejo;
+
     return ListView(
       controller: scrollController,
       padding: const EdgeInsets.all(20),
@@ -445,21 +451,23 @@ class _DetalleChofer extends StatelessWidget {
           data: data,
         ),
 
-        const Divider(color: Colors.white10),
-        const _SectionTitle(
-            icon: Icons.local_shipping, label: 'Asignación de unidades'),
-        _AsignacionUnidad(
-          dni: dni,
-          campo: 'VEHICULO',
-          label: 'Tractor',
-          actual: (data['VEHICULO'] ?? '').toString(),
-        ),
-        _AsignacionUnidad(
-          dni: dni,
-          campo: 'ENGANCHE',
-          label: 'Enganche',
-          actual: (data['ENGANCHE'] ?? '').toString(),
-        ),
+        if (esDeManejo) ...[
+          const Divider(color: Colors.white10),
+          const _SectionTitle(
+              icon: Icons.local_shipping, label: 'Asignación de unidades'),
+          _AsignacionUnidad(
+            dni: dni,
+            campo: 'VEHICULO',
+            label: 'Tractor',
+            actual: (data['VEHICULO'] ?? '').toString(),
+          ),
+          _AsignacionUnidad(
+            dni: dni,
+            campo: 'ENGANCHE',
+            label: 'Enganche',
+            actual: (data['ENGANCHE'] ?? '').toString(),
+          ),
+        ],
 
         const SizedBox(height: 30),
       ],
@@ -645,16 +653,4 @@ class _DatoEditableTexto extends StatelessWidget {
             ),
           ),
           // Permite enviar con Enter sin tener que ir al botón.
-          onSubmitted: (_) {
-            onSave(transform(controller.text));
-            Navigator.pop(dCtx);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dCtx),
-            child: const Text('CANCELAR'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              onSave(transform(controller.text));
+    
