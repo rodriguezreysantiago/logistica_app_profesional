@@ -25,6 +25,7 @@ class _AdminPersonalFormScreenState
 
   final _dniCtrl = TextEditingController();
   final _nombreCtrl = TextEditingController();
+  final _apodoCtrl = TextEditingController();
   final _cuilCtrl = TextEditingController();
   final _mailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
@@ -43,6 +44,7 @@ class _AdminPersonalFormScreenState
   void dispose() {
     _dniCtrl.dispose();
     _nombreCtrl.dispose();
+    _apodoCtrl.dispose();
     _cuilCtrl.dispose();
     _mailCtrl.dispose();
     _passCtrl.dispose();
@@ -85,6 +87,11 @@ class _AdminPersonalFormScreenState
           .doc(dni)
           .set({
         'NOMBRE': _nombreCtrl.text.trim().toUpperCase(),
+        // Apodo opcional — vacío se guarda como null para distinguirlo
+        // de string vacío del lado del bot/cron.
+        'APODO': _apodoCtrl.text.trim().isEmpty
+            ? null
+            : _apodoCtrl.text.trim(),
         'CUIL': _cuilCtrl.text.trim(),
         'MAIL': _mailCtrl.text.trim().toLowerCase(),
         'CONTRASEÑA': passwordHash,
@@ -145,10 +152,26 @@ class _AdminPersonalFormScreenState
                   maxLength: 8,
                 ),
                 _FormInput(
-                  label: 'Nombre y apellido completo',
+                  label: 'Apellido(s) y nombre(s)',
                   controller: _nombreCtrl,
                   icon: Icons.person,
-                  // Nombre va en MAYÚSCULAS para uniformar la base.
+                  // ORDEN OBLIGATORIO: APELLIDO primero, después nombre.
+                  // Así está toda la base existente y así espera el
+                  // algoritmo que extrae el primer nombre del saludo.
+                  // Ej: "PEREZ JUAN", "GONZALEZ RODRIGUEZ JUAN CARLOS".
+                  // Si el chofer tiene 2 apellidos o 2 nombres y el
+                  // algoritmo se confunde, cargar el campo APODO.
+                  // Va en MAYÚSCULAS para uniformar la base.
+                ),
+                _FormInput(
+                  label: 'Apodo (opcional, cómo le decís)',
+                  controller: _apodoCtrl,
+                  icon: Icons.tag_faces,
+                  // El apodo respeta como lo tipea el admin (no
+                  // mayúsculas) — al saludar conviene "Carlos" antes
+                  // que "CARLOS".
+                  toUpperCase: false,
+                  isOptional: true,
                 ),
                 _FormInput(
                   label: 'CUIL (sin guiones)',
@@ -237,6 +260,10 @@ class _FormInput extends StatelessWidget {
   /// CUIL) queden uniformes. Antes se hacía con `textCapitalization`,
   /// pero eso rompe el Backspace en Windows desktop.
   final bool toUpperCase;
+  /// Si es true, el campo puede quedar vacío sin error de validación.
+  /// Default false: campo obligatorio. Usar para campos como APODO o
+  /// teléfono opcional.
+  final bool isOptional;
   final TextInputAction textInputAction;
 
   const _FormInput({
@@ -248,6 +275,7 @@ class _FormInput extends StatelessWidget {
     this.isCuil = false,
     this.isMail = false,
     this.toUpperCase = true,
+    this.isOptional = false,
     this.textInputAction = TextInputAction.next,
   });
 
@@ -294,6 +322,7 @@ class _FormInput extends StatelessWidget {
             return null;
           }
           if (v.isEmpty) {
+            if (isOptional) return null;
             return 'Campo obligatorio';
           }
           if (isNumeric && v.length < (maxLength ?? 0)) {
@@ -369,60 +398,4 @@ class _RoleSelector extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: SegmentedButton<String>(
-        segments: const [
-          ButtonSegment(
-            value: 'USER',
-            label: Text('Chofer'),
-            icon: Icon(Icons.drive_eta, size: 18),
-          ),
-          ButtonSegment(
-            value: 'ADMIN',
-            label: Text('Admin'),
-            icon: Icon(Icons.security, size: 18),
-          ),
-        ],
-        selected: {rol},
-        onSelectionChanged:
-            enabled ? (set) => onChanged(set.first) : null,
-      ),
-    );
-  }
-}
-
-class _BotonGuardar extends StatelessWidget {
-  final bool guardando;
-  final VoidCallback onPressed;
-
-  const _BotonGuardar({
-    required this.guardando,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 55,
-      child: ElevatedButton.icon(
-        onPressed: guardando ? null : onPressed,
-        icon: guardando
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.black,
-                ),
-              )
-            : const Icon(Icons.person_add_alt_1),
-        label: Text(
-          guardando ? 'PROCESANDO...' : 'CREAR LEGAJO',
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
-        ),
-      ),
-    );
-  }
-}
+        segment

@@ -11,6 +11,12 @@ class Empleado {
   final String? empresa;
   final String? telefono;
   final String? contrasena;
+  // Apodo opcional — cómo le decimos al chofer cuando le hablamos.
+  // Necesario porque varios choferes tienen 2 nombres y 2 apellidos
+  // (ej: "GONZALEZ RODRIGUEZ JUAN CARLOS"), donde el algoritmo de
+  // "segundo token" falla. Si está vacío, el saludo cae al fallback
+  // (`_extraerPrimerNombre` del NOMBRE).
+  final String? apodo;
   final String? archivoPerfil;
   final String? vehiculo; // Patente del tractor asignado
   final String? enganche; // Patente de batea/tolva asignada
@@ -37,6 +43,7 @@ class Empleado {
     this.empresa,
     this.telefono,
     this.contrasena,
+    this.apodo,
     this.archivoPerfil,
     this.vehiculo,
     this.enganche,
@@ -63,6 +70,7 @@ class Empleado {
       'EMPRESA': empresa?.toUpperCase(),
       'TELEFONO': telefono,
       'CONTRASEÑA': contrasena,
+      'APODO': apodo,
       'ARCHIVO_PERFIL': archivoPerfil,
       'VEHICULO': vehiculo?.toUpperCase(),
       'ENGANCHE': enganche?.toUpperCase(),
@@ -97,6 +105,7 @@ class Empleado {
       empresa: map['EMPRESA'],
       telefono: map['TELEFONO'],
       contrasena: map['CONTRASEÑA'],
+      apodo: map['APODO'],
       archivoPerfil: map['ARCHIVO_PERFIL'],
       vehiculo: map['VEHICULO'],
       enganche: map['ENGANCHE'],
@@ -142,6 +151,7 @@ class Empleado {
     String? empresa,
     String? telefono,
     String? contrasena,
+    String? apodo,
     String? archivoPerfil,
     String? vehiculo,
     String? enganche,
@@ -163,17 +173,9 @@ class Empleado {
       empresa: empresa ?? this.empresa,
       telefono: telefono ?? this.telefono,
       contrasena: contrasena ?? this.contrasena,
+      apodo: apodo ?? this.apodo,
       archivoPerfil: archivoPerfil ?? this.archivoPerfil,
       vehiculo: vehiculo ?? this.vehiculo,
       enganche: enganche ?? this.enganche,
       vencimientoLicencia: vencimientoLicencia ?? this.vencimientoLicencia,
-      archivoLicencia: archivoLicencia ?? this.archivoLicencia,
-      vencimientoPreocupacional: vencimientoPreocupacional ?? this.vencimientoPreocupacional,
-      archivoPreocupacional: archivoPreocupacional ?? this.archivoPreocupacional,
-      vencimientoManejo: vencimientoManejo ?? this.vencimientoManejo,
-      archivoManejo: archivoManejo ?? this.archivoManejo,
-      vencimientoArt: vencimientoArt ?? this.vencimientoArt,
-      archivoArt: archivoArt ?? this.archivoArt,
-    );
-  }
-}
+      archivoLicencia: arch

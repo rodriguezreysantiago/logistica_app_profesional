@@ -89,6 +89,7 @@ class _EmpleadoCard extends StatelessWidget {
     final data = doc.data() as Map<String, dynamic>;
     final dni = doc.id;
     final nombre = (data['NOMBRE'] ?? 'Sin nombre').toString();
+    final apodo = (data['APODO'] ?? '').toString().trim();
     final rol = (data['ROL'] ?? 'USUARIO').toString();
     final tractor = (data['VEHICULO'] ?? '-').toString();
     final enganche = (data['ENGANCHE'] ?? '-').toString();
@@ -116,14 +117,27 @@ class _EmpleadoCard extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        nombre,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
+                      child: RichText(
                         overflow: TextOverflow.ellipsis,
+                        text: TextSpan(
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            fontSize: 14,
+                          ),
+                          children: [
+                            TextSpan(text: nombre),
+                            if (apodo.isNotEmpty)
+                              TextSpan(
+                                text: '  ($apodo)',
+                                style: const TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 12,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                     if (rol.toUpperCase() == 'ADMIN')
@@ -274,6 +288,21 @@ class _DetalleChofer extends StatelessWidget {
           aplicarMayusculas: false,
           onSave: (v) =>
               EmpleadoActions.dato(context, dni, 'MAIL', v.toLowerCase()),
+        ),
+        _DatoEditableTexto(
+          etiqueta: 'APODO',
+          // Mostramos lo cargado, o '-' si está vacío (visualmente
+          // indica al admin que falta cargar). Si el admin guarda
+          // string vacío, persistimos null para distinguir "vacío
+          // intencional" de "todavía no editado".
+          valor: ((data['APODO'] ?? '').toString().isEmpty
+              ? '-'
+              : data['APODO'].toString()),
+          // El apodo respeta como lo escribe el admin: "Carlos" en
+          // lugar de "CARLOS" (más natural al saludar).
+          aplicarMayusculas: false,
+          onSave: (v) => EmpleadoActions.dato(
+              context, dni, 'APODO', v.trim().isEmpty ? null : v.trim()),
         ),
         _DatoEditableTexto(
           etiqueta: 'TELÉFONO',
@@ -673,53 +702,4 @@ class _FilaVencimiento extends StatelessWidget {
                   Text(
                     etiqueta,
                     style: const TextStyle(
-                        color: Colors.white54, fontSize: 11),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    tieneFecha
-                        ? AppFormatters.formatearFecha(fecha)
-                        : 'Sin fecha',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            VencimientoBadge(fecha: fecha),
-            const SizedBox(width: 4),
-            const Icon(Icons.chevron_right,
-                color: Colors.white24, size: 18),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AsignacionUnidad extends StatelessWidget {
-  final String dni;
-  final String campo;
-  final String label;
-  final String actual;
-
-  const _AsignacionUnidad({
-    required this.dni,
-    required this.campo,
-    required this.label,
-    required this.actual,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final tieneAsignacion =
-        actual.isNotEmpty && actual != '-' && actual != 'SIN ASIGNAR';
-
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        campo == 'VEHICULO' ? Icons.local_shipping : Icons.link,
-        color: tieneAsignacion ? Colors.greenAccent : Colors.wh
+                        color: C

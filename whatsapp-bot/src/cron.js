@@ -198,7 +198,11 @@ async function _runOnce(fs) {
       const telefono = data.TELEFONO ? String(data.TELEFONO) : null;
       if (!telefono) continue; // sin teléfono, no podemos avisar
 
-      const nombre = aviso.extraerPrimerNombre(data.NOMBRE);
+      // Saludamos por APODO si está cargado, sino fallback al
+      // algoritmo de segundo token. Decisión de diseño en
+      // ESTADO_PROYECTO: el admin carga APODO solo donde el algoritmo
+      // falla (dos apellidos, segundo nombre, etc).
+      const nombre = aviso.resolverNombreSaludo(data);
       for (const [etiqueta, campoBase] of Object.entries(DOCS_EMPLEADO)) {
         const fechaStr = data[`VENCIMIENTO_${campoBase}`];
         const dias = calcularDiasRestantes(fechaStr);
@@ -277,7 +281,7 @@ async function _runOnce(fs) {
         ? String(chofer.data.TELEFONO)
         : null;
       if (!telefono) continue;
-      const nombre = aviso.extraerPrimerNombre(chofer.data.NOMBRE);
+      const nombre = aviso.resolverNombreSaludo(chofer.data);
 
       for (const spec of specs) {
         const fechaStr = v[spec.campoFecha];
@@ -362,7 +366,7 @@ async function _runOnce(fs) {
         ? String(chofer.data.TELEFONO)
         : null;
       if (!telefono) continue;
-      const nombre = aviso.extraerPrimerNombre(chofer.data.NOMBRE);
+      const nombre = aviso.resolverNombreSaludo(chofer.data);
 
       const serviceDistanceKm = _resolverServiceDistance(v);
       if (serviceDistanceKm == null) continue;
@@ -504,15 +508,4 @@ function _resolverServiceDistance(v) {
 }
 
 // `_buscarChofer` removida — reemplazada por el índice inverso
-// `choferByPatente` que se construye una vez al inicio del ciclo y
-// permite lookup O(1) en lugar de O(n) por cada vencimiento.
-
-module.exports = {
-  start,
-  stop,
-  // Exportados para tests / uso interno:
-  calcularDiasRestantes,
-  DOCS_EMPLEADO,
-  DOCS_VEHICULO,
-  INTERVALO_SERVICE_KM,
-};
+// `choferByPatente` que se construye un

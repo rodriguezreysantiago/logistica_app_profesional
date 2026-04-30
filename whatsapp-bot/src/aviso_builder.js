@@ -119,6 +119,27 @@ function construirCuerpo({ item, saludo, esVehiculo, referencia, fechaFmt }) {
 }
 
 /**
+ * Resuelve cómo saludar a un chofer dado su doc de EMPLEADOS.
+ *
+ * Prioridad:
+ *   1. Si tiene `APODO` cargado y no es vacío → usar APODO. Es lo que
+ *      cargó el admin manualmente para casos donde el algoritmo de
+ *      "segundo token" falla (dos apellidos, segundo nombre, etc).
+ *   2. Sino → algoritmo `extraerPrimerNombre(NOMBRE)` (segundo token).
+ *
+ * Devuelve `null` si no se pudo resolver (sin apodo y NOMBRE de un
+ * solo token), igual que `extraerPrimerNombre`.
+ */
+function resolverNombreSaludo(empleadoData) {
+  if (!empleadoData) return null;
+  const apodo = empleadoData.APODO;
+  if (apodo && String(apodo).trim().length > 0) {
+    return String(apodo).trim();
+  }
+  return extraerPrimerNombre(empleadoData.NOMBRE);
+}
+
+/**
  * Para nombres tipo "PEREZ JUAN CARLOS" devuelve "Juan" (formato
  * APELLIDO NOMBRE… que usa la app). Si solo hay un token, devuelve
  * null para evitar saludar al chofer por su apellido.
@@ -153,4 +174,33 @@ function extraerPatente(titulo) {
  * 30/05 se mostraba como "29/05" en el WhatsApp.
  *
  * Ahora parseamos strings ISO YYYY-MM-DD literalmente (componente por
- * componente) sin pasar por el constructor de Date — así no h
+ * componente) sin pasar por el constructor de Date — así no hay
+ * interpretación implícita de zona horaria.
+ */
+function formatearFecha(fecha) {
+  if (!fecha) return '-';
+  if (fecha instanceof Date) {
+    const day = String(fecha.getDate()).padStart(2, '0');
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    return `${day}/${mes}/${fecha.getFullYear()}`;
+  }
+  const str = String(fecha).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+  if (m) {
+    return `${m[3]}/${m[2]}/${m[1]}`;
+  }
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return str;
+  const day = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}/${mes}/${d.getFullYear()}`;
+}
+
+module.exports = {
+  build,
+  extraerPrimerNombre,
+  resolverNombreSaludo,
+  extraerPatente,
+  formatearFecha,
+  FIRMA,
+};

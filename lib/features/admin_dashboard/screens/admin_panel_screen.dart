@@ -207,10 +207,49 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 // SALUDO
 // =============================================================================
 
-/// Encabezado con saludo según hora del día + nombre del admin.
-/// Toma `PrefsService.nombre` para personalizar.
-class _Saludo extends StatelessWidget {
+/// Encabezado con saludo según hora del día + apodo o primer nombre del admin.
+///
+/// Resolución del nombre a saludar:
+///   1. Lee `EMPLEADOS/{dni}.APODO` (lectura única, cacheada en memoria
+///      para que no parpadee al volver al panel).
+///   2. Si no hay apodo cargado, fallback al algoritmo "segundo token"
+///      del `NOMBRE` (ej. "PEREZ JUAN" → "Juan"). Limitación conocida:
+///      con dos apellidos elige el segundo apellido en lugar del primer
+///      nombre — para esos casos hay que cargar el APODO desde el form.
+class _Saludo extends StatefulWidget {
   const _Saludo();
+
+  @override
+  State<_Saludo> createState() => _SaludoState();
+}
+
+class _SaludoState extends State<_Saludo> {
+  String? _apodoResuelto; // null si todavía no leyó, '' si no tiene
+
+  @override
+  void initState() {
+    super.initState();
+    _resolverApodo();
+  }
+
+  /// Lee una sola vez el APODO del legajo del admin logueado. La lectura
+  /// es barata (un doc) y se hace en background — la primera frame se
+  /// renderiza con el fallback y después se actualiza si hay apodo.
+  Future<void> _resolverApodo() async {
+    final dni = PrefsService.dni;
+    if (dni.isEmpty) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('EMPLEADOS')
+          .doc(dni)
+          .get();
+      if (!mounted) return;
+      final apodo = (snap.data()?['APODO'] ?? '').toString().trim();
+      setState(() => _apodoResuelto = apodo);
+    } catch (_) {
+      // Si Firestore falla o el doc no existe, dejamos el fallback.
+    }
+  }
 
   String _saludoHora() {
     final h = DateTime.now().hour;
@@ -220,7 +259,7 @@ class _Saludo extends StatelessWidget {
   }
 
   /// Para nombres "APELLIDO NOMBRE …", devuelve "Nombre" capitalizado.
-  /// Igual a `_extraerPrimerNombre` de vencimiento_editor_sheet.dart.
+  /// Solo se usa como fallback cuando el APODO no está cargado.
   String? _primerNombre(String full) {
     final partes = full.trim().split(RegExp(r'\s+'));
     if (partes.length < 2) return null;
@@ -232,7 +271,11 @@ class _Saludo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final nombreFull = PrefsService.nombre;
-    final nombre = _primerNombre(nombreFull);
+    // Prioridad: APODO si está cargado → fallback al segundo token.
+    final apodoLimpio = (_apodoResuelto ?? '').trim();
+    final nombre = apodoLimpio.isNotEmpty
+        ? apodoLimpio
+        : _primerNombre(nombreFull);
     final saludo =
         nombre != null ? '${_saludoHora()}, $nombre' : _saludoHora();
     final fechaHoy =
@@ -571,55 +614,4 @@ class _KpiCard extends StatelessWidget {
   }
 }
 
-// =============================================================================
-// TILE DE ACCESO DIRECTO (legacy — secciones grandes del menú)
-// =============================================================================
-
-class _AdminTile extends StatelessWidget {
-  final String titulo;
-  final String subtitulo;
-  final IconData icono;
-  final Color color;
-  final String ruta;
-
-  const _AdminTile({
-    required this.titulo,
-    required this.subtitulo,
-    required this.icono,
-    required this.color,
-    required this.ruta,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      onTap: () => Navigator.pushNamed(context, ruta),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: color.withAlpha(25),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icono, color: color, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  titulo,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    fontSize: 13,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitulo,
-   
+// =========================================================
