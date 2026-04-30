@@ -51,7 +51,24 @@ async function manejarSiEsComando(msg, contextos) {
   const texto = (msg.body || '').trim();
   if (!texto.startsWith('/')) return false;
 
-  const fromNumber = (msg.from || '').replace('@c.us', '');
+  // Resolver el número real del remitente:
+  //  - Si msg.from termina en @c.us → es un teléfono directo.
+  //  - Si termina en @lid (chats con números no agendados en WhatsApp
+  //    moderno) → llamamos a msg.getContact() para obtener el número
+  //    canónico (msg.from acá es un linked-id interno, no un teléfono).
+  let fromNumber = '';
+  try {
+    const contacto = await msg.getContact();
+    if (contacto) {
+      fromNumber = contacto.number || (contacto.id && contacto.id.user) || '';
+    }
+  } catch (_) {
+    // ignoramos — fallback al parseo del from
+  }
+  if (!fromNumber) {
+    fromNumber = (msg.from || '').replace(/@(c\.us|lid)$/, '');
+  }
+
   if (!_esAdmin(fromNumber)) {
     log.warn(`Comando recibido de no-admin ${fromNumber}: ${texto.slice(0, 40)}`);
     // No respondemos para no exponer la existencia del comando.

@@ -216,7 +216,14 @@ function crearHandler(fs, wa) {
       if (msg.fromMe) return; // mensajes del propio bot
       if (msg.isStatus) return; // status updates
       if (msg.from && msg.from.endsWith('@g.us')) return; // grupo
-      if (!msg.from || !msg.from.endsWith('@c.us')) return; // broadcast / unknown
+      // Aceptamos @c.us (chats con contactos) y @lid (linked-id de
+      // WhatsApp moderno: aparece en chats con números NO agendados).
+      // En @lid, msg.from no es un número directo — el resolver de
+      // commands.js hace getContact() para obtener el canónico.
+      if (!msg.from) return;
+      const tipoChat = msg.from.endsWith('@c.us') ? 'c.us' :
+                       msg.from.endsWith('@lid') ? 'lid' : null;
+      if (!tipoChat) return; // broadcast / status / unknown
 
       // ─── Comandos admin (early return si matchea) ───
       // Si el mensaje empieza con `/` y viene de un admin autorizado
