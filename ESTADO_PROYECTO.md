@@ -218,6 +218,60 @@ Reporte: `AUDITORIA_2026-04-28.md`. Resueltos: credenciales Volvo hardcodeadas, 
 ### 6.8 OCR para detectar fechas (Sprint bot)
 - **`OcrService`** en `lib/shared/utils/ocr_service.dart`: `detectarFecha(path)` con Google ML Kit on-device. Regex para `DD/MM/YYYY`, `DD-MM-YYYY`, `DD.MM.YYYY`. Devuelve la fecha más lejana en el futuro (asume que el último vencimiento es el de renovación). Property `soportado` para ocultar UI en Web/Windows.
 
+### 6.9 Sesión 30 abril 2026 — Cleanup, RBAC, robustez del bot
+
+#### 6.9.1 Cleanup app
+- Eliminado el botón "AVISAR POR WHATSAPP" + dependencias muertas (~970 líneas): `whatsapp_helper.dart`, `aviso_vencimiento_service.dart`, `aviso_vencimiento_builder.dart`, `_HistorialAvisos` widget, test asociado. La app ya no encolaba mensajes manualmente — todo pasa por el bot Node.js.
+- Colección `AVISOS_VENCIMIENTOS` borrada de Firestore (13 docs huérfanos).
+
+#### 6.9.2 Pantalla "Estado del Bot"
+- Bot escribe `BOT_HEALTH/main` cada 60s con: estado del cliente WA, cola actual, último ciclo del cron, último mensaje, errores recientes (ring buffer 10), config, info del proceso (versión, pid, uptime).
+- Pantalla `lib/features/admin_dashboard/screens/admin_estado_bot_screen.dart` con StreamBuilder + refresh cada 5s. Banner verde/amarillo/rojo según último heartbeat (>2min sin heartbeat = bot caído). 6 cards con datos en vivo. Tile nuevo en `admin_panel`.
+- Module `whatsapp-bot/src/health.js`: `iniciar()`, `setEstadoCliente()`, `registrarEnvio()`, `registrarError()`, `registrarCicloCron()`. Hooks integrados en `index.js`, `whatsapp.js`, `cron.js`.
+
+#### 6.9.3 Robustez del bot Node.js
+- **Reintentos con backoff**: clasificación de errores transitorios vs definitivos (timeout/ECONN*/session closed → transitorio). Default: 30s, 2min, 10min de backoff. Después de MAX_RETRIES=3 fallos, escala a ERROR. Field nuevo `proximoIntentoEn` en COLA_WHATSAPP que el polling respeta. Helper `marcarReintento()` en firestore.js.
+- **Watchdog del evento `READY`**: bug conocido de wwebjs (issue #5758) donde tras `authenticated` el `ready` nunca llega por A/B testing de WhatsApp Web 2.3000.x. Si pasa READY_TIMEOUT_SEC=90s sin ready, mata el cliente y reinicializa (sin reescaneo de QR). Después de MAX_READY_TIMEOUTS=3 timeouts seguidos, exit 1 → supervisor reinicia el proceso. Validado en producción: primer arranque cae en el bug, watchdog dispara a los 90s, segundo intento llega a ready en 1s.
+- **`webVersionCache: 'remote'`** apuntando a `wppconnect-team/wa-version` para usar siempre versión estable de WhatsApp Web (bypaseando el A/B testing problemático).
+- **Upgrade `whatsapp-web.js` 1.27.0 → 1.34.6** (en producción local quedó 1.34.7).
+
+#### 6.9.4 Campo APODO
+- Nuevo campo opcional `apodo` en EMPLEADOS. Resuelve casos donde el algoritmo de "segundo token" del NOMBRE falla (dos apellidos, segundo nombre como "Carlos" en "PEREZ JUAN CARLOS").
+- Modelo `Empleado`: campo `apodo` (String?) opcional. Form de alta y editor del detalle lo incluyen.
+- Saludo del panel admin lee `EMPLEADOS/{dni}.APODO` lazy una vez; si está, prevalece sobre el algoritmo.
+- Bot Node.js: `aviso_builder.resolverNombreSaludo(empleadoData)` prioriza APODO sobre `extraerPrimerNombre(NOMBRE)`. 3 call sites en cron.js usan el helper.
+- **Fix bonus**: el form decía "Nombre y apellido completo" pero el algoritmo asume "APELLIDO NOMBRE". Cambiado a "Apellido(s) y nombre(s)" — el malentendido inducía a admins a cargar choferes con orden invertido y rompía la extracción.
+
+#### 6.9.5 Sistema RBAC: 4 roles + 5 áreas + capabilities
+**Roles** (definen QUÉ puede hacer cada usuario):
+- `CHOFER`: empleado de manejo con vehículo asignado. Ve sus vencimientos personales + su unidad.
+- `PLANTA`: empleado sin vehículo (planta, taller, gomería, administración). Solo ve sus vencimientos.
+- `SUPERVISOR`: mando medio. Gestiona personal/flota/vencimientos/revisiones/bot. NO puede crear admins ni cambiar roles.
+- `ADMIN`: control total. Crear admins, cambiar roles, auditoría, sync dashboard.
+
+**Áreas** (define DÓNDE trabaja la persona, descriptivo):
+- `MANEJO`, `ADMINISTRACION`, `PLANTA`, `TALLER`, `GOMERIA`.
+
+**Componentes**:
+- `lib/core/constants/app_constants.dart`: `AppRoles` con 4 roles + helpers `tieneVehiculo()`, `normalizar()` (legacy USUARIO → CHOFER). `AppAreas` con 5 áreas + `defaultParaRol()`.
+- `lib/core/services/capabilities.dart` (nuevo): enum `Capability` con 17 acciones gateadas. `Capabilities.can(rol, cap)` chequea permisos. ADMIN hereda todo de SUPERVISOR + capabilities exclusivas.
+- `lib/shared/widgets/guards/role_guard.dart`: parámetro nuevo `requiredCapability` (preferido sobre `requiredRole`).
+- `lib/routing/app_router.dart`: `_protegerAdmin()` ahora usa `Capability.verPanelAdmin` (deja pasar ADMIN y SUPERVISOR). Nuevo `_protegerSoloAdmin()` para rutas reservadas a ADMIN (ej. SyncDashboard).
+- `lib/features/admin_dashboard/screens/admin_panel_screen.dart`: tiles condicionales según capability del usuario logueado.
+- `lib/features/employees/screens/admin_personal_form_screen.dart`: dropdowns ROL (4 opciones con descripción + ícono) y ÁREA (5 opciones). Mensaje cambió de "Chofer creado" a "Empleado creado".
+- `lib/features/employees/screens/admin_personal_lista_screen.dart`: chip de área en card cuando el rol no es CHOFER, lógica `mostrarFlota = (area == MANEJO)`. `_RolBadge` con colores por rol. `_DatoEditableEnum` para editar ROL/ÁREA.
+- Cloud Function nueva `actualizarRolEmpleado` (callable, solo ADMIN): actualiza ROL/ÁREA + refresca custom claim del usuario afectado + libera VEHICULO/ENGANCHE en EMPLEADOS si pasa de CHOFER a otra cosa, Y marca esas patentes como `ESTADO=LIBRE` en VEHICULOS.
+- Cloud Function `loginConDni` actualizada: normaliza ROL legacy USUARIO/USER → CHOFER, agrega claim `area`.
+- `firestore.rules`: helpers nuevos `isSupervisor()`, `isAdminOrSupervisor()`. 8 reglas migradas a usar el combinado para que SUPERVISOR pueda gestionar.
+- Migración aplicada con `scripts/migrar_roles.js` (idempotente, --dry-run + --apply): 57 empleados normalizados a CHOFER+MANEJO o ADMIN+ADMINISTRACION.
+
+#### 6.9.6 Robustez operativa del bot (parte 2)
+- **Kill-switch**: nuevo `whatsapp-bot/src/control.js`. Toggle en la pantalla "Estado del Bot" (admin only) escribe `BOT_CONTROL/main.pausado=true|false`. El bot lo lee con cache TTL 10s antes de procesar cada item de la cola. Si está pausado, deja los docs en PENDIENTE para retomar al reanudar. Rule: read isAdminOrSupervisor, write isAdmin.
+- **Anti-baneo: variantes de texto**: `aviso_builder.js` ahora tiene 2-3 variantes por nivel de urgencia. `_pick(arr)` elige una random. Choferes que vencen en el mismo día con la misma urgencia ya no reciben mensajes idénticos.
+- **Throttle por chofer**: `cron.js` pre-carga un Map<telefono, count> de avisos encolados HOY al inicio de cada ciclo. Antes de cada add chequea `yaSuperoTope()` y salta si ya alcanzó `MAX_AVISOS_POR_CHOFER_DIA=2`. Helper `_inicioDelDia()` para definir "hoy".
+- **Modo dry-run**: `BOT_DRY_RUN=true` hace que `whatsapp.enviarMensaje()` devuelva un id sintético sin tocar el cliente real. Util para testing sin spammear choferes.
+- **Comandos admin por WhatsApp**: nuevo `whatsapp-bot/src/commands.js`. Mandando al propio número del bot un mensaje `/estado`, `/pausar [dur]`, `/reanudar`, `/forzar-cron`, `/ayuda` desde un teléfono en la whitelist `ADMIN_PHONES`. Útil para operar desde el celular cuando estás afuera de la PC. Cron exporta `forzarRunOnce()` para `/forzar-cron`.
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
@@ -290,7 +344,6 @@ flutter run -d windows --dart-define-from-file=secrets.json
 # (en VS Code F5 ya tiene el flag configurado en .vscode/launch.json)
 ```
 
-### Archivos sensibles que necesitás recrear
 | Archivo | Para qué | Cómo |
 |---|---|---|
 | `secrets.json` | Credenciales Volvo Connect | Plantilla en `secrets.example.json`. Contenido en Bitwarden. |
