@@ -15,6 +15,7 @@ const fs = require('./firestore');
 const wa = require('./whatsapp');
 const cron = require('./cron');
 const health = require('./health');
+const control = require('./control');
 const messageHandler = require('./message_handler');
 const {
   enHorarioHabil,
@@ -187,6 +188,16 @@ async function procesarSiguiente() {
       return;
     }
 
+    // ─── Validación: kill-switch del admin ───
+    // El admin puede pausar el bot desde la app (BOT_CONTROL/main.pausado).
+    // Si está pausado, dejamos el doc en PENDIENTE — el polling lo va a
+    // re-detectar cuando se reanude. Importante: no marcamos ERROR para
+    // no inflar el contador de errores con algo que no es realmente fallo.
+    if (await control.estaPausado()) {
+      log.info(`Bot pausado por admin. ${docId} queda PENDIENTE.`);
+      return;
+    }
+
     const wid = normalizarTelefonoAWid(data.telefono);
     if (!wid) {
       log.warn(`${docId} con teléfono inválido: ${data.telefono}`);
@@ -288,6 +299,9 @@ async function main() {
   await wa.inicializar();
 
   iniciarPolling(db);
+
+  // Inicializar lectura del kill-switch BOT_CONTROL/main.
+  control.inicializar(db);
 
   health.iniciar(db, fs, wa);
 

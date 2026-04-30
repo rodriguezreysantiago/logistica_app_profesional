@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/services/prefs_service.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Pantalla "Estado del Bot" — muestra en tiempo real el estado del bot
@@ -110,6 +112,8 @@ class _DashboardBot extends StatelessWidget {
       children: [
         _BannerEstado(salud: salud, estadoCliente: estadoCliente, ultimoHb: ultimoHb),
         const SizedBox(height: 16),
+        const _ToggleKillSwitch(),
+        const SizedBox(height: 12),
         _CardCola(cola: (data['cola'] as Map?) ?? const {}),
         const SizedBox(height: 12),
         _CardMensajes(mensajes: (data['mensajes'] as Map?) ?? const {}),
@@ -636,12 +640,3 @@ class _Mensaje extends StatelessWidget {
   final Color color;
   final String texto;
   const _Mensaje({
-    required this.icono,
-    required this.color,
-    required this.texto,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding
