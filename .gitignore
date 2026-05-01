@@ -55,6 +55,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Mensajes de commit temporales (creados a mano para usar con git commit -F)
+commit_msg.txt
+commit_msg*.txt
+
 # Entorno y Seguridad S.M.A.R.T. Logística
 serviceAccountKey.json
 *.jks
