@@ -237,10 +237,11 @@ class VolvoApiService {
           "${_consecutive401 >= _max401 ? 'Circuit breaker ABIERTO. Pausando llamadas (cooldown ${_circuitCooldownMin}min).' : ''}");
     } else if (statusCode >= 200 && statusCode < 300) {
       // Sale bien — resetea contador y timestamp para volver a estado
-      // sano completamente.
-      if (_consecutive401 > 0) {
-        debugPrint("✅ [VOLVO AUTH] Auth recuperada, reseteando circuit.");
-      }
+      // sano completamente. Log silenciado (antes era util pero ahora
+      // el Sync Dashboard ya muestra el estado de auth en vivo).
+      // if (_consecutive401 > 0) {
+      //   debugPrint("✅ [VOLVO AUTH] Auth recuperada, reseteando circuit.");
+      // }
       _consecutive401 = 0;
       _ultimoFailAt = null;
     }
@@ -359,11 +360,16 @@ class VolvoApiService {
           return tele;
         }
       }
-      debugPrint(
-          "ℹ️ [VOLVO TELE $cleanVin] Respuesta 200 pero sin datos útiles.");
+      // Silenciado: 200 sin datos pasa seguido cuando el endpoint no
+      // tiene info reciente del vehiculo (ej. ignition off hace dias)
+      // y el Sync Dashboard ya marca esos casos como "saltados".
+      // debugPrint(
+      //     "ℹ️ [VOLVO TELE $cleanVin] Respuesta 200 pero sin datos útiles.");
       return const VolvoTelemetria();
     }
 
+    // Mantenemos el log de status code != 200 porque indica un problema
+    // real de la API que conviene ver en consola al debuggear.
     debugPrint("⚠️ [VOLVO TELE $cleanVin] HTTP ${res.statusCode}");
     return const VolvoTelemetria();
   }

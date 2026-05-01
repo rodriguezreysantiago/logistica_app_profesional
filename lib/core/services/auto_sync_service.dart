@@ -155,9 +155,12 @@ class AutoSyncService {
         skipped: saltados,
       );
 
-      debugPrint(
-          '🔄 AutoSync ciclo cerrado: procesados=$procesados '
-          'éxito=$exito error=$errores saltados=$saltados');
+      // Silenciado: el Sync Dashboard ya muestra el resumen del ultimo
+      // ciclo (procesados/exito/error/saltados) en vivo, no hace falta
+      // verlo en consola en cada vuelta del cron (ruido cada 60s).
+      // debugPrint(
+      //     '🔄 AutoSync ciclo cerrado: procesados=$procesados '
+      //     'éxito=$exito error=$errores saltados=$saltados');
 
       // Snapshot histórico TELEMETRIA_HISTORICO: ya NO se escribe desde
       // el cliente. La Cloud Function `telemetriaSnapshotScheduled`

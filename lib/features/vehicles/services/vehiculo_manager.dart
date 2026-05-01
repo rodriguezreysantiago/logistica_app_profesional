@@ -131,7 +131,10 @@ class VehiculoManager {
       final tele = await _api.traerTelemetria(cleanVin);
 
       if (!tele.tieneAlgunDato) {
-        debugPrint("ℹ️ $patente sin datos válidos");
+        // Silenciado: vehiculos sin datos validos (ignition off, sin
+        // GPS, etc.) son normales y aparecen como "saltados" en el
+        // Sync Dashboard.
+        // debugPrint("ℹ️ $patente sin datos válidos");
         return;
       }
 
