@@ -7,6 +7,7 @@ import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../../whatsapp_bot/screens/admin_whatsapp_cola_screen.dart';
 
 /// Pantalla "Estado del Bot" — muestra en tiempo real el estado del bot
 /// Node.js que envía mensajes de WhatsApp.
@@ -294,20 +295,44 @@ class _CardCola extends StatelessWidget {
     final pendientesFrescos =
         (pendientes - reintentando).clamp(0, pendientes);
 
+    // Cada fila navega a la cola con el filtro precargado, así desde el
+    // dashboard "tap en Con error: 3" llegás directo a esos 3 items.
+    // El bot guarda los reintentos como estado PENDIENTE con
+    // proximoIntentoEn — la cola hoy no distingue ese subset, así que
+    // ambos ("Pendientes" y "Reintentando") deep-linkean a PENDIENTE.
     return _BloqueDatos(
       titulo: 'Cola de envío',
       icono: Icons.queue_outlined,
+      mostrarChevron: true,
       filas: [
         _Fila('Pendientes', '$pendientesFrescos',
             color:
-                pendientesFrescos > 0 ? AppColors.warning : Colors.white70),
-        _Fila('En proceso', '$procesando'),
+                pendientesFrescos > 0 ? AppColors.warning : Colors.white70,
+            onTap: () => _abrirCola(context, 'PENDIENTE')),
+        _Fila('En proceso', '$procesando',
+            onTap: () => _abrirCola(context, 'PROCESANDO')),
         _Fila('Reintentando', '$reintentando',
             color:
-                reintentando > 0 ? Colors.amberAccent : Colors.white70),
+                reintentando > 0 ? Colors.amberAccent : Colors.white70,
+            onTap: () => _abrirCola(context, 'PENDIENTE')),
         _Fila('Con error', '$error',
-            color: error > 0 ? AppColors.error : Colors.white70),
+            color: error > 0 ? AppColors.error : Colors.white70,
+            onTap: () => _abrirCola(context, 'ERROR')),
       ],
+    );
+  }
+
+  /// Empuja la cola con el estado preseleccionado. Se usa
+  /// MaterialPageRoute (push directo) porque AdminWhatsAppColaScreen
+  /// no está registrada en `app_router.dart`. Esa decisión fue
+  /// deliberada para no obligar a tocar el router por un deep-link
+  /// puntual; si más adelante hace falta una entrada formal, sumar
+  /// AppRoutes.adminWhatsAppCola y mover esto a Navigator.pushNamed.
+  void _abrirCola(BuildContext context, String estado) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AdminWhatsAppColaScreen(initialFilter: estado),
+      ),
     );
   }
 }
@@ -569,10 +594,16 @@ class _BloqueDatos extends StatelessWidget {
   final String titulo;
   final IconData icono;
   final List<_Fila> filas;
+  /// Si true, el bloque sugiere visualmente que las filas son
+  /// clickeables agregando una pequeña indicación en el header
+  /// ("toca para abrir"). No fuerza el comportamiento — cada `_Fila`
+  /// decide si es clickeable según tenga `onTap` o no.
+  final bool mostrarChevron;
   const _BloqueDatos({
     required this.titulo,
     required this.icono,
     required this.filas,
+    this.mostrarChevron = false,
   });
 
   @override
@@ -586,14 +617,26 @@ class _BloqueDatos extends StatelessWidget {
             children: [
               Icon(icono, color: AppColors.accentGreen, size: 18),
               const SizedBox(width: 8),
-              Text(
-                titulo,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
+              Expanded(
+                child: Text(
+                  titulo,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
                 ),
               ),
+              if (mostrarChevron)
+                const Text(
+                  'TOCAR PARA VER',
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 9,
+                    letterSpacing: 0.6,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 10),
@@ -608,12 +651,22 @@ class _Fila extends StatelessWidget {
   final String label;
   final String valor;
   final Color color;
-  const _Fila(this.label, this.valor, {this.color = Colors.white70});
+  /// Si está seteado, la fila se renderiza como InkWell y agrega un
+  /// chevron sutil a la derecha. Si es null, comportamiento original
+  /// (solo lectura).
+  final VoidCallback? onTap;
+
+  const _Fila(
+    this.label,
+    this.valor, {
+    this.color = Colors.white70,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+    final contenido = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: Row(
         children: [
           Expanded(
@@ -630,7 +683,21 @@ class _Fila extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
+          if (onTap != null) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.chevron_right,
+                size: 16, color: Colors.white38),
+          ],
         ],
+      ),
+    );
+    if (onTap == null) return contenido;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: contenido,
       ),
     );
   }
