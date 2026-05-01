@@ -246,57 +246,31 @@ async function _runOnce(fs) {
     }
 
     // 3) Service preventivo de TRACTORES
+    //
+    // CAMBIO 2026-05: el aviso de service ya NO se manda al chofer del
+    // tractor. Va consolidado en UN solo mensaje diario al encargado
+    // de mantenimiento (SERVICE_DESTINATARIO_DNI en .env, ej.
+    // Emmanuel Corchete). Recolectamos aca todos los tractores con
+    // urgencia y los procesamos despues del loop "por chofer", en un
+    // bloque dedicado.
+    const tractoresConUrgencia = [];
     for (const vDoc of vehiculosSnap.docs) {
       const v = vDoc.data();
       const tipo = String(v.TIPO || '').toUpperCase();
       if (tipo !== 'TRACTOR') continue;
 
       const patente = vDoc.id;
-      const chofer = choferByPatente.get(String(patente).trim().toUpperCase());
-      if (!chofer) continue;
-      const telefono = chofer.data.TELEFONO ? String(chofer.data.TELEFONO) : null;
-      if (!telefono) continue;
-
       const serviceDistanceKm = _resolverServiceDistance(v);
       if (serviceDistanceKm == null) continue;
       const urgencia = hist.urgenciaServicePara(serviceDistanceKm);
       if (!urgencia) continue;
 
-      // Anclaje del ciclo del service (ver comentarios extensos en
-      // versiones previas — bug C7 del code review).
-      let anclaCiclo;
-      if (v.ULTIMO_SERVICE_KM != null) {
-        anclaCiclo = Math.round(Number(v.ULTIMO_SERVICE_KM));
-      } else if (v.SERVICE_DISTANCE_KM != null) {
-        anclaCiclo = Math.round(Number(v.KM_ACTUAL || 0) + Number(v.SERVICE_DISTANCE_KM || 0));
-      } else {
-        continue;
-      }
-
-      const params = {
-        coleccion: 'VEHICULOS',
-        docId: patente,
-        campoBase: 'SERVICE',
+      tractoresConUrgencia.push({
+        patente,
         urgencia: urgencia.codigo,
-        fechaVenc: String(anclaCiclo),
-      };
-      // Para SERVICE usamos `yaSeEnvioServiceMaxUrgencia` en lugar del
-      // chequeo plano. Asi evitamos el rebote cuando la urgencia baja
-      // dentro de la misma ancla (caso del admin que edita
-      // ULTIMO_SERVICE_KM por error sin que el service realmente se haya
-      // hecho). La escalada normal (urgencia sube) sigue funcionando
-      // porque chequea solo niveles iguales o mayores.
-      if (await hist.yaSeEnvioServiceMaxUrgencia(db, params)) {
-        stats.salteados++;
-        continue;
-      }
-      _addItem(chofer.id, chofer, {
-        tipo: 'service',
-        tipoDoc: 'Service',
-        dias: serviceDistanceKm, // para service, "dias" es realmente KM (lo formatea aviso_builder)
-        fecha: null,
-        referencia: `${patente}`,
-        params,
+        km: serviceDistanceKm,
+        marca: v.MARCA || '',
+        modelo: v.MODELO || '',
       });
     }
 
@@ -412,6 +386,82 @@ async function _runOnce(fs) {
         stats.errores++;
         log.error(`No se pudo encolar para ${dni}: ${e.message}`);
       }
+    }
+
+    // ─── Service diario consolidado (1 msj/dia al encargado) ─────
+    const dniDestinatarioService = process.env.SERVICE_DESTINATARIO_DNI;
+    if (dniDestinatarioService) {
+      const yaEnviado = await hist.yaSeEnvioServiceDiario(db, dniDestinatarioService);
+      if (yaEnviado) {
+        log.debug(`Service diario ya enviado hoy a ${dniDestinatarioService}, skip.`);
+      } else {
+        const empDest = empleadosByDni.get(String(dniDestinatarioService).trim());
+        if (!empDest) {
+          log.warn(
+            `SERVICE_DESTINATARIO_DNI=${dniDestinatarioService} no esta en EMPLEADOS. ` +
+            `Service diario no se envia hoy.`
+          );
+        } else {
+          const telefonoDest = empDest.data.TELEFONO ? String(empDest.data.TELEFONO).trim() : null;
+          if (!telefonoDest) {
+            log.warn(
+              `Destinatario service ${dniDestinatarioService} no tiene TELEFONO. ` +
+              `Service diario no se envia hoy.`
+            );
+          } else {
+            const apodoDest = aviso.resolverNombreSaludo(empDest.data);
+            const mensajeService = avisoService.buildResumenDiario({
+              destinatarioNombre: apodoDest,
+              tractores: tractoresConUrgencia,
+            });
+            try {
+              const colaRef = await db.collection(fs.COLECCION).add({
+                telefono: telefonoDest,
+                mensaje: mensajeService,
+                estado: fs.ESTADO.pendiente,
+                encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                enviado_en: null,
+                error: null,
+                intentos: 0,
+                origen: 'cron_service_diario',
+                destinatario_coleccion: 'EMPLEADOS',
+                destinatario_id: dniDestinatarioService,
+                campo_base: 'SERVICE_DIARIO',
+                admin_dni: 'BOT',
+                admin_nombre: 'Bot automatico',
+                // Lista de tractores incluidos en el reporte. La pantalla
+                // "Cola de WhatsApp" puede mostrarlos desplegables
+                // (mismo patron que items_agrupados de vencimientos).
+                items_agrupados: tractoresConUrgencia.length > 0
+                  ? tractoresConUrgencia.map((t) => ({
+                      tipoDoc: 'Service',
+                      campoBase: 'SERVICE',
+                      coleccion: 'VEHICULOS',
+                      docId: t.patente,
+                      fecha: null,
+                      dias: t.km,
+                      urgencia: t.urgencia,
+                    }))
+                  : null,
+              });
+              await hist.registrarServiceDiario(db, dniDestinatarioService, {
+                cantidadTractores: tractoresConUrgencia.length,
+                colaDocId: colaRef.id,
+              });
+              stats.encolados++;
+              log.info(
+                `+ Encolado SERVICE DIARIO: ${dniDestinatarioService} ` +
+                `(${tractoresConUrgencia.length} tractores) -> ${colaRef.id}`
+              );
+            } catch (e) {
+              stats.errores++;
+              log.error(`No se pudo encolar service diario: ${e.message}`);
+            }
+          }
+        }
+      }
+    } else {
+      log.debug('SERVICE_DESTINATARIO_DNI no configurado. Skip aviso service diario.');
     }
 
     log.info(

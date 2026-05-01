@@ -8,6 +8,8 @@
 //
 // No podemos eliminar la huella de bot, pero la podemos suavizar.
 
+const { esFeriado, descripcionFeriado } = require('./feriados_ar');
+
 /**
  * Devuelve `true` si el momento actual está dentro de la ventana hábil
  * configurada para enviar mensajes automáticos.
@@ -58,7 +60,20 @@ function enHorarioHabil(now = new Date()) {
   const esFinDeSemana = weekday === 'Sat' || weekday === 'Sun';
   if (esFinDeSemana) return false;
 
+  // Skip feriados nacionales obligatorios de Argentina (lista hardcoded
+  // en feriados_ar.js, ver para mantenimiento anual).
+  if (esFeriado(now)) return false;
+
   return hora >= inicio && hora < fin;
+}
+
+/**
+ * Devuelve la descripcion del feriado actual, o null si no es feriado.
+ * Util para logs y para que el admin entienda por que el bot no
+ * mando nada un dia particular.
+ */
+function feriadoHoy(now = new Date()) {
+  return descripcionFeriado(now);
 }
 
 /**
@@ -95,14 +110,13 @@ function sleep(ms) {
 function normalizarTelefonoAWid(telefono) {
   if (!telefono) return null;
   const digitos = String(telefono).replace(/\D+/g, '');
-  // Argentina suele tener 12 o 13 dígitos con el prefijo internacional
-  // (54). Mínimo razonable 10. Máximo 15 (E.164).
   if (digitos.length < 10 || digitos.length > 15) return null;
   return `${digitos}@c.us`;
 }
 
 module.exports = {
   enHorarioHabil,
+  feriadoHoy,
   delayAleatorioMs,
   sleep,
   normalizarTelefonoAWid,

@@ -129,7 +129,112 @@ function construirCuerpo({ saludo, ref, km }) {
   );
 }
 
+
+// ============================================================================
+// RESUMEN DIARIO CONSOLIDADO PARA EL ENCARGADO DE MANTENIMIENTO
+// ============================================================================
+//
+// Una sola persona (definida por SERVICE_DESTINATARIO_DNI en .env) recibe
+// UN mensaje por dia con el listado completo de tractores que requieren
+// atencion. Si no hay ninguno, igual se le manda un "todo en orden" para
+// que sepa que el cron corrio.
+
+const ICONO_URGENCIA = {
+  service_vencido: '🔴',
+  service_urgente: '🟠',
+  service_programar: '🟡',
+  service_atencion: '🟢',
+};
+
+const ETIQUETA_URGENCIA = {
+  service_vencido: 'VENCIDO',
+  service_urgente: 'URGENTE',
+  service_programar: 'PROGRAMAR',
+  service_atencion: 'ATENCION',
+};
+
+// Orden de severidad (mas alta primero) para que el listado salga
+// ordenado: vencidos arriba, despues urgentes, etc.
+const ORDEN_SEVERIDAD = [
+  'service_vencido',
+  'service_urgente',
+  'service_programar',
+  'service_atencion',
+];
+
+/**
+ * Construye el mensaje resumen diario para el encargado de mantenimiento.
+ *
+ * @param {object} args
+ * @param {string|null} args.destinatarioNombre - Apodo o primer nombre.
+ * @param {Array<{patente:string, urgencia:string, km:number, marca?:string, modelo?:string}>} args.tractores
+ * @returns {string}
+ */
+function buildResumenDiario({ destinatarioNombre, tractores }) {
+  const nombre = destinatarioNombre
+    ? String(destinatarioNombre).replace(/\s+/g, ' ').trim().slice(0, 40)
+    : null;
+  const saludo = nombre ? `Hola ${nombre}` : 'Hola';
+
+  // Caso 1: no hay tractores con urgencia. Mensaje "todo OK" para
+  // confirmar al destinatario que el cron corrio (asi sabe que el
+  // bot esta vivo y no se olvido de avisarle).
+  if (!Array.isArray(tractores) || tractores.length === 0) {
+    return (
+      `${saludo}. Reporte diario de service preventivo: ` +
+      `ningun tractor requiere atencion hoy. ✅
+
+${FIRMA}`
+    );
+  }
+
+  // Caso 2: hay tractores. Ordenamos por severidad descendente.
+  const ordenados = [...tractores].sort((a, b) => {
+    const ia = ORDEN_SEVERIDAD.indexOf(a.urgencia);
+    const ib = ORDEN_SEVERIDAD.indexOf(b.urgencia);
+    return ia - ib;
+  });
+
+  const lineas = ordenados.map((t) => {
+    const icono = ICONO_URGENCIA[t.urgencia] || '⚪';
+    const etiqueta = ETIQUETA_URGENCIA[t.urgencia] || t.urgencia;
+    const ref = construirReferenciaUnidad({
+      patente: t.patente,
+      marca: t.marca,
+      modelo: t.modelo,
+    });
+    // Mensaje km segun signo. Si km es negativo (vencido), lo
+    // redactamos como "paso por X km", sino "faltan X km".
+    const kmInt = Number.isFinite(t.km) ? Math.round(t.km) : 0;
+    const km =
+      kmInt < 0
+        ? `paso por ${Math.abs(kmInt)} km`
+        : `faltan ${kmInt} km`;
+    return `${icono} ${etiqueta}: ${ref} (${km})`;
+  });
+
+  const cantidad = ordenados.length;
+  const titulo =
+    cantidad === 1
+      ? '1 tractor requiere atencion:'
+      : `${cantidad} tractores requieren atencion:`;
+
+  return (
+    `${saludo}. Reporte diario de service preventivo.
+
+` +
+    `${titulo}
+
+` +
+    `${lineas.join('\n')}
+
+` +
+    `${FIRMA}`
+  );
+}
+
 module.exports = {
   build,
+  buildResumenDiario,
   FIRMA,
 };

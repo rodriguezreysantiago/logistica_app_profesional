@@ -220,6 +220,37 @@ async function registrar(db, params, colaDocId) {
 }
 
 /**
+ * Para el aviso DIARIO consolidado de service preventivo (que se manda
+ * a un destinatario unico tipo Emmanuel del area de mantenimiento, no
+ * a cada chofer): chequea si ya se mando el aviso del dia para este
+ * destinatario. Idempotencia por dia + por DNI destinatario.
+ *
+ * Devuelve true si ya se mando hoy (skip), false si no (proceder).
+ */
+async function yaSeEnvioServiceDiario(db, dniDestinatario) {
+  const id = `service_diario_${_fechaHoyIso()}_${dniDestinatario}`;
+  const doc = await db.collection(COLECCION).doc(id).get();
+  return doc.exists;
+}
+
+/**
+ * Marca como enviado el aviso DIARIO de service. Guarda metadata
+ * (cuantos tractores con urgencia, cuando) para auditoria. Llamar
+ * despues de encolar exitosamente el mensaje.
+ */
+async function registrarServiceDiario(db, dniDestinatario, meta) {
+  const id = `service_diario_${_fechaHoyIso()}_${dniDestinatario}`;
+  await db.collection(COLECCION).doc(id).set({
+    tipo: 'service_diario',
+    destinatario_dni: dniDestinatario,
+    fecha: _fechaHoyIso(),
+    cantidad_tractores: meta?.cantidadTractores || 0,
+    cola_doc_id: meta?.colaDocId || null,
+    creado_en: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+/**
  * Helper para limpiar históricos de avisos cuyo papel ya se renovó.
  * No se llama hoy — pensado para una tarea de mantenimiento futura.
  * Se deja documentado para no perder la idea.
@@ -241,6 +272,8 @@ module.exports = {
   buildId,
   yaSeEnvio,
   yaSeEnvioServiceMaxUrgencia,
+  yaSeEnvioServiceDiario,
   registrar,
+  registrarServiceDiario,
   limpiarObsoletos,
 };
