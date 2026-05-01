@@ -496,6 +496,29 @@ Al abrir una conversación nueva de Cowork sobre este proyecto:
 
 - `admin_personal_lista_screen.dart` → extraer `_Actualizar` a `services/empleado_actions.dart`. Ver sección 7. Plan listo, ejecutar en sandbox fresco o a mano.
 
+### Síntoma: lockfile residual en `.git/` tras comandos del sandbox
+
+Cualquier comando git desde el sandbox que toque el index (`git fetch`,
+`git pull`, `git add`, etc.) puede dejar `.git/index.lock` o
+`.git/objects/maintenance.lock` que el sandbox NO puede borrar después
+(Operation not permitted sobre `.git/`). Resultado: el próximo `git add`
+desde PowerShell falla con "Another git process seems to be running".
+
+**Workaround**: borrar manual desde PowerShell:
+
+```powershell
+Remove-Item .\.git\index.lock -ErrorAction SilentlyContinue
+Remove-Item .\.git\objects\maintenance.lock -ErrorAction SilentlyContinue
+```
+
+**Regla preventiva para Claude**: desde el sandbox solo correr comandos
+git de lectura (`status`, `log`, `diff`, `show`). Si necesita
+escribir/sincronizar (fetch, pull, add, etc.), pedírselo al usuario que
+lo corra desde PowerShell. Si por algún motivo se ejecuta uno de esos
+comandos y aparece la advertencia "unable to unlink ... index.lock",
+avisarle al usuario en el mismo mensaje para que limpie antes del
+próximo commit.
+
 
 ## 13. Pendientes para próximas sesiones — anotaciones del 2026-04-30 noche
 

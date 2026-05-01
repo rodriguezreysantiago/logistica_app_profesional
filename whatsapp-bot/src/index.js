@@ -17,6 +17,7 @@ process.env.TZ = process.env.BOT_TIMEZONE || 'America/Argentina/Buenos_Aires';
 
 const fsNode = require('fs');
 const path = require('path');
+const os = require('os');
 
 const log = require('./logger');
 const fs = require('./firestore');
@@ -25,6 +26,13 @@ const cron = require('./cron');
 const health = require('./health');
 const control = require('./control');
 const messageHandler = require('./message_handler');
+
+// Identificador de esta PC. Configurable via env var BOT_PC_ID
+// (recomendado: "casa", "oficina", "server-prod"). Si no se setea,
+// usamos el hostname del SO como fallback ("DESKTOP-XYZ123"). Lo
+// usamos para detectar el caso "el bot ya esta corriendo en otra PC"
+// y evitar dos instancias procesando la misma cola.
+const PC_ID = process.env.BOT_PC_ID || os.hostname() || 'desconocida';
 const {
   enHorarioHabil,
   delayAleatorioMs,
@@ -297,11 +305,105 @@ function detenerPolling() {
   }
 }
 
+// Umbral en segundos para considerar un heartbeat como "fresco".
+// Si la otra PC envio heartbeat hace menos que esto, asumimos que
+// esta viva. El default es 150s (2.5x el heartbeat default de 60s),
+// que da un margen razonable para cubrir un ciclo perdido por red
+// o lentitud sin generar falsos positivos.
+const UMBRAL_HEARTBEAT_FRESCO_SEG = parseInt(
+  process.env.UMBRAL_OTRA_INSTANCIA_SEG || '150',
+  10
+);
+
+async function _verificarNoHayOtraInstancia(db) {
+  if (String(process.env.FORCE_START || '').toLowerCase() === 'true') {
+    log.warn('FORCE_START=true -- saltando check de otra instancia.');
+    return;
+  }
+
+  let snap;
+  try {
+    snap = await db.collection('BOT_HEALTH').doc('main').get();
+  } catch (e) {
+    // Si no podemos leer (rules, red), arrancamos igual y dejamos que
+    // el bot se haga cargo si Firestore esta caido. Mejor un bot
+    // arrancando de mas que un bot bloqueado por una lectura fallida.
+    log.warn(`No pude leer BOT_HEALTH para chequear otra instancia: ${e.message}`);
+    return;
+  }
+
+  if (!snap.exists) {
+    log.info('No hay BOT_HEALTH previo, arrancando primera vez.');
+    return;
+  }
+
+  const data = snap.data();
+  const ultimoHb = data.ultimoHeartbeat;
+  const otroPcId = data.pcId || 'desconocida';
+
+  if (!ultimoHb) {
+    log.info('BOT_HEALTH existe pero sin ultimoHeartbeat. Arrancando.');
+    return;
+  }
+
+  // ultimoHeartbeat es un Timestamp de Firestore. Lo convertimos a ms.
+  const ultimoMs = typeof ultimoHb.toMillis === 'function'
+    ? ultimoHb.toMillis()
+    : new Date(ultimoHb).getTime();
+  const segDesdeUltimo = Math.round((Date.now() - ultimoMs) / 1000);
+
+  if (segDesdeUltimo > UMBRAL_HEARTBEAT_FRESCO_SEG) {
+    log.info(
+      `Ultimo heartbeat fue hace ${segDesdeUltimo}s ` +
+      `(> ${UMBRAL_HEARTBEAT_FRESCO_SEG}s). La otra PC parece muerta, arranco.`
+    );
+    return;
+  }
+
+  if (otroPcId === PC_ID) {
+    log.info(
+      `Heartbeat reciente (${segDesdeUltimo}s atras) pero del mismo PC_ID ` +
+      `(${PC_ID}). Asumo que soy yo reiniciado, arranco.`
+    );
+    return;
+  }
+
+  // Bloqueo: hay heartbeat fresco de otra PC.
+  log.error(
+    `\nABORTANDO: el bot YA esta corriendo en otra PC.\n\n` +
+    `  PC remota:        ${otroPcId}\n` +
+    `  Mi PC:            ${PC_ID}\n` +
+    `  Ultimo heartbeat: hace ${segDesdeUltimo}s\n` +
+    `  Umbral:           ${UMBRAL_HEARTBEAT_FRESCO_SEG}s\n\n` +
+    `Para evitar que dos bots procesen la misma cola y dupliquen ` +
+    `mensajes (riesgo de baneo de WhatsApp), no arranco.\n\n` +
+    `Soluciones:\n` +
+    `  1. Detener el bot en "${otroPcId}" (recomendado).\n` +
+    `  2. Si sabes que esa PC esta muerta y el heartbeat es residual, ` +
+    `seteá FORCE_START=true en .env y reintentá.\n`
+  );
+  process.exit(1);
+}
+
 async function main() {
-  log.info('Iniciando whatsapp-bot...');
+  log.info(`Iniciando whatsapp-bot (PC_ID=${PC_ID})...`);
   limpiarLocksChromium();
 
   const db = fs.inicializar();
+
+  // ─── Check anti-doble-bot ────────────────────────────────────────
+  // Antes de inicializar WhatsApp Web (lo mas pesado y lo que dispara
+  // un linkeo de dispositivo), verificamos que no haya OTRA PC ya
+  // corriendo el bot. El criterio es: si el ultimo heartbeat de
+  // BOT_HEALTH/main es de hace menos de UMBRAL_FRESCO segundos Y el
+  // pcId del heartbeat es DISTINTO al nuestro, asumimos que esta otra
+  // PC esta procesando la cola y abortamos. Si es del mismo pcId
+  // (yo, simplemente reiniciado), o no hay heartbeat reciente, sigo.
+  //
+  // Bypass: setear FORCE_START=true en .env si querias arrancar igual
+  // (util para casos raros tipo "la otra PC se colgo y yo se que esta
+  // muerta aunque el heartbeat sea reciente").
+  await _verificarNoHayOtraInstancia(db);
 
   log.info('Conectando a WhatsApp Web — esto puede demorar 10-30s...');
   await wa.inicializar();

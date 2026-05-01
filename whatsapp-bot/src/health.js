@@ -20,7 +20,14 @@
 // si el bot crashea, no hay nadie que lo ponga en false.
 
 const admin = require('firebase-admin');
+const os = require('os');
 const log = require('./logger');
+
+// Identificador de la PC donde corre el bot. Coincide con la
+// constante PC_ID en index.js — duplicado a proposito para que
+// health.js sea autocontenido y no introduzca un require ciclico.
+// Si en el futuro se mueve a un modulo `config.js` central, mejor.
+const PC_ID = process.env.BOT_PC_ID || os.hostname() || 'desconocida';
 
 // ─── Estado en memoria ─────────────────────────────────────────────
 //
@@ -196,6 +203,11 @@ async function escribirHeartbeat() {
   const doc = {
     ultimoHeartbeat: admin.firestore.FieldValue.serverTimestamp(),
     estadoCliente: _state.estadoCliente,
+
+    // Identificador de la PC que esta corriendo el bot. Lo lee
+    // index.js al arrancar para detectar el caso "ya hay otra PC con
+    // el bot vivo, no levantes una segunda instancia".
+    pcId: PC_ID,
 
     cola,
 
