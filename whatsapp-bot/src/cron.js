@@ -20,6 +20,7 @@ const aviso = require('./aviso_builder');
 const avisoService = require('./aviso_service_builder');
 const hist = require('./historico');
 const health = require('./health');
+const { aIsoLocal } = require('./fechas');
 
 // Intervalo entre services programados de tractores Volvo, en KM.
 const INTERVALO_SERVICE_KM = 50000;
@@ -169,7 +170,10 @@ async function _runOnce(fs) {
       if (!telefono) continue;
 
       for (const [etiqueta, campoBase] of Object.entries(DOCS_EMPLEADO)) {
-        const fechaStr = data[`VENCIMIENTO_${campoBase}`];
+        // Normalizamos a YYYY-MM-DD via aIsoLocal: cubre strings,
+        // Timestamps de Firestore, Date objects y JSON con _seconds
+        // sin sufrir el shift UTC vs ART (bug del 2026-05).
+        const fechaStr = aIsoLocal(data[`VENCIMIENTO_${campoBase}`]);
         const dias = calcularDiasRestantes(fechaStr);
         if (dias == null) continue;
         const urgencia = hist.urgenciaPara(dias);
@@ -212,7 +216,8 @@ async function _runOnce(fs) {
       if (!telefono) continue;
 
       for (const spec of specs) {
-        const fechaStr = v[spec.campoFecha];
+        // Misma normalizacion que para vencimientos personales.
+        const fechaStr = aIsoLocal(v[spec.campoFecha]);
         const dias = calcularDiasRestantes(fechaStr);
         if (dias == null) continue;
         const urgencia = hist.urgenciaPara(dias);
@@ -441,20 +446,23 @@ function _resolverServiceDistance(v) {
 
 /**
  * Fuerza una corrida del cron AHORA, ignorando el setInterval. Usado
- * por el comando admin /forzar-cron de WhatsApp.
+ * por el comando admin /forzar-cron y por tests. Idempotente con
+ * `_running`: si ya hay uno corriendo, sale silencioso.
+ *
+ * @returns {Promise<{stats: object} | {skipped: true}>}
  */
 async function forzarRunOnce(fs) {
-  if (_running) return null;
-  await _runOnce(fs);
-  return null;
+  if (_running) {
+    log.info('forzarRunOnce: ya hay un ciclo en progreso, salteo.');
+    return { skipped: true };
+  }
+  return _runOnce(fs);
 }
 
 module.exports = {
   start,
   stop,
   forzarRunOnce,
+  // Exportado para tests / debugging.
   calcularDiasRestantes,
-  DOCS_EMPLEADO,
-  DOCS_VEHICULO,
-  INTERVALO_SERVICE_KM,
 };

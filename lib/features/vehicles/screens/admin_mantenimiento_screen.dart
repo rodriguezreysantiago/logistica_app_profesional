@@ -496,7 +496,7 @@ class _TractorCard extends StatelessWidget {
                           color: Colors.greenAccent, size: 18),
                       const SizedBox(width: 10),
                       Text(
-                        'Fecha: ${AppFormatters.formatearFecha(fechaElegida.toString().split(" ").first)}',
+                        'Fecha: ${AppFormatters.formatearFecha(fechaElegida)}',
                         style: const TextStyle(color: Colors.white),
                       ),
                       const Spacer(),
@@ -536,8 +536,7 @@ class _TractorCard extends StatelessWidget {
       await Future.wait([
         db.collection('VEHICULOS').doc(patente).update({
           'ULTIMO_SERVICE_KM': kmActual,
-          'ULTIMO_SERVICE_FECHA':
-              fechaElegida.toString().split(' ').first,
+          'ULTIMO_SERVICE_FECHA': AppFormatters.aIsoFechaLocal(fechaElegida),
           'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
         }),
         // Reset del estado: el tractor acaba de salir del taller. El

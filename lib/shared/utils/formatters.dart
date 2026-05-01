@@ -107,6 +107,25 @@ class AppFormatters {
   static DateTime? tryParseFecha(dynamic fecha) =>
       _parseUniversalDate(fecha);
 
+  /// Devuelve `YYYY-MM-DD` usando los componentes LOCALES del DateTime.
+  ///
+  /// Reemplazo seguro de los patrones:
+  ///   - `dt.toString().split(' ').first` (funciona si dt es local,
+  ///     pero rompe si es UTC -- te da el dia anterior en TZ ART).
+  ///   - `dt.toIso8601String().split('T').first` (siempre devuelve
+  ///     componentes UTC -- entre 21:00 y 23:59 ART te da el dia
+  ///     siguiente).
+  ///
+  /// Uso tipico: convertir el DateTime que devuelve `pickFecha(...)` a
+  /// string para guardarlo en Firestore en el campo VENCIMIENTO_*.
+  /// Asi no importa si el DateTime es local, UTC o vino de un parse
+  /// raro -- siempre se guarda el dia que el admin tipeo.
+  static String aIsoFechaLocal(DateTime d) {
+    final l = d.isUtc ? d.toLocal() : d;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${l.year}-${two(l.month)}-${two(l.day)}';
+  }
+
   // --- FORMATEAR FECHA (DD/MM/YYYY) ---
   static String formatearFecha(dynamic fecha) {
     final DateTime? parsed = _parseUniversalDate(fecha);

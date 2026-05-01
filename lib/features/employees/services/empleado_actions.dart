@@ -505,7 +505,7 @@ class EmpleadoActions {
       titulo: 'Vencimiento ${campo.replaceAll("VENCIMIENTO_", "").replaceAll("_", " ")}',
     );
     if (picked != null && context.mounted) {
-      final nuevaFecha = picked.toString().split(' ').first;
+      final nuevaFecha = AppFormatters.aIsoFechaLocal(picked);
       await dato(context, dni, campo, nuevaFecha);
     }
   }

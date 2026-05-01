@@ -38,7 +38,9 @@ class VehiculoManager {
   Future<void> precargarDatosVolvo() async {
     try {
       cacheVolvo = await _repo.traerFlotaVolvo();
-      debugPrint("📦 Cache Volvo cargada: ${cacheVolvo.length} unidades");
+      // Silenciado: log de bootstrap. Si la cache esta vacia (0
+      // unidades) lo notas igual cuando la app no muestre nada.
+      // debugPrint("📦 Cache Volvo cargada: ${cacheVolvo.length} unidades");
     } catch (e) {
       debugPrint("⚠️ Error cargando cache Volvo: $e");
       cacheVolvo = [];

@@ -281,8 +281,9 @@ class _SaludoState extends State<_Saludo> {
         : _primerNombre(nombreFull);
     final saludo =
         nombre != null ? '${_saludoHora()}, $nombre' : _saludoHora();
-    final fechaHoy =
-        AppFormatters.formatearFecha(DateTime.now().toIso8601String());
+    // Pasamos DateTime directo (no toIso8601String que es UTC y rompe
+    // entre 21:00 y 23:59 ART). formatearFecha ya acepta DateTime.
+    final fechaHoy = AppFormatters.formatearFecha(DateTime.now());
 
     return Padding(
       padding: const EdgeInsets.only(top: 4, left: 4),

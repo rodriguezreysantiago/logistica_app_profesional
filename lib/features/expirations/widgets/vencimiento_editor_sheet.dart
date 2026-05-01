@@ -117,7 +117,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
 
     try {
       final urlFinal = await _subirArchivo();
-      final fechaStr = _fechaSeleccionada.toString().split(' ').first;
+      final fechaStr = AppFormatters.aIsoFechaLocal(_fechaSeleccionada);
 
       await FirebaseFirestore.instance
           .collection(widget.item.coleccion)
@@ -192,8 +192,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
               style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
             subtitle: Text(
-              AppFormatters.formatearFecha(
-                  _fechaSeleccionada.toString().split(' ').first),
+              AppFormatters.formatearFecha(_fechaSeleccionada),
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,

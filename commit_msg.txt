@@ -1,0 +1,73 @@
+fix(tz) + chore(logs+nssm): blindar fechas + auto-config NSSM + silenciar logs
+
+PROBLEMA PRINCIPAL (TZ): choferes recibian avisos por WhatsApp con fechas
+1 dia menos (ej. licencia que vence 30/05 aparecia como 29/05). Datos en
+Firestore correctos, bug en el formateo del bot y en como se escribian
+algunas fechas desde la app.
+
+CAUSA: cuando un campo VENCIMIENTO_X en Firestore es un Timestamp con
+hora UTC midnight (caso tipico de migraciones desde Python o JS con
+new Date('YYYY-MM-DD')), getDate() en TZ ART (UTC-3) devuelve el dia
+anterior, porque la medianoche UTC = 21h del dia anterior local.
+
+FIX BOT (whatsapp-bot/src/fechas.js + cron.js + aviso_builder.js):
+- Nuevo modulo fechas.js con helpers aIsoLocal y aDdMmYyyyLocal que
+  normalizan cualquier formato (string ISO, Date, Timestamp Firestore
+  con toDate(), JSON con _seconds) a YYYY-MM-DD seguro. Detecta si el
+  Date es 'fecha calendario' (UTC midnight exacto) o 'momento real'
+  (con hora) y elige componentes UTC vs locales segun corresponda.
+- cron.js: normaliza data['VENCIMIENTO_X'] al leerlo de Firestore.
+- aviso_builder.js: formatearFecha delega al helper, sin fallback
+  inseguro a new Date(str).
+
+FIX APP (lib/shared/utils/formatters.dart + 7 call sites):
+- Nuevo AppFormatters.aIsoFechaLocal(DateTime) que devuelve YYYY-MM-DD
+  con componentes LOCALES, blindado contra DateTime UTC.
+- Migrados 7 call sites que usaban .toString().split(' ').first o
+  .toIso8601String().split('T').first (patrones que se rompen con
+  DateTime UTC entre 21:00-23:59 ART o cuando viene de DateTime.parse
+  de un string ISO):
+  * notification_service.dart (idempotencia 'una notif por dia')
+  * empleado_actions.dart (asignar fecha a vencimiento de chofer)
+  * vencimiento_editor_sheet.dart x2 (guardar y mostrar)
+  * admin_mantenimiento_screen.dart x2 (registrar service hecho)
+  * admin_vehiculo_form_screen.dart x2 (form de vehiculo)
+  * admin_panel_screen.dart (fechaHoy del header)
+
+Tests del helper cubren: string YYYY-MM-DD, ISO con T y Z, Date local,
+Date UTC midnight, Timestamp con toDate, Timestamp seconds. Todos
+devuelven 30/05/2026 correctamente.
+
+OTROS CAMBIOS DEL MISMO DIA:
+
+chore(nssm): instalar_servicio.ps1 automatiza icacls + PUPPETEER_CACHE_DIR
+- Antes el script instalaba el servicio pero hacia falta laburo manual
+  para que arrancara: dar permisos a LocalSystem sobre la carpeta del
+  bot y de puppeteer (icacls), y setear PUPPETEER_CACHE_DIR para que
+  Chrome se encontrara. Sin estos pasos el servicio crasheaba con
+  error 1326 o 'Could not find Chrome'.
+- Ahora el script detecta el repoRoot, la cache de puppeteer
+  (USERPROFILE/.cache/puppeteer), setea AppEnvironmentExtra y aplica
+  icacls /grant 'NT AUTHORITY\\SYSTEM:(OI)(CI)F' /T sobre repo y cache.
+- Avisa si la cache no existe y guia al usuario a correr node src/index.js
+  una vez para que puppeteer baje Chrome.
+- En la PC oficina la instalacion va a ser un solo comando.
+
+chore(logs): silenciar 6 debugPrints redundantes con el Sync Dashboard
+- VOLVO AUTH 'Auth recuperada'
+- VOLVO TELE 'Respuesta 200 pero sin datos utiles'
+- '{patente} sin datos validos'
+- 'AutoSync ciclo cerrado: procesados=...'
+- 'Cache Volvo cargada: N unidades' (bootstrap, sale 1 vez)
+- 'Provider inicializado' (bootstrap, sale 1 vez)
+
+Eran utiles antes del Sync Dashboard, ahora generan ruido cada 60s
+(los 4 primeros) o son cosmeticos de bootstrap (los 2 ultimos).
+Quedan comentados (no borrados) por si hace falta re-debuggear.
+
+Mantengo activos los logs de problemas reales (rechazo auth, circuit
+breaker, HTTP no-2xx, errores cargando cache, errores de sync).
+
+VALIDADO: flutter analyze 0 issues, flutter test 25/25 OK,
+node --check de bot OK, helpers de fechas testeados con todos los
+formatos posibles.

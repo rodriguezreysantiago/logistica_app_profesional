@@ -1,0 +1,115 @@
+/**
+ * Helpers de fecha anti-timezone.
+ *
+ * El bot trabaja en TZ ART (forzada via process.env.TZ en index.js).
+ * Pero las fechas pueden venir de Firestore en varios formatos:
+ *
+ *   - String YYYY-MM-DD (lo que guarda la app actual).
+ *   - String ISO completo "YYYY-MM-DDTHH:MM:SS.sssZ" (data importada).
+ *   - Date object (poco comun, pero algun script Python podria).
+ *   - Firestore Timestamp (los campos de vencimiento podrian estar
+ *     guardados asi si fueron migrados desde un script).
+ *
+ * Cualquiera de estos puede generar bugs de "1 dia menos" cuando se
+ * formatean en TZ ART, porque:
+ *
+ *   datetime(2026, 5, 30) en Python -> Firestore Timestamp UTC midnight
+ *   new Date desde ese Timestamp     -> medianoche UTC = 21h del 29 ART
+ *   getDate() en ART                 -> 29 en lugar de 30
+ *
+ * Estos helpers encapsulan la conversion segura. Para STRINGS ISO
+ * tomamos los primeros 10 chars (lo que ve el usuario en la app).
+ * Para DATE/TIMESTAMP, distinguimos:
+ *
+ *   - Si la hora UTC es exactamente medianoche (00:00:00.000), asumimos
+ *     que es una "fecha calendario" pura (caso tipico de migraciones
+ *     desde Python o JavaScript con `new Date("YYYY-MM-DD")`). Usamos
+ *     getUTCDate() para obtener el dia que el usuario ESPERABA guardar.
+ *
+ *   - Si tiene hora distinta (ej. timestamp de last-modified), es un
+ *     momento real -- usamos getDate() local (ya en ART por TZ del
+ *     proceso).
+ */
+
+/**
+ * Normaliza cualquier representacion de fecha a string YYYY-MM-DD.
+ *
+ * @param {string|Date|object|null} fecha
+ * @returns {string|null}
+ */
+function aIsoLocal(fecha) {
+  if (fecha === null || fecha === undefined || fecha === '') return null;
+
+  // String: si empieza con YYYY-MM-DD (con o sin tail), tomamos los
+  // primeros 10 chars sin pasar por new Date() (que ahi si shiftearia
+  // por UTC). Cubre tanto "2026-05-30" como "2026-05-30T00:00:00.000Z".
+  if (typeof fecha === 'string') {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(fecha.trim());
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    const d = new Date(fecha);
+    if (!isNaN(d.getTime())) return _dateToIsoSafe(d);
+    return null;
+  }
+
+  // Firestore Timestamp (admin SDK los expone con .toDate()).
+  if (fecha && typeof fecha.toDate === 'function') {
+    return _dateToIsoSafe(fecha.toDate());
+  }
+
+  // Date instance.
+  if (fecha instanceof Date) {
+    return _dateToIsoSafe(fecha);
+  }
+
+  // Object plano con _seconds / seconds (Timestamp serializado a JSON).
+  if (fecha && typeof fecha === 'object') {
+    const secs = fecha._seconds ?? fecha.seconds;
+    if (typeof secs === 'number') {
+      return _dateToIsoSafe(new Date(secs * 1000));
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Formatea cualquier representacion de fecha a 'DD/MM/YYYY'.
+ * Devuelve '-' si no se pudo parsear.
+ */
+function aDdMmYyyyLocal(fecha) {
+  const iso = aIsoLocal(fecha);
+  if (!iso) return '-';
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+}
+
+/**
+ * Helper interno: convierte un Date a YYYY-MM-DD eligiendo entre
+ * componentes UTC (cuando es fecha calendario, hora UTC = 00:00:00.000)
+ * o componentes locales (cuando es momento real con hora). Ver el
+ * comentario al top del modulo para el rationale.
+ */
+function _dateToIsoSafe(d) {
+  const esFechaCalendario =
+    d.getUTCHours() === 0 &&
+    d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 &&
+    d.getUTCMilliseconds() === 0;
+
+  if (esFechaCalendario) {
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+module.exports = {
+  aIsoLocal,
+  aDdMmYyyyLocal,
+  // Exportado para tests / debugging.
+  _dateToIsoSafe,
+};

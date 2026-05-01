@@ -6,6 +6,7 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../shared/constants/app_colors.dart';
+import '../../shared/utils/formatters.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -193,7 +194,10 @@ class NotificationService {
     // Ahora el ID es determinístico por chofer + documento + día, así
     // re-intentos del mismo evento producen la MISMA notificación
     // (que el plugin nativo deduplica al mostrar).
-    final hoyIso = DateTime.now().toIso8601String().split('T').first;
+    // Usamos componentes LOCALES (no UTC). Si usaramos toIso8601String,
+    // entre 21:00 y 23:59 ART el ISO es del dia siguiente (UTC) y la
+    // idempotencia "una notificacion por dia" se rompe.
+    final hoyIso = AppFormatters.aIsoFechaLocal(DateTime.now());
     final id = _idDeterministico('admin_${chofer}_${documento}_$hoyIso');
 
     await _notificationsPlugin.show(

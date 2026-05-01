@@ -156,7 +156,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       return;
     }
     setState(() {
-      _ultimoServiceFecha = picked.toString().split(' ').first;
+      _ultimoServiceFecha = AppFormatters.aIsoFechaLocal(picked);
     });
   }
 
@@ -401,7 +401,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
 
     if (picked != null && mounted) {
       setState(() {
-        _fechas[spec.campoFecha] = picked.toString().split(' ').first;
+        _fechas[spec.campoFecha] = AppFormatters.aIsoFechaLocal(picked);
       });
     }
   }

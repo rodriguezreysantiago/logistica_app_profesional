@@ -271,36 +271,19 @@ function extraerPatente(titulo) {
 }
 
 /**
- * Formatea una fecha ISO `YYYY-MM-DD` o un Date a `DD/MM/YYYY`. Tolera
- * strings nulos o mal formados — devuelve `'-'` en ese caso.
+ * Formatea una fecha cualquiera (string YYYY-MM-DD, Date, Timestamp
+ * Firestore, etc.) a `DD/MM/YYYY`. Devuelve `'-'` si no se puede.
  *
- * **Bug histórico que fixeamos acá**: `new Date("2026-05-30")` parsea
- * el string como UTC midnight. Cuando después llamamos `.getDate()` en
- * zona local ART (UTC-3), devuelve 29 — porque la medianoche UTC es
- * 21h del día anterior en ART. Resultado: la licencia que vence el
- * 30/05 se mostraba como "29/05" en el WhatsApp.
- *
- * Ahora parseamos strings ISO YYYY-MM-DD literalmente (componente por
- * componente) sin pasar por el constructor de Date — así no hay
- * interpretación implícita de zona horaria.
+ * Delegado a `aDdMmYyyyLocal` del modulo `fechas.js` que centraliza
+ * el parseo anti-timezone. La funcion vieja tenia su propio fallback
+ * con `new Date(str).getDate()` que sufria el bug "1 dia menos" para
+ * Timestamps con UTC midnight (caso tipico de migraciones desde
+ * Python o JS con `new Date("YYYY-MM-DD")`).
  */
+const { aDdMmYyyyLocal } = require('./fechas');
+
 function formatearFecha(fecha) {
-  if (!fecha) return '-';
-  if (fecha instanceof Date) {
-    const day = String(fecha.getDate()).padStart(2, '0');
-    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
-    return `${day}/${mes}/${fecha.getFullYear()}`;
-  }
-  const str = String(fecha).trim();
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
-  if (m) {
-    return `${m[3]}/${m[2]}/${m[1]}`;
-  }
-  const d = new Date(str);
-  if (isNaN(d.getTime())) return str;
-  const day = String(d.getDate()).padStart(2, '0');
-  const mes = String(d.getMonth() + 1).padStart(2, '0');
-  return `${day}/${mes}/${d.getFullYear()}`;
+  return aDdMmYyyyLocal(fecha);
 }
 
 module.exports = {

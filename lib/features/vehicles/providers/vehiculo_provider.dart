@@ -28,7 +28,8 @@ class VehiculoProvider extends ChangeNotifier {
     try {
       await manager.precargarDatosVolvo();
       _initialized = true;
-      debugPrint("✅ Provider inicializado");
+      // Silenciado: log de bootstrap. Mantenemos el de error abajo.
+      // debugPrint("✅ Provider inicializado");
     } catch (e) {
       debugPrint("⚠️ Error init provider: $e");
     } finally {
