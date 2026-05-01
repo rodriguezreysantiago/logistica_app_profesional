@@ -329,6 +329,125 @@ De los 32 findings totales, deduplicados a un plan de **17 items en 4 fases** or
 - **Storage rules**: `firebase deploy --only storage`.
 - **Bot Node.js**: reiniciar el proceso (Ctrl+C + `node src/index.js`) para que tome whitelist + idempotencia service + cache empleados + TZ env var.
 
+### 6.11 Sesión 1-mayo 2026 (PM/noche) — Bot panel + NSSM multi-PC + TZ hardening + feriados + service consolidado a Emmanuel + setup operativo
+
+Sesión muy larga, varios bloques temáticos. Todo pusheado a `origin/main`.
+
+#### 6.11.1 Mejoras al panel del bot en la app (commit `a1da6bc`)
+- **`admin_whatsapp_cola_screen.dart`**: chips clickeables en la fila de contadores (PENDIENTES/PROCESANDO/ENVIADOS/ERROR) con toggle del filtro, igual patrón que mantenimiento. Tap en cualquier item abre un BottomSheet `_DetalleColaSheet` con detalle completo: mensaje sin truncar (selectable), lista de papeles agrupados con estado humano ("vencido hace 3d"), línea de tiempo (encolado/enviado/próximo reintento), metadata (origen/destinatario/admin/ID copiable), error completo monoespaciado. Nuevo badge cyan `_BadgeAgrupado` (📎 Nx) junto al estado cuando `items_agrupados.length > 0`. La pantalla acepta `initialFilter` opcional para deep-link.
+- **`admin_estado_bot_screen.dart`**: cada fila de `_CardCola` (Pendientes/En proceso/Reintentando/Con error) ahora navega a la cola filtrada por ese estado vía `MaterialPageRoute` (las rutas `AdminWhatsAppColaScreen` siguen huérfanas en `app_router.dart`, decisión: push directo es lo más simple). `_BloqueDatos` ganó `mostrarChevron` (hint "TOCAR PARA VER" en header). `_Fila` acepta `onTap` opcional → InkWell + chevron sutil.
+- **Sección 12 ESTADO_PROYECTO**: agregada nota sobre lockfile residual en `.git/` tras comandos del sandbox + workaround PowerShell + regla preventiva para Claude.
+
+#### 6.11.2 NSSM modo manual + check anti-doble-bot multi-PC (commits `8c45374` y `0c0403d`)
+Permite tener el bot instalado en 2 PCs (casa + oficina) sin que ambas procesen la cola al mismo tiempo (mensajes duplicados → riesgo de baneo de WhatsApp).
+- **`instalar_servicio.ps1`**: `SERVICE_AUTO_START` → `SERVICE_DEMAND_START` (modo manual). Path derivado de `$PSScriptRoot` (no más hardcoded). No arranca el servicio al terminar la instalación. ASCII-only (sin acentos/emojis) para evitar problemas de encoding cuando PowerShell lee `.ps1` como ANSI.
+- **`start_bot.ps1` / `stop_bot.ps1`** (nuevos): `start` hace git pull + npm install + `nssm start` (aborta si hay cambios sin commitear). `stop` hace `nssm stop` con espera ordenada hasta 90s respetando el grace period del bot. Auto-elevación UAC vía `Test-IsAdmin` + `Start-Process -Verb RunAs` cuando no se está como admin.
+- **`src/index.js`**: constante `PC_ID = process.env.BOT_PC_ID || os.hostname() || 'desconocida'`. Función `_verificarNoHayOtraInstancia(db)` que se ejecuta antes de `wa.inicializar()`. Lee `BOT_HEALTH/main`: si `ultimoHeartbeat < UMBRAL_OTRA_INSTANCIA_SEG` (default 150s) Y `pcId` remoto ≠ propio, aborta con mensaje claro. Bypass via `FORCE_START=true`.
+- **`src/health.js`**: campo `pcId: PC_ID` en el doc de heartbeat.
+- **`.env.example`**: sección con `BOT_PC_ID`, `FORCE_START`, `UMBRAL_OTRA_INSTANCIA_SEG`.
+
+#### 6.11.3 Fix bug timezone (commit `8a29a1a`)
+Choferes recibían avisos por WhatsApp con fechas 1 día menos (ej. licencia que vence 30/05 aparecía como 29/05). Datos en Firestore correctos; bug en formateo del bot y en cómo se guardaban algunas fechas desde la app.
+
+**Causa**: cuando un campo `VENCIMIENTO_X` en Firestore es un Timestamp con hora UTC midnight (caso típico de migraciones desde Python o JS con `new Date('YYYY-MM-DD')`), `getDate()` en TZ ART (UTC-3) devuelve el día anterior porque la medianoche UTC = 21h del día anterior local.
+
+**Fix bot**: nuevo `whatsapp-bot/src/fechas.js` con helpers `aIsoLocal` y `aDdMmYyyyLocal` que normalizan cualquier formato (string ISO, Date, Timestamp Firestore con `toDate()`, JSON con `_seconds`) a `YYYY-MM-DD` seguro. Detecta si el Date es "fecha calendario" (UTC midnight exacto) o "momento real" (con hora) y elige componentes UTC vs locales según corresponda. Cableado en `cron.js` (normaliza al leer `VENCIMIENTO_X`) y `aviso_builder.js` (`formatearFecha` delega al helper).
+
+**Fix app**: nuevo `AppFormatters.aIsoFechaLocal(DateTime)` en `lib/shared/utils/formatters.dart` que devuelve `YYYY-MM-DD` con componentes locales (blindado contra DateTime UTC). Migrados 7 call sites que usaban `.toString().split(' ').first` o `.toIso8601String().split('T').first`:
+- `notification_service.dart` (idempotencia "una notif por día")
+- `empleado_actions.dart`, `vencimiento_editor_sheet.dart` ×2, `admin_mantenimiento_screen.dart` ×2, `admin_vehiculo_form_screen.dart` ×2: serialización de fecha de pickFecha → string para Firestore
+- `admin_panel_screen.dart`: `fechaHoy` del header
+
+#### 6.11.4 Auto-config NSSM con icacls + PUPPETEER_CACHE_DIR (commit `8a29a1a`)
+Antes el `instalar_servicio.ps1` instalaba el servicio pero hacía falta laburo manual adicional para que arrancara: dar permisos a LocalSystem sobre la carpeta del bot y de puppeteer (icacls), y setear `PUPPETEER_CACHE_DIR` para que Chrome se encontrara. Sin estos pasos el servicio crasheaba con error 1326 o "Could not find Chrome".
+
+Ahora el script:
+- Detecta el `repoRoot` y la cache de puppeteer (`$env:USERPROFILE\.cache\puppeteer`).
+- Setea `AppEnvironmentExtra=PUPPETEER_CACHE_DIR=...` en NSSM.
+- Aplica `icacls /grant 'NT AUTHORITY\SYSTEM:(OI)(CI)F' /T` sobre repo y cache.
+- Avisa si la cache no existe y guía al usuario a correr `node src/index.js` una vez para que puppeteer baje Chrome.
+
+#### 6.11.5 Logs verbose silenciados (commit `8a29a1a`)
+6 `debugPrint` redundantes con el Sync Dashboard, comentados (no borrados):
+- `[VOLVO AUTH] Auth recuperada` (volvo_api_service.dart:242)
+- `[VOLVO TELE] Respuesta 200 pero sin datos utiles` (:363)
+- `{patente} sin datos validos` (vehiculo_manager.dart:134)
+- `AutoSync ciclo cerrado: procesados=N` (auto_sync_service.dart:159)
+- `Cache Volvo cargada: N unidades` (vehiculo_manager.dart, bootstrap)
+- `Provider inicializado` (vehiculo_provider.dart, bootstrap)
+
+Mantengo activos los logs de problemas reales (rechazo auth, circuit breaker, HTTP no-2xx, errores cargando cache, errores de sync).
+
+#### 6.11.6 Feriados nacionales ARG (commit `7fed8da`)
+El bot ya no envía mensajes en feriados nacionales obligatorios (igual que ya no manda sábados/domingos). Los mensajes pendientes quedan en `PENDIENTE` y se procesan automáticamente en el próximo día hábil.
+- Nuevo `whatsapp-bot/src/feriados_ar.js` con lista hardcoded de feriados nacionales obligatorios para 2026 y 2027 (sin puentes turísticos, solo los obligatorios).
+- Helpers `esFeriado(date)` y `descripcionFeriado(date)`.
+- `humano.js` `enHorarioHabil()` chequea feriado además de fin de semana. Nueva función `feriadoHoy()` para logs.
+- **Mantenimiento anual**: actualizar `feriados_ar.js` cada par de años (comentario al top del archivo lo recuerda).
+
+#### 6.11.7 Service preventivo consolidado a 1 destinatario (commit `7fed8da`)
+Antes el aviso de service de cada tractor se enviaba al chofer asignado. Ahora va UN solo mensaje por día al encargado del área de mantenimiento (Emmanuel Corchete, DNI 29820141), con el listado completo de tractores que requieren atención.
+
+- Nueva env var `SERVICE_DESTINATARIO_DNI=29820141` en `.env.example`.
+- Nuevo `avisoService.buildResumenDiario({apodo, tractores})` que construye el mensaje consolidado con iconos por urgencia (🔴 vencido / 🟠 urgente / 🟡 programar / 🟢 atención) y orden de severidad descendente. Si no hay tractores, manda mensaje "todo en orden" para confirmar que el cron corrió.
+- `cron.js` sección 3 refactorizada: en vez de `_addItem(chofer, ...)` por cada tractor, recolecta en lista `tractoresConUrgencia`. Después del loop "por chofer", bloque dedicado encola UN solo mensaje a Emmanuel en `COLA_WHATSAPP` con `items_agrupados` poblado.
+- Idempotencia diaria: nuevas funciones `yaSeEnvioServiceDiario` y `registrarServiceDiario` en `historico.js`. Si por la tarde un tractor cruza un nuevo umbral, NO se manda hasta el día siguiente (decisión aceptada: "unos km de más no son tan grave").
+- Saludo usa el `APODO` de Emmanuel via `aviso.resolverNombreSaludo` (mismo patrón que choferes). Su apodo es "EMMA".
+
+#### 6.11.8 Script verificar_destinatario_service.js (commit `206da8b`)
+Herramienta de validación para corroborar que el destinatario del aviso de service esté correctamente cargado:
+- Lee `SERVICE_DESTINATARIO_DNI` del `.env`.
+- Verifica que el documento `EMPLEADOS/{DNI}` exista, tenga TELEFONO válido y APODO o NOMBRE.
+- Imprime preview de los tractores con urgencia que recibiría HOY.
+- Sin envío real, solo lectura. Útil al configurar el bot en una PC nueva.
+
+Validado el 1-mayo: Emmanuel existe, teléfono `5492914072695`, apodo "EMMA", rol ADMIN. 4 tractores con urgencia detectados (1 VENCIDO, 1 URGENTE, 2 ATENCIÓN).
+
+#### 6.11.9 Logger formato local DD-MM-AAAA HH:MM:SS (commit `b0d0532`)
+Antes los timestamps del logger eran ISO con sufijo Z (UTC). Ej: `2026-05-01T19:23:05.512Z`. El admin tenía que restar 3 horas en la cabeza para entender cuándo pasó cada cosa.
+
+Ahora el logger usa formato AR familiar `[DD-MM-AAAA HH:MM:SS]` con componentes locales del proceso (que ya está en TZ ART por `process.env.TZ`). Ej: `[01-05-2026 16:23:05]`.
+
+#### 6.11.10 Setup operativo Windows (no commiteable, hecho en la PC casa)
+Estos pasos son del lado del operador, no del repo:
+- NSSM 2.24 instalado en `C:\nssm\`. Servicio `SmartLogisticaBot` creado en modo `SERVICE_DEMAND_START` corriendo como `LocalSystem`.
+- `whatsapp-bot/.env` cargado con `BOT_PC_ID=casa`, `SERVICE_DESTINATARIO_DNI=29820141`, `AUTO_AVISOS_ENABLED=true`.
+- `icacls` aplicados sobre `C:\Users\santi\logistica_app_profesional\` y `C:\Users\santi\.cache\puppeteer\` para que `LocalSystem` pueda leer.
+- `PUPPETEER_CACHE_DIR=C:\Users\santi\.cache\puppeteer` configurado en NSSM via `AppEnvironmentExtra`.
+- Sesión de WhatsApp escaneada bajo contexto LocalSystem (importante para que NSSM la pueda leer en restarts).
+- Backup de `.wwebjs_auth/` guardado en `C:\Users\santi\Backups\bot_wwebjs_auth_*`.
+
+#### 6.11.11 Calvario operativo del 1-mayo PM (lección aprendida)
+La sesión wwebjs se "quemó" porque mezclamos: bot manual del user `santi` + servicio NSSM como `LocalSystem` corriendo en paralelo. Resultado: 4 sesiones autenticadas simultáneas peleándose, WhatsApp Web tira a varias. Después la sesión persistida quedó con propietario mezclado y el `Remove-Item` no podía borrarla (acceso denegado por archivos creados por SYSTEM).
+
+**Solución que funcionó**: reiniciar la PC entera + borrar `.wwebjs_auth` desde PowerShell-Admin + arrancar el servicio + escanear QR fresco bajo contexto LocalSystem.
+
+**Reglas para la próxima vez** (anotadas también en sec. 12):
+- NUNCA correr `node src/index.js` a mano si el servicio NSSM está activo. Una sesión a la vez.
+- El servicio crea/escribe archivos como `LocalSystem`. Para borrar `.wwebjs_auth` siempre desde PowerShell-Admin.
+- Si la sesión se rompe (loops infinitos de "Esperando WhatsApp listo... 1/3"), el remedio es: stop service → borrar `.wwebjs_auth` → start service → escanear QR fresco. NO mezclar approaches.
+- Backup de `.wwebjs_auth/` a otra ubicación tras escanear QR limpio. Restauración: stop → borrar → copiar backup → start.
+
+#### 6.11.12 Validaciones de cierre
+- `flutter analyze` (toda la app): **0 issues**.
+- `flutter test`: **25/25 tests pasan**.
+- `node --check` en bot: limpio en `index.js`, `health.js`, `cron.js`, `aviso_builder.js`, `aviso_service_builder.js`, `humano.js`, `feriados_ar.js`, `historico.js`, `logger.js`.
+- Tests del helper de feriados: 7 casos cubiertos (2026 + 2027 + no-feriado + fuera de rango), todos OK.
+- Tests del helper `aDdMmYyyyLocal`: 6 formatos (string ISO, ISO con T y Z, Date local, Date UTC midnight, Timestamp con `toDate`, Timestamp con `seconds`), todos devuelven 30/05/2026 correcto.
+- Tests del builder `buildResumenDiario`: caso 0 tractores (msj OK) y caso N tractores (msj ordenado por severidad).
+- Bot operativo como servicio NSSM, sesión vinculada, cron HABILITADO. Lunes hábil próximo (4-mayo) recibirá Emmanuel el primer mensaje consolidado con 4 tractores.
+
+#### 6.11.13 Commits del día (todos pusheados)
+| Commit | Resumen |
+|---|---|
+| `a1da6bc` | feat(bot): items_agrupados visibles + detalle completo + deep-link desde dashboard |
+| `8c45374` | feat(bot): NSSM modo manual + check anti-doble-bot para flujo multi-PC |
+| `0c0403d` | fix(bot): start_bot/stop_bot con auto-elevacion UAC via Test-IsAdmin |
+| `8a29a1a` | fix(tz) + chore(logs+nssm): blindar fechas + auto-config NSSM + silenciar logs |
+| `7fed8da` | feat(bot): feriados nacionales + service preventivo consolidado a Emmanuel |
+| `206da8b` | chore(bot): script verificar_destinatario_service para chequear setup de Emmanuel |
+| `b0d0532` | fix(bot): logger usa formato local DD-MM-AAAA HH:MM:SS |
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
