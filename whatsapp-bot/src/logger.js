@@ -16,7 +16,7 @@ function _timestampLocal() {
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   const ss = String(d.getSeconds()).padStart(2, '0');
-  return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+  return `${day}-${m}-${y} ${hh}:${mm}:${ss}`;
 }
 
 function fmt(level, args) {
