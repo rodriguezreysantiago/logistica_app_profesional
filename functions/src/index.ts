@@ -164,21 +164,29 @@ export const loginConDni = onCall(
 
     const passwordOk = verificarPassword(password, storedHash);
     if (!passwordOk) {
-      // Registramos intento fallido. Si esta llamada llega al límite,
-      // el siguiente intento queda bloqueado.
-      const intentos = await registrarIntentoFallido(intentosRef);
+      // Registramos intento fallido. La transaccion atomicamente
+      // incrementa el contador Y devuelve si quedo bloqueado, asi no
+      // hace falta un get() suelto previo (Bug M1: el chequeo previo
+      // tenia ventana de race con esta tx).
+      const resultado = await registrarIntentoFallido(intentosRef);
       logger.info("[login] password incorrecto", {
         dniHash: hashId(dni),
-        intentosFallidos: intentos,
+        intentosFallidos: resultado.intentos,
+        bloqueadoMinRestantes: resultado.bloqueadoMinRestantes,
       });
-      // Si justo este intento ES el que cruza el umbral, avisamos al
-      // usuario explícitamente. Para los anteriores, mensaje genérico.
-      const recienBloqueado = intentos >= MAX_INTENTOS_FALLIDOS;
-      const minutos = BLOQUEO_DURACION_MS / 60000;
-      const msg = recienBloqueado ?
-        `Contraseña incorrecta. Cuenta bloqueada temporalmente por ${minutos} minutos.` :
-        "Contraseña incorrecta.";
-      throw new HttpsError("permission-denied", msg);
+      if (resultado.bloqueadoMinRestantes > 0) {
+        // Si justo este intento ES el que cruza el umbral, avisamos
+        // al usuario explicitamente. Si ya estaba bloqueado de antes,
+        // mensaje informativo.
+        const recienBloqueado =
+          resultado.intentos >= MAX_INTENTOS_FALLIDOS;
+        const mins = resultado.bloqueadoMinRestantes;
+        const msg = recienBloqueado ?
+          `Contraseña incorrecta. Cuenta bloqueada temporalmente por ${mins} minutos.` :
+          `Cuenta bloqueada. Reintenta en ${mins} minutos.`;
+        throw new HttpsError("permission-denied", msg);
+      }
+      throw new HttpsError("permission-denied", "Contraseña incorrecta.");
     }
 
     // ─── Migración silenciosa SHA-256 → bcrypt ─────────────────────
@@ -504,34 +512,56 @@ async function chequearBloqueoActivo(
 }
 
 /**
- * Registra un intento fallido en LOGIN_ATTEMPTS. Si esta llamada
- * empuja el contador hasta el máximo, agrega `bloqueadoHasta` con
- * timestamp = ahora + duración configurada. Usa una transacción para
- * que dos intentos paralelos no se pisen.
+ * Resultado de `registrarIntentoFallido`. La funcion devuelve toda la
+ * informacion necesaria para que el caller decida que mensaje mostrar,
+ * sin necesidad de un get() previo (que era vulnerable a race).
+ */
+interface ResultadoIntentoFallido {
+  /** Contador post-incremento (o el valor previo si ya estaba bloqueado). */
+  intentos: number;
+  /** Minutos restantes de bloqueo (0 si NO esta bloqueado). */
+  bloqueadoMinRestantes: number;
+}
+
+/**
+ * Registra un intento fallido en LOGIN_ATTEMPTS y devuelve, ATOMICAMENTE
+ * en la misma transaccion, si la cuenta queda bloqueada (con cuantos
+ * minutos restantes). Esto cierra la ventana de race que existia con el
+ * `chequearBloqueoActivo` previo (un get() suelto antes de la tx) -- Bug
+ * M1 del code review.
  *
- * Devuelve el valor del contador post-incremento.
+ * Caminos:
+ *  - Doc ya tenia `bloqueadoHasta` futuro: NO incrementa, devuelve
+ *    `{ intentos: <previo>, bloqueadoMinRestantes: <restante> }`. El
+ *    caller informa al usuario que esta bloqueado.
+ *  - Incrementa intentos. Si llega al MAX, marca `bloqueadoHasta` y
+ *    devuelve `bloqueadoMinRestantes = duracion completa`.
+ *  - Si todavia esta debajo del MAX, devuelve `bloqueadoMinRestantes = 0`.
  */
 async function registrarIntentoFallido(
   ref: DocumentReference
-): Promise<number> {
+): Promise<ResultadoIntentoFallido> {
   return await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const data = snap.exists ? snap.data() ?? {} : {};
 
-    // Bug M1 del code review: race entre `chequearBloqueoActivo` (sin
-    // transacción) y este registro. Defensa adicional: si DENTRO de
-    // la transacción ya vemos `bloqueadoHasta` futuro, NO incrementamos
-    // más — el doc ya está bloqueado, sumar al contador no agrega
-    // nada y evita acumulación infinita en logins paralelos.
+    // Si DENTRO de la transaccion ya vemos `bloqueadoHasta` futuro,
+    // NO incrementamos y reportamos los minutos restantes. Esto cubre
+    // el caso de logins paralelos donde el chequeo previo (sin tx) era
+    // vulnerable a race.
     const yaBloqueado = data.bloqueadoHasta as Timestamp | undefined;
     if (yaBloqueado && yaBloqueado.toMillis() > Date.now()) {
       const intentosActuales = Number(data.intentos ?? 0);
-      return Number.isFinite(intentosActuales) ? intentosActuales : 0;
+      const restanteMs = yaBloqueado.toMillis() - Date.now();
+      return {
+        intentos: Number.isFinite(intentosActuales) ? intentosActuales : 0,
+        bloqueadoMinRestantes: Math.ceil(restanteMs / 60000),
+      };
     }
 
-    // Bug A2 del code review: el campo `intentos` debería ser number,
-    // pero por corrupción/migración podría venir como string. Hacemos
-    // coerción explícita y tolerante a cualquier tipo.
+    // Bug A2 del code review: el campo `intentos` deberia ser number,
+    // pero por corrupcion/migracion podria venir como string. Hacemos
+    // coercion explicita y tolerante a cualquier tipo.
     const rawIntentos = data.intentos;
     const numIntentos =
       typeof rawIntentos === "number" ?
@@ -542,17 +572,19 @@ async function registrarIntentoFallido(
       intentos,
       ultimoIntento: FieldValue.serverTimestamp(),
     };
+    let bloqueadoMinRestantes = 0;
     if (intentos >= MAX_INTENTOS_FALLIDOS) {
       update.bloqueadoHasta = Timestamp.fromMillis(
         Date.now() + BLOQUEO_DURACION_MS
       );
+      bloqueadoMinRestantes = Math.ceil(BLOQUEO_DURACION_MS / 60000);
     }
     if (snap.exists) {
       tx.update(ref, update);
     } else {
       tx.set(ref, update);
     }
-    return intentos;
+    return { intentos, bloqueadoMinRestantes };
   });
 }
 

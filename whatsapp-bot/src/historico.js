@@ -139,6 +139,70 @@ async function yaSeEnvio(db, params) {
 }
 
 /**
+ * Orden de las urgencias de SERVICE de menor a mayor severidad.
+ * `service_vencido` es la mas alta. Lo usa `yaSeEnvioServiceMaxUrgencia`
+ * para decidir si la urgencia actual es 'igual o menor' a alguna ya
+ * notificada para la misma ancla (caso rebote).
+ */
+const ORDEN_URGENCIAS_SERVICE = [
+  'service_atencion',
+  'service_programar',
+  'service_urgente',
+  'service_vencido',
+];
+
+/**
+ * Para SERVICE: chequea si ya se envio un aviso para esta (patente, ancla)
+ * con la urgencia actual O cualquier MAYOR. Util para evitar reenvio
+ * cuando la urgencia rebota hacia abajo dentro del mismo ciclo (ej.
+ * admin edita ULTIMO_SERVICE_KM por error y la urgencia baja de
+ * service_vencido a service_urgente sin haberse hecho el service real).
+ *
+ * Casos:
+ *   - Escalada (urgencia sube): se mando service_atencion. Ahora estamos
+ *     en service_programar. Solo chequea programar/urgente/vencido. Como
+ *     ninguno de esos se mando, retorna false -> se manda el aviso. OK.
+ *   - Rebote (urgencia baja): se mando service_vencido. Ahora la urgencia
+ *     cayo a service_urgente. Chequea urgente/vencido. service_vencido ya
+ *     esta registrado -> retorna true -> skip. OK.
+ *   - Nuevo ciclo (admin cambio ULTIMO_SERVICE_KM porque se hizo el
+ *     service): la `ancla` cambia, las keys cambian, no se encuentra
+ *     nada para la nueva ancla -> se manda el primer aviso. OK.
+ *
+ * Para `service_vencido` la key incluye la fecha del dia (reenvio diario).
+ * Usamos query por prefijo para detectar registros de cualquier dia previo.
+ */
+async function yaSeEnvioServiceMaxUrgencia(db, params) {
+  const idxActual = ORDEN_URGENCIAS_SERVICE.indexOf(params.urgencia);
+  if (idxActual < 0) {
+    // Urgencia desconocida (no es de service) -- fallback al check normal.
+    return yaSeEnvio(db, params);
+  }
+  for (let i = idxActual; i < ORDEN_URGENCIAS_SERVICE.length; i++) {
+    const u = ORDEN_URGENCIAS_SERVICE[i];
+    if (u === 'service_vencido') {
+      // Vencido tiene fecha del dia. Buscamos por prefijo del documentId.
+      const baseSinFecha =
+        `${params.coleccion}_${params.docId}_${params.campoBase}_${u}_${params.fechaVenc}_`;
+      const prefix = baseSinFecha.replace(/\//g, '-').replace(/\s+/g, '');
+      const snap = await db
+        .collection(COLECCION)
+        .where(admin.firestore.FieldPath.documentId(), '>=', prefix)
+        .where(admin.firestore.FieldPath.documentId(), '<', prefix + '\uffff')
+        .limit(1)
+        .get();
+      if (!snap.empty) return true;
+    } else {
+      // Sin fecha. Check directo del doc.
+      const id = buildId({ ...params, urgencia: u });
+      const doc = await db.collection(COLECCION).doc(id).get();
+      if (doc.exists) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Marca el aviso como ya enviado por el cron. Se guarda metadata para
  * auditoría: cuándo se generó, qué doc de COLA_WHATSAPP creó, etc.
  */
@@ -171,10 +235,12 @@ module.exports = {
   COLECCION,
   URGENCIAS,
   URGENCIAS_SERVICE,
+  ORDEN_URGENCIAS_SERVICE,
   urgenciaPara,
   urgenciaServicePara,
   buildId,
   yaSeEnvio,
+  yaSeEnvioServiceMaxUrgencia,
   registrar,
   limpiarObsoletos,
 };

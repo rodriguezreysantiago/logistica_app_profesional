@@ -171,9 +171,13 @@ service cloud.firestore {
     // ========================================================================
 
     match /RESPUESTAS_BOT_AMBIGUAS/{doc=**} {
-      // El bot las crea (Admin SDK). Admin/supervisor las despachan
-      // desde la bandeja: descartar o convertir en revisión.
-      allow read, write: if isAdminOrSupervisor();
+      // El bot las CREA via Admin SDK (bypassea las rules).
+      // Admin/Supervisor las DESCARTAN o las CONVIERTEN en revision
+      // -- ambas operaciones implican delete del doc ambiguo.
+      // No hay caso de uso valido de create/update desde el cliente.
+      allow read: if isAdminOrSupervisor();
+      allow delete: if isAdminOrSupervisor();
+      allow create, update: if false;
     }
 
     // ========================================================================

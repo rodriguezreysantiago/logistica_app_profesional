@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/services/capabilities.dart';
 import '../../../core/services/notification_service.dart';
+import '../../../core/services/prefs_service.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 import '../../employees/screens/admin_personal_lista_screen.dart';
@@ -50,11 +52,13 @@ class _AdminShellState extends State<AdminShell> {
       icon: Icons.dashboard_outlined,
       iconActive: Icons.dashboard,
       build: () => const AdminPanelScreen(),
+      requiredCapability: Capability.verPanelAdmin,
     ),
     _ShellSection(
       label: 'Revisiones',
       icon: Icons.fact_check_outlined,
       iconActive: Icons.fact_check,
+      requiredCapability: Capability.verRevisiones,
       badgeStream: FirebaseFirestore.instance
           .collection('REVISIONES')
           .snapshots(),
@@ -65,11 +69,13 @@ class _AdminShellState extends State<AdminShell> {
       icon: Icons.local_shipping_outlined,
       iconActive: Icons.local_shipping,
       build: () => const AdminVehiculosListaScreen(),
+      requiredCapability: Capability.verListaFlota,
     ),
     _ShellSection(
       label: 'Service',
       icon: Icons.build_circle_outlined,
       iconActive: Icons.build_circle,
+      requiredCapability: Capability.verMantenimiento,
       // Badge: cuenta tractores que cruzaron a VENCIDO. La colección
       // se popula desde VehiculoManager._evaluarMantenimiento; al
       // sumar/sacar un tractor del estado, el badge se actualiza solo.
@@ -85,32 +91,48 @@ class _AdminShellState extends State<AdminShell> {
       icon: Icons.badge_outlined,
       iconActive: Icons.badge,
       build: () => const AdminPersonalListaScreen(),
+      requiredCapability: Capability.verListaPersonal,
     ),
     _ShellSection(
       label: 'Vencimientos',
       icon: Icons.assignment_late_outlined,
       iconActive: Icons.assignment_late,
       build: () => const AdminVencimientosMenuScreen(),
+      requiredCapability: Capability.verVencimientos,
     ),
     _ShellSection(
       label: 'Reportes',
       icon: Icons.analytics_outlined,
       iconActive: Icons.analytics,
       build: () => const AdminReportsScreen(),
+      requiredCapability: Capability.verReportes,
     ),
     _ShellSection(
       label: 'Sync',
       icon: Icons.monitor_heart_outlined,
       iconActive: Icons.monitor_heart,
       build: () => const SyncDashboardScreen(),
+      requiredCapability: Capability.verSyncDashboard,
     ),
     _ShellSection(
       label: 'Estado Bot',
       icon: Icons.smart_toy_outlined,
       iconActive: Icons.smart_toy,
       build: () => const AdminEstadoBotScreen(),
+      requiredCapability: Capability.verEstadoBot,
     ),
   ];
+
+  /// Subset de `_sections` que el usuario logueado puede ver, segun
+  /// las capabilities de su rol. Las secciones sin `requiredCapability`
+  /// (ej. Inicio, si no la tuviera) se muestran siempre.
+  List<_ShellSection> get _seccionesVisibles {
+    final rol = PrefsService.rol;
+    return _sections.where((s) {
+      final cap = s.requiredCapability;
+      return cap == null || Capabilities.can(rol, cap);
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -155,7 +177,12 @@ class _AdminShellState extends State<AdminShell> {
   @override
   Widget build(BuildContext context) {
     final esDesktop = MediaQuery.of(context).size.width >= 800;
-    final section = _sections[_currentIndex];
+    final visibles = _seccionesVisibles;
+    // Clamp defensivo: si el rol cambia mid-session y la seccion
+    // actual deja de ser visible (caso raro), volvemos al primer
+    // destino disponible.
+    if (_currentIndex >= visibles.length) _currentIndex = 0;
+    final section = visibles[_currentIndex];
 
     return Scaffold(
       // El shell tiene su propio AppBar y fondo
@@ -256,7 +283,7 @@ class _AdminShellState extends State<AdminShell> {
         fontSize: 11,
       ),
       indicatorColor: Colors.greenAccent.withAlpha(40),
-      destinations: _sections
+      destinations: _seccionesVisibles
           .asMap()
           .entries
           .map(
@@ -294,7 +321,7 @@ class _AdminShellState extends State<AdminShell> {
         height: 70,
         labelBehavior:
             NavigationDestinationLabelBehavior.onlyShowSelected,
-        destinations: _sections
+        destinations: _seccionesVisibles
             .asMap()
             .entries
             .map(
@@ -377,12 +404,17 @@ class _ShellSection {
   final Widget Function() build;
   final Stream<QuerySnapshot>? badgeStream;
 
+  /// Capability requerida para que la seccion sea visible en el rail/
+  /// bottombar. Si `null`, siempre se muestra (ej. 'Inicio').
+  final Capability? requiredCapability;
+
   _ShellSection({
     required this.label,
     required this.icon,
     required this.iconActive,
     required this.build,
     this.badgeStream,
+    this.requiredCapability,
   });
 }
 

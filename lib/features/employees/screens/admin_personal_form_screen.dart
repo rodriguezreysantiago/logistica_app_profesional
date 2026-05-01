@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
+import '../../../core/services/capabilities.dart';
+import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/password_hasher.dart';
@@ -456,7 +458,18 @@ class _RoleSelector extends StatelessWidget {
       decoration: const InputDecoration(
         prefixIcon: Icon(Icons.badge_outlined),
       ),
-      items: AppRoles.todos.map((r) {
+      // Filtramos los roles disponibles segun capability del usuario
+      // logueado: si no tiene `asignarRolAdmin`, no puede ofrecer crear
+      // a otro empleado como ADMIN. Para SUPERVISOR queda CHOFER /
+      // PLANTA / SUPERVISOR como opciones disponibles.
+      items: AppRoles.todos.where((r) {
+        if (r == AppRoles.admin &&
+            !Capabilities.can(
+                PrefsService.rol, Capability.asignarRolAdmin)) {
+          return false;
+        }
+        return true;
+      }).map((r) {
         return DropdownMenuItem(
           value: r,
           child: Row(

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/capabilities.dart';
+import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/phone_formatter.dart';
@@ -352,16 +354,27 @@ class _DetalleChofer extends StatelessWidget {
           onSave: (v) => EmpleadoActions.dato(
               context, dni, 'APODO', v.trim().isEmpty ? null : v.trim()),
         ),
+        // El dropdown de ROL solo es editable para usuarios con la
+        // capability `cambiarRolEmpleado` (hoy solo ADMIN). SUPERVISOR
+        // ve el rol como solo-lectura (sin abrir el selector al tap).
+        // Y la opcion 'Admin' se filtra del listado si el usuario no
+        // tiene `asignarRolAdmin` -- previene que un futuro SUPERVISOR
+        // promueva a alguien a admin (la rule server-side rechazaria
+        // igual, pero la UI deberia ocultar lo que no se puede hacer).
         _DatoEditableEnum(
           etiqueta: 'ROL',
           valorActual: AppRoles.normalizar(data['ROL']?.toString()),
-          opciones: const {
+          opciones: {
             AppRoles.chofer: 'Chofer (con vehículo)',
             AppRoles.planta: 'Planta (sin vehículo)',
             AppRoles.supervisor: 'Supervisor (gestión)',
-            AppRoles.admin: 'Admin (control total)',
+            if (Capabilities.can(
+                PrefsService.rol, Capability.asignarRolAdmin))
+              AppRoles.admin: 'Admin (control total)',
           },
           icono: Icons.badge_outlined,
+          editable: Capabilities.can(
+              PrefsService.rol, Capability.cambiarRolEmpleado),
           // Cambio de ROL pasa por la Cloud Function `actualizarRolEmpleado`
           // que valida (solo ADMIN), actualiza el doc Y refresca el
           // custom claim del usuario afectado.
@@ -743,12 +756,19 @@ class _DatoEditableEnum extends StatelessWidget {
   final IconData icono;
   final ValueChanged<String> onSave;
 
+  /// Si `false`, el tile se ve igual pero no abre el selector al tap
+  /// y el icono trailing se atenua. Util para mostrar el dato como
+  /// solo-lectura cuando el usuario no tiene la capability para
+  /// editarlo (ej. SUPERVISOR mirando el ROL de un empleado).
+  final bool editable;
+
   const _DatoEditableEnum({
     required this.etiqueta,
     required this.valorActual,
     required this.opciones,
     required this.icono,
     required this.onSave,
+    this.editable = true,
   });
 
   @override
@@ -764,8 +784,14 @@ class _DatoEditableEnum extends StatelessWidget {
         label,
         style: const TextStyle(fontSize: 12, color: Colors.white),
       ),
-      trailing: Icon(icono, size: 20, color: Colors.greenAccent),
-      onTap: () => _mostrarSelector(context),
+      trailing: Icon(
+        icono,
+        size: 20,
+        // Atenuamos el icono cuando no es editable para que se note
+        // visualmente que el dato es solo-lectura.
+        color: editable ? Colors.greenAccent : Colors.white24,
+      ),
+      onTap: editable ? () => _mostrarSelector(context) : null,
     );
   }
 

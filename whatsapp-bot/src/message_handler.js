@@ -120,10 +120,28 @@ async function _asociarConAviso(db, chofer, msg, quotedId) {
  * media como base64 — la convertimos a Buffer y delegamos al helper de
  * `firestore.js`.
  */
+/**
+ * Whitelist de tipos que aceptamos como comprobantes. Cualquier otro
+ * formato (webp de stickers, mp4 de videos, doc/xls, exe, etc) se
+ * rechaza: no se sube a Storage ni se procesa. El chofer recibe el
+ * mensaje normal del bot pero sin asociacion de comprobante.
+ *
+ * Antes habia un fallback `'bin'` que dejaba pasar todo y los archivos
+ * raros terminaban en Storage; lo sacamos para evitar ruido y
+ * defensa-en-profundidad ante un mimetype falsificado.
+ */
+const EXTENSIONES_PERMITIDAS = ['jpg', 'png', 'pdf'];
+
 async function _subirMedia(fs, msg, dni) {
   const media = await msg.downloadMedia();
   if (!media) return null;
-  const ext = _extensionDeMime(media.mimetype) || 'bin';
+  const ext = _extensionDeMime(media.mimetype);
+  if (!ext || !EXTENSIONES_PERMITIDAS.includes(ext)) {
+    log.warn(
+      `Media rechazada por tipo no permitido: mimetype=${media.mimetype} dni=${dni}`
+    );
+    return null;
+  }
   const ts = Date.now();
   // Defense-in-depth: aunque hoy el DNI viene de doc.id de EMPLEADOS y
   // está garantizado a ser dígitos por DigitOnlyFormatter en la app,
@@ -141,10 +159,10 @@ async function _subirMedia(fs, msg, dni) {
 
 function _extensionDeMime(mime) {
   if (!mime) return null;
-  if (mime.includes('jpeg')) return 'jpg';
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
   if (mime.includes('png')) return 'png';
   if (mime.includes('pdf')) return 'pdf';
-  if (mime.includes('webp')) return 'webp';
+  // webp (stickers de WhatsApp), mp4, docx, etc -> null = rechazar.
   return null;
 }
 

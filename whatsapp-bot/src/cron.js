@@ -275,7 +275,13 @@ async function _runOnce(fs) {
         urgencia: urgencia.codigo,
         fechaVenc: String(anclaCiclo),
       };
-      if (await hist.yaSeEnvio(db, params)) {
+      // Para SERVICE usamos `yaSeEnvioServiceMaxUrgencia` en lugar del
+      // chequeo plano. Asi evitamos el rebote cuando la urgencia baja
+      // dentro de la misma ancla (caso del admin que edita
+      // ULTIMO_SERVICE_KM por error sin que el service realmente se haya
+      // hecho). La escalada normal (urgencia sube) sigue funcionando
+      // porque chequea solo niveles iguales o mayores.
+      if (await hist.yaSeEnvioServiceMaxUrgencia(db, params)) {
         stats.salteados++;
         continue;
       }
