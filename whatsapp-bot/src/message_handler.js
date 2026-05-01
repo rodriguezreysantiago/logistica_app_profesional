@@ -34,15 +34,42 @@ const control = require('./control');
 const cron = require('./cron');
 
 // Mapeo de teléfono normalizado (solo dígitos) → DNI del chofer.
-// Se rebuilds cada vez que llega un mensaje porque las altas/bajas
-// de empleados son raras y la app lista al mes son ~30 docs:
-// el costo de la query ad-hoc es despreciable.
+//
+// Cache en memoria con TTL configurable (default 5min). Antes
+// rebuildiamos por cada mensaje entrante leyendo TODA la coleccion
+// EMPLEADOS (~57 docs). Con 100 mensajes por dia eran ~5700 reads
+// solo para resolver el remitente. Con cache de 5min eso baja a
+// ~57 reads por intervalo, ahorrando ordenes de magnitud.
+//
+// El TTL es corto (5 min) porque no queremos que un alta o cambio
+// de telefono recien hecho tarde demasiado en propagarse al bot.
+// Si una baja crea un mismatch (chofer dado de baja contacta al
+// bot dentro de la ventana de cache), el peor caso es responder
+// como si todavia estuviera activo durante hasta 5 min -- aceptable.
+const _CACHE_TTL_MS = parseInt(process.env.EMPLEADOS_CACHE_TTL_MS || '300000', 10);
+let _cacheEmpleados = null;
+let _cacheTimestamp = 0;
+
+async function _refrescarCacheEmpleados(db) {
+  const snap = await db.collection('EMPLEADOS').get();
+  _cacheEmpleados = snap.docs.map((doc) => ({
+    dni: doc.id,
+    data: doc.data(),
+  }));
+  _cacheTimestamp = Date.now();
+  log.info(`[empleados-cache] refresh: ${_cacheEmpleados.length} empleados (TTL ${_CACHE_TTL_MS}ms)`);
+}
+
 async function _resolverChofer(db, fromNumber) {
   const fromDigits = String(fromNumber).replace(/\D+/g, '');
   if (!fromDigits) return null;
-  const snap = await db.collection('EMPLEADOS').get();
-  for (const doc of snap.docs) {
-    const data = doc.data();
+
+  // Refresh cache si nunca se cargo o si expiro el TTL.
+  if (!_cacheEmpleados || (Date.now() - _cacheTimestamp) > _CACHE_TTL_MS) {
+    await _refrescarCacheEmpleados(db);
+  }
+
+  for (const { dni, data } of _cacheEmpleados) {
     const tel = String(data.TELEFONO || '').replace(/\D+/g, '');
     if (!tel) continue;
 
@@ -58,12 +85,12 @@ async function _resolverChofer(db, fromNumber) {
     // que estamos comparando un teléfono real argentino completo
     // (área + abonado), no solo el abonado local.
     if (fromDigits === tel) {
-      return { dni: doc.id, data };
+      return { dni, data };
     }
     const corto = fromDigits.length <= tel.length ? fromDigits : tel;
     const largo = fromDigits.length <= tel.length ? tel : fromDigits;
     if (corto.length >= 10 && largo.endsWith(corto)) {
-      return { dni: doc.id, data };
+      return { dni, data };
     }
   }
   return null;

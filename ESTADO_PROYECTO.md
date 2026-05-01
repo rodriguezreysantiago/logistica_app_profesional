@@ -1,8 +1,9 @@
 # Estado del proyecto — S.M.A.R.T. Logística
 
-Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-04-29** (revisión profunda post-pull desde casa, completado documentación de bot WhatsApp + sesión seguridad + sprints 4-8 + refactor `_Actualizar` → `EmpleadoActions` + AUDITORIA_ACCIONES movido al server).
+Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-05-01** (sesión grande post-30-abril: imports bulk Excel → Firestore, fix UI extintores en ficha admin, chips clickeables en mantenimiento, unificación menus admin, auditoría profunda con dos agentes paralelos, y plan de acción de 4 fases ejecutado completo: RBAC + rate limit + idempotencia bot + rules + AppDocsEmpleado + tryParseFecha + AppColors + perf + .gitattributes).
 
 Sesiones recientes:
+- **2026-05-01 (sesión larga)** — Continuación del trabajo del 30-abril. Tres bloques: **(1) imports bulk de datos** desde Excel a Firestore via 2 scripts Python idempotentes con `--dry-run`/`--apply`: `importar_servicios_y_matafuegos.py` (56 patentes con KM/fecha de último service + matafuegos cabina/exterior) e `importar_apodos.py` (53 choferes con APODO; matching exacto + fallback starts-with normalizado Unicode para SCHRÖDER/IBAÑEZ). Snapshot Excel se incluye y se borra al final una vez aplicado. **(2) fixes UI**: la ficha de detalle del vehículo en Gestión de Flota tenía los vencimientos hardcoded a RTO+Seguro — ahora itera `AppVencimientos.forTipo()` y los TRACTORES muestran los 4 vencimientos (extintores incluidos). Los chips del header de MANTENIMIENTO PREVENTIVO (Vencidos/Urgentes/Programar/Falta poco/OK) son clickeables y filtran la lista por estado, conteos siguen globales, tap-toggle limpia el filtro. Sidebar admin y panel central de "Accesos rápidos" unificados (mismo orden y mismos nombres cortos: Revisiones/Flota/Service/Personal/Vencimientos/Reportes/Sync/Estado Bot). **(3) auditoría profunda con 2 agentes paralelos** (cliente Flutter + backend Functions/bot/rules) que produjo plan de 4 fases ejecutado completo — ver sección 6.10. `flutter analyze` y `flutter test` (25 tests) pasan limpios al cierre.
 - **2026-04-29 (madrugada+)** — Bot WhatsApp Fase 2/3 endurecido: avisos automáticos de service preventivo (sumado al cron del bot Node.js, 4 niveles igual que la pantalla cliente: 5000/2500/1000/0 km), recordatorios diarios de vencidos (papeles + service) — el id del histórico incluye fecha del día así se reenvía hasta regularización con copy escalado por días/km transcurridos. **Plan B activo** (`uptimeData.serviceDistance` no viene del API por restricción de paquete Volvo): la pantalla y el bot calculan `serviceDistance` desde `(ULTIMO_SERVICE_KM + 50.000) − KM_ACTUAL` cuando falta el dato del API; el cliente puede registrar "service hecho" desde la card con un tap. Ticket abierto a Volvo para activar el bloque UPTIME en la cuenta. **Bot Node.js refactor crítico**: cambiado `onSnapshot` (gRPC stream) por polling con `get()` cada 15s — el stream gRPC se caía cada ~2 min en redes con NAT/firewall agresivo cortando conexiones idle. Solución mucho más resiliente, latencia despreciable. Polling tolera errores transientes sin romper el ciclo.
 - **2026-04-29 (madrugada)** — Mantenimiento preventivo (roadmap Volvo, ~1 día): nueva pantalla `admin_mantenimiento_screen` que ordena tractores por urgencia de service (5 estados: OK / Falta poco / Programar / Urgente / Vencido). Parseo de `serviceDistance` agregado a `VolvoTelemetria` + persistencia en `VEHICULOS.SERVICE_DISTANCE_KM` desde `VehiculoManager` y en `TELEMETRIA_HISTORICO` desde la scheduled function. Campos manuales `ULTIMO_SERVICE_KM` + `ULTIMO_SERVICE_FECHA` editables desde la ficha del tractor (form admin). Notificación local con idempotencia en `MANTENIMIENTOS_AVISADOS/{patente}` cuando un tractor cruza el umbral a VENCIDO. Constants centralizadas en `AppMantenimiento` (umbrales 5000/2500/1000/0). Pendiente: deploy de `firestore.rules` (sumó match para `MANTENIMIENTOS_AVISADOS`).
 - **2026-04-29 (medianoche)** — `flutter_secure_storage` para `PrefsService`: migrados `dni`/`nombre`/`rol`/`isLoggedIn`/`lastDni` desde `SharedPreferences` (texto plano) al almacén seguro nativo (DPAPI en Windows, Keychain en iOS, KeyStore + EncryptedSharedPreferences en Android). API pública sigue **sync** (cache en memoria al `init()`) — los 13 call sites no cambian. Migración one-shot idempotente desde SharedPreferences viejo al primer arranque después del upgrade.
@@ -272,6 +273,62 @@ Reporte: `AUDITORIA_2026-04-28.md`. Resueltos: credenciales Volvo hardcodeadas, 
 - **Modo dry-run**: `BOT_DRY_RUN=true` hace que `whatsapp.enviarMensaje()` devuelva un id sintético sin tocar el cliente real. Util para testing sin spammear choferes.
 - **Comandos admin por WhatsApp**: nuevo `whatsapp-bot/src/commands.js`. Mandando al propio número del bot un mensaje `/estado`, `/pausar [dur]`, `/reanudar`, `/forzar-cron`, `/ayuda` desde un teléfono en la whitelist `ADMIN_PHONES`. Útil para operar desde el celular cuando estás afuera de la PC. Cron exporta `forzarRunOnce()` para `/forzar-cron`.
 
+### 6.10 Sesión 1-mayo 2026 — Imports bulk + fixes UI + auditoría profunda + plan 4 fases
+
+#### 6.10.1 Imports bulk de datos desde Excel → Firestore
+- **`scripts/importar_servicios_y_matafuegos.py`** (uso único, snapshot Excel removido tras aplicar). Mapeo: `KM ULTIMO SERVICE` → `ULTIMO_SERVICE_KM` (num); `FECHA ULTIMO` → `ULTIMO_SERVICE_FECHA` (string ISO); `MATAFUEGO CHASIS` → `VENCIMIENTO_EXTINTOR_EXTERIOR`; `MATAFUEGO CABINA` → `VENCIMIENTO_EXTINTOR_CABINA`. Reglas: patente ausente skipea+reporta, celda vacía no toca campo existente, sobreescribe valores previos, idempotente, warnings de fechas futuras > 30d. **56 patentes actualizadas**.
+- **`scripts/importar_apodos.py`** (uso único, snapshot Excel removido). Matching exacto por `NOMBRE` normalizado (Unicode NFD + uppercase + strip, así `SCHRÖDER`=`SCHRODER` y `IBAÑEZ`=`IBANEZ`). Fallback starts-with si hay un único candidato (caso `VICTOR RAUL` → `VICTOR RAUL JESUS`). Detecta header CHOFER/NOMBRE/APELLIDO/APODO. **53 choferes con APODO seteado**, 2 no encontrados (no estaban dados de alta aún).
+
+#### 6.10.2 Fixes UI
+- **Ficha admin del vehículo (extintores no se veían)**: `admin_vehiculos_lista_screen.dart` tenía los vencimientos hardcoded a RTO + Póliza Seguro. Reemplazado por `for (final spec in AppVencimientos.forTipo(data['TIPO']))` → los TRACTORES ahora muestran los 4 vencimientos (Extintor Cabina/Exterior incluidos), los enganches siguen mostrando 2. Mismo patrón bug que se arreglaría después en Fase 2 con `AppDocsEmpleado`.
+- **Chips clickeables en MANTENIMIENTO PREVENTIVO**: `admin_mantenimiento_screen.dart` tenía los chips del header (Vencidos/Urgentes/Programar/Falta poco/OK) como solo visualizadores de conteos. Ahora cada uno es clickeable: tap filtra la lista a ese estado, tap mismo chip lo deselecciona, tap a otro cambia el filtro. Chip activo se resalta (fondo + borde + label en bold blanco). Conteos siguen globales (calculados sobre `sorted`, no sobre `filtrados`) para que el admin sepa cuántos hay en cada estado y pueda saltar de uno a otro. Search por texto se aplica encadenado al filtro de estado.
+- **Unificación sidebar admin + panel central**: tenían ordenes y nombres distintos (sidebar decía "Service", panel "MANTENIMIENTO PREVENTIVO"; "Sync" vs "SYNC OBSERVABILITY"; etc). Confundía. Sumamos `Estado Bot` al sidebar como destino #9 y reordenamos+renombramos los tiles del panel para coincidir 1-a-1 con el sidebar: `Revisiones / Flota / Service / Personal / Vencimientos / Reportes / Sync / Estado Bot`. Capabilities preservadas en cada tile.
+
+#### 6.10.3 Auditoría profunda con 2 agentes paralelos
+Después de los fixes UI, lanzamos 2 agentes en paralelo para revisión estructural:
+- **Agente cliente Flutter**: bugs latentes, listas hardcoded vs config centralizada, convenciones rotas, dead code, capabilities mal aplicadas, streams sin dispose. 11 findings.
+- **Agente backend** (Functions + bot + rules): race conditions, idempotencia, validaciones faltantes, secrets, manejo de errores, observabilidad, gaps de seguridad. 21 findings.
+
+De los 32 findings totales, deduplicados a un plan de **17 items en 4 fases** ordenados por severidad y costo. Falsos positivos descartados (los mismatches de `MANTENIMIENTOS_AVISADOS` y `BOT_CONTROL` tenían rules ya alineadas con la intención).
+
+#### 6.10.4 Plan de 4 fases ejecutado completo
+
+**Fase 1 — Bugs latentes / seguridad**
+- **#1+#2 [rbac]**: capabilities `cambiarRolEmpleado` y `asignarRolAdmin` que estaban definidas en el enum pero NO se chequeaban en UI ahora se aplican. En `admin_personal_lista_screen.dart` el dropdown ROL filtra la opción "Admin" si el usuario no tiene `asignarRolAdmin`, y queda no-editable (icono atenuado, sin onTap) si no tiene `cambiarRolEmpleado` (sumamos `editable: bool = true` a `_DatoEditableEnum`). En `admin_personal_form_screen.dart` el `_RoleSelector` filtra `AppRoles.todos` para esconder ADMIN. Sidebar admin (`admin_shell.dart`) ahora filtra `_sections` por `requiredCapability` igual que el panel central — SUPERVISOR ya no ve el destino "Sync" (es solo de ADMIN). Clamp defensivo del `_currentIndex` por si el rol cambia mid-session.
+- **#3 [functions/security]**: rate limit del login con check dentro de la transacción. Antes había `chequearBloqueoActivo` (un `get()` suelto previo) + `registrarIntentoFallido` (transacción) en pasos separados — ventana de race con fuzzing concurrente. Ahora `registrarIntentoFallido` devuelve un objeto `ResultadoIntentoFallido { intentos, bloqueadoMinRestantes }` que reporta el bloqueo atómicamente desde la misma transacción. El chequeo previo sigue como optimización para no quemar bcrypt cuando ya está bloqueado.
+- **#4 [bot/security]**: whitelist de extensiones (`['jpg','png','pdf']`) en `whatsapp-bot/src/message_handler.js`. Antes el fallback `'bin'` dejaba pasar cualquier mimetype falsificado a Storage. Stickers webp se rechazan.
+- **#5 [bot/cron]**: idempotencia robusta del service preventivo. Nueva función `historico.yaSeEnvioServiceMaxUrgencia` que para SERVICE itera la urgencia actual hacia las MAYORES y chequea si alguna ya fue notificada (incluido prefix-query Firestore para `service_vencido` que tiene fecha del día en la key). Evita el rebote cuando el admin edita `ULTIMO_SERVICE_KM` por error y la urgencia baja sin que el service realmente se hizo. Constante `ORDEN_URGENCIAS_SERVICE = ['service_atencion', 'service_programar', 'service_urgente', 'service_vencido']`.
+- **#6 [rules]**: `RESPUESTAS_BOT_AMBIGUAS` separada en `read+delete: isAdminOrSupervisor` y `create+update: false`. Antes permitía cualquier write con isAdminOrSupervisor; ahora solo el bot via Admin SDK puede crear, y admin/supervisor solo descartan o convierten a revisión (delete). Verificado contra el cliente: `admin_bot_bandeja_screen.dart` solo hace `.delete()` y `batch.delete()`.
+
+**Fase 2 — Limpieza estructural**
+- **#7 [refactor]**: nueva clase `AppDocsEmpleado` en `vencimientos_config.dart` con `etiquetas` (Map<String, String> de los 7 documentos del empleado). Antes había 4 copias del mismo mapa con nombres distintos (`_docsEmpleado` x2, `_documentosAuditados`, `_docsAgendables`) en pantallas distintas — mismo patrón bug que los extintores. Migrados: `admin_panel_screen`, `admin_vencimientos_calendario_screen`, `admin_vencimientos_choferes_screen`, `user_mis_vencimientos_screen`. Net −19 líneas reales.
+- **#8 [ui]**: sweep de colors hardcoded a `AppColors.success/error/warning/info` (semánticos) y `AppColors.accentGreen` (decorativos). Migrados 26 call sites en 3 archivos: `notification_service.dart` (5 — los 3 canales de notificación nativa: vencimientos→warning, mantenimiento→error, nueva revisión→success), `admin_estado_bot_screen.dart` (17 — switch _Salud, alertas pendientes/errores, toggle pausado, kill-switch), `command_palette.dart` (4). Otros archivos con migración incremental cuando se toquen.
+- **#9 [parsing]**: `AppFormatters.tryParseFecha(dynamic)` público (alias del privado `_parseUniversalDate`) que acepta múltiples formatos (ISO, DD-MM-YYYY, DD/MM/YYYY, DateTime nativo). Migrados 9 call sites en 6 pantallas (`vencimiento_editor_sheet`, `empleado_actions`, `user_mis_vencimientos`, `admin_vencimientos_calendario` x2, `admin_mantenimiento`, `admin_vehiculo_form` x2). Beneficio extra: arregla bug de timezone donde `30/05` aparecía como `29/05` en zonas UTC-3 (`tryParseFecha` construye `DateTime` local explicit, no UTC midnight).
+- **#10 [storage]**: `storage.rules` de `REVISIONES` ahora valida `request.resource.contentType.matches('image/.*|application/pdf')` y `size < 10 MB`. Antes admitía cualquier mimetype, lo que permitía subir `.exe` enmascarados. Los mismatches que detectaba la auditoría en Firestore (`MANTENIMIENTOS_AVISADOS`, `BOT_CONTROL`) resultaron falsos positivos: las rules ya estaban alineadas con la intención documentada.
+
+**Fase 3 — Performance + observabilidad**
+- **#11 [bot/perf]**: cache en memoria con TTL configurable (default 5min) para `_resolverChofer` en `message_handler.js`. Antes leía toda `EMPLEADOS` por mensaje entrante (~57 reads cada uno; con 100 mensajes/día eran ~5700 reads). Ahora ~57 reads cada TTL. Configurable vía `EMPLEADOS_CACHE_TTL_MS` env.
+- **#12 [bot/tz]**: `process.env.TZ = process.env.BOT_TIMEZONE || 'America/Argentina/Buenos_Aires'` al **top** de `index.js`, antes de cualquier `require()` que dependa de fechas (cron, historico, calcularDiasRestantes). Configurable vía `BOT_TIMEZONE`. Previene desfase de 1 día si el bot se migra a Cloud Run región UTC.
+- **#13 [functions/perf]**: `telemetriaSnapshotScheduled` timeout `120s → 45s`. Las invocaciones reales nunca pasan de 20s; los 75s extra eran costo innecesario.
+- **#14 [functions/security]**: validación `VIN_REGEX = /^[A-Z0-9]{17}$/` en `volvoProxy` antes de forwardear (cases `telemetria` y `kilometraje`). Antes solo chequeaba no-vacío; un VIN malformado se mandaba a Volvo y comía timeout completo.
+
+**Fase 4 — Drift / nice-to-have**
+- **#15 [.gitattributes]**: nuevo archivo `.gitattributes` en la raíz que normaliza line-endings: LF para texto, CRLF solo para `*.ps1`/`*.bat`/`*.cmd`, binarios untouched. Después `git add --renormalize .` para fijar todo el repo. Antes el drift LF/CRLF mezclaba cambios reales con EOL changes en cada commit — nos mordió varias veces durante esta misma sesión. **Recomendado en Windows**: `git config --global core.autocrlf input`.
+- **#16 [imports muertos]**: los 2 candidatos del handoff (`selectNotificationStream` en `notification_service.dart`, `intl` en `admin_bot_bandeja_screen.dart`) resultaron falsos positivos. Ambos sí se usan: el stream lo escucha `main.dart:137` para navegar al tap de notificación, y `intl` lo usa `DateFormat('dd/MM HH:mm').format(...)` en línea 234. `flutter analyze` global confirma 0 issues.
+- **#17 [refactor AlertDialog en empleado_actions]**: NO ejecutado en esta sesión. Es un cambio más grande de UX (extraer el dialog ad-hoc de asignación de equipo a una pantalla o BottomSheet) y no es urgente. Queda para futura iteración.
+
+#### 6.10.5 Validaciones de cierre
+- `flutter analyze` (todo el proyecto): **0 issues**.
+- `flutter test`: **25/25 tests pasan**.
+- `tsc --noEmit` en `functions/`: limpio.
+- `node --check` en archivos modificados del bot: limpio.
+
+#### 6.10.6 Deploys requeridos al cierre
+- **Cloud Functions**: `firebase deploy --only functions:loginConDni,functions:telemetriaSnapshotScheduled,functions:volvoProxy`.
+- **Firestore rules**: `firebase deploy --only firestore:rules`.
+- **Storage rules**: `firebase deploy --only storage`.
+- **Bot Node.js**: reiniciar el proceso (Ctrl+C + `node src/index.js`) para que tome whitelist + idempotencia service + cache empleados + TZ env var.
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
@@ -445,7 +502,8 @@ Al abrir una conversación nueva de Cowork sobre este proyecto:
 Al cerrar la sesión del 30 de abril, quedaron estos temas en el aire que conviene retomar en la próxima reunión con Claude (idealmente desde un chat nuevo para que el sandbox quede sincronizado limpio).
 
 ### 13.1 Validaciones pendientes (importante)
-- **Validar la agrupación de mensajes**. Hoy se implementó la opción de mandar UN mensaje con la lista de papeles cuando un chofer tiene 2+ vencimientos. La lógica está deployada y commiteada (`13da5b2`) pero no se vio funcionar con datos reales. Plan: mandar `/forzar-cron` desde el celular admin al bot, esperar el ciclo, mirar el log buscando líneas como `+ Encolado AGRUPADO: <DNI> (N papeles) → ...`. Si aparece, abrir Firestore y ver el doc en COLA_WHATSAPP — debe tener `origen: 'cron_aviso_agrupado'` y campo `items_agrupados` poblado.
+- **⚠️ Verificar el bug de timezone reportado** — ahora con `AppFormatters.tryParseFecha` migrado en 9 call sites (Fase 2 #9), el bug de Victor Raul Jesus (DNI 38303285) debería estar resuelto. Confirmar con el próximo aviso o forzando el cron.
+- **⚠️ Validar la agrupación de mensajes**. La lógica está deployada y commiteada (`13da5b2`) pero no se vio funcionar con datos reales. Plan: mandar `/forzar-cron` desde el celular admin al bot, esperar el ciclo, mirar el log buscando líneas como `+ Encolado AGRUPADO: <DNI> (N papeles) → ...`. Si aparece, abrir Firestore y ver el doc en COLA_WHATSAPP — debe tener `origen: 'cron_aviso_agrupado'` y campo `items_agrupados` poblado.
 - **Verificar el bug de timezone reportado**. La licencia de VICTOR RAUL JESUS (DNI 38303285) vence el 30/05 pero el bot le mandó "vence el 29/05". El fix de parseo manual `YYYY-MM-DD` ya está deployado en `cron.calcularDiasRestantes` y `aviso_builder.formatearFecha`, pero hay que confirmar en producción que ahora dice 30/05. Mirar el próximo aviso que mande el bot a ese DNI o forzar el cron.
 
 ### 13.2 Mejoras al bot pendientes
@@ -455,10 +513,10 @@ Al cerrar la sesión del 30 de abril, quedaron estos temas en el aire que convie
 
 ### 13.3 App Flutter
 - **Pantalla "Mi perfil del chofer"**. Hoy es mínima. Podría tener: foto, vencimientos personales con días restantes, contacto rápido al admin (botón WhatsApp), historial de revisiones del chofer.
-- **Sweep de hallazgos sospechosos del code-review** (no críticos):
-  - `notification_service.dart` línea 13: `selectNotificationStream` declarado y usado adentro pero verificar si alguien lo consume desde main.dart o routing/.
-  - `admin_bot_bandeja_screen.dart`: `import 'package:intl/intl.dart'` aparentemente no usado.
-- **Limpiar el drift del working tree**. Después de la sesión del 30-abril quedaron ~20 archivos del cliente Flutter como "modificados" en `git status` pero sin diferencias claras de contenido (mezcla de drift sandbox/PC + line endings LF/CRLF). Conviene resolverlo: `git diff --stat` para ver cuáles tienen cambios reales y cuáles son solo line endings. Si solo es line endings, se resuelve con `git config core.autocrlf input` o setear `.gitattributes` con `* text=auto eol=lf`.
+- **✅ Sweep de hallazgos sospechosos del code-review** — verificado en sesión 1-mayo (Fase 4 #16). Ambos candidatos eran falsos positivos:
+  - `selectNotificationStream` sí se usa: `main.dart:137` lo escucha.
+  - `intl` sí se usa: `admin_bot_bandeja_screen.dart:234` con `DateFormat('dd/MM HH:mm').format(...)`. `flutter analyze` global confirma 0 issues.
+- **✅ Limpiar el drift del working tree** — resuelto en sesión 1-mayo (Fase 4 #15). Creado `.gitattributes` con LF para texto, CRLF para `*.ps1`/`*.bat`/`*.cmd`, binarios untouched + `git add --renormalize .` aplicado. **Recomendado en Windows**: `git config --global core.autocrlf input`.
 
 ### 13.4 Producción / DevOps
 - **Deploy NSSM como servicio Windows** en el server dedicado. El script ya está en `whatsapp-bot/scripts/instalar_servicio.ps1` listo para correr cuando termine el ensayo en la PC de programación. Lo deja autostart al boot, auto-restart si crashea, logs rotados.
@@ -475,4 +533,4 @@ Al cerrar la sesión del 30 de abril, quedaron estos temas en el aire que convie
 
 ---
 
-**Cómo retomar**: leer secciones 6.9 (todo lo del 30-abril) y 13 (este resumen). El estado del repo está en `796a237` (después del cleanup de docs) o el más reciente que aparezca con `git log -1`.
+**Cómo retomar**: leer secciones 6.9 (cleanup + RBAC del 30-abril), 6.10 (sesión grande del 1-mayo: imports bulk + fixes UI + auditoría profunda + plan 4 fases ejecutado) y 13 (lo que queda). El estado del repo es el commit más reciente — `git log --oneline -10`.

@@ -618,6 +618,12 @@ const ACCEPT_VEHICLES =
 const ACCEPT_STATUSES =
   "application/x.volvogroup.com.vehiclestatuses.v1.0+json; UTF-8";
 
+// VIN estandar ISO 3779: 17 caracteres alfanumericos en mayuscula.
+// Validamos cliente-side antes de forwardear a Volvo para cortar
+// requests con VINs malformados (typos, fuzzing) sin tocar la API
+// externa.
+const VIN_REGEX = /^[A-Z0-9]{17}$/;
+
 interface VolvoProxyResult {
   statusCode: number;
   data: unknown;
@@ -665,6 +671,9 @@ export const volvoProxy = onCall(
       if (!vin) {
         throw new HttpsError("invalid-argument", "Falta `params.vin`.");
       }
+      if (!VIN_REGEX.test(vin)) {
+        throw new HttpsError("invalid-argument", "`params.vin` no es un VIN valido (17 chars, A-Z y 0-9).");
+      }
       const qs = new URLSearchParams({
         vin,
         latestOnly: "true",
@@ -687,6 +696,9 @@ export const volvoProxy = onCall(
       const vin = (params.vin ?? "").toString().trim().toUpperCase();
       if (!vin) {
         throw new HttpsError("invalid-argument", "Falta `params.vin`.");
+      }
+      if (!VIN_REGEX.test(vin)) {
+        throw new HttpsError("invalid-argument", "`params.vin` no es un VIN valido (17 chars, A-Z y 0-9).");
       }
       const qs = new URLSearchParams({
         vin,
@@ -790,7 +802,11 @@ export const telemetriaSnapshotScheduled = onSchedule(
     schedule: "every 6 hours",
     timeZone: "America/Argentina/Buenos_Aires",
     secrets: [volvoUsername, volvoPassword],
-    timeoutSeconds: 120,
+    // Bajado de 120s a 45s. La function hace fetch a Volvo + batch
+    // write a Firestore. Ambas operaciones nunca tardaron mas de 20s
+    // en operacion normal; 45s deja margen para latencia alta sin
+    // pagar 75s de invocacion innecesarios.
+    timeoutSeconds: 45,
     memory: "256MiB",
   },
   async () => {

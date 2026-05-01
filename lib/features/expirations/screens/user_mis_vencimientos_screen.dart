@@ -33,21 +33,6 @@ class _UserMisVencimientosScreenState
   final RevisionService _revisionService = RevisionService();
   late final Stream<DocumentSnapshot> _empleadoStream;
 
-  /// Documentos personales del chofer que se auditan. La clave es la
-  /// etiqueta visible (la que aparece en la notificación push) y el
-  /// valor es el sufijo del campo en Firestore. Replica el listado de
-  /// `admin_vencimientos_choferes_screen.dart`; si en el futuro se
-  /// centraliza, mover a `vencimientos_config.dart`.
-  static const Map<String, String> _docsAgendables = {
-    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
-    'Preocupacional': 'PREOCUPACIONAL',
-    'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
-    'ART': 'ART',
-    'F. 931': '931',
-    'Seguro de Vida': 'SEGURO_DE_VIDA',
-    'Sindicato': 'LIBRE_DE_DEUDA_SINDICAL',
-  };
-
   @override
   void initState() {
     super.initState();
@@ -74,10 +59,10 @@ class _UserMisVencimientosScreenState
 
       final avisos = <VencimientoAviso>[];
       final hoy = DateTime.now();
-      _docsAgendables.forEach((etiqueta, campoBase) {
+      AppDocsEmpleado.etiquetas.forEach((etiqueta, campoBase) {
         final fechaStr = data['VENCIMIENTO_$campoBase']?.toString();
         if (fechaStr == null || fechaStr.isEmpty) return;
-        final fecha = DateTime.tryParse(fechaStr);
+        final fecha = AppFormatters.tryParseFecha(fechaStr);
         if (fecha == null) return;
         // Solo agendamos si el vencimiento es futuro — los pasados ya
         // perdieron sentido de aviso preventivo.

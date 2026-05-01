@@ -94,6 +94,19 @@ class AppFormatters {
     return null;
   }
 
+  /// Alias publico de `_parseUniversalDate`. Util cuando el caller
+  /// quiere un `DateTime?` y ya esta usando `AppFormatters` para otras
+  /// cosas. Acepta multiples formatos (ISO YYYY-MM-DD, DD-MM-YYYY,
+  /// DD/MM/YYYY, DateTime nativo) y devuelve null si no parsea.
+  ///
+  /// Preferir esto sobre `DateTime.tryParse(s)` directo cuando se
+  /// parsean campos `VENCIMIENTO_*` o `ULTIMO_SERVICE_FECHA` cuyo
+  /// formato historico puede variar (siempre se guarda ISO desde la
+  /// app, pero migraciones viejas o ediciones manuales en console
+  /// pudieron dejar DD/MM en la BD).
+  static DateTime? tryParseFecha(dynamic fecha) =>
+      _parseUniversalDate(fecha);
+
   // --- FORMATEAR FECHA (DD/MM/YYYY) ---
   static String formatearFecha(dynamic fecha) {
     final DateTime? parsed = _parseUniversalDate(fecha);

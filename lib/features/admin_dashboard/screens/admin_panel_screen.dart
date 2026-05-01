@@ -36,19 +36,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   late final Stream<QuerySnapshot> _vehiculosStream;
   late final Stream<QuerySnapshot> _revisionesStream;
 
-  /// Documentos de chofer auditados — replica del listado en
-  /// `admin_vencimientos_choferes_screen.dart`. Si en el futuro se
-  /// centraliza, mover a `vencimientos_config.dart`.
-  static const Map<String, String> _docsEmpleado = {
-    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
-    'Preocupacional': 'PREOCUPACIONAL',
-    'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
-    'ART': 'ART',
-    'F. 931': '931',
-    'Seguro de Vida': 'SEGURO_DE_VIDA',
-    'Sindicato': 'LIBRE_DE_DEUDA_SINDICAL',
-  };
-
   @override
   void initState() {
     super.initState();
@@ -119,7 +106,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
                     empleados: snapEmp.data,
                     vehiculos: snapVeh.data,
                     revisiones: snapRev.data,
-                    docsEmpleado: _docsEmpleado,
+                    docsEmpleado: AppDocsEmpleado.etiquetas,
                   );
                   return _GridKPIs(stats: stats);
                 },

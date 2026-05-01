@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../widgets/vencimiento_editor_sheet.dart';
@@ -23,17 +24,6 @@ class _AdminVencimientosChoferesScreenState
     extends State<AdminVencimientosChoferesScreen> {
   late final Stream<QuerySnapshot> _empleadosStream;
 
-  /// Documentos a auditar (etiqueta visible → sufijo del campo Firestore).
-  static const Map<String, String> _documentosAuditados = {
-    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
-    'Preocupacional': 'PREOCUPACIONAL',
-    'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
-    'ART': 'ART',
-    'F. 931': '931',
-    'Seguro de Vida': 'SEGURO_DE_VIDA',
-    'Sindicato': 'LIBRE_DE_DEUDA_SINDICAL',
-  };
-
   @override
   void initState() {
     super.initState();
@@ -49,7 +39,7 @@ class _AdminVencimientosChoferesScreenState
       final nombre = (data['NOMBRE'] ?? 'Sin nombre').toString();
       final dni = doc.id.trim();
 
-      _documentosAuditados.forEach((etiqueta, campoBase) {
+      AppDocsEmpleado.etiquetas.forEach((etiqueta, campoBase) {
         final fecha = data['VENCIMIENTO_$campoBase']?.toString();
         if (fecha == null || fecha.isEmpty) return;
         final dias = AppFormatters.calcularDiasRestantes(fecha);

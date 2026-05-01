@@ -95,3 +95,31 @@ class AppVencimientos {
     return enganche;
   }
 }
+
+/// Documentos vencibles de un EMPLEADO (chofer / planta / supervisor /
+/// admin). Mapa `etiqueta visible -> sufijo del campo Firestore`.
+///
+/// Convencion: el campo en EMPLEADOS se llama `VENCIMIENTO_<sufijo>` y
+/// el archivo asociado `ARCHIVO_<sufijo>`. Para sumar un documento
+/// nuevo, agregar la entrada aca y todas las pantallas que lo usen lo
+/// van a recoger automaticamente (panel admin KPIs, auditoria de
+/// vencimientos, calendario, mis vencimientos del chofer).
+///
+/// Antes esta lista estaba duplicada en 4 pantallas distintas con
+/// nombres distintos (`_docsEmpleado`, `_documentosAuditados`,
+/// `_docsAgendables`). Si se agregaba uno nuevo y se olvidaba alguna
+/// pantalla, quedaba inconsistencia silenciosa.
+class AppDocsEmpleado {
+  AppDocsEmpleado._();
+
+  /// Mapa `etiqueta visible -> sufijo del campo Firestore`.
+  static const Map<String, String> etiquetas = {
+    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
+    'Preocupacional': 'PREOCUPACIONAL',
+    'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
+    'ART': 'ART',
+    'F. 931': '931',
+    'Seguro de Vida': 'SEGURO_DE_VIDA',
+    'Sindicato': 'LIBRE_DE_DEUDA_SINDICAL',
+  };
+}

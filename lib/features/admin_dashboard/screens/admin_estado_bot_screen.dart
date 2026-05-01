@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
@@ -66,19 +67,19 @@ class _AdminEstadoBotScreenState extends State<AdminEstadoBotScreen> {
           if (snap.hasError) {
             return _Mensaje(
               icono: Icons.error_outline,
-              color: Colors.redAccent,
+              color: AppColors.error,
               texto: 'Error leyendo BOT_HEALTH: ${snap.error}',
             );
           }
           if (!snap.hasData) {
             return const Center(
-              child: CircularProgressIndicator(color: Colors.greenAccent),
+              child: CircularProgressIndicator(color: AppColors.accentGreen),
             );
           }
           if (!snap.data!.exists) {
             return const _Mensaje(
               icono: Icons.help_outline,
-              color: Colors.orangeAccent,
+              color: AppColors.warning,
               texto:
                   'El bot nunca reportó estado.\n\n'
                   'Verificá en la PC del bot que esté corriendo:\n'
@@ -174,9 +175,9 @@ class _BannerEstado extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (salud) {
-      _Salud.ok => Colors.greenAccent,
-      _Salud.advertencia => Colors.orangeAccent,
-      _Salud.caido => Colors.redAccent,
+      _Salud.ok => AppColors.success,
+      _Salud.advertencia => AppColors.warning,
+      _Salud.caido => AppColors.error,
     };
     final tituloPrincipal = switch (salud) {
       _Salud.ok => 'BOT OPERATIVO',
@@ -299,13 +300,13 @@ class _CardCola extends StatelessWidget {
       filas: [
         _Fila('Pendientes', '$pendientesFrescos',
             color:
-                pendientesFrescos > 0 ? Colors.orangeAccent : Colors.white70),
+                pendientesFrescos > 0 ? AppColors.warning : Colors.white70),
         _Fila('En proceso', '$procesando'),
         _Fila('Reintentando', '$reintentando',
             color:
                 reintentando > 0 ? Colors.amberAccent : Colors.white70),
         _Fila('Con error', '$error',
-            color: error > 0 ? Colors.redAccent : Colors.white70),
+            color: error > 0 ? AppColors.error : Colors.white70),
       ],
     );
   }
@@ -324,7 +325,7 @@ class _CardMensajes extends StatelessWidget {
       icono: Icons.mark_chat_read_outlined,
       filas: [
         _Fila('Enviados hoy', '$hoy',
-            color: Colors.greenAccent),
+            color: AppColors.success),
         _Fila('Último envío',
             ultimo == null ? 'Nunca' : _hace(ultimo)),
       ],
@@ -354,7 +355,7 @@ class _CardCron extends StatelessWidget {
       filas.add(_Fila('Salteados (idempotencia)', '${stats['salteados'] ?? 0}'));
       final err = (stats['errores'] ?? 0) as int;
       filas.add(_Fila('Errores', '$err',
-          color: err > 0 ? Colors.redAccent : Colors.white70));
+          color: err > 0 ? AppColors.error : Colors.white70));
     }
 
     return _BloqueDatos(
@@ -383,14 +384,14 @@ class _CardConfig extends StatelessWidget {
       icono: Icons.tune,
       filas: [
         _Fila('Ahora en horario hábil', enHorario ? 'Sí' : 'No',
-            color: enHorario ? Colors.greenAccent : Colors.orangeAccent),
+            color: enHorario ? AppColors.success : AppColors.warning),
         _Fila('Ventana', start != null && end != null ? '$start a $end hs' : '—'),
         _Fila('Zona horaria', tz),
         _Fila('Avisos automáticos', autoAvisos ? 'Activos' : 'Pausados',
-            color: autoAvisos ? Colors.greenAccent : Colors.white54),
+            color: autoAvisos ? AppColors.success : Colors.white54),
         _Fila('Respuestas automáticas',
             autoResp ? 'Activas' : 'Desactivadas',
-            color: autoResp ? Colors.greenAccent : Colors.white54),
+            color: autoResp ? AppColors.success : Colors.white54),
       ],
     );
   }
@@ -432,7 +433,7 @@ class _CardErroresRecientes extends StatelessWidget {
         icono: Icons.bug_report_outlined,
         filas: [
           _Fila('Sin errores en buffer', '✓',
-              color: Colors.greenAccent),
+              color: AppColors.success),
         ],
       );
     }
@@ -444,7 +445,7 @@ class _CardErroresRecientes extends StatelessWidget {
           Row(
             children: [
               const Icon(Icons.bug_report_outlined,
-                  color: Colors.redAccent, size: 18),
+                  color: AppColors.error, size: 18),
               const SizedBox(width: 8),
               Text(
                 'Errores recientes (${errores.length})',
@@ -485,13 +486,13 @@ class _FilaError extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.redAccent.withAlpha(30),
+                    color: AppColors.error.withAlpha(30),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     ctx.toUpperCase(),
                     style: const TextStyle(
-                      color: Colors.redAccent,
+                      color: AppColors.error,
                       fontSize: 9,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.5,
@@ -583,7 +584,7 @@ class _BloqueDatos extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icono, color: Colors.greenAccent, size: 18),
+              Icon(icono, color: AppColors.accentGreen, size: 18),
               const SizedBox(width: 8),
               Text(
                 titulo,
@@ -698,13 +699,13 @@ class _ToggleKillSwitch extends StatelessWidget {
         final motivo = (data?['motivo'] ?? '').toString().trim();
         return AppCard(
           padding: const EdgeInsets.all(14),
-          borderColor: pausado ? Colors.orangeAccent.withAlpha(160) : null,
+          borderColor: pausado ? AppColors.warning.withAlpha(160) : null,
           highlighted: pausado,
           child: Row(
             children: [
               Icon(
                 pausado ? Icons.pause_circle_filled : Icons.power_settings_new,
-                color: pausado ? Colors.orangeAccent : Colors.greenAccent,
+                color: pausado ? AppColors.warning : AppColors.success,
                 size: 28,
               ),
               const SizedBox(width: 14),
@@ -715,7 +716,7 @@ class _ToggleKillSwitch extends StatelessWidget {
                     Text(
                       pausado ? 'Bot pausado por admin' : 'Bot operando normal',
                       style: TextStyle(
-                        color: pausado ? Colors.orangeAccent : Colors.white,
+                        color: pausado ? AppColors.warning : Colors.white,
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                       ),
@@ -737,7 +738,7 @@ class _ToggleKillSwitch extends StatelessWidget {
               ),
               Switch(
                 value: pausado,
-                activeThumbColor: Colors.orangeAccent,
+                activeThumbColor: AppColors.warning,
                 onChanged: (nuevoValor) =>
                     _confirmarYTogglear(context, pausado, nuevoValor),
               ),
@@ -775,7 +776,7 @@ class _ToggleKillSwitch extends StatelessWidget {
           TextButton(
             style: TextButton.styleFrom(
               foregroundColor:
-                  nuevoValor ? Colors.orangeAccent : Colors.greenAccent,
+                  nuevoValor ? AppColors.warning : AppColors.success,
             ),
             onPressed: () => Navigator.pop(dCtx, true),
             child: Text(accion),

@@ -7,6 +7,14 @@
 
 require('dotenv').config();
 
+// Fijamos la TZ del proceso EN EL TOP, antes de cualquier require que
+// dependa de fechas (cron, historico, calcularDiasRestantes). Sin esto
+// el bot heredaria la TZ del host -- si maniana migramos a Cloud Run
+// region US, los avisos se desfasarian un dia (medianoche ART vs UTC).
+// Configurable via env: BOT_TIMEZONE=America/Argentina/Buenos_Aires
+// (default si no esta seteada).
+process.env.TZ = process.env.BOT_TIMEZONE || 'America/Argentina/Buenos_Aires';
+
 const fsNode = require('fs');
 const path = require('path');
 

@@ -102,7 +102,17 @@ service firebase.storage {
       allow read: if isSignedIn();
       // Cualquier signedIn (chofer) puede subir su comprobante.
       // El admin lo aprueba/rechaza desde la app.
-      allow write: if isSignedIn();
+      //
+      // Validaciones del upload:
+      //  - contentType: solo imagenes (image/*) o PDF. Antes admitia
+      //    cualquier mimetype, lo que dejaba subir .exe enmascarados
+      //    como .pdf u otros archivos raros que confunden al admin
+      //    cuando los abre desde la pantalla de revisiones.
+      //  - tamano <= 10 MB. Suficiente para PDFs y fotos HD; por
+      //    encima de eso es ruido (videos, scanners no comprimidos).
+      allow write: if isSignedIn()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|application/pdf');
     }
 
     // ========================================================================

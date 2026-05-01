@@ -267,7 +267,7 @@ class _TractorCard extends StatelessWidget {
     final ultimoServiceFechaRaw =
         data['ULTIMO_SERVICE_FECHA']?.toString() ?? '';
     final ultimoServiceFecha = ultimoServiceFechaRaw.isNotEmpty
-        ? DateTime.tryParse(ultimoServiceFechaRaw)
+        ? AppFormatters.tryParseFecha(ultimoServiceFechaRaw)
         : null;
 
     // Si no hay datos suficientes (sin API y sin manual cargado), la

@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../constants/app_colors.dart';
+
 import '../../features/employees/screens/admin_personal_lista_screen.dart'
     show abrirDetalleChofer;
 import '../../features/revisions/screens/admin_revisiones_screen.dart'
@@ -188,7 +190,7 @@ class _PaletteDialogState extends State<_PaletteDialog> {
                 decoration: InputDecoration(
                   hintText: 'Buscar chofer, vehículo o trámite…',
                   prefixIcon: const Icon(Icons.search,
-                      color: Colors.greenAccent),
+                      color: AppColors.accentGreen),
                   filled: true,
                   fillColor: Colors.black.withAlpha(80),
                   border: OutlineInputBorder(
@@ -208,7 +210,7 @@ class _PaletteDialogState extends State<_PaletteDialog> {
               child: _items == null && _loadError == null
                   ? const Center(
                       child: CircularProgressIndicator(
-                          color: Colors.greenAccent))
+                          color: AppColors.accentGreen))
                   : _loadError != null
                       ? Center(
                           child: Padding(
@@ -216,7 +218,7 @@ class _PaletteDialogState extends State<_PaletteDialog> {
                             child: Text(
                               'No se pudieron cargar los datos:\n$_loadError',
                               textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.redAccent),
+                              style: const TextStyle(color: AppColors.error),
                             ),
                           ),
                         )
@@ -265,7 +267,7 @@ class _PaletteDialogState extends State<_PaletteDialog> {
                   Text(
                     '${filtrados.length} resultado${filtrados.length == 1 ? '' : 's'}',
                     style: const TextStyle(
-                      color: Colors.greenAccent,
+                      color: AppColors.accentGreen,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
@@ -290,7 +292,7 @@ class _ItemTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       dense: true,
-      leading: Icon(item.icon, color: Colors.greenAccent, size: 20),
+      leading: Icon(item.icon, color: AppColors.accentGreen, size: 20),
       title: Text(
         item.titulo,
         style: const TextStyle(

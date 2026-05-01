@@ -1,0 +1,112 @@
+# Normalización de line endings — S.M.A.R.T. Logística
+#
+# Antes de este archivo el repo tenía drift LF/CRLF: archivos editados
+# en Windows quedaban con CRLF, los del sandbox/CI con LF. Cuando alguien
+# corría `git status` veía decenas de "modificados" sin cambios reales,
+# los diffs eran imposibles de leer, y los Edit del agente fallaban
+# porque el old_string no matcheaba el EOL en disco.
+#
+# Política:
+#   - TEXTO: LF en el repo. Lo que ve cada checkout depende del SO via
+#     core.autocrlf, pero el almacenamiento siempre es LF.
+#   - PowerShell/batch: CRLF (Windows-only, lo necesitan algunos hosts).
+#   - BINARIOS: git no los toca.
+#
+# Después de crear este archivo, hay que correr UNA vez:
+#     git add --renormalize .
+#     git commit -m "chore: normalize line endings via .gitattributes"
+#
+# Ese commit va a tocar muchos archivos pero solo en EOL — ningún
+# cambio real. Después los diffs vuelven a ser limpios.
+
+# Default: cualquier archivo de texto se normaliza a LF en disco.
+* text=auto eol=lf
+
+# Código de la app (Flutter / Node / Functions)
+*.dart      text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.mjs       text eol=lf
+
+# Configuración / data
+*.json      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.xml       text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.scss      text eol=lf
+*.md        text eol=lf
+*.rules     text eol=lf
+*.gradle    text eol=lf
+*.properties text eol=lf
+*.lock      text eol=lf
+.env.example text eol=lf
+
+# Shell / scripts portables
+*.sh        text eol=lf
+*.py        text eol=lf
+
+# Scripts Windows (necesitan CRLF para que los intérpretes los acepten)
+*.ps1       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Imágenes
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.webp      binary
+*.bmp       binary
+
+# Documentos / spreadsheets / paquetes
+*.pdf       binary
+*.xlsx      binary
+*.xls       binary
+*.docx      binary
+*.doc       binary
+*.pptx      binary
+*.zip       binary
+*.tar       binary
+*.gz        binary
+*.7z        binary
+*.rar       binary
+
+# Fuentes
+*.ttf       binary
+*.otf       binary
+*.woff      binary
+*.woff2     binary
+*.eot       binary
+
+# Audio/video
+*.mp3       binary
+*.mp4       binary
+*.mov       binary
+*.wav       binary
+
+# Build artifacts / nativos
+*.jar       binary
+*.aar       binary
+*.so        binary
+*.dll       binary
+*.dylib     binary
+*.exe       binary
+*.apk       binary
+*.aab       binary
+*.ipa       binary
+
+# Keystores / firmas
+*.keystore  binary
+*.jks       binary
+*.p12       binary
+*.pem       text eol=lf
+
+# SVG: técnicamente XML pero algunos generadores lo dan binario.
+# Lo tratamos como texto para que los diffs funcionen.
+*.svg       text eol=lf

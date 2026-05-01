@@ -14,6 +14,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
 
@@ -497,7 +498,7 @@ class EmpleadoActions {
     String campo,
     String? fechaActual,
   ) async {
-    final initial = DateTime.tryParse(fechaActual ?? '');
+    final initial = AppFormatters.tryParseFecha(fechaActual ?? '');
     final picked = await pickFecha(
       context,
       initial: initial,

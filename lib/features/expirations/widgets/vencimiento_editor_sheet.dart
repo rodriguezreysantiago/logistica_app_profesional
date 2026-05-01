@@ -63,7 +63,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
   void initState() {
     super.initState();
     _fechaSeleccionada =
-        DateTime.tryParse(widget.item.fecha) ?? DateTime.now();
+        AppFormatters.tryParseFecha(widget.item.fecha) ?? DateTime.now();
   }
 
   Future<void> _seleccionarFecha() async {

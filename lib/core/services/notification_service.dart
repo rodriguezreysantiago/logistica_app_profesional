@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'dart:async'; // ✅ MENTOR: Necesario para el StreamController
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+
+import '../../shared/constants/app_colors.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -88,7 +89,7 @@ class NotificationService {
       importance: Importance.max,
       priority: Priority.high,
       showWhen: true,
-      color: Colors.orangeAccent, 
+      color: AppColors.warning,
       styleInformation: BigTextStyleInformation(mensaje), 
     );
 
@@ -126,8 +127,8 @@ class NotificationService {
           'Avisos cuando un tractor cruza el umbral de service vencido.',
       importance: Importance.max,
       priority: Priority.high,
-      color: Colors.redAccent,
-      ledColor: Colors.redAccent,
+      color: AppColors.error,
+      ledColor: AppColors.error,
       ledOnMs: 1000,
       ledOffMs: 500,
     );
@@ -172,8 +173,8 @@ class NotificationService {
       channelDescription: 'Notificaciones sobre nuevas revisiones pendientes',
       importance: Importance.max,
       priority: Priority.high,
-      color: Colors.greenAccent, 
-      ledColor: Colors.greenAccent,
+      color: AppColors.success,
+      ledColor: AppColors.success,
       ledOnMs: 1000,
       ledOffMs: 500,
     );
@@ -285,7 +286,7 @@ class NotificationService {
                     'Notificaciones sobre documentos próximos a vencer',
                 importance: Importance.high,
                 priority: Priority.high,
-                color: Colors.orangeAccent,
+                color: AppColors.warning,
               ),
               iOS: DarwinNotificationDetails(
                 presentAlert: true,

@@ -32,15 +32,6 @@ class _AdminVencimientosCalendarioScreenState
   /// Documentos auditados en EMPLEADOS — replica del listado en
   /// `admin_vencimientos_choferes_screen.dart`. Si en el futuro se
   /// centraliza, conviene mover esto a `vencimientos_config.dart`.
-  static const Map<String, String> _docsEmpleado = {
-    'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
-    'Preocupacional': 'PREOCUPACIONAL',
-    'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
-    'ART': 'ART',
-    'F. 931': '931',
-    'Seguro de Vida': 'SEGURO_DE_VIDA',
-    'Sindicato': 'LIBRE_DE_DEUDA_SINDICAL',
-  };
 
   late final Stream<QuerySnapshot> _empleadosStream;
   late final Stream<QuerySnapshot> _vehiculosStream;
@@ -81,10 +72,10 @@ class _AdminVencimientosCalendarioScreenState
       final nombre = (data['NOMBRE'] ?? 'Sin nombre').toString();
       final dni = doc.id.trim();
 
-      _docsEmpleado.forEach((etiqueta, campoBase) {
+      AppDocsEmpleado.etiquetas.forEach((etiqueta, campoBase) {
         final fechaStr = data['VENCIMIENTO_$campoBase']?.toString();
         if (fechaStr == null || fechaStr.isEmpty) return;
-        final fecha = DateTime.tryParse(fechaStr);
+        final fecha = AppFormatters.tryParseFecha(fechaStr);
         if (fecha == null) return;
         final dias = AppFormatters.calcularDiasRestantes(fechaStr);
         agregar(
@@ -113,7 +104,7 @@ class _AdminVencimientosCalendarioScreenState
       for (final spec in specs) {
         final fechaStr = data[spec.campoFecha]?.toString();
         if (fechaStr == null || fechaStr.isEmpty) continue;
-        final fecha = DateTime.tryParse(fechaStr);
+        final fecha = AppFormatters.tryParseFecha(fechaStr);
         if (fecha == null) continue;
         final campoBase = spec.campoFecha.replaceFirst('VENCIMIENTO_', '');
         final dias = AppFormatters.calcularDiasRestantes(fechaStr);

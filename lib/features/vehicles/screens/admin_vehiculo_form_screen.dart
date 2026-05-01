@@ -135,7 +135,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   Future<void> _seleccionarFechaUltimoService() async {
     final messenger = ScaffoldMessenger.of(context);
     final initial = (_ultimoServiceFecha != null)
-        ? DateTime.tryParse(_ultimoServiceFecha!)
+        ? AppFormatters.tryParseFecha(_ultimoServiceFecha!)
         : null;
     final picked = await pickFecha(
       context,
@@ -390,7 +390,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
   Future<void> _seleccionarFecha(VencimientoSpec spec) async {
     final fechaActual = _fechas[spec.campoFecha];
     final initial = (fechaActual != null && fechaActual.isNotEmpty)
-        ? DateTime.tryParse(fechaActual)
+        ? AppFormatters.tryParseFecha(fechaActual)
         : null;
 
     final picked = await pickFecha(
