@@ -14,12 +14,8 @@
 # Que hace:
 #   1. git pull en la raiz del repo (trae los ultimos cambios).
 #   2. npm install --silent en whatsapp-bot/ (solo instala si cambio package.json).
-#   3. nssm start SmartLogisticaBot.
+#   3. Start-Service SmartLogisticaBot (con auto-elevacion UAC si hace falta).
 #   4. Te dice donde ver los logs en vivo.
-#
-# Que NO hace (de proposito):
-#   - flutter pub get (la app la arrancas vos cuando quieras).
-#   - Reiniciar el bot si ya estaba corriendo (te avisa y sale).
 
 $ErrorActionPreference = 'Stop'
 $serviceName = 'SmartLogisticaBot'
@@ -30,30 +26,34 @@ $botRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repoRoot = (Resolve-Path (Join-Path $botRoot '..')).Path
 $logsDir  = Join-Path $botRoot 'logs'
 
-# Helper: arranca el servicio con auto-elevacion (UAC) si no estamos
-# como Administrador. NSSM/sc.exe requieren admin para tocar servicios;
-# antes usabamos `& nssm start` directo y fallaba con "Acceso denegado"
-# en sesiones de PowerShell normales. Ahora usamos Start-Service nativo
-# y, si tampoco tiene permisos, relanzamos PowerShell elevado solo
-# para esa accion puntual (te aparece UAC, autorizas, sigue).
+# Helpers de elevacion ----------------------------------------------
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $pr = New-Object Security.Principal.WindowsPrincipal($id)
+    return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Invoke-ElevatedServiceAction {
     param(
-        [Parameter(Mandatory)] [string]$Action,   # 'Start' o 'Stop'
+        [Parameter(Mandatory)] [string]$Action,
         [Parameter(Mandatory)] [string]$Name
     )
-    try {
+    if (Test-IsAdmin) {
         if ($Action -eq 'Start') { Start-Service -Name $Name -ErrorAction Stop }
         elseif ($Action -eq 'Stop') { Stop-Service -Name $Name -ErrorAction Stop }
         return $true
-    } catch [System.InvalidOperationException] {
-        # Acceso denegado: relanzamos como admin via UAC. -Verb RunAs
-        # gatilla el prompt; -Wait y -PassThru para sincronizar.
-        Write-Host "Sin permisos de admin -- pidiendo elevacion via UAC..." -ForegroundColor Yellow
-        $verb = if ($Action -eq 'Start') { 'Start-Service' } else { 'Stop-Service' }
-        $arg = "$verb -Name '$Name'"
+    }
+    Write-Host "Necesito permisos de admin para tocar el servicio." -ForegroundColor Yellow
+    Write-Host "Vas a ver un prompt de UAC -- aceptalo." -ForegroundColor Yellow
+    $verb = if ($Action -eq 'Start') { 'Start-Service' } else { 'Stop-Service' }
+    $arg = "$verb -Name '$Name' -ErrorAction Stop"
+    try {
         $proc = Start-Process powershell -ArgumentList @('-NoProfile','-Command',$arg) `
             -Verb RunAs -Wait -PassThru -ErrorAction Stop
         return ($proc.ExitCode -eq 0)
+    } catch {
+        Write-Host "El usuario rechazo el prompt de UAC, o el servicio fallo." -ForegroundColor Red
+        return $false
     }
 }
 
@@ -75,7 +75,7 @@ if (-not $svc) {
 if ($svc.Status -eq 'Running') {
     Write-Host "El bot YA esta corriendo en esta PC." -ForegroundColor Yellow
     Write-Host "Si queres reiniciar (despues de un git pull con cambios), corre:" -ForegroundColor Yellow
-    Write-Host "  nssm restart $serviceName" -ForegroundColor Yellow
+    Write-Host "  Restart-Service $serviceName" -ForegroundColor Yellow
     exit 0
 }
 
@@ -83,16 +83,14 @@ if ($svc.Status -eq 'Running') {
 Write-Host "[1/3] Sincronizando con git pull..." -ForegroundColor Cyan
 Push-Location $repoRoot
 try {
-    # Verificamos primero que no haya cambios sin commitear, para
-    # que el pull no falle por conflicto de merge inesperado.
     $dirty = git status --porcelain
     if ($dirty) {
         Write-Host "ADVERTENCIA: hay cambios sin commitear en el repo:" -ForegroundColor Yellow
         Write-Host $dirty -ForegroundColor Yellow
-        Write-Host "Resolvelos (commit/stash) antes de seguir, o arranca el bot a mano con 'nssm start $serviceName'." -ForegroundColor Yellow
+        Write-Host "Resolvelos (commit/stash) antes de seguir, o arranca el bot a mano con:" -ForegroundColor Yellow
+        Write-Host "  Start-Service $serviceName" -ForegroundColor Yellow
         exit 1
     }
-
     git pull
     if ($LASTEXITCODE -ne 0) {
         Write-Host "git pull fallo. Revisa el error arriba." -ForegroundColor Red
@@ -104,8 +102,6 @@ finally {
 }
 
 # --- 4. npm install en el bot --------------------------------------
-# Lo corremos siempre porque es idempotente y rapido si no cambio
-# package.json. Mejor que olvidarse cuando si cambio.
 Write-Host "[2/3] Refrescando dependencias del bot (npm install)..." -ForegroundColor Cyan
 Push-Location $botRoot
 try {

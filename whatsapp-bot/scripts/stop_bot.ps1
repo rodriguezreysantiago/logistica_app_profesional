@@ -13,24 +13,33 @@
 $ErrorActionPreference = 'Stop'
 $serviceName = 'SmartLogisticaBot'
 
-# Stop-Service requiere admin. Si no lo somos, relanzamos elevado solo
-# para esa accion via UAC (mismo patron que start_bot.ps1).
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $pr = New-Object Security.Principal.WindowsPrincipal($id)
+    return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Invoke-ElevatedServiceAction {
     param(
-        [Parameter(Mandatory)] [string]$Action,   # 'Start' o 'Stop'
+        [Parameter(Mandatory)] [string]$Action,
         [Parameter(Mandatory)] [string]$Name
     )
-    try {
+    if (Test-IsAdmin) {
         if ($Action -eq 'Start') { Start-Service -Name $Name -ErrorAction Stop }
         elseif ($Action -eq 'Stop') { Stop-Service -Name $Name -ErrorAction Stop }
         return $true
-    } catch [System.InvalidOperationException] {
-        Write-Host "Sin permisos de admin -- pidiendo elevacion via UAC..." -ForegroundColor Yellow
-        $verb = if ($Action -eq 'Start') { 'Start-Service' } else { 'Stop-Service' }
-        $arg = "$verb -Name '$Name'"
+    }
+    Write-Host "Necesito permisos de admin para tocar el servicio." -ForegroundColor Yellow
+    Write-Host "Vas a ver un prompt de UAC -- aceptalo." -ForegroundColor Yellow
+    $verb = if ($Action -eq 'Start') { 'Start-Service' } else { 'Stop-Service' }
+    $arg = "$verb -Name '$Name' -ErrorAction Stop"
+    try {
         $proc = Start-Process powershell -ArgumentList @('-NoProfile','-Command',$arg) `
             -Verb RunAs -Wait -PassThru -ErrorAction Stop
         return ($proc.ExitCode -eq 0)
+    } catch {
+        Write-Host "El usuario rechazo el prompt de UAC, o el servicio fallo." -ForegroundColor Red
+        return $false
     }
 }
 
@@ -47,8 +56,6 @@ if ($svc.Status -eq 'Stopped') {
 }
 
 Write-Host "Deteniendo bot '$serviceName'..." -ForegroundColor Cyan
-# NSSM tiene un grace period configurado en index.js (DELAY_MAX_MS + 10s)
-# para que un envio en curso termine antes de matar el proceso.
 $ok = Invoke-ElevatedServiceAction -Action 'Stop' -Name $serviceName
 if (-not $ok) {
     Write-Host "No pude detener el servicio." -ForegroundColor Red
