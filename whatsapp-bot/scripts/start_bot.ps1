@@ -30,6 +30,33 @@ $botRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repoRoot = (Resolve-Path (Join-Path $botRoot '..')).Path
 $logsDir  = Join-Path $botRoot 'logs'
 
+# Helper: arranca el servicio con auto-elevacion (UAC) si no estamos
+# como Administrador. NSSM/sc.exe requieren admin para tocar servicios;
+# antes usabamos `& nssm start` directo y fallaba con "Acceso denegado"
+# en sesiones de PowerShell normales. Ahora usamos Start-Service nativo
+# y, si tampoco tiene permisos, relanzamos PowerShell elevado solo
+# para esa accion puntual (te aparece UAC, autorizas, sigue).
+function Invoke-ElevatedServiceAction {
+    param(
+        [Parameter(Mandatory)] [string]$Action,   # 'Start' o 'Stop'
+        [Parameter(Mandatory)] [string]$Name
+    )
+    try {
+        if ($Action -eq 'Start') { Start-Service -Name $Name -ErrorAction Stop }
+        elseif ($Action -eq 'Stop') { Stop-Service -Name $Name -ErrorAction Stop }
+        return $true
+    } catch [System.InvalidOperationException] {
+        # Acceso denegado: relanzamos como admin via UAC. -Verb RunAs
+        # gatilla el prompt; -Wait y -PassThru para sincronizar.
+        Write-Host "Sin permisos de admin -- pidiendo elevacion via UAC..." -ForegroundColor Yellow
+        $verb = if ($Action -eq 'Start') { 'Start-Service' } else { 'Stop-Service' }
+        $arg = "$verb -Name '$Name'"
+        $proc = Start-Process powershell -ArgumentList @('-NoProfile','-Command',$arg) `
+            -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        return ($proc.ExitCode -eq 0)
+    }
+}
+
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "INICIANDO BOT - S.M.A.R.T. Logistica" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
@@ -94,7 +121,13 @@ finally {
 
 # --- 5. Arrancar el servicio ---------------------------------------
 Write-Host "[3/3] Arrancando servicio '$serviceName'..." -ForegroundColor Cyan
-nssm start $serviceName | Out-Null
+$ok = Invoke-ElevatedServiceAction -Action 'Start' -Name $serviceName
+if (-not $ok) {
+    Write-Host "No pude arrancar el servicio." -ForegroundColor Red
+    Write-Host "Revisa los logs:" -ForegroundColor Yellow
+    Write-Host "  Get-Content $logsDir\bot.err.log -Tail 50" -ForegroundColor Yellow
+    exit 1
+}
 Start-Sleep -Seconds 3
 
 $svc = Get-Service -Name $serviceName

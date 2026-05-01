@@ -13,6 +13,27 @@
 $ErrorActionPreference = 'Stop'
 $serviceName = 'SmartLogisticaBot'
 
+# Stop-Service requiere admin. Si no lo somos, relanzamos elevado solo
+# para esa accion via UAC (mismo patron que start_bot.ps1).
+function Invoke-ElevatedServiceAction {
+    param(
+        [Parameter(Mandatory)] [string]$Action,   # 'Start' o 'Stop'
+        [Parameter(Mandatory)] [string]$Name
+    )
+    try {
+        if ($Action -eq 'Start') { Start-Service -Name $Name -ErrorAction Stop }
+        elseif ($Action -eq 'Stop') { Stop-Service -Name $Name -ErrorAction Stop }
+        return $true
+    } catch [System.InvalidOperationException] {
+        Write-Host "Sin permisos de admin -- pidiendo elevacion via UAC..." -ForegroundColor Yellow
+        $verb = if ($Action -eq 'Start') { 'Start-Service' } else { 'Stop-Service' }
+        $arg = "$verb -Name '$Name'"
+        $proc = Start-Process powershell -ArgumentList @('-NoProfile','-Command',$arg) `
+            -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        return ($proc.ExitCode -eq 0)
+    }
+}
+
 $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $svc) {
     Write-Host "El servicio '$serviceName' no esta instalado en esta PC." -ForegroundColor Yellow
@@ -28,7 +49,11 @@ if ($svc.Status -eq 'Stopped') {
 Write-Host "Deteniendo bot '$serviceName'..." -ForegroundColor Cyan
 # NSSM tiene un grace period configurado en index.js (DELAY_MAX_MS + 10s)
 # para que un envio en curso termine antes de matar el proceso.
-nssm stop $serviceName | Out-Null
+$ok = Invoke-ElevatedServiceAction -Action 'Stop' -Name $serviceName
+if (-not $ok) {
+    Write-Host "No pude detener el servicio." -ForegroundColor Red
+    exit 1
+}
 
 # Esperamos hasta 90s a que el servicio quede en Stopped. Si tarda
 # mas, casi seguro hay un envio largo en curso o el grace period
