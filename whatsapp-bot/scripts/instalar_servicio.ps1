@@ -1,13 +1,25 @@
 # Instala el bot como servicio Windows con NSSM, configurado para:
+#
 #   - Modo MANUAL (vos lo arrancas con start_bot.ps1, no en el boot).
 #     Esto es ideal cuando trabajas en 2 PCs distintas (casa + oficina)
 #     y queres evitar que se ejecuten 2 bots en simultaneo procesando
 #     la misma cola de Firestore. Si en el futuro queres que arranque
 #     solo, cambiar SERVICE_DEMAND_START por SERVICE_AUTO_START mas
 #     abajo.
+#
 #   - Auto-restart con backoff si el proceso muere (mientras este
 #     arrancado).
+#
 #   - Logs persistentes en carpeta `logs/` del bot, con rotacion a 10MB.
+#
+#   - Corre como LocalSystem (cuenta de servicio default de Windows).
+#     Para que LocalSystem pueda leer/escribir los archivos del bot
+#     (que viven en C:\Users\<vos>\), el script da permisos full
+#     control sobre la carpeta del repo y sobre la cache de puppeteer.
+#     Tambien setea PUPPETEER_CACHE_DIR para que puppeteer encuentre
+#     el Chromium descargado por tu user (LocalSystem por default
+#     buscaria en C:\WINDOWS\system32\config\systemprofile\.cache\
+#     que esta vacio).
 #
 # Requiere ejecutar como Administrador.
 #
@@ -34,9 +46,15 @@ $serviceName = 'SmartLogisticaBot'
 # absoluto a un usuario especifico de Windows). El script vive en
 # `whatsapp-bot/scripts/`, asi que el root es dos niveles arriba.
 $botRoot     = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$repoRoot    = (Resolve-Path (Join-Path $botRoot '..')).Path
 $logsDir     = Join-Path $botRoot 'logs'
 $nssmDir     = 'C:\nssm'
 $nssmExe     = Join-Path $nssmDir 'nssm.exe'
+
+# Cache de puppeteer (donde el primer `node src/index.js` o npm
+# install descargo Chrome). Default: $env:USERPROFILE\.cache\puppeteer
+# Si en tu PC esta en otro lado, cambialo aca antes de correr.
+$puppeteerCache = Join-Path $env:USERPROFILE '.cache\puppeteer'
 
 # --- 2. Verificar permisos de admin --------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal] `
@@ -57,7 +75,6 @@ if (-not (Test-Path $nssmExe)) {
     Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip -UseBasicParsing
     Expand-Archive -Path $nssmZip -DestinationPath "$env:TEMP\nssm-extract" -Force
 
-    # NSSM viene con 32-bit y 64-bit. Usamos el de 64-bit (win64).
     $nssm64 = Get-ChildItem "$env:TEMP\nssm-extract" -Recurse `
         -Filter 'nssm.exe' | Where-Object { $_.DirectoryName -match 'win64' } |
         Select-Object -First 1
@@ -84,10 +101,26 @@ if (-not $nodeExe) {
 }
 Write-Host "OK Node.js encontrado: $nodeExe" -ForegroundColor Green
 
-# --- 5. Crear carpeta de logs --------------------------------------
+# --- 5. Verificar que Chromium de puppeteer este descargado --------
+# Si no esta, recordamos que hay que correr `node src/index.js` una
+# vez como tu user para que puppeteer baje Chrome. Sin Chrome, el
+# bot crashea al arrancar el servicio.
+if (-not (Test-Path $puppeteerCache)) {
+    Write-Host "" -ForegroundColor Yellow
+    Write-Host "AVISO: no encontre Chromium de puppeteer en $puppeteerCache" -ForegroundColor Yellow
+    Write-Host "Despues de instalar el servicio, corre UNA VEZ:" -ForegroundColor Yellow
+    Write-Host "  cd $botRoot" -ForegroundColor Yellow
+    Write-Host "  npm install" -ForegroundColor Yellow
+    Write-Host "  node src/index.js   # solo para que puppeteer baje Chrome y autenticar QR de WA" -ForegroundColor Yellow
+    Write-Host "  Ctrl+C cuando llegue a 'WhatsApp listo para enviar.'" -ForegroundColor Yellow
+    Write-Host "Despues podes arrancar el servicio con start_bot.ps1." -ForegroundColor Yellow
+    Write-Host "" -ForegroundColor Yellow
+}
+
+# --- 6. Crear carpeta de logs --------------------------------------
 New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 
-# --- 6. Detener y borrar el servicio si ya existia -----------------
+# --- 7. Detener y borrar el servicio si ya existia -----------------
 $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($existing) {
     Write-Host "WARN  Servicio '$serviceName' ya existe. Lo voy a recrear..." -ForegroundColor Yellow
@@ -96,7 +129,7 @@ if ($existing) {
     Start-Sleep -Seconds 2
 }
 
-# --- 7. Instalar el servicio ---------------------------------------
+# --- 8. Instalar el servicio ---------------------------------------
 Write-Host "[PKG] Creando servicio Windows '$serviceName'..." -ForegroundColor Cyan
 
 & $nssmExe install $serviceName $nodeExe 'src\index.js' | Out-Null
@@ -113,15 +146,18 @@ Write-Host "[PKG] Creando servicio Windows '$serviceName'..." -ForegroundColor C
 
 # Auto-restart: si el proceso termina con cualquier codigo, reintentar.
 & $nssmExe set $serviceName AppExit Default Restart | Out-Null
-# Espera 10 segundos antes de reintentar (evita rafaga de fallos rapidos).
 & $nssmExe set $serviceName AppRestartDelay 10000 | Out-Null
-# Si el proceso falla 3 veces en 60 segundos, esperar 5 minutos antes de reintentar de nuevo.
 & $nssmExe set $serviceName AppThrottle 60000 | Out-Null
 
 # Modo de inicio: MANUAL. El servicio NO arranca al boot - vos lo
-# encendes con start_bot.ps1 cuando empezas a trabajar. Si en el
-# futuro queres autostart, cambiar a SERVICE_AUTO_START.
+# encendes con start_bot.ps1 cuando empezas a trabajar.
 & $nssmExe set $serviceName Start SERVICE_DEMAND_START | Out-Null
+
+# Variables de entorno para el bot. PUPPETEER_CACHE_DIR es CRITICO:
+# cuando el servicio corre como LocalSystem, su HOME es
+# C:\WINDOWS\system32\config\systemprofile\ y puppeteer busca
+# Chromium ahi. Lo redirigimos a la cache que ya tiene tu user.
+& $nssmExe set $serviceName AppEnvironmentExtra "PUPPETEER_CACHE_DIR=$puppeteerCache" | Out-Null
 
 # Descripcion visible en services.msc.
 & $nssmExe set $serviceName DisplayName 'S.M.A.R.T. Logistica - Bot WhatsApp' | Out-Null
@@ -129,20 +165,41 @@ Write-Host "[PKG] Creando servicio Windows '$serviceName'..." -ForegroundColor C
 
 Write-Host "OK Servicio '$serviceName' creado (modo MANUAL)." -ForegroundColor Green
 
-# --- 8. Resumen ----------------------------------------------------
-# A diferencia de la version anterior, NO arrancamos el servicio
-# automaticamente. El usuario decide cuando con start_bot.ps1.
+# --- 9. Permisos para LocalSystem ----------------------------------
+# Por default Windows protege C:\Users\<user>\ asi que solo el user
+# puede leer. Cuando el servicio corre como LocalSystem (la cuenta
+# default de NSSM), no puede acceder a los archivos del bot ni a la
+# cache de puppeteer. Le damos full control sobre las dos carpetas
+# que necesita.
+Write-Host "[ACL] Otorgando permisos a LocalSystem sobre carpetas del bot..." -ForegroundColor Cyan
+
+# Repo entero (necesita leer src/, node_modules/, .env, y escribir
+# logs/, .wwebjs_auth/, .wwebjs_cache/).
+icacls $repoRoot /grant 'NT AUTHORITY\SYSTEM:(OI)(CI)F' /T /C 2>&1 | Out-Null
+Write-Host "  OK $repoRoot" -ForegroundColor DarkGray
+
+# Cache de puppeteer (Chromium descargado).
+if (Test-Path $puppeteerCache) {
+    icacls $puppeteerCache /grant 'NT AUTHORITY\SYSTEM:(OI)(CI)F' /T /C 2>&1 | Out-Null
+    Write-Host "  OK $puppeteerCache" -ForegroundColor DarkGray
+} else {
+    Write-Host "  SKIP $puppeteerCache (todavia no existe; correr node src/index.js una vez)" -ForegroundColor Yellow
+}
+
+# --- 10. Resumen ---------------------------------------------------
 $svc = Get-Service -Name $serviceName
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "INSTALACION COMPLETA" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Servicio:     $serviceName (modo MANUAL)"
-Write-Host "Estado:       $($svc.Status)  <- detenido, no se ejecuta hasta que lo prendas"
-Write-Host "Ejecutable:   $nodeExe src\index.js"
-Write-Host "Working dir:  $botRoot"
-Write-Host "Logs:         $logsDir"
+Write-Host "Servicio:           $serviceName (modo MANUAL)"
+Write-Host "Estado:             $($svc.Status)  <- detenido, no se ejecuta hasta que lo prendas"
+Write-Host "Cuenta:             LocalSystem"
+Write-Host "Ejecutable:         $nodeExe src\index.js"
+Write-Host "Working dir:        $botRoot"
+Write-Host "Logs:               $logsDir"
+Write-Host "PUPPETEER_CACHE_DIR: $puppeteerCache"
 Write-Host ""
 Write-Host "Para empezar a usar el bot:" -ForegroundColor Yellow
 Write-Host "  cd $botRoot"
@@ -150,13 +207,13 @@ Write-Host "  .\scripts\start_bot.ps1"
 Write-Host ""
 Write-Host "Comandos NSSM utiles:" -ForegroundColor Yellow
 Write-Host "  Ver estado:           Get-Service $serviceName"
-Write-Host "  Arrancar:             nssm start $serviceName"
-Write-Host "  Detener:              nssm stop $serviceName"
-Write-Host "  Reiniciar:            nssm restart $serviceName"
-Write-Host "  Editar config (GUI):  nssm edit $serviceName"
+Write-Host "  Arrancar:             Start-Service $serviceName"
+Write-Host "  Detener:              Stop-Service $serviceName"
+Write-Host "  Reiniciar:            Restart-Service $serviceName"
+Write-Host "  Editar config (GUI):  & '$nssmExe' edit $serviceName"
 Write-Host "  Ver log en vivo:      Get-Content $logsDir\bot.out.log -Tail 50 -Wait"
 Write-Host "  Ver errores:          Get-Content $logsDir\bot.err.log -Tail 50 -Wait"
-Write-Host "  Desinstalar:          nssm remove $serviceName confirm"
+Write-Host "  Desinstalar:          & '$nssmExe' remove $serviceName confirm"
 Write-Host ""
 Write-Host "IMPORTANTE: el servicio quedo en MODO MANUAL." -ForegroundColor Cyan
 Write-Host "  - NO arranca solo al prender la PC." -ForegroundColor Cyan
