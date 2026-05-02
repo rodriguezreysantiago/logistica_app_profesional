@@ -25,6 +25,8 @@ import {
   FieldValue,
   DocumentReference,
   Timestamp,
+  Firestore,
+  Transaction,
 } from "firebase-admin/firestore";
 import * as bcrypt from "bcryptjs";
 import * as crypto from "crypto";
@@ -533,7 +535,7 @@ export function hashId(text: string): string {
  *     bloqueadoHasta?: timestamp, // existe si está bloqueado
  *   }
  */
-async function chequearBloqueoActivo(
+export async function chequearBloqueoActivo(
   ref: DocumentReference
 ): Promise<number> {
   const snap = await ref.get();
@@ -573,10 +575,11 @@ interface ResultadoIntentoFallido {
  *    devuelve `bloqueadoMinRestantes = duracion completa`.
  *  - Si todavia esta debajo del MAX, devuelve `bloqueadoMinRestantes = 0`.
  */
-async function registrarIntentoFallido(
-  ref: DocumentReference
+export async function registrarIntentoFallido(
+  ref: DocumentReference,
+  database: Firestore = db
 ): Promise<ResultadoIntentoFallido> {
-  return await db.runTransaction(async (tx) => {
+  return await database.runTransaction(async (tx: Transaction) => {
     const snap = await tx.get(ref);
     const data = snap.exists ? snap.data() ?? {} : {};
 
