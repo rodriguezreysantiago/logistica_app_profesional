@@ -849,28 +849,51 @@ class _BotonRangoFecha extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       onTap: () async {
         final hoy = DateTime.now();
-        // Limites: 2 años atrás (suficiente para cualquier reporte
-        // razonable) y 1 día hacia adelante (no permitimos rangos
-        // futuros, pero sí incluir hoy entero).
+        final firstDate = DateTime(hoy.year - 2, 1, 1);
+        final lastDate = hoy.add(const Duration(days: 1));
+
+        // Usamos DOS showDatePicker en secuencia (no showDateRangePicker)
+        // porque este último en Windows abre con scroll vertical de
+        // meses sin flechas ◀ ▶ visibles. showDatePicker con modo
+        // `calendar` SIEMPRE tiene flechas para navegar mes a mes,
+        // que es lo que el admin espera.
         //
-        // initialEntryMode: en desktop por default abre en modo "input"
-        // (solo campos de texto sin calendario). Forzamos `calendar`
-        // para que SIEMPRE muestre el grid navegable mes a mes con
-        // flechas ◀ ▶ — lo que el admin espera al pedir un calendario.
-        final picked = await showDateRangePicker(
+        // Flow: 1) elegís fecha de inicio → 2) elegís fecha de fin
+        // (con firstDate = inicio para evitar rangos invertidos).
+
+        // Paso 1: fecha de inicio.
+        final desdePicked = await showDatePicker(
           context: context,
-          initialDateRange: DateTimeRange(start: desde, end: hasta),
-          firstDate: DateTime(hoy.year - 2, 1, 1),
-          lastDate: hoy.add(const Duration(days: 1)),
+          initialDate: desde,
+          firstDate: firstDate,
+          lastDate: lastDate,
           locale: const Locale('es', 'AR'),
           initialEntryMode: DatePickerEntryMode.calendar,
-          helpText: 'Seleccioná el rango del reporte',
-          saveText: 'CONFIRMAR',
+          helpText: 'Fecha DESDE (inicio del rango)',
+          confirmText: 'SIGUIENTE',
           cancelText: 'CANCELAR',
-          fieldStartLabelText: 'Desde',
-          fieldEndLabelText: 'Hasta',
         );
-        if (picked != null) onPick(picked.start, picked.end);
+        if (desdePicked == null) return;
+        if (!context.mounted) return;
+
+        // Paso 2: fecha de fin. firstDate = desdePicked para evitar
+        // que el admin elija un fin anterior al inicio (rango inválido).
+        final hastaInicial =
+            hasta.isBefore(desdePicked) ? desdePicked : hasta;
+        final hastaPicked = await showDatePicker(
+          context: context,
+          initialDate: hastaInicial,
+          firstDate: desdePicked,
+          lastDate: lastDate,
+          locale: const Locale('es', 'AR'),
+          initialEntryMode: DatePickerEntryMode.calendar,
+          helpText: 'Fecha HASTA (fin del rango)',
+          confirmText: 'CONFIRMAR',
+          cancelText: 'CANCELAR',
+        );
+        if (hastaPicked == null) return;
+
+        onPick(desdePicked, hastaPicked);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
