@@ -1,0 +1,111 @@
+# CI — corre en cada push a main y en cada Pull Request hacia main.
+#
+# Tres jobs en paralelo (uno por componente del stack). Si alguno falla,
+# GitHub marca el commit con ✗ rojo y manda mail. Si pasan los tres, ✓.
+#
+# El workflow NO deploya nada -- solo valida que el repo está sano. El
+# deploy sigue siendo manual (`firebase deploy --only ...`) por
+# decisión consciente: minimiza el blast radius si algo se cuela.
+
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+# Cancela runs viejos si se pushea de nuevo a la misma rama --
+# evita que se acumulen jobs viejos esperando.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter:
+    name: Flutter (analyze + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        run: flutter analyze
+
+      - name: Flutter test
+        run: flutter test
+
+  bot:
+    name: WhatsApp Bot (npm test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # PUPPETEER_SKIP_DOWNLOAD evita descargar ~100MB de Chromium con
+    # whatsapp-web.js. CI solo corre tests unitarios puros (feriados,
+    # fechas, commands) -- no abre WhatsApp Web ni necesita el browser.
+    # Sin esto el job tardaba ~3min; con esto, ~30s.
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    defaults:
+      run:
+        working-directory: whatsapp-bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: whatsapp-bot/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: npm test
+        run: npm test
+
+      - name: node --check (sintaxis de cada modulo)
+        # Defensa extra: aunque los tests cubren los modulos importantes,
+        # node --check valida la sintaxis del resto sin requerir tests.
+        run: |
+          for f in src/*.js; do
+            node --check "$f"
+          done
+
+  functions:
+    name: Cloud Functions (build + lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: TypeScript build (tsc)
+        # Valida que el codigo TS compila sin errores. Es lo que
+        # firebase-tools corre internamente como parte del predeploy.
+        run: npm run build
+
+      - name: ESLint
+        # Lint actual tira 2 warnings de max-len que conocemos. Los
+        # warnings NO fallan -- ESLint solo exit 1 si hay errors.
+        # Si en el futuro queremos tratar warnings como bloqueantes,
+        # cambiar a: npm run lint -- --max-warnings 0
+        run: npm run lint

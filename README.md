@@ -1,5 +1,7 @@
 # S.M.A.R.T. Logística
 
+[![CI](https://github.com/rodriguezreysantiago/logistica_app_profesional/actions/workflows/ci.yml/badge.svg)](https://github.com/rodriguezreysantiago/logistica_app_profesional/actions/workflows/ci.yml)
+
 Sistema de gestión de flota para la empresa de transporte **Vecchi / Sucesión Vecchi** (Bahía Blanca). Maneja personal, flota, vencimientos de papeles, checklists, revisiones, integración con Volvo Connect y un bot de WhatsApp para avisos automáticos.
 
 ## Stack
