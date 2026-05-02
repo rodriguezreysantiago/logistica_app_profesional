@@ -294,13 +294,18 @@ async function procesarSiguiente() {
 
 // ─── Polling de COLA_WHATSAPP ───────────────────────────────────────
 let _pollingTimer = null;
+// Trackea el ultimo estado de horario habil visto por el polling
+// para loguear SOLO al cruzar el umbral (no cada 15s). null = primer
+// poll de la sesion.
+let _ultimoEstadoHorario = null;
 
 async function pollearCola(db) {
   try {
     // Sweeper de docs stale en PROCESANDO: si el bot crasheo durante
     // un envio anterior (entre marcarProcesando y marcarEnviado), el
     // doc quedo PROCESANDO y nadie lo repesca. Lo devolvemos a
-    // PENDIENTE para que entre al ciclo actual.
+    // PENDIENTE para que entre al ciclo actual. Corre SIEMPRE -- aun
+    // fuera de horario habil queremos mantener el estado de la cola.
     try {
       const recuperados = await fs.recuperarStaleProcesando(db);
       if (recuperados > 0) {
@@ -309,6 +314,27 @@ async function pollearCola(db) {
     } catch (e) {
       log.warn(`Sweeper de PROCESANDO fallo: ${e.message}`);
     }
+
+    // Skip rapido si estamos fuera de horario habil (incluye fines de
+    // semana, noches, y feriados nacionales). Sin esto, el polling
+    // re-traia el mismo doc PENDIENTE cada 15s y logueaba "Fuera de
+    // horario..." en cada vuelta -> ~35K lineas inutiles en un fin
+    // de semana largo, que ahogan los logs reales.
+    //
+    // Loguear solo al cruzar el umbral: cuando entramos a fuera de
+    // horario, una linea; cuando volvemos a horario habil, otra.
+    const enHorario = enHorarioHabil();
+    if (_ultimoEstadoHorario === null) {
+      log.info(enHorario
+        ? 'Polling: en horario habil -- procesando envios.'
+        : 'Polling: fuera de horario habil -- pausa hasta proximo dia habil.');
+    } else if (_ultimoEstadoHorario !== enHorario) {
+      log.info(enHorario
+        ? 'Horario habil reanudado -- polling activo.'
+        : 'Fuera de horario habil -- pausa hasta proximo dia habil.');
+    }
+    _ultimoEstadoHorario = enHorario;
+    if (!enHorario) return;
 
     const qs = await db
       .collection(fs.COLECCION)
