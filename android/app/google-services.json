@@ -1,32 +1,13 @@
 {
   "project_info": {
-    "project_number": "444186792745",
-    "project_id": "logisticaapp-e539a",
-    "storage_bucket": "logisticaapp-e539a.firebasestorage.app"
+    "project_number": "808925655961",
+    "project_id": "coopertrans-movil",
+    "storage_bucket": "coopertrans-movil.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:444186792745:android:766198ff5d4b64a4f69d38",
-        "android_client_info": {
-          "package_name": "com.example.logistica_app"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyCuKqPyfeujSaendP08jkM5j9bNiOwZmVg"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:444186792745:android:eb89fdab89bf9043f69d38",
+        "mobilesdk_app_id": "1:808925655961:android:8cbc568b31cd0f95a4d908",
         "android_client_info": {
           "package_name": "com.example.logistica_app_profesional"
         }
@@ -34,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCuKqPyfeujSaendP08jkM5j9bNiOwZmVg"
+          "current_key": "AIzaSyD1Ll6WhwlIHd_Mr08jfMH9Yda1IhWzdfs"
         }
       ],
       "services": {

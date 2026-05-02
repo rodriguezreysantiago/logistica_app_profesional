@@ -44,40 +44,38 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCuKqPyfeujSaendP08jkM5j9bNiOwZmVg',
-    appId: '1:444186792745:android:eb89fdab89bf9043f69d38',
-    messagingSenderId: '444186792745',
-    projectId: 'logisticaapp-e539a',
-    storageBucket: 'logisticaapp-e539a.firebasestorage.app',
+    apiKey: 'AIzaSyD1Ll6WhwlIHd_Mr08jfMH9Yda1IhWzdfs',
+    appId: '1:808925655961:android:8cbc568b31cd0f95a4d908',
+    messagingSenderId: '808925655961',
+    projectId: 'coopertrans-movil',
+    storageBucket: 'coopertrans-movil.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyDybNRoE5mutL9IIgRZLhdj47oB0rnDv1s',
-    appId: '1:444186792745:ios:949745be7ed5b53cf69d38',
-    messagingSenderId: '444186792745',
-    projectId: 'logisticaapp-e539a',
-    storageBucket: 'logisticaapp-e539a.firebasestorage.app',
-    iosBundleId: 'com.example.logisticaAppProfesional',
+    apiKey: 'AIzaSyAI1z5ZtDvuK5KpI2g483rnHVKb9zUg29M',
+    appId: '1:808925655961:ios:35db79f4532b71caa4d908',
+    messagingSenderId: '808925655961',
+    projectId: 'coopertrans-movil',
+    storageBucket: 'coopertrans-movil.firebasestorage.app',
+    iosBundleId: 'com.coopertrans.movil',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyAXoZtGig1_dEg5ImI7iD9x5gzXhvRBASE',
-    appId: '1:444186792745:web:8e09b842d82b25ebf69d38',
-    messagingSenderId: '444186792745',
-    projectId: 'logisticaapp-e539a',
-    authDomain: 'logisticaapp-e539a.firebaseapp.com',
-    storageBucket: 'logisticaapp-e539a.firebasestorage.app',
-    measurementId: 'G-3T2ZQS8NST',
+    apiKey: 'AIzaSyDbtUdJmSyxQobtFpsIds6mutKCbEy0iuw',
+    appId: '1:808925655961:web:1ca61bae2dc19f23a4d908',
+    messagingSenderId: '808925655961',
+    projectId: 'coopertrans-movil',
+    authDomain: 'coopertrans-movil.firebaseapp.com',
+    storageBucket: 'coopertrans-movil.firebasestorage.app',
   );
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyAXoZtGig1_dEg5ImI7iD9x5gzXhvRBASE',
-    appId: '1:444186792745:web:0891d0a876c5ded5f69d38',
-    messagingSenderId: '444186792745',
-    projectId: 'logisticaapp-e539a',
-    authDomain: 'logisticaapp-e539a.firebaseapp.com',
-    storageBucket: 'logisticaapp-e539a.firebasestorage.app',
-    measurementId: 'G-V4B4HZYMSE',
+    apiKey: 'AIzaSyDbtUdJmSyxQobtFpsIds6mutKCbEy0iuw',
+    appId: '1:808925655961:web:f5f1aa100c059ddba4d908',
+    messagingSenderId: '808925655961',
+    projectId: 'coopertrans-movil',
+    authDomain: 'coopertrans-movil.firebaseapp.com',
+    storageBucket: 'coopertrans-movil.firebasestorage.app',
   );
 
 }
