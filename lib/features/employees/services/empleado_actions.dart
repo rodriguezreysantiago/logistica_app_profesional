@@ -70,7 +70,7 @@ class EmpleadoActions {
   /// AuditLog y volvoProxy — llamamos por HTTPS directo con Dio porque
   /// el plugin oficial `cloud_functions` no tiene impl Windows.
   static const String _endpointActualizarRol =
-      'https://us-central1-coopertrans-movil.cloudfunctions.net/actualizarRolEmpleado';
+      'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/actualizarRolEmpleado';
 
   static Dio? _dioCallable;
   static Dio get _httpCallable => _dioCallable ??= Dio(

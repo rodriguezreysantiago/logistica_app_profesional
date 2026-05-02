@@ -109,7 +109,7 @@ class VolvoApiService {
   // Si en el futuro cambiamos a Gen1 o cambia el pattern, solo ajustamos
   // esta constante.
   static const String _proxyEndpoint =
-      'https://us-central1-coopertrans-movil.cloudfunctions.net/volvoProxy';
+      'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/volvoProxy';
 
   // ============= CIRCUIT BREAKER =============
   // Si auth/permisos fallan 3 veces seguidas, dejamos de pegarle al

@@ -60,7 +60,7 @@ class AuthService {
   /// legacy de Firebase. Si en el futuro cambiamos a Gen1 o cambia el
   /// pattern, solo se ajusta esta constante.
   static const String _loginEndpoint =
-      'https://us-central1-coopertrans-movil.cloudfunctions.net/loginConDni';
+      'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/loginConDni';
 
   final FirebaseAuth _auth;
   final Dio _dio;

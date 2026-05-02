@@ -123,7 +123,7 @@ Errores comunes:
 | Mensaje | Causa | Fix |
 |---|---|---|
 | `iam.serviceAccounts.signBlob denied` | SA runtime sin Service Account Token Creator sobre sí misma | Re-aplicar IAM (ver `ESTADO_PROYECTO.md` sec. "Hardening de seguridad") |
-| `permission-denied: ...allUsers Cloud Run Invoker missing` | Después de un deploy nuevo, Cloud Run quitó el `allUsers` invoker | `gcloud run services add-iam-policy-binding logincondni --region=us-central1 --member="allUsers" --role="roles/run.invoker"` |
+| `permission-denied: ...allUsers Cloud Run Invoker missing` | Después de un deploy nuevo, Cloud Run quitó el `allUsers` invoker | `gcloud run services add-iam-policy-binding logincondni --region=southamerica-east1 --member="allUsers" --role="roles/run.invoker"` |
 | `resource-exhausted: Demasiados intentos fallidos` | Rate limit pegándole al usuario | Esperar 15 min, o limpiar `LOGIN_ATTEMPTS/{hash(dni)}` desde la consola Firestore |
 
 ### Chequeo 2 — Custom claims desactualizadas
@@ -214,19 +214,19 @@ Errores comunes después de un deploy:
 
 ```powershell
 # Ver versiones desplegadas
-gcloud functions list --regions=us-central1
+gcloud functions list --regions=southamerica-east1
 
 # Rollback a una versión específica de una function
 # (Functions Gen2 corren en Cloud Run — el rollback es por revisión)
-gcloud run services update-traffic <function-name> --to-revisions=<previous-revision>=100 --region=us-central1
+gcloud run services update-traffic <function-name> --to-revisions=<previous-revision>=100 --region=southamerica-east1
 ```
 
 Ejemplo concreto si `loginConDni` se rompe:
 ```powershell
 # Listar revisiones
-gcloud run revisions list --service=logincondni --region=us-central1
+gcloud run revisions list --service=logincondni --region=southamerica-east1
 # Volver a la anterior
-gcloud run services update-traffic logincondni --to-revisions=logincondni-00012-abc=100 --region=us-central1
+gcloud run services update-traffic logincondni --to-revisions=logincondni-00012-abc=100 --region=southamerica-east1
 ```
 
 ### Firestore rules

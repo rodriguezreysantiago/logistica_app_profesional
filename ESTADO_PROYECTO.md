@@ -451,7 +451,7 @@ La sesión wwebjs se "quemó" porque mezclamos: bot manual del user `santi` + se
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
-- ✅ Cloud Function `loginConDni` callable Gen2 deployada en us-central1 (Node.js 20 + bcrypt server-side).
+- ✅ Cloud Function `loginConDni` callable Gen2 deployada en southamerica-east1 (Node.js 20 + bcrypt server-side). Migrada desde us-central1 el 2026-05-02 para colocar Functions en el mismo DC que Firestore.
 - ✅ `AuthService` llama vía **HTTPS directo con Dio** (no `cloud_functions` plugin) porque ese plugin no tiene implementación nativa para Windows desktop. El protocolo callable (`{"data": ...}` request, `{"result": ...}` response) se maneja a mano.
 - ✅ `AuthGuard` con doble check (PrefsService + FirebaseAuth.currentUser).
 - ✅ `firestore.rules` y `storage.rules` reescritas con `isAdmin()` por custom claim — DEPLOYADAS.
@@ -477,7 +477,7 @@ La sesión wwebjs se "quemó" porque mezclamos: bot manual del user `santi` + se
 3. ✅ **Mover `AUDITORIA_ACCIONES` al server** — COMPLETADO Y DEPLOYADO 2026-04-29 noche tarde. Cloud Function callable `auditLogWrite` (Gen2 en `functions/src/index.ts`). Cliente reescrito en `lib/core/services/audit_log_service.dart` para llamar via Dio + Bearer ID token. Rule cerrada a `write: if false`. Whitelist server-side de 11 acciones permitidas + 3 entidades. `admin_dni`/`admin_nombre` se toman del JWT (no del cliente, así no se pueden falsificar). **Pendiente único**: agregar `allUsers` Cloud Run Invoker al servicio `auditlogwrite` para que clientes Flutter puedan invocarlo:
    ```powershell
    gcloud run services add-iam-policy-binding auditlogwrite `
-     --region=us-central1 --member="allUsers" --role="roles/run.invoker"
+     --region=southamerica-east1 --member="allUsers" --role="roles/run.invoker"
    ```
    (Sin esto la app va a recibir 403 al intentar auditar acciones.)
 

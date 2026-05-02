@@ -35,9 +35,11 @@ import * as crypto from "crypto";
 initializeApp();
 
 // Configuración global: límite de instancias concurrentes para que un
-// loop de login no me funda la cuenta.
+// loop de login no me funda la cuenta. La region es southamerica-east1
+// (São Paulo) para estar en el mismo DC que Firestore — eso elimina el
+// hop us-central1 ↔ sa-east1 en cada read/write (~150ms por op).
 setGlobalOptions({
-  region: "us-central1",
+  region: "southamerica-east1",
   maxInstances: 10,
   // El timeout por defecto es 60 segundos, suficiente.
 });
