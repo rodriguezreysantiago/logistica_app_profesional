@@ -251,6 +251,35 @@ async function registrarServiceDiario(db, dniDestinatario, meta) {
 }
 
 /**
+ * Para el resumen DIARIO de Alertas de Volvo (severidad HIGH de las
+ * últimas 24h, agrupadas por chofer + patente + tipo). Idempotencia
+ * por día y por DNI destinatario (mismo patrón que service diario).
+ *
+ * Devuelve true si ya se mando hoy (skip), false si no (proceder).
+ */
+async function yaSeEnvioAlertasResumen(db, dniDestinatario) {
+  const id = `alertas_resumen_${_fechaHoyIso()}_${dniDestinatario}`;
+  const doc = await db.collection(COLECCION).doc(id).get();
+  return doc.exists;
+}
+
+/**
+ * Marca como enviado el aviso DIARIO de Alertas Volvo. Llamar despues
+ * de encolar exitosamente el mensaje en COLA_WHATSAPP.
+ */
+async function registrarAlertasResumen(db, dniDestinatario, meta) {
+  const id = `alertas_resumen_${_fechaHoyIso()}_${dniDestinatario}`;
+  await db.collection(COLECCION).doc(id).set({
+    tipo: 'alertas_volvo_resumen',
+    destinatario_dni: dniDestinatario,
+    fecha: _fechaHoyIso(),
+    cantidad_eventos: meta?.cantidadEventos || 0,
+    cola_doc_id: meta?.colaDocId || null,
+    creado_en: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+/**
  * Helper para limpiar históricos de avisos cuyo papel ya se renovó.
  * No se llama hoy — pensado para una tarea de mantenimiento futura.
  * Se deja documentado para no perder la idea.
@@ -273,7 +302,9 @@ module.exports = {
   yaSeEnvio,
   yaSeEnvioServiceMaxUrgencia,
   yaSeEnvioServiceDiario,
+  yaSeEnvioAlertasResumen,
   registrar,
   registrarServiceDiario,
+  registrarAlertasResumen,
   limpiarObsoletos,
 };

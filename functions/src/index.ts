@@ -15,6 +15,7 @@
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { defineSecret } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
@@ -1676,4 +1677,200 @@ function buildAlertaDoc(
   }
 
   return doc;
+}
+
+// ============================================================================
+// onAlertaVolvoCreated — notificación al chofer cuando hay alerta HIGH
+// ============================================================================
+// Trigger Firestore que se dispara cuando `volvoAlertasPoller` escribe un
+// doc nuevo en `VOLVO_ALERTAS`. Si la severidad es HIGH:
+//   1. Buscamos qué chofer tiene asignada esa patente (EMPLEADOS.VEHICULO).
+//   2. Si tiene TELEFONO cargado, encolamos un mensaje en COLA_WHATSAPP.
+//   3. El bot Node.js (NSSM) procesa la cola respetando horarios laborales
+//      (8-19 lunes a viernes, sin feriados): si la alerta es a las 23:00,
+//      el doc queda PENDIENTE hasta las 8:00 del siguiente día hábil.
+//
+// Idempotencia: el trigger `onCreate` se dispara UNA SOLA VEZ por docId.
+// Como el docId composite es `{vin}_{createdMs}_{tipo}` y el poller skipea
+// duplicados con getAll, el mismo evento NO genera dos triggers.
+//
+// Casos donde se hace skip silencioso (log, no se manda mensaje):
+//   - Severidad MEDIUM o LOW (solo HIGH gatilla notificación al instante).
+//   - Patente sin chofer asignado (tractor en taller / sin uso).
+//   - Chofer sin TELEFONO o con TELEFONO vacío ("-", "").
+//
+// Si el chofer no aparece, la alerta sigue visible en el tablero "Alertas"
+// del admin y entra al resumen diario que se envía a Santiago.
+
+const ETIQUETAS_TIPO_ALERTA: Record<string, string> = {
+  DISTANCE_ALERT: "Cerca del vehículo de adelante",
+  IDLING: "Motor en ralentí prolongado",
+  OVERSPEED: "Exceso de velocidad",
+  PTO: "Toma de fuerza activada",
+  HARSH: "Aceleración / frenada brusca",
+  GENERIC: "Evento genérico",
+  TELL_TALE: "Luz de tablero encendida",
+  FUEL: "Cambio anormal de combustible",
+  CATALYST: "Cambio de nivel AdBlue",
+  ALARM: "Alarma anti-robo",
+  GEOFENCE: "Entrada/salida de geocerca",
+  SAFETY_ZONE: "Zona de velocidad reducida",
+  TPM: "Presión de neumático",
+  TTM: "Temperatura de neumático",
+  AEBS: "Frenado automático de emergencia",
+  ESP: "Control de estabilidad",
+  DAS: "Alerta de cansancio",
+  LKS: "Asistente de carril",
+  LCS: "Asistente de cambio de carril",
+  UNSAFE_LANE_CHANGE: "Cambio de carril inseguro",
+  TACHO_OUT_OF_SCOPE_MODE_CHANGE: "Tacógrafo fuera de servicio",
+  CARGO: "Cambio en carga (puerta / temp)",
+  ADBLUELEVEL_LOW: "AdBlue bajo",
+  WITHOUT_ADBLUE: "Sin AdBlue",
+  DRIVING_WITHOUT_BEING_LOGGED_IN: "Conducción sin chofer identificado",
+};
+
+export const onAlertaVolvoCreated = onDocumentCreated(
+  {
+    document: "VOLVO_ALERTAS/{alertId}",
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) {
+      logger.warn("[onAlertaVolvoCreated] event.data vacío, skip");
+      return;
+    }
+
+    const data = snap.data() ?? {};
+    const severidad = (data.severidad ?? "").toString().toUpperCase();
+    if (severidad !== "HIGH") {
+      // MEDIUM/LOW no notifican al instante — quedan en el tablero del
+      // admin y entran al resumen diario.
+      return;
+    }
+
+    const patenteRaw = (data.patente ?? "").toString().trim();
+    const patente = patenteRaw.toUpperCase();
+    const tipo = (data.tipo ?? "").toString();
+    if (!patente) {
+      logger.info("[onAlertaVolvoCreated] HIGH sin patente, skip", {
+        alertId: event.params.alertId,
+        tipo,
+      });
+      return;
+    }
+
+    // Lookup chofer por patente. EMPLEADOS.VEHICULO guarda la patente
+    // del tractor asignado al chofer ("-" si sin asignar). El campo es
+    // único entre choferes activos — no debería haber dos con la misma.
+    const empleadosSnap = await db
+      .collection("EMPLEADOS")
+      .where("VEHICULO", "==", patente)
+      .limit(1)
+      .get();
+    if (empleadosSnap.empty) {
+      logger.info("[onAlertaVolvoCreated] patente sin chofer asignado", {
+        patente,
+        tipo,
+      });
+      return;
+    }
+
+    const choferDoc = empleadosSnap.docs[0];
+    const choferData = choferDoc.data();
+    const telefonoRaw = (choferData.TELEFONO ?? "").toString().trim();
+    if (!telefonoRaw || telefonoRaw === "-") {
+      logger.info("[onAlertaVolvoCreated] chofer sin TELEFONO", {
+        patente,
+        choferDni: choferDoc.id,
+      });
+      return;
+    }
+
+    const apodo = (choferData.APODO ?? "").toString().trim();
+    const nombreFull = (choferData.NOMBRE ?? "").toString().trim();
+    const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+
+    const creadoMs =
+      (data.creado_en as Timestamp | undefined)?.toMillis() ?? Date.now();
+    const horaTxt = _formatHoraArg(creadoMs);
+    const etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
+
+    const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+    const mensaje =
+      `${saludo},\n\n` +
+      `Se detectó un evento de manejo en el TRACTOR ${patente} ` +
+      `hoy a las ${horaTxt}:\n\n` +
+      `⚠️ ${etiqueta}\n\n` +
+      "Te pedimos ajustar tu manejo. Si hubo una situación particular, " +
+      "avisanos a la oficina.\n\n" +
+      "_Sistema S.M.A.R.T. Logística — Mensaje automático._";
+
+    try {
+      const colaRef = await db.collection("COLA_WHATSAPP").add({
+        telefono: telefonoRaw,
+        mensaje,
+        estado: "PENDIENTE",
+        encolado_en: FieldValue.serverTimestamp(),
+        enviado_en: null,
+        error: null,
+        intentos: 0,
+        origen: "volvo_alert_high",
+        destinatario_coleccion: "EMPLEADOS",
+        destinatario_id: choferDoc.id,
+        campo_base: "VOLVO_ALERT_HIGH",
+        admin_dni: "BOT",
+        admin_nombre: "Bot automatico",
+        // Metadata para auditoria / debugging.
+        alert_id: event.params.alertId,
+        alert_tipo: tipo,
+        alert_patente: patente,
+      });
+      logger.info("[onAlertaVolvoCreated] OK encolado para chofer", {
+        alertId: event.params.alertId,
+        patente,
+        tipo,
+        choferDni: choferDoc.id,
+        colaDocId: colaRef.id,
+      });
+    } catch (e) {
+      logger.error("[onAlertaVolvoCreated] no se pudo encolar", {
+        alertId: event.params.alertId,
+        patente,
+        error: (e as Error).message,
+      });
+      // No re-throw: el trigger no debe reintentar agresivamente.
+      // Si el encolado falla, queda registro en el log y la alerta
+      // sigue visible en el tablero del admin.
+    }
+  }
+);
+
+/**
+ * Devuelve el segundo token capitalizado de un nombre tipo
+ * "APELLIDO NOMBRE …", o "" si no se puede determinar.
+ * Espejo del helper que usa el panel admin del cliente.
+ */
+function _primerNombre(full: string): string {
+  const partes = full.trim().split(/\s+/);
+  if (partes.length < 2) return "";
+  const n = partes[1];
+  if (!n) return "";
+  return n[0].toUpperCase() + n.slice(1).toLowerCase();
+}
+
+/**
+ * Formatea HH:MM en TZ Argentina a partir de millis UTC. Independiente
+ * de la TZ del runtime (Cloud Functions corre en UTC).
+ */
+function _formatHoraArg(millis: number): string {
+  const fmt = new Intl.DateTimeFormat("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return fmt.format(new Date(millis));
 }

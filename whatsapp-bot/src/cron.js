@@ -18,8 +18,10 @@ const log = require('./logger');
 const { enHorarioHabil } = require('./humano');
 const aviso = require('./aviso_builder');
 const avisoService = require('./aviso_service_builder');
+const avisoAlertasVolvo = require('./aviso_alertas_volvo_builder');
 const hist = require('./historico');
 const health = require('./health');
+const fs = require('./firestore');
 const { aIsoLocal } = require('./fechas');
 
 // Intervalo entre services programados de tractores Volvo, en KM.
@@ -462,6 +464,147 @@ async function _runOnce(fs) {
       }
     } else {
       log.debug('SERVICE_DESTINATARIO_DNI no configurado. Skip aviso service diario.');
+    }
+
+    // ─── Alertas Volvo: resumen diario al admin ─────────────────────
+    // Mismo patron que service diario: 1 mensaje por dia con el listado
+    // consolidado de eventos HIGH severity de las ultimas 24h. Se envia
+    // al primer ciclo del dia que cae en horario habil (~8:00 ART).
+    // Si no hubo eventos HIGH, NO se manda nada (silencio = nada que
+    // reportar; mandar "todo OK" todos los dias seria ruido para algo
+    // que ya tiene baja frecuencia).
+    const dniAlertasResumen = process.env.ALERTAS_RESUMEN_DESTINATARIO_DNI;
+    if (dniAlertasResumen) {
+      const yaEnviadoAlertas = await hist.yaSeEnvioAlertasResumen(
+        db,
+        dniAlertasResumen
+      );
+      if (yaEnviadoAlertas) {
+        log.debug(
+          `Alertas Volvo resumen ya enviado hoy a ${dniAlertasResumen}, skip.`
+        );
+      } else {
+        const empAlertas = empleadosByDni.get(
+          String(dniAlertasResumen).trim()
+        );
+        if (!empAlertas) {
+          log.warn(
+            `ALERTAS_RESUMEN_DESTINATARIO_DNI=${dniAlertasResumen} no esta en EMPLEADOS. ` +
+              `Resumen alertas Volvo no se envia hoy.`
+          );
+        } else {
+          const telAlertas = empAlertas.data.TELEFONO
+            ? String(empAlertas.data.TELEFONO).trim()
+            : null;
+          if (!telAlertas) {
+            log.warn(
+              `Destinatario alertas ${dniAlertasResumen} no tiene TELEFONO. ` +
+                `Resumen alertas Volvo no se envia hoy.`
+            );
+          } else {
+            // Query VOLVO_ALERTAS de las ultimas 24h con severidad HIGH.
+            const desde = admin.firestore.Timestamp.fromMillis(
+              Date.now() - 24 * 60 * 60 * 1000
+            );
+            const alertasSnap = await db
+              .collection('VOLVO_ALERTAS')
+              .where('severidad', '==', 'HIGH')
+              .where('creado_en', '>=', desde)
+              .get();
+            const eventos = alertasSnap.docs.map((d) => {
+              const data = d.data();
+              const patente = String(data.patente || '—').trim();
+              const tipo = String(data.tipo || '').trim();
+              const creadoEn = data.creado_en;
+              const fechaHora = creadoEn && typeof creadoEn.toDate === 'function'
+                ? creadoEn.toDate()
+                : new Date();
+              // Lookup chofer por patente (mapa ya cargado al inicio
+              // del cron). Si no hay match, dejamos null y el builder
+              // lo muestra como "patente sin chofer".
+              const chofer = choferByPatente.get(
+                patente.toUpperCase()
+              );
+              const choferNombre = chofer
+                ? aviso.resolverNombreSaludo(chofer.data)
+                : null;
+              return { patente, tipo, choferNombre, fechaHora };
+            });
+
+            if (eventos.length === 0) {
+              log.info(
+                `Resumen alertas Volvo: 0 eventos HIGH en ultimas 24h, ` +
+                  `no se envia mensaje.`
+              );
+              // Marcamos en historico igual para que no se chequee mil
+              // veces en el mismo dia. Idempotencia diaria preservada.
+              await hist.registrarAlertasResumen(db, dniAlertasResumen, {
+                cantidadEventos: 0,
+                colaDocId: null,
+              });
+            } else {
+              const apodoAlertas = aviso.resolverNombreSaludo(empAlertas.data);
+              const mensajeAlertas = avisoAlertasVolvo.buildResumenDiario({
+                destinatarioNombre: apodoAlertas,
+                eventos,
+              });
+              if (!mensajeAlertas) {
+                // No deberia pasar (eventos.length > 0 garantiza que el
+                // builder devuelve string), pero defensivo.
+                log.warn(
+                  `Builder de resumen alertas devolvio null con ${eventos.length} ` +
+                    `eventos. Skip.`
+                );
+              } else {
+                try {
+                  const colaRef = await db.collection(fs.COLECCION).add({
+                    telefono: telAlertas,
+                    mensaje: mensajeAlertas,
+                    estado: fs.ESTADO.pendiente,
+                    encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                    enviado_en: null,
+                    error: null,
+                    intentos: 0,
+                    origen: 'cron_alertas_volvo_diario',
+                    destinatario_coleccion: 'EMPLEADOS',
+                    destinatario_id: dniAlertasResumen,
+                    campo_base: 'ALERTAS_VOLVO_DIARIO',
+                    admin_dni: 'BOT',
+                    admin_nombre: 'Bot automatico',
+                    items_agrupados: eventos.map((e) => ({
+                      tipoDoc: 'AlertaVolvo',
+                      campoBase: 'ALERTAS_VOLVO',
+                      coleccion: 'VOLVO_ALERTAS',
+                      docId: `${e.patente}_${e.tipo}_${e.fechaHora.toISOString()}`,
+                      fecha: e.fechaHora.toISOString(),
+                      tipo: e.tipo,
+                      chofer: e.choferNombre,
+                    })),
+                  });
+                  await hist.registrarAlertasResumen(db, dniAlertasResumen, {
+                    cantidadEventos: eventos.length,
+                    colaDocId: colaRef.id,
+                  });
+                  stats.encolados++;
+                  log.info(
+                    `+ Encolado RESUMEN ALERTAS VOLVO: ${dniAlertasResumen} ` +
+                      `(${eventos.length} eventos HIGH 24h) -> ${colaRef.id}`
+                  );
+                } catch (e) {
+                  stats.errores++;
+                  log.error(
+                    `No se pudo encolar resumen alertas Volvo: ${e.message}`
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      log.debug(
+        'ALERTAS_RESUMEN_DESTINATARIO_DNI no configurado. Skip resumen alertas Volvo.'
+      );
     }
 
     log.info(
