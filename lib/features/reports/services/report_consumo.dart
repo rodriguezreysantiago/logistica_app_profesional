@@ -74,9 +74,9 @@ class ReportConsumoService {
     final Map<String, bool> opciones = {
       "PATENTE": true,
       "MODELO": true,
-      "KM RECORRIDOS (km)": true,
-      "LITROS CONSUMIDOS (L)": true,
-      "PROMEDIO L/100KM": true,
+      "LITROS": true,
+      "KILOMETROS": true,
+      "PROMEDIO": true,
       "ULTIMA SINCRONIZACION": true,
     };
 
@@ -476,7 +476,19 @@ class ReportConsumoService {
       case 'MODELO':
         cell.value = ex.TextCellValue(f.modelo);
         break;
-      case 'KM RECORRIDOS (km)':
+      case 'LITROS':
+        if (f.esPeriodo) {
+          // Redondeamos a 2 decimales — el API trae mililitros pero
+          // un consumo del período se lee mejor en L.cc.
+          cell.value = ex.DoubleCellValue(
+              double.parse(f.litros.toStringAsFixed(2)));
+          cell.cellStyle = numStyle;
+        } else {
+          cell.value =
+              ex.TextCellValue('${f.litros.round()} (acum.)');
+        }
+        break;
+      case 'KILOMETROS':
         if (f.esPeriodo) {
           // Redondeamos a 1 decimal — la API Volvo da km con precisión
           // de metros pero para un reporte humano alcanza con .x.
@@ -490,19 +502,9 @@ class ReportConsumoService {
           cell.value = ex.TextCellValue('${f.km.round()} (acum.)');
         }
         break;
-      case 'LITROS CONSUMIDOS (L)':
-        if (f.esPeriodo) {
-          // Redondeamos a 2 decimales — el API trae mililitros pero
-          // un consumo del período se lee mejor en L.cc.
-          cell.value = ex.DoubleCellValue(
-              double.parse(f.litros.toStringAsFixed(2)));
-          cell.cellStyle = numStyle;
-        } else {
-          cell.value =
-              ex.TextCellValue('${f.litros.round()} (acum.)');
-        }
-        break;
-      case 'PROMEDIO L/100KM':
+      case 'PROMEDIO':
+        // L/100km — métrica estándar de eficiencia (cuanto más bajo,
+        // mejor). Tractores cargados típicamente en 30-40.
         cell.value = ex.DoubleCellValue(
             double.parse(f.consumoLPor100Km.toStringAsFixed(2)));
         cell.cellStyle = numStyle;
@@ -542,14 +544,15 @@ class ReportConsumoService {
       ..sort((a, b) => b.consumoLPor100Km.compareTo(a.consumoLPor100Km));
 
     // Cabeceras en fila 0 (sin título de hoja arriba — más limpio
-    // para aplicar AutoFilter directo).
+    // para aplicar AutoFilter directo). Orden de columnas numéricas:
+    // LITROS, KILOMETROS, PROMEDIO (consistente con la hoja DETALLE).
     const titulos = [
       '#',
       'PATENTE',
       'MARCA / MODELO',
-      'L/100KM',
       'LITROS',
-      'KM',
+      'KILOMETROS',
+      'PROMEDIO',
       'BARRA'
     ];
     for (var i = 0; i < titulos.length; i++) {
@@ -589,21 +592,26 @@ class ReportConsumoService {
           .cell(ex.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: fila))
           .value = ex.TextCellValue('${f.marca} ${f.modelo}'.trim());
 
-      final consumoCell = hoja
-          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: fila));
-      consumoCell.value = ex.DoubleCellValue(
-          double.parse(f.consumoLPor100Km.toStringAsFixed(2)));
-      consumoCell.cellStyle = numStyle;
-
+      // Orden: LITROS (col 3), KILOMETROS (col 4), PROMEDIO (col 5).
+      // Coincide con el orden en la hoja DETALLE para que el lector
+      // recorra ambas hojas con la misma estructura mental.
       final litrosCell = hoja
-          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: fila));
-      litrosCell.value = ex.DoubleCellValue(f.litros);
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: fila));
+      litrosCell.value = ex.DoubleCellValue(
+          double.parse(f.litros.toStringAsFixed(2)));
       litrosCell.cellStyle = numStyle;
 
       final kmCell = hoja
-          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: fila));
-      kmCell.value = ex.DoubleCellValue(f.km);
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: fila));
+      kmCell.value = ex.DoubleCellValue(
+          double.parse(f.km.toStringAsFixed(1)));
       kmCell.cellStyle = numStyle;
+
+      final consumoCell = hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: fila));
+      consumoCell.value = ex.DoubleCellValue(
+          double.parse(f.consumoLPor100Km.toStringAsFixed(2)));
+      consumoCell.cellStyle = numStyle;
 
       // Barra unicode: ancho proporcional al peor consumo (más L/100km
       // = barra más larga). Hasta 30 caracteres.
