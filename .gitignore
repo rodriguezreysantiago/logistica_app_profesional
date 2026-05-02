@@ -61,7 +61,13 @@ commit_msg*.txt
 
 # State directory de Claude Code (worktrees temporales del agent,
 # session state, etc). 100% local de la maquina, no deberia trackearse.
-.claude/
+# Excepción: settings.json del proyecto SÍ se trackea — define el
+# comportamiento del agent (allowlist de permisos, hooks) y queremos
+# que sea consistente entre PCs (Santiago alterna casa/oficina).
+# Usar `.claude/*` (no `.claude/`) para que git escanee adentro y
+# aplique el `!.claude/settings.json` siguiente.
+.claude/*
+!.claude/settings.json
 
 # Buffer local del SDK nativo de Sentry — guarda eventos pendientes
 # de envío antes de transmitirlos al server. Local de la PC, no
