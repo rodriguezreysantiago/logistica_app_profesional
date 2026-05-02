@@ -59,18 +59,25 @@ class ReportConsumoService {
     DateTime hasta = hoy;
 
     // ============= 2) Columnas a incluir =============
+    // Solo columnas relevantes para el análisis de combustible:
+    // identificación (PATENTE, MODELO), métricas de consumo
+    // (KM ACTUAL, LITROS TOTALES, PROMEDIO L/100KM) y estado de la
+    // sincronización (ULTIMA SINCRONIZACION, ESTADO CONEXION).
+    //
+    // Excluidas — no afectan el cálculo:
+    //   - TIPO: siempre TRACTOR (ya filtrado a nivel de query).
+    //   - MARCA: siempre Volvo en esta flota.
+    //   - VIN: identificador interno de Volvo, no aporta al análisis.
+    //   - EMPRESA: info organizacional.
+    //   - ESTADO CONEXION: el dato útil es la última sincronización
+    //     (si está reciente = conectado), no un flag binario duplicado.
     final Map<String, bool> opciones = {
       "PATENTE": true,
-      "TIPO": true,
-      "MARCA": true,
       "MODELO": true,
-      "VIN": true,
-      "EMPRESA": true,
       "KM ACTUAL": true,
       "LITROS TOTALES": true,
       "PROMEDIO L/100KM": true,
       "ULTIMA SINCRONIZACION": true,
-      "ESTADO CONEXION": true,
     };
 
     final confirmar = await _mostrarDialogoOpciones(
@@ -499,20 +506,8 @@ class ReportConsumoService {
       case 'PATENTE':
         cell.value = ex.TextCellValue(f.patente);
         break;
-      case 'TIPO':
-        cell.value = ex.TextCellValue(f.tipo);
-        break;
-      case 'MARCA':
-        cell.value = ex.TextCellValue(f.marca);
-        break;
       case 'MODELO':
         cell.value = ex.TextCellValue(f.modelo);
-        break;
-      case 'VIN':
-        cell.value = ex.TextCellValue(f.vin.isEmpty ? '-' : f.vin);
-        break;
-      case 'EMPRESA':
-        cell.value = ex.TextCellValue(f.empresa);
         break;
       case 'KM ACTUAL':
         if (f.esPeriodo) {
@@ -541,9 +536,6 @@ class ReportConsumoService {
         break;
       case 'ULTIMA SINCRONIZACION':
         cell.value = ex.TextCellValue(f.ultimaSync);
-        break;
-      case 'ESTADO CONEXION':
-        cell.value = ex.TextCellValue(f.conectado ? 'CONECTADO' : 'OFFLINE');
         break;
     }
   }
