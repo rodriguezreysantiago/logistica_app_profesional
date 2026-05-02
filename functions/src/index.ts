@@ -1264,3 +1264,408 @@ export const auditLogWrite = onCall(
     }
   }
 );
+
+// ============================================================================
+// volvoAlertasPoller
+// ============================================================================
+// Scheduled function que cada 5 minutos pollea la Volvo Vehicle Alerts API
+// (`/alert/vehiclealerts`) y persiste cada evento nuevo en la colección
+// VOLVO_ALERTAS. Las alertas son eventos discretos del vehículo (IDLING,
+// DISTANCE_ALERT, PTO, OVERSPEED, TELL_TALE, ALARM, etc.) — distintos de
+// los snapshots de telemetría que captura `telemetriaSnapshotScheduled`.
+//
+// Diseño:
+//   - **Cursor por timestamp del server**: el endpoint devuelve
+//     `requestServerDateTime` (UTC del server al recibir el request). Lo
+//     persistimos en META/volvo_alertas_cursor y lo usamos como `starttime`
+//     del próximo run. Eso garantiza no perder eventos ni duplicar (con
+//     `datetype=received` que es el default).
+//   - **DocId composite + idempotente**: `{vin}_{createdMs}_{tipo}`. Si
+//     el mismo evento se polea dos veces (overlap del cursor, retry, etc),
+//     mismo docId → mismo doc, no se duplica.
+//   - **Skip de duplicados con getAll batch**: antes de escribir, hacemos
+//     1 getAll por página para detectar cuáles docIds ya existen y no
+//     pisar campos de gestión (`atendida`, `atendida_por`) seteados por el
+//     admin desde la app.
+//   - **Paginación**: el spec devuelve `moreDataAvailable` + `moreDataAvailableLink`
+//     (relativo, ya con query params preservados). Lo seguimos hasta que
+//     `moreDataAvailable=false` o llegamos al safety cap de páginas.
+//   - **Cold start**: si no hay cursor (primer run de la function),
+//     arrancamos desde "ahora menos 1h". El histórico anterior se ignora
+//     en este path; si hace falta backfillear más, se hace por script
+//     manual aparte.
+//   - **Cross-ref VIN → patente**: el payload trae `customerVehicleName`
+//     que en la cuenta de Coopertrans coincide con la patente argentina.
+//     Como fallback (si viene vacío o no coincide), buscamos en VEHICULOS
+//     por VIN — mismo patrón que `telemetriaSnapshotScheduled`.
+
+const ACCEPT_ALERTS =
+  "application/x.volvogroup.com.vehiclealerts.v1.1+json; UTF-8";
+
+// Sub-objetos posibles dentro de un AlertsObject según el spec v1.1.6.
+// Los copiamos al campo `detalles` solo si vienen en el payload — la
+// mayoría de las alertas tiene exactamente uno (el que corresponde al
+// alertType), pero el modelo permite más.
+const ALERT_SUBOBJETOS = [
+  "generic",
+  "tachoOutOfMode",
+  "geofence",
+  "safetyZone",
+  "overspeed",
+  "idling",
+  "fuelLevel",
+  "catalystFuelLevel",
+  "pto",
+  "cargo",
+  "tpm",
+  "ttm",
+  "das",
+  "esp",
+  "aebs",
+  "harsh",
+  "lks",
+  "lcs",
+  "distanceAlert",
+  "unsafeLaneChange",
+  "chargingStatusInfo",
+  "volvoGroupChargingStatusInfo",
+  "batteryPackInfo",
+  "chargingConnectionStatusInfo",
+  "alarmInfo",
+] as const;
+
+// Cap de páginas por run para que un cursor mal seteado no nos haga un
+// loop largo. Con cadencia de 5 min y volumen real (~5 eventos/día), una
+// sola página alcanza siempre. 20 páginas = hasta 2000 eventos, suficiente
+// margen para cualquier escenario realista.
+const MAX_PAGES_PER_RUN = 20;
+
+// En cold start, arrancamos desde "ahora - 1h" (no backfilleamos histórico
+// completo automáticamente). 1h da margen razonable de overlap si la
+// function arranca después de un período de inactividad sin perder los
+// eventos recientes.
+const COLD_START_LOOKBACK_MS = 60 * 60 * 1000;
+
+interface AlertsApiAlert extends Record<string, unknown> {
+  vin?: string;
+  alertType?: string;
+  severity?: string;
+  createdDateTime?: string;
+  receivedDateTime?: string;
+  customerVehicleName?: string;
+  gnssPosition?: Record<string, unknown>;
+  driverId?: Record<string, unknown>;
+  hrTotalVehicleDistance?: number;
+  totalEngineHours?: number;
+  totalElectricMotorHours?: number;
+}
+
+interface AlertsApiResponse {
+  alertsResponse?: {
+    alerts?: AlertsApiAlert[];
+    moreDataAvailable?: boolean;
+    moreDataAvailableLink?: string;
+    requestServerDateTime?: string;
+  };
+}
+
+export const volvoAlertasPoller = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "America/Argentina/Buenos_Aires",
+    secrets: [volvoUsername, volvoPassword],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async () => {
+    logger.info("[volvoAlertasPoller] iniciando ciclo");
+
+    // ─── 1. Cursor: desde dónde poleamos ────────────────────────────
+    const cursorRef = db.collection("META").doc("volvo_alertas_cursor");
+    const cursorSnap = await cursorRef.get();
+    const cursorData = cursorSnap.exists ? cursorSnap.data() ?? {} : {};
+    const ultimoServerTs = cursorData.ultimo_request_server_datetime as
+      | Timestamp
+      | undefined;
+    const starttime = ultimoServerTs ?
+      ultimoServerTs.toDate().toISOString() :
+      new Date(Date.now() - COLD_START_LOOKBACK_MS).toISOString();
+    const esColdStart = !ultimoServerTs;
+
+    // ─── 2. Map VIN → patente desde VEHICULOS ───────────────────────
+    const vehiculosSnap = await db.collection("VEHICULOS").get();
+    const vinToPatente = new Map<string, string>();
+    for (const doc of vehiculosSnap.docs) {
+      const data = doc.data();
+      const vin = (data.VIN ?? "").toString().trim().toUpperCase();
+      if (vin && vin !== "-") {
+        vinToPatente.set(vin, doc.id);
+      }
+    }
+
+    // ─── 3. Auth Volvo ──────────────────────────────────────────────
+    const authHeader = "Basic " + Buffer.from(
+      `${volvoUsername.value()}:${volvoPassword.value()}`
+    ).toString("base64");
+
+    // ─── 4. Loop de paginación ──────────────────────────────────────
+    const qsInicial = new URLSearchParams({ starttime });
+    let url = `${VOLVO_BASE}/alert/vehiclealerts?${qsInicial.toString()}`;
+    let totalRecibidos = 0;
+    let totalEscritos = 0;
+    let totalDuplicados = 0;
+    let totalDescartados = 0;
+    let nuevoServerDateTime: string | null = null;
+    let pages = 0;
+
+    while (pages < MAX_PAGES_PER_RUN) {
+      pages++;
+
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Authorization": authHeader,
+            "Accept": ACCEPT_ALERTS,
+          },
+        });
+      } catch (e) {
+        logger.error("[volvoAlertasPoller] fetch falló", {
+          page: pages,
+          error: (e as Error).message,
+        });
+        return; // No actualizamos cursor, próximo run reintenta.
+      }
+
+      if (!res.ok) {
+        logger.warn("[volvoAlertasPoller] Volvo HTTP error", {
+          statusCode: res.status,
+          page: pages,
+        });
+        return; // Idem: no avanzamos cursor.
+      }
+
+      const body = (await res.json()) as AlertsApiResponse;
+      const response = body.alertsResponse ?? {};
+      const alerts = Array.isArray(response.alerts) ? response.alerts : [];
+      const moreData = response.moreDataAvailable === true;
+      const moreLink = response.moreDataAvailableLink;
+      const serverTs = response.requestServerDateTime;
+
+      // El requestServerDateTime de la PRIMER página es el que vamos a
+      // persistir como cursor. Las páginas siguientes traen el mismo
+      // valor o uno levemente distinto, pero usamos siempre la primera
+      // para que el cursor refleje el momento del primer fetch.
+      if (pages === 1 && serverTs) {
+        nuevoServerDateTime = serverTs;
+      }
+
+      totalRecibidos += alerts.length;
+
+      if (alerts.length > 0) {
+        const writeResult = await persistirAlertas(
+          alerts,
+          vinToPatente
+        );
+        totalEscritos += writeResult.escritos;
+        totalDuplicados += writeResult.duplicados;
+        totalDescartados += writeResult.descartados;
+      }
+
+      if (!moreData || !moreLink) break;
+      url = `${VOLVO_BASE}${moreLink}`;
+    }
+
+    // ─── 5. Persistir cursor ────────────────────────────────────────
+    if (nuevoServerDateTime) {
+      await cursorRef.set(
+        {
+          ultimo_request_server_datetime: Timestamp.fromDate(
+            new Date(nuevoServerDateTime)
+          ),
+          ultimo_exito_at: FieldValue.serverTimestamp(),
+          ultimo_recibidos: totalRecibidos,
+          ultimo_escritos: totalEscritos,
+          ultimo_duplicados: totalDuplicados,
+          ultimo_descartados: totalDescartados,
+          ultimo_paginas: pages,
+        },
+        { merge: true }
+      );
+    }
+
+    logger.info("[volvoAlertasPoller] OK", {
+      esColdStart,
+      paginas: pages,
+      recibidos: totalRecibidos,
+      escritos: totalEscritos,
+      duplicados: totalDuplicados,
+      descartados: totalDescartados,
+    });
+  }
+);
+
+interface PersistirResult {
+  escritos: number;
+  duplicados: number;
+  descartados: number;
+}
+
+/**
+ * Persiste un batch de alertas en VOLVO_ALERTAS de manera idempotente.
+ *
+ * Estrategia:
+ *   1. Construir docId compuesto `{vin}_{createdMs}_{tipo}` para cada
+ *      alerta. Las que no tengan los campos required del spec
+ *      (vin/alertType/createdDateTime) se descartan.
+ *   2. Hacer un único `getAll` para detectar cuáles docIds ya existen
+ *      en Firestore. Esos se skipean (no los pisamos para no perder
+ *      campos de gestión `atendida`/`atendida_por`/`atendida_en`).
+ *   3. Crear los nuevos en una sola batch.
+ *
+ * Costo: 1 getAll de N reads + 1 batch de M writes (M = alertas nuevas).
+ */
+async function persistirAlertas(
+  alerts: AlertsApiAlert[],
+  vinToPatente: Map<string, string>
+): Promise<PersistirResult> {
+  // 1. Construir docIds, descartar las inválidas
+  type Pendiente = { docId: string; alert: AlertsApiAlert };
+  const pendientes: Pendiente[] = [];
+  let descartados = 0;
+
+  for (const alert of alerts) {
+    const vin = (alert.vin ?? "").toString().trim().toUpperCase();
+    const tipo = (alert.alertType ?? "").toString();
+    const createdRaw = alert.createdDateTime;
+    if (!vin || !tipo || !createdRaw) {
+      descartados++;
+      continue;
+    }
+    const createdMs = new Date(createdRaw).getTime();
+    if (Number.isNaN(createdMs)) {
+      descartados++;
+      continue;
+    }
+    pendientes.push({ docId: `${vin}_${createdMs}_${tipo}`, alert });
+  }
+
+  if (pendientes.length === 0) {
+    return { escritos: 0, duplicados: 0, descartados };
+  }
+
+  // 2. getAll para saber cuáles ya existen
+  const refs = pendientes.map((p) =>
+    db.collection("VOLVO_ALERTAS").doc(p.docId)
+  );
+  const snaps = await db.getAll(...refs);
+  const existing = new Set<string>();
+  for (const snap of snaps) {
+    if (snap.exists) existing.add(snap.id);
+  }
+
+  // 3. Batch de creación de los nuevos
+  const batch = db.batch();
+  let escritos = 0;
+  for (let i = 0; i < pendientes.length; i++) {
+    const { docId, alert } = pendientes[i];
+    if (existing.has(docId)) continue;
+    batch.set(refs[i], buildAlertaDoc(alert, vinToPatente));
+    escritos++;
+  }
+  if (escritos > 0) {
+    await batch.commit();
+  }
+
+  return {
+    escritos,
+    duplicados: pendientes.length - escritos,
+    descartados,
+  };
+}
+
+/**
+ * Mapea una alerta del payload de Volvo al doc Firestore
+ * (naming castellano + tipos serializables).
+ */
+function buildAlertaDoc(
+  alert: AlertsApiAlert,
+  vinToPatente: Map<string, string>
+): Record<string, unknown> {
+  const vin = (alert.vin ?? "").toString().trim().toUpperCase();
+  const tipo = (alert.alertType ?? "").toString();
+  const severidad = (alert.severity ?? "").toString();
+  const creadoMs = new Date(alert.createdDateTime as string).getTime();
+
+  const customerName = (alert.customerVehicleName ?? "").toString().trim();
+  const patente = customerName || vinToPatente.get(vin) || null;
+
+  const doc: Record<string, unknown> = {
+    vin,
+    tipo,
+    severidad,
+    creado_en: Timestamp.fromMillis(creadoMs),
+    polled_en: FieldValue.serverTimestamp(),
+  };
+  if (patente) doc.patente = patente;
+
+  if (alert.receivedDateTime) {
+    const recibidoMs = new Date(alert.receivedDateTime).getTime();
+    if (!Number.isNaN(recibidoMs)) {
+      doc.recibido_en = Timestamp.fromMillis(recibidoMs);
+    }
+  }
+
+  // GPS: el spec marca `latitude`/`longitude`/`positionDateTime` como
+  // required dentro de gnssPosition. Si vino el sub-objeto, lo mapeamos.
+  const gps = alert.gnssPosition;
+  if (gps && typeof gps === "object") {
+    const posicion: Record<string, unknown> = {};
+    if (gps.latitude != null) posicion.lat = Number(gps.latitude);
+    if (gps.longitude != null) posicion.lng = Number(gps.longitude);
+    if (gps.heading != null) posicion.heading = Number(gps.heading);
+    if (gps.altitude != null) posicion.altitud = Number(gps.altitude);
+    if (gps.speed != null) posicion.velocidad = Number(gps.speed);
+    if (gps.positionDateTime) {
+      const posMs = new Date(gps.positionDateTime as string).getTime();
+      if (!Number.isNaN(posMs)) posicion.timestamp = Timestamp.fromMillis(posMs);
+    }
+    if (Object.keys(posicion).length > 0) {
+      doc.posicion_gps = posicion;
+    }
+  }
+
+  // Sub-objetos del payload: copiamos el que venga (suele ser uno solo,
+  // el correspondiente al alertType). Los renombramos con prefijo
+  // `detalle_` para que sean obvios en consultas y no choquen con
+  // campos top-level.
+  for (const subKey of ALERT_SUBOBJETOS) {
+    const sub = alert[subKey];
+    if (sub != null) {
+      doc[`detalle_${subKey}`] = sub;
+    }
+  }
+
+  // Datos opcionales del vehículo en el momento del evento.
+  if (alert.hrTotalVehicleDistance != null) {
+    const metros = Number(alert.hrTotalVehicleDistance);
+    if (!Number.isNaN(metros)) doc.distancia_total_metros = metros;
+  }
+  if (alert.totalEngineHours != null) {
+    const horas = Number(alert.totalEngineHours);
+    if (!Number.isNaN(horas)) doc.horas_motor = horas;
+  }
+  if (alert.totalElectricMotorHours != null) {
+    const horas = Number(alert.totalElectricMotorHours);
+    if (!Number.isNaN(horas)) doc.horas_motor_electrico = horas;
+  }
+
+  // Driver ID si vino. Lo guardamos crudo — la app decide qué mostrar
+  // según `tachoDriverIdentification` o `oemDriverIdentification`.
+  if (alert.driverId && typeof alert.driverId === "object") {
+    doc.driver_id = alert.driverId;
+  }
+
+  return doc;
+}

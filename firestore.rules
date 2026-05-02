@@ -230,6 +230,40 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // VOLVO_ALERTAS — eventos del Vehicle Alerts API (solo Cloud Function escribe)
+    // ========================================================================
+    // La scheduled function `volvoAlertasPoller` corre cada 5 min y popula
+    // esta colección con los eventos que devuelve la Volvo Vehicle Alerts
+    // API (IDLING, DISTANCE_ALERT, OVERSPEED, PTO, TELL_TALE, ALARM, etc).
+    // El docId es composite e idempotente: `{vin}_{createdMs}_{tipo}`.
+    //
+    // El cliente puede MARCAR alertas como atendidas (escribiendo los
+    // campos `atendida`, `atendida_por`, `atendida_en`) pero no puede
+    // crearlas ni borrarlas — todo create/delete pasa por Admin SDK.
+
+    match /VOLVO_ALERTAS/{doc} {
+      allow read: if isAdminOrSupervisor();
+      // Update: admin/supervisor marcan como atendida desde el tablero.
+      // El payload de la alerta lo escribe el poller via Admin SDK, no
+      // hace falta protegerlo a nivel de rules — un admin "rebelde" no
+      // gana nada cambiando el `tipo` o `severidad` de un evento ya
+      // registrado, y AUDITORIA_ACCIONES guarda quién marcó qué.
+      allow update: if isAdminOrSupervisor();
+      allow create, delete: if false;
+    }
+
+    // ========================================================================
+    // META — estado interno de los pollers (cursor, etc.)
+    // ========================================================================
+    // Subcolección de docs internos del server (cursor del poller Volvo
+    // Alerts, futuros cursors de otros pollers). Ningún cliente debe leer
+    // ni escribir — todo pasa por Admin SDK.
+
+    match /META/{doc=**} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
     // LOGIN_ATTEMPTS — rate limiting del login (solo Cloud Function)
     // ========================================================================
     // La function `loginConDni` escribe acá vía Admin SDK (bypasea rules).
