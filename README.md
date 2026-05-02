@@ -62,19 +62,11 @@ logistica_app_profesional/
 
 ## Documentación
 
-**`ESTADO_PROYECTO.md`** es el doc principal — handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Incluye:
-
-- Tech stack detallado.
-- Arquitectura completa por features.
-- Convenciones (orden APELLIDO+NOMBRE, IDs en EMPLEADOS=DNI, etc.).
-- Decisiones técnicas con su razón.
-- Lo ya hecho por sesiones (sprints, refactors, features Volvo, bot, RBAC, etc.).
-- Pendientes / roadmap.
-- Setup en máquina nueva.
-- Comandos útiles.
-- Bugs del sandbox de Cowork con sus workarounds.
-
-Cuando vuelvas en otra sesión, leé esa sección antes de cambiar nada.
+| Archivo | Para qué |
+|---|---|
+| **[`RUNBOOK.md`](RUNBOOK.md)** | Apagar incendios. Bot caído, login roto, rollback, backup, disaster recovery. Leerlo si algo NO ESTÁ ANDANDO en producción. |
+| **[`ESTADO_PROYECTO.md`](ESTADO_PROYECTO.md)** | Handoff completo. Stack, arquitectura, convenciones, decisiones técnicas, sesiones de trabajo, pendientes. Leerlo si vas a CAMBIAR algo. |
+| **`README.md`** (este) | Onboarding inicial. Cómo arrancar el proyecto la primera vez. |
 
 ## Roles y permisos
 
