@@ -19,7 +19,17 @@ const {
   esLegacy,
   sha256Hex,
   hashId,
+  validarInputLogin,
 } = require('../lib/index');
+
+// HttpsError de firebase-functions/v2/https tiene .code que combina
+// 'functions/<code>' (ej. 'functions/invalid-argument'). Lo usamos en
+// los tests para verificar el tipo de error sin importar si el SDK
+// cambia el wrapper.
+function esHttpsError(err, codigoEsperado) {
+  return err && typeof err.code === 'string' &&
+    err.code.endsWith(codigoEsperado);
+}
 
 describe('esBcrypt', () => {
   test('reconoce prefijos bcrypt estandar ($2a$, $2b$, $2y$)', () => {
@@ -136,5 +146,120 @@ describe('verificarPassword (async)', () => {
     const promise = verificarPassword('vecchi123', hash);
     assert.ok(promise instanceof Promise, 'verificarPassword debe devolver Promise');
     await promise;
+  });
+});
+
+describe('validarInputLogin', () => {
+  test('input valido devuelve los valores limpios', () => {
+    const r = validarInputLogin({ dni: '29820141', password: 'vecchi123' });
+    assert.deepStrictEqual(r, { dni: '29820141', password: 'vecchi123' });
+  });
+
+  test('DNI con puntos y espacios se sanea', () => {
+    const r = validarInputLogin({ dni: '29.820.141', password: 'pwd123' });
+    assert.strictEqual(r.dni, '29820141');
+  });
+
+  test('DNI con guiones se sanea (formato CUIL inverso)', () => {
+    const r = validarInputLogin({ dni: '29-820-141', password: 'pwd123' });
+    assert.strictEqual(r.dni, '29820141');
+  });
+
+  test('password con espacios al borde se trimea', () => {
+    const r = validarInputLogin({ dni: '29820141', password: '  pwd123  ' });
+    assert.strictEqual(r.password, 'pwd123');
+  });
+
+  test('password con espacios INTERIORES se preserva', () => {
+    // Caso real: password "vecchi 123" -- el trim solo toca bordes,
+    // no debe meter mano dentro del string.
+    const r = validarInputLogin({ dni: '29820141', password: 'vecchi 123' });
+    assert.strictEqual(r.password, 'vecchi 123');
+  });
+
+  test('input null tira invalid-argument', () => {
+    assert.throws(
+      () => validarInputLogin(null),
+      (err) => esHttpsError(err, 'invalid-argument'),
+      'Debe tirar HttpsError invalid-argument cuando data es null'
+    );
+  });
+
+  test('DNI vacio tira invalid-argument', () => {
+    assert.throws(
+      () => validarInputLogin({ dni: '', password: 'pwd' }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+  });
+
+  test('password vacia tira invalid-argument', () => {
+    assert.throws(
+      () => validarInputLogin({ dni: '29820141', password: '' }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+  });
+
+  test('DNI muy corto (<6 chars) tira invalid-argument', () => {
+    assert.throws(
+      () => validarInputLogin({ dni: '12345', password: 'pwd' }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+  });
+
+  test('DNI muy largo (>9 chars) tira invalid-argument', () => {
+    assert.throws(
+      () => validarInputLogin({ dni: '1234567890', password: 'pwd' }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+  });
+
+  test('DNI de solo letras se sanea a vacio y tira invalid-argument', () => {
+    assert.throws(
+      () => validarInputLogin({ dni: 'abcdefgh', password: 'pwd' }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+  });
+
+  test('REGRESSION DoS: password > 128 chars tira invalid-argument', () => {
+    // bcrypt.compare es O(N) sobre el largo. Sin este chequeo, un POST
+    // con password de varios MB bloquea el event loop. Test critico
+    // contra regresion del fix de seguridad.
+    const passwordLarga = 'x'.repeat(200);
+    assert.throws(
+      () => validarInputLogin({ dni: '29820141', password: passwordLarga }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+  });
+
+  test('password de exactamente 128 chars pasa (limite inclusivo)', () => {
+    const password128 = 'x'.repeat(128);
+    const r = validarInputLogin({ dni: '29820141', password: password128 });
+    assert.strictEqual(r.password.length, 128);
+  });
+
+  test('password de 129 chars tira (limite exclusivo arriba)', () => {
+    const password129 = 'x'.repeat(129);
+    assert.throws(
+      () => validarInputLogin({ dni: '29820141', password: password129 }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+  });
+
+  test('campos numéricos como input se convierten a string', () => {
+    // Defensivo: si el cliente manda dni como number en lugar de string,
+    // el .toString() lo convierte. Asi loginConDni no crashea.
+    const r = validarInputLogin({ dni: 29820141, password: 'pwd' });
+    assert.strictEqual(r.dni, '29820141');
+  });
+
+  test('campos undefined se manejan sin crashear', () => {
+    assert.throws(
+      () => validarInputLogin({}),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
+    assert.throws(
+      () => validarInputLogin({ dni: undefined, password: undefined }),
+      (err) => esHttpsError(err, 'invalid-argument')
+    );
   });
 });

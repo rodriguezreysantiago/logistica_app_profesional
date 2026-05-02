@@ -87,39 +87,8 @@ export const loginConDni = onCall(
     enforceAppCheck: false, // todavía no está activado App Check
   },
   async (request) => {
-    const { data } = request;
-
-    // ─── Validación de input ────────────────────────────────────────
-    const dniRaw = (data?.dni ?? "").toString();
-    const passwordRaw = (data?.password ?? "").toString();
-
-    const dni = dniRaw.replace(/[^0-9]/g, "");
-    const password = passwordRaw.trim();
-
-    if (!dni || !password) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Complete todos los campos requeridos."
-      );
-    }
-    if (dni.length < 6 || dni.length > 9) {
-      // DNIs argentinos modernos: 7-8 dígitos. Aceptamos 6-9 por si
-      // hay legajos con formato distinto.
-      throw new HttpsError(
-        "invalid-argument",
-        "El DNI tiene un formato inválido."
-      );
-    }
-    if (password.length > 128) {
-      // bcrypt.compare es O(N) sobre el largo del input. Sin este
-      // chequeo, un POST con password de varios MB bloquea el event
-      // loop por segundos -- vector de DoS barato. 128 es muy generoso
-      // para un usuario real; nadie tipea passwords mas largas.
-      throw new HttpsError(
-        "invalid-argument",
-        "Contraseña demasiado larga."
-      );
-    }
+    // Validación extraída a función pura (testeable sin Firebase).
+    const { dni, password } = validarInputLogin(request.data);
 
     // ─── Lectura del legajo ────────────────────────────────────────
     const docRef = db.collection("EMPLEADOS").doc(dni);
@@ -450,6 +419,54 @@ export const actualizarRolEmpleado = onCall(
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Valida el input de `loginConDni` y devuelve los valores limpios.
+ *
+ * Tira `HttpsError("invalid-argument", ...)` con mensaje user-friendly
+ * en cada caso de input invalido:
+ *   - DNI o password vacios.
+ *   - DNI fuera del rango 6-9 digitos (los DNIs argentinos modernos
+ *     son 7-8; aceptamos 6-9 por legajos con formato distinto).
+ *   - Password > 128 chars (vector de DoS contra bcrypt: si el atacante
+ *     manda 1MB, bcrypt.compare procesa 1MB y bloquea el event loop).
+ *
+ * Devuelve un objeto con los valores ya saneados:
+ *   - `dni`: solo digitos (cualquier separador / punto / espacio quitado).
+ *   - `password`: trimeada en bordes.
+ */
+export function validarInputLogin(data: unknown): {
+  dni: string;
+  password: string;
+} {
+  const obj = (data ?? {}) as { dni?: unknown; password?: unknown };
+  const dniRaw = (obj.dni ?? "").toString();
+  const passwordRaw = (obj.password ?? "").toString();
+
+  const dni = dniRaw.replace(/[^0-9]/g, "");
+  const password = passwordRaw.trim();
+
+  if (!dni || !password) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Complete todos los campos requeridos."
+    );
+  }
+  if (dni.length < 6 || dni.length > 9) {
+    throw new HttpsError(
+      "invalid-argument",
+      "El DNI tiene un formato inválido."
+    );
+  }
+  if (password.length > 128) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Contraseña demasiado larga."
+    );
+  }
+
+  return { dni, password };
+}
 
 /**
  * Compara una contraseña en plano con un hash en formato bcrypt o
