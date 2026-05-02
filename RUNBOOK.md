@@ -249,30 +249,79 @@ No hay rollback automático para mobile/desktop builds — el usuario tiene que 
 
 ## Backup y disaster recovery
 
-### Firestore — backup automático recomendado
+Hay dos backups críticos: **Firestore** (datos del negocio) y **`.wwebjs_auth/`** (sesión WhatsApp del bot). Los scripts ya están en el repo; falta programarlos.
 
-**No está activado todavía** (item #7 del backlog del 1-mayo). Lo correcto es activar export programado a GCS:
+### Backup Firestore (`scripts/backup_firestore.ps1`)
 
-```powershell
-gcloud firestore export gs://<bucket-backups>/$(Get-Date -Format yyyy-MM-dd) `
-  --project=<project-id>
-```
-
-Programar con Cloud Scheduler una vez al día. Está dentro del free tier para una flota chica.
-
-### Sesión `.wwebjs_auth/`
-
-Esta carpeta es el "estado autenticado" de WhatsApp Web del bot. Si se pierde, hay que reescanear el QR — y como el QR se escanea desde el celular descartable, también hay que tener ese celular disponible.
+**Setup one-time** (hacé esto solo una vez):
 
 ```powershell
-# Backup manual (mientras no esté automatizado):
-$fecha = Get-Date -Format yyyy-MM-dd
-Compress-Archive `
-  -Path C:\Users\santi\logistica_app_profesional\whatsapp-bot\.wwebjs_auth `
-  -DestinationPath "C:\Users\santi\Backups\bot_wwebjs_auth_$fecha.zip"
+# 1. Instalar gcloud CLI si no lo tenés:
+#    https://cloud.google.com/sdk/docs/install
+
+# 2. Login y proyecto activo:
+gcloud auth login
+gcloud config set project logisticaapp-e539a
+
+# 3. Crear el bucket de backups (region SA = menor latencia desde AR):
+gcloud storage buckets create gs://logisticaapp-backups `
+  --project=logisticaapp-e539a `
+  --location=southamerica-east1 `
+  --uniform-bucket-level-access
+
+# 4. Probar el script una vez manual:
+.\scripts\backup_firestore.ps1
+# Si OK, debería decir "Backup OK: gs://logisticaapp-backups/2026-..."
 ```
 
-Ideal: tarea programada de Windows que corra eso semanalmente y suba el zip a OneDrive.
+**Programar** (recomendado: Cloud Scheduler en GCP — corre aunque la PC esté apagada):
+
+```powershell
+# Crear job de Cloud Scheduler que invoque el export diariamente a las 03:00 ART:
+gcloud scheduler jobs create http firestore-backup-diario `
+  --location=southamerica-east1 `
+  --schedule="0 3 * * *" `
+  --time-zone="America/Argentina/Buenos_Aires" `
+  --uri="https://firestore.googleapis.com/v1/projects/logisticaapp-e539a/databases/(default):exportDocuments" `
+  --http-method=POST `
+  --oauth-service-account-email=<service-account-email> `
+  --message-body='{"outputUriPrefix":"gs://logisticaapp-backups"}'
+```
+
+(El `<service-account-email>` lo sacás de Firebase Console → Project Settings → Service accounts. Permisos requeridos: `Cloud Datastore Import Export Admin`.)
+
+**Alternativa más simple** si Cloud Scheduler te complica: programar el `.ps1` con Task Scheduler de Windows en la PC casa (ver siguiente sección, mismo patrón).
+
+**Costo**: ~3 centavos USD/mes para una flota chica. El export en sí es gratis; solo paga storage en GCS.
+
+### Backup `.wwebjs_auth/` (`whatsapp-bot/scripts/backup_wwebjs_auth.ps1`)
+
+La sesión es el "estado autenticado" de WhatsApp Web. Si se pierde, hay que reescanear QR desde el celular descartable. El script comprime la carpeta a un zip con timestamp y aplica retención (60 días por default).
+
+**Programar con Task Scheduler** (Windows):
+
+1. Abrir **Programador de tareas** (Task Scheduler).
+2. Click en **Crear tarea básica** → nombre: `Backup wwebjs_auth semanal`.
+3. **Trigger**: Semanalmente, día y hora a tu elección (recomendado: domingo 03:00 AM).
+4. **Acción**: Iniciar un programa.
+   - **Programa**: `powershell.exe`
+   - **Argumentos**:
+     ```
+     -NoProfile -ExecutionPolicy Bypass -File "C:\Users\santi\logistica_app_profesional\whatsapp-bot\scripts\backup_wwebjs_auth.ps1"
+     ```
+5. **Condiciones**: marcar "Despertar el equipo para ejecutar esta tarea" si la PC duerme.
+6. **Configuración** → "Si la tarea falla, reintentar cada": 5 minutos, hasta 3 intentos.
+
+**Variables de entorno opcionales** (set en system env vars o pasalas al script):
+- `BOT_BACKUP_DIR` — destino del zip. Default `%USERPROFILE%\Backups\bot`.
+- `BOT_BACKUP_RETENCION_DIAS` — borra zips más viejos que esto. Default 60.
+
+Para llevar los zips a la nube: el `BOT_BACKUP_DIR` apunta a una subcarpeta dentro de **OneDrive** (que sincroniza solo). Ej:
+```powershell
+[Environment]::SetEnvironmentVariable('BOT_BACKUP_DIR', "$env:USERPROFILE\OneDrive\Backups\bot", 'User')
+```
+
+Logs del backup: `whatsapp-bot/logs/backup.log`.
 
 ### `serviceAccountKey.json` y `secrets.json`
 
