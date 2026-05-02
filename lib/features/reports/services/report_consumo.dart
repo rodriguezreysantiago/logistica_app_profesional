@@ -302,7 +302,15 @@ class ReportConsumoService {
         fontColorHex: ex.ExcelColor.fromHexString("#FFFFFF"),
         horizontalAlign: ex.HorizontalAlign.Center,
       );
-      final numStyle = ex.CellStyle(numberFormat: ex.NumFormat.standard_4);
+      // Formato argentino: 1.234.567,89 (punto miles, coma decimal).
+      // El prefijo `[$-2C0A]` fuerza el locale es-AR independiente de
+      // la configuración regional de la PC del lector. Sin él, Excel
+      // mostraría `1,234,567.89` en una PC con locale en-US.
+      final numStyle = ex.CellStyle(
+        numberFormat: const ex.CustomNumericNumFormat(
+          formatCode: r'[$-2C0A]#,##0.00',
+        ),
+      );
 
       // Sin header informativo arriba — el admin aplica AutoFilter
       // (Ctrl+Shift+L) directamente sobre la fila 0 y filtra/ordena
@@ -557,7 +565,11 @@ class ReportConsumoService {
     }
 
     final maxConsumo = ranking.first.consumoLPor100Km;
-    final numStyle = ex.CellStyle(numberFormat: ex.NumFormat.standard_4);
+    final numStyle = ex.CellStyle(
+      numberFormat: const ex.CustomNumericNumFormat(
+        formatCode: r'[$-2C0A]#,##0.00',
+      ),
+    );
 
     for (var i = 0; i < ranking.length; i++) {
       final f = ranking[i];
