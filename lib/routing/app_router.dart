@@ -17,6 +17,7 @@ import '../features/expirations/screens/user_mis_vencimientos_screen.dart';
 
 import '../features/admin_dashboard/screens/admin_shell.dart';
 import '../features/admin_dashboard/screens/admin_estado_bot_screen.dart';
+import '../features/admin_dashboard/screens/admin_volvo_alertas_screen.dart';
 import '../features/employees/screens/admin_personal_lista_screen.dart';
 import '../features/vehicles/screens/admin_vehiculos_lista_screen.dart';
 import '../features/vehicles/screens/admin_mantenimiento_screen.dart';
@@ -199,6 +200,16 @@ class AppRouter {
       case AppRoutes.adminMantenimiento:
         return _buildRoute(
           _protegerAdmin(const AdminMantenimientoScreen()),
+          settings,
+        );
+
+      // ================= ALERTAS VOLVO =================
+      // Tablero de eventos del Vehicle Alerts API (IDLING, OVERSPEED,
+      // DISTANCE_ALERT, PTO, TELL_TALE, ALARM, etc.) populado por la
+      // scheduled function `volvoAlertasPoller` cada 5 min.
+      case AppRoutes.adminVolvoAlertas:
+        return _buildRoute(
+          _protegerAdmin(const AdminVolvoAlertasScreen()),
           settings,
         );
 

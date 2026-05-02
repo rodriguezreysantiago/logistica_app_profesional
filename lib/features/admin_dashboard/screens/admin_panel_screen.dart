@@ -120,6 +120,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               color: Colors.deepOrangeAccent,
               ruta: AppRoutes.adminMantenimiento,
             ),
+          if (Capabilities.can(PrefsService.rol, Capability.verAlertasVolvo))
+            const _AdminTile(
+              titulo: 'ALERTAS',
+              subtitulo: 'Eventos en vivo de la flota Volvo (IDLING, OVERSPEED, ...)',
+              icono: Icons.notifications_active_outlined,
+              color: Colors.redAccent,
+              ruta: AppRoutes.adminVolvoAlertas,
+            ),
           if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
             const _AdminTile(
               titulo: 'PERSONAL',

@@ -18,6 +18,7 @@ class AppRoutes {
   static const String adminRevisiones = '/admin_revisiones';
   static const String adminReportes = '/admin_reportes';
   static const String adminMantenimiento = '/admin_mantenimiento';
+  static const String adminVolvoAlertas = '/admin_volvo_alertas';
   static const String syncDashboard = '/sync_dashboard';
   static const String adminEstadoBot = '/admin_estado_bot';
 
