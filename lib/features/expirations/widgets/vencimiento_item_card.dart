@@ -24,13 +24,19 @@ class VencimientoItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dias = item.dias;
+    // Inválida (dias == null) la tratamos como peor que vencida:
+    // borde rojo + highlight, así se ve a la primera que algo está mal
+    // con el dato y nadie pasa de largo creyendo que vence en X dias.
+    final esInvalida = dias == null;
+    final esVencida = dias != null && dias < 0;
+    final esCritica = dias != null && dias <= 14;
     return AppCard(
       onTap: onTap,
-      // Si está vencido o vence en menos de 14 días, destacamos la card.
-      highlighted: item.dias <= 14,
-      borderColor: item.dias < 0
+      highlighted: esInvalida || esCritica,
+      borderColor: esInvalida || esVencida
           ? Colors.redAccent.withAlpha(120)
-          : item.dias <= 14
+          : esCritica
               ? Colors.orangeAccent.withAlpha(120)
               : null,
       child: Row(

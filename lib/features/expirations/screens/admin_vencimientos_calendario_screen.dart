@@ -135,7 +135,11 @@ class _AdminVencimientosCalendarioScreenState
   Color _colorPorUrgencia(List<VencimientoItem> items) {
     int minDias = 999;
     for (final it in items) {
-      if (it.dias < minDias) minDias = it.dias;
+      final d = it.dias;
+      // En el calendario los items con fecha inválida no llegan acá
+      // (tryParseFecha los descarta arriba), pero el tipo es int? así
+      // que filtramos defensivamente.
+      if (d != null && d < minDias) minDias = d;
     }
     if (minDias <= 7) return Colors.redAccent;
     if (minDias <= 30) return Colors.orangeAccent;

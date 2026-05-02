@@ -57,10 +57,19 @@ class _AdminVencimientosChoferesScreenState
       });
     }
 
-    // Filtrar críticos (≤ 60 días) y ordenar por urgencia
-    final criticos =
-        items.where((it) => it.dias <= 60).toList()
-          ..sort((a, b) => a.dias.compareTo(b.dias));
+    // Filtrar críticos (≤ 60 días) y ordenar por urgencia.
+    // Las fechas inválidas (dias == null) las incluimos arriba de
+    // todo: son datos corruptos que el admin tiene que arreglar antes
+    // que cualquier cosa que vence en X días.
+    final criticos = items
+        .where((it) => it.dias == null || it.dias! <= 60)
+        .toList()
+      ..sort((a, b) {
+        if (a.dias == null && b.dias == null) return 0;
+        if (a.dias == null) return -1;
+        if (b.dias == null) return 1;
+        return a.dias!.compareTo(b.dias!);
+      });
     return criticos;
   }
 

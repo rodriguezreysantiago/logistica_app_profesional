@@ -392,7 +392,11 @@ class _Stats {
     void contarFecha(String? fechaStr) {
       if (fechaStr == null || fechaStr.isEmpty) return;
       final dias = AppFormatters.calcularDiasRestantes(fechaStr);
-      if (dias < 0) {
+      // Fecha cargada pero no parseable -> contamos como vencido (peor
+      // caso). Hasta hace poco devolvia sentinel 999 y se silenciaba
+      // en el dashboard; ahora se ve y el admin la encuentra abriendo
+      // la pantalla de auditoria correspondiente.
+      if (dias == null || dias < 0) {
         vencidos++;
       } else if (dias <= 7) {
         prox7++;

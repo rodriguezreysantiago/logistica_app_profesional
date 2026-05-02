@@ -24,8 +24,13 @@ class VencimientoItem {
   /// Fecha de vencimiento como string (formato YYYY-MM-DD).
   final String fecha;
 
-  /// Días restantes hasta el vencimiento (negativo si ya venció).
-  final int dias;
+  /// Días restantes hasta el vencimiento.
+  /// - Negativo: ya venció.
+  /// - 0..N: faltan N días.
+  /// - `null`: el campo en Firestore tenía un valor pero no se pudo
+  ///   parsear (fecha corrupta). El item igual aparece en las
+  ///   auditorías y se pinta como inválido para no silenciarlo.
+  final int? dias;
 
   /// URL del archivo adjunto en Storage (si lo hay).
   final String? urlArchivo;

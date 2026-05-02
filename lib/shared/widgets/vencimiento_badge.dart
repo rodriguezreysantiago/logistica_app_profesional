@@ -7,7 +7,8 @@ enum VencimientoEstado {
   critico, // dias <= 14
   proximo, // dias <= 30
   ok, // dias > 30
-  sinFecha,
+  sinFecha, // campo nunca cargado
+  invalida, // campo cargado pero no parseable (typo en consola, dato corrupto)
 }
 
 /// Color y semántica de cada estado, en un solo lugar.
@@ -24,18 +25,26 @@ extension VencimientoEstadoX on VencimientoEstado {
         return Colors.greenAccent;
       case VencimientoEstado.sinFecha:
         return Colors.white24;
+      case VencimientoEstado.invalida:
+        return Colors.redAccent;
     }
   }
 }
 
 /// Calcula el estado a partir de los días restantes.
-/// Si [tieneFecha] es false → siempre `sinFecha` (importante para
-/// distinguir "sin cargar" de "vence hoy").
+///
+/// Tri-state según [tieneFecha] y [dias]:
+/// - `!tieneFecha` → `sinFecha` (gris, neutro: nunca se cargó)
+/// - `tieneFecha && dias == null` → `invalida` (rojo: hay valor pero
+///   no parsea — typo manual en consola, migración rota, dato corrupto.
+///   No silenciar)
+/// - `dias != null` → vencido / critico / proximo / ok según valor
 VencimientoEstado calcularEstadoVencimiento(
   int? dias, {
   bool tieneFecha = true,
 }) {
-  if (!tieneFecha || dias == null) return VencimientoEstado.sinFecha;
+  if (!tieneFecha) return VencimientoEstado.sinFecha;
+  if (dias == null) return VencimientoEstado.invalida;
   if (dias < 0) return VencimientoEstado.vencido;
   if (dias <= 14) return VencimientoEstado.critico;
   if (dias <= 30) return VencimientoEstado.proximo;
@@ -70,6 +79,7 @@ class VencimientoBadge extends StatelessWidget {
     final texto = switch (estado) {
       VencimientoEstado.vencido => 'VENCIDO',
       VencimientoEstado.sinFecha => 'Sin fecha',
+      VencimientoEstado.invalida => 'Inválida',
       _ => '${dias}d',
     };
 

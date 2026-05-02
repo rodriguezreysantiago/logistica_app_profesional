@@ -139,19 +139,20 @@ class AppFormatters {
   }
 
   // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
-  static int calcularDiasRestantes(dynamic fecha) {
+  //
+  // Devuelve `null` cuando no se pudo parsear la fecha (input vacío,
+  // null, "---", o string corrupto). Antes devolvía sentinel `999`
+  // -- el caller lo interpretaba como "muy lejos en el futuro" y el
+  // badge lo pintaba verde "OK", silenciando alarmas cuando un campo
+  // VENCIMIENTO_X tenia valor invalido por typo en la consola.
+  // Ahora null obliga al caller a tri-state: sin fecha / invalida / valida.
+  static int? calcularDiasRestantes(dynamic fecha) {
     final DateTime? fVto = _parseUniversalDate(fecha);
-    
-    if (fVto == null) return 999;
+    if (fVto == null) return null;
 
-    try {
-      final vtoNormalizado = DateTime(fVto.year, fVto.month, fVto.day);
-      final ahora = DateTime.now();
-      final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);
-      
-      return vtoNormalizado.difference(hoyNormalizado).inDays;
-    } catch (_) { 
-      return 999; 
-    }
+    final vtoNormalizado = DateTime(fVto.year, fVto.month, fVto.day);
+    final ahora = DateTime.now();
+    final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);
+    return vtoNormalizado.difference(hoyNormalizado).inDays;
   }
 }

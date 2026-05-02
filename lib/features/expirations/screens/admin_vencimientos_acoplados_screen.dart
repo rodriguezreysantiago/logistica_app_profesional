@@ -61,9 +61,16 @@ class _AdminVencimientosAcopladosScreenState
       }
     }
 
-    final criticos =
-        items.where((it) => it.dias <= 60).toList()
-          ..sort((a, b) => a.dias.compareTo(b.dias));
+    // Inválidas (dias == null) primero: son datos corruptos a arreglar.
+    final criticos = items
+        .where((it) => it.dias == null || it.dias! <= 60)
+        .toList()
+      ..sort((a, b) {
+        if (a.dias == null && b.dias == null) return 0;
+        if (a.dias == null) return -1;
+        if (b.dias == null) return 1;
+        return a.dias!.compareTo(b.dias!);
+      });
     return criticos;
   }
 
