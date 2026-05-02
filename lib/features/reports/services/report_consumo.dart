@@ -340,21 +340,19 @@ class ReportConsumoService {
       );
       final numStyle = ex.CellStyle(numberFormat: ex.NumFormat.standard_4);
 
-      // Header informativo arriba (rango + nota acumulado)
+      // Sin header informativo arriba — el admin aplica AutoFilter
+      // (Ctrl+Shift+L) directamente sobre la fila 0 y filtra/ordena
+      // como cualquier tabla. El rango se ve en el nombre del archivo.
       final fmt = DateFormat('dd/MM/yyyy');
-      _setHeaderInfo(
-        hojaDetalle,
-        rangoTxt: '${fmt.format(desde)} a ${fmt.format(hasta)}',
-      );
 
-      // Cabeceras dinámicas en fila 4 (las 3 primeras filas son info)
+      // Cabeceras dinámicas en fila 0 — datos desde fila 1.
       final titulos = <String>[];
       filtros.forEach((key, val) {
         if (val) titulos.add(key);
       });
 
-      const filaCabecera = 4;
-      const filaInicioDatos = 5;
+      const filaCabecera = 0;
+      const filaInicioDatos = 1;
 
       for (var i = 0; i < titulos.length; i++) {
         final cell = hojaDetalle.cell(ex.CellIndex.indexByColumnRow(
@@ -423,18 +421,6 @@ class ReportConsumoService {
     }
   }
 
-  /// Pinta el header informativo en las 3 primeras filas: título +
-  /// rango + nota sobre el dato acumulado.
-  static void _setHeaderInfo(ex.Sheet hoja, {required String rangoTxt}) {
-    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).value =
-        ex.TextCellValue('REPORTE DE CONSUMO DE COMBUSTIBLE');
-    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1)).value =
-        ex.TextCellValue('Rango: $rangoTxt');
-    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2)).value =
-        ex.TextCellValue(
-            'Nota: litros y KM son acumulados totales del vehículo (Volvo Connect).');
-  }
-
   /// Escribe el valor de una columna específica en la celda según el
   /// título lógico. Mantenemos esto en un switch separado para que sumar
   /// columnas nuevas sea agregar una rama y un key en `filtros`.
@@ -497,12 +483,14 @@ class ReportConsumoService {
     }
   }
 
-  /// Construye la hoja "RANKING" con el top 10 unidades más consumidoras.
+  /// Construye la hoja "RANKING" con TODA la flota ordenada por
+  /// consumo L/100km (de peor a mejor — los más altos consumen más
+  /// combustible cada 100 km, son los que conviene revisar primero).
   ///
   /// Para visualizar la magnitud sin un chart nativo, agregamos una
-  /// columna "BARRA" con caracteres `█` proporcionales al máximo. Es el
-  /// truco clásico de "in-cell bar chart" — funciona en cualquier Excel
-  /// y en LibreOffice sin macros.
+  /// columna "BARRA" con caracteres `█` proporcionales al peor caso
+  /// (la unidad más ineficiente). Es el truco clásico de "in-cell bar
+  /// chart" — funciona en cualquier Excel y en LibreOffice sin macros.
   static void _construirHojaRanking(
       ex.Excel excel, List<_FilaConsumo> filas) {
     final hoja = excel['RANKING'];
@@ -514,38 +502,48 @@ class ReportConsumoService {
       horizontalAlign: ex.HorizontalAlign.Center,
     );
 
-    hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).value =
-        ex.TextCellValue('TOP 10 UNIDADES MÁS CONSUMIDORAS');
-
-    // Solo unidades con datos REALES del período (litros > 0 +
-    // esPeriodo). Las que tienen acumulado no compiten en el ranking
-    // porque sus litros son del histórico completo del vehículo y
-    // distorsionarían la comparación.
+    // Solo unidades con datos REALES del período (esPeriodo && km > 0).
+    // Sin km no se puede calcular L/100km. Las que tienen solo
+    // acumulado no compiten porque la métrica del período no aplica.
+    // Ordenamos descendente por L/100km — los peores arriba.
     final ranking = filas
-        .where((f) => f.esPeriodo && f.litros > 0)
+        .where((f) => f.esPeriodo && f.km > 0 && f.consumoLPor100Km > 0)
         .toList()
-      ..sort((a, b) => b.litros.compareTo(a.litros));
-    final top = ranking.take(10).toList();
-    if (top.isEmpty) {
-      hoja.cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2)).value =
-          ex.TextCellValue(
+      ..sort((a, b) => b.consumoLPor100Km.compareTo(a.consumoLPor100Km));
+
+    // Cabeceras en fila 0 (sin título de hoja arriba — más limpio
+    // para aplicar AutoFilter directo).
+    const titulos = [
+      '#',
+      'PATENTE',
+      'MARCA / MODELO',
+      'L/100KM',
+      'LITROS',
+      'KM',
+      'BARRA'
+    ];
+    for (var i = 0; i < titulos.length; i++) {
+      final cell = hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+      cell.value = ex.TextCellValue(titulos[i]);
+      cell.cellStyle = headerStyle;
+    }
+
+    if (ranking.isEmpty) {
+      hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1))
+          .value = ex.TextCellValue(
               'Sin snapshots históricos en el rango (todavía). El ranking '
               'aparece después de unos días de tracking activo.');
       return;
     }
 
-    final maxLitros = top.first.litros;
-    const titulos = ['#', 'PATENTE', 'MARCA / MODELO', 'LITROS', 'BARRA'];
-    for (var i = 0; i < titulos.length; i++) {
-      final cell = hoja.cell(
-          ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 2));
-      cell.value = ex.TextCellValue(titulos[i]);
-      cell.cellStyle = headerStyle;
-    }
+    final maxConsumo = ranking.first.consumoLPor100Km;
+    final numStyle = ex.CellStyle(numberFormat: ex.NumFormat.standard_4);
 
-    for (var i = 0; i < top.length; i++) {
-      final f = top[i];
-      final fila = i + 3;
+    for (var i = 0; i < ranking.length; i++) {
+      final f = ranking[i];
+      final fila = i + 1;
 
       hoja
           .cell(ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: fila))
@@ -556,25 +554,41 @@ class ReportConsumoService {
       hoja
           .cell(ex.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: fila))
           .value = ex.TextCellValue('${f.marca} ${f.modelo}'.trim());
-      hoja
-          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: fila))
-          .value = ex.DoubleCellValue(f.litros);
 
-      // Barra unicode: ancho proporcional al máximo, hasta 30 caracteres.
-      final ratio = maxLitros == 0 ? 0.0 : f.litros / maxLitros;
+      final consumoCell = hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: fila));
+      consumoCell.value = ex.DoubleCellValue(
+          double.parse(f.consumoLPor100Km.toStringAsFixed(2)));
+      consumoCell.cellStyle = numStyle;
+
+      final litrosCell = hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: fila));
+      litrosCell.value = ex.DoubleCellValue(f.litros);
+      litrosCell.cellStyle = numStyle;
+
+      final kmCell = hoja
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: fila));
+      kmCell.value = ex.DoubleCellValue(f.km);
+      kmCell.cellStyle = numStyle;
+
+      // Barra unicode: ancho proporcional al peor consumo (más L/100km
+      // = barra más larga). Hasta 30 caracteres.
+      final ratio = maxConsumo == 0 ? 0.0 : f.consumoLPor100Km / maxConsumo;
       final ancho = (ratio * 30).round();
       final barra = '█' * ancho;
       hoja
-          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: fila))
+          .cell(ex.CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: fila))
           .value = ex.TextCellValue(barra);
     }
 
     // Anchos cómodos para lectura
-    hoja.setColumnWidth(0, 6);
-    hoja.setColumnWidth(1, 14);
-    hoja.setColumnWidth(2, 28);
-    hoja.setColumnWidth(3, 16);
-    hoja.setColumnWidth(4, 36);
+    hoja.setColumnWidth(0, 6);   // #
+    hoja.setColumnWidth(1, 14);  // PATENTE
+    hoja.setColumnWidth(2, 28);  // MARCA / MODELO
+    hoja.setColumnWidth(3, 14);  // L/100KM
+    hoja.setColumnWidth(4, 14);  // LITROS
+    hoja.setColumnWidth(5, 14);  // KM
+    hoja.setColumnWidth(6, 36);  // BARRA
   }
 }
 
