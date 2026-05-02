@@ -145,92 +145,47 @@ class ReportConsumoService {
           ),
           content: SizedBox(
             width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _LabelSeccion('Rango de referencia'),
-                  // Presets rápidos para los rangos más usados. Tocás
-                  // un chip y se setea desde/hasta sin tener que abrir
-                  // el calendario. El "Personalizado" se usa abriendo
-                  // el botón de abajo directamente.
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      for (final preset in _presetsRangos())
-                        _ChipPreset(
-                          label: preset.label,
-                          activo: _esPresetActivo(
-                              preset, localDesde, localHasta),
-                          onTap: () {
-                            setDialogState(() {
-                              localDesde = preset.desde;
-                              localHasta = preset.hasta;
-                            });
-                            onRangoCambiado(localDesde, localHasta);
-                          },
-                        ),
-                    ],
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _LabelSeccion('Rango de fechas'),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8, left: 4),
+                  child: Text(
+                    'Tocá el botón para abrir el calendario. '
+                    'Marcá la fecha de inicio y después la de fin '
+                    'en el mismo grid.',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
                   ),
-                  const SizedBox(height: 8),
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 8, left: 4),
-                    child: Text(
-                      'O tocá el botón para abrir el calendario y elegir '
-                      'un rango personalizado (primero la fecha de inicio, '
-                      'después la de fin).',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                      ),
+                ),
+                _BotonRangoFecha(
+                  desde: localDesde,
+                  hasta: localHasta,
+                  onPick: (d, h) {
+                    setDialogState(() {
+                      localDesde = d;
+                      localHasta = h;
+                    });
+                    onRangoCambiado(localDesde, localHasta);
+                  },
+                ),
+                const SizedBox(height: 8),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    'Los litros y km del período se calculan a partir de '
+                    'los snapshots diarios. Si una unidad todavía no '
+                    'tiene snapshots dentro del rango, se reporta el '
+                    'acumulado total marcado como "(acum.)".',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 10.5,
+                      height: 1.4,
                     ),
                   ),
-                  _BotonRangoFecha(
-                    desde: localDesde,
-                    hasta: localHasta,
-                    onPick: (d, h) {
-                      setDialogState(() {
-                        localDesde = d;
-                        localHasta = h;
-                      });
-                      onRangoCambiado(localDesde, localHasta);
-                    },
-                  ),
-                  const SizedBox(height: 4),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                      'Los litros y km del período se calculan a partir de '
-                      'los snapshots diarios que guarda el AutoSync. Si '
-                      'una unidad todavía no tiene snapshots dentro del '
-                      'rango, se reporta el acumulado total y se marca '
-                      'como "S/D (acum.)".',
-                      style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 10.5,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const _LabelSeccion('Columnas'),
-                  ...opciones.keys.map((key) {
-                    return CheckboxListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(key,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 13)),
-                      value: opciones[key],
-                      activeColor: Colors.greenAccent,
-                      onChanged: (val) =>
-                          setDialogState(() => opciones[key] = val ?? false),
-                    );
-                  }),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           actions: [
@@ -829,88 +784,6 @@ class _LabelSeccion extends StatelessWidget {
   }
 }
 
-// =============================================================================
-// PRESETS RÁPIDOS DE RANGO
-// =============================================================================
-//
-// Los rangos más comunes que pide un admin sin tener que navegar el
-// calendario. Si la fecha actual cae dentro del preset y `desde`/`hasta`
-// matchean, mostramos el chip resaltado para que el admin sepa qué
-// preset está activo.
-
-class _PresetRango {
-  final String label;
-  final DateTime desde;
-  final DateTime hasta;
-  const _PresetRango(this.label, this.desde, this.hasta);
-}
-
-List<_PresetRango> _presetsRangos() {
-  final hoy = DateTime.now();
-  final inicioHoy = DateTime(hoy.year, hoy.month, hoy.day);
-  final inicioSemana =
-      inicioHoy.subtract(Duration(days: inicioHoy.weekday - 1));
-  final inicioMesActual = DateTime(hoy.year, hoy.month, 1);
-  final inicioMesPasado = DateTime(hoy.year, hoy.month - 1, 1);
-  final finMesPasado = DateTime(hoy.year, hoy.month, 1)
-      .subtract(const Duration(days: 1));
-  return [
-    _PresetRango('Hoy', inicioHoy, inicioHoy),
-    _PresetRango('Esta semana', inicioSemana, inicioHoy),
-    _PresetRango('Mes actual', inicioMesActual, inicioHoy),
-    _PresetRango('Mes pasado', inicioMesPasado, finMesPasado),
-    _PresetRango(
-        'Últimos 7 días', inicioHoy.subtract(const Duration(days: 6)), inicioHoy),
-    _PresetRango(
-        'Últimos 30 días', inicioHoy.subtract(const Duration(days: 29)), inicioHoy),
-  ];
-}
-
-bool _esPresetActivo(_PresetRango p, DateTime desde, DateTime hasta) {
-  bool eq(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
-  return eq(p.desde, desde) && eq(p.hasta, hasta);
-}
-
-class _ChipPreset extends StatelessWidget {
-  final String label;
-  final bool activo;
-  final VoidCallback onTap;
-  const _ChipPreset({
-    required this.label,
-    required this.activo,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = activo ? Colors.greenAccent : Colors.white54;
-    final bg = activo
-        ? Colors.greenAccent.withAlpha(40)
-        : Colors.white.withAlpha(15);
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withAlpha(120), width: 1),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontWeight: activo ? FontWeight.bold : FontWeight.w500,
-            fontSize: 12,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Un solo botón que abre `showDateRangePicker` de Material —
 /// calendario unificado donde el admin marca primero la fecha de
 /// inicio y después la de fin en el mismo flow. UX mejor que dos
@@ -934,51 +807,24 @@ class _BotonRangoFecha extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       onTap: () async {
         final hoy = DateTime.now();
-        final firstDate = DateTime(hoy.year - 2, 1, 1);
-        final lastDate = hoy.add(const Duration(days: 1));
-
-        // Usamos DOS showDatePicker en secuencia (no showDateRangePicker)
-        // porque este último en Windows abre con scroll vertical de
-        // meses sin flechas ◀ ▶ visibles. showDatePicker con modo
-        // `calendar` SIEMPRE tiene flechas para navegar mes a mes,
-        // que es lo que el admin espera.
-        //
-        // Flow: 1) elegís fecha de inicio → 2) elegís fecha de fin
-        // (con firstDate = inicio para evitar rangos invertidos).
-
-        // Paso 1: fecha de inicio.
-        final desdePicked = await showDatePicker(
+        // showDateRangePicker: en Windows abre full-screen con scroll
+        // vertical de meses (Santiago lo prefiere así). El admin marca
+        // un día como inicio y otro como fin en el mismo calendario,
+        // y los días intermedios se resaltan automáticamente.
+        final picked = await showDateRangePicker(
           context: context,
-          initialDate: desde,
-          firstDate: firstDate,
-          lastDate: lastDate,
+          initialDateRange: DateTimeRange(start: desde, end: hasta),
+          firstDate: DateTime(hoy.year - 2, 1, 1),
+          lastDate: hoy.add(const Duration(days: 1)),
           locale: const Locale('es', 'AR'),
           initialEntryMode: DatePickerEntryMode.calendar,
-          helpText: 'Fecha DESDE (inicio del rango)',
-          confirmText: 'SIGUIENTE',
+          helpText: 'Seleccioná el rango del reporte',
+          saveText: 'CONFIRMAR',
           cancelText: 'CANCELAR',
+          fieldStartLabelText: 'Desde',
+          fieldEndLabelText: 'Hasta',
         );
-        if (desdePicked == null) return;
-        if (!context.mounted) return;
-
-        // Paso 2: fecha de fin. firstDate = desdePicked para evitar
-        // que el admin elija un fin anterior al inicio (rango inválido).
-        final hastaInicial =
-            hasta.isBefore(desdePicked) ? desdePicked : hasta;
-        final hastaPicked = await showDatePicker(
-          context: context,
-          initialDate: hastaInicial,
-          firstDate: desdePicked,
-          lastDate: lastDate,
-          locale: const Locale('es', 'AR'),
-          initialEntryMode: DatePickerEntryMode.calendar,
-          helpText: 'Fecha HASTA (fin del rango)',
-          confirmText: 'CONFIRMAR',
-          cancelText: 'CANCELAR',
-        );
-        if (hastaPicked == null) return;
-
-        onPick(desdePicked, hastaPicked);
+        if (picked != null) onPick(picked.start, picked.end);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
