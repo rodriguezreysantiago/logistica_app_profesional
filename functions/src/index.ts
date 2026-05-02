@@ -1569,13 +1569,34 @@ async function persistirAlertas(
     if (snap.exists) existing.add(snap.id);
   }
 
-  // 3. Batch de creación de los nuevos
+  // 3. Pre-cargar asignaciones para resolver chofer-en-fecha en memoria.
+  // Tomamos todas las patentes únicas presentes en los pendientes que NO
+  // existían ya (los duplicados los skipeamos abajo igual). Una sola
+  // query (en chunks de 30 por límite de Firestore `in`) nos da todo.
+  const patentesUnicas = new Set<string>();
+  for (let i = 0; i < pendientes.length; i++) {
+    if (existing.has(pendientes[i].docId)) continue;
+    const vin = (pendientes[i].alert.vin ?? "")
+      .toString().trim().toUpperCase();
+    const customerName = (pendientes[i].alert.customerVehicleName ?? "")
+      .toString().trim();
+    const patente = customerName || vinToPatente.get(vin);
+    if (patente) patentesUnicas.add(patente);
+  }
+  const asignacionesPorPatente = await cargarAsignacionesPorPatentes(
+    Array.from(patentesUnicas)
+  );
+
+  // 4. Batch de creación de los nuevos
   const batch = db.batch();
   let escritos = 0;
   for (let i = 0; i < pendientes.length; i++) {
     const { docId, alert } = pendientes[i];
     if (existing.has(docId)) continue;
-    batch.set(refs[i], buildAlertaDoc(alert, vinToPatente));
+    batch.set(
+      refs[i],
+      buildAlertaDoc(alert, vinToPatente, asignacionesPorPatente)
+    );
     escritos++;
   }
   if (escritos > 0) {
@@ -1589,13 +1610,92 @@ async function persistirAlertas(
   };
 }
 
+interface AsignacionLookup {
+  chofer_dni: string;
+  chofer_nombre: string | null;
+  desde: Timestamp;
+  hasta: Timestamp | null;
+}
+
+/**
+ * Trae todas las asignaciones de las patentes pedidas, agrupadas por
+ * patente y ordenadas por `desde` descendente. Usar
+ * [buscarAsignacionEnFecha] para resolver el chofer en un momento dado.
+ *
+ * Firestore acepta hasta 30 valores en `where in`, así que si hay más
+ * patentes (Vecchi tiene 56), partimos en chunks.
+ */
+async function cargarAsignacionesPorPatentes(
+  patentes: string[]
+): Promise<Map<string, AsignacionLookup[]>> {
+  const result = new Map<string, AsignacionLookup[]>();
+  if (patentes.length === 0) return result;
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < patentes.length; i += 30) {
+    chunks.push(patentes.slice(i, i + 30));
+  }
+
+  for (const chunk of chunks) {
+    const snap = await db
+      .collection("ASIGNACIONES_VEHICULO")
+      .where("vehiculo_id", "in", chunk)
+      .get();
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const patente = (data.vehiculo_id ?? "").toString();
+      if (!patente) continue;
+      const arr = result.get(patente) ?? [];
+      arr.push({
+        chofer_dni: (data.chofer_dni ?? "").toString(),
+        chofer_nombre: data.chofer_nombre ?
+          String(data.chofer_nombre) :
+          null,
+        desde: data.desde as Timestamp,
+        hasta: (data.hasta as Timestamp | null) ?? null,
+      });
+      result.set(patente, arr);
+    }
+  }
+
+  // Ordenamos cada lista por `desde` descendente. Permite buscar en
+  // memoria devolviendo la primera asignación cuyo rango cubre la fecha.
+  for (const arr of result.values()) {
+    arr.sort((a, b) => b.desde.toMillis() - a.desde.toMillis());
+  }
+  return result;
+}
+
+/**
+ * Encuentra la asignación que estaba vigente para una patente en un
+ * instante dado (ms). Devuelve `null` si no había nadie asignado.
+ */
+function buscarAsignacionEnFecha(
+  asignaciones: AsignacionLookup[] | undefined,
+  fechaMs: number
+): AsignacionLookup | null {
+  if (!asignaciones) return null;
+  for (const a of asignaciones) {
+    const desdeMs = a.desde.toMillis();
+    const hastaMs = a.hasta ? a.hasta.toMillis() : null;
+    if (desdeMs <= fechaMs && (hastaMs === null || hastaMs > fechaMs)) {
+      return a;
+    }
+  }
+  return null;
+}
+
 /**
  * Mapea una alerta del payload de Volvo al doc Firestore
- * (naming castellano + tipos serializables).
+ * (naming castellano + tipos serializables). Si hay [asignacionesPorPatente]
+ * disponibles, snapshottea el chofer que estaba manejando esa patente
+ * en el momento del evento (de forma que la atribución no cambie si
+ * después se reasigna la unidad).
  */
 function buildAlertaDoc(
   alert: AlertsApiAlert,
-  vinToPatente: Map<string, string>
+  vinToPatente: Map<string, string>,
+  asignacionesPorPatente?: Map<string, AsignacionLookup[]>
 ): Record<string, unknown> {
   const vin = (alert.vin ?? "").toString().trim().toUpperCase();
   const tipo = (alert.alertType ?? "").toString();
@@ -1617,7 +1717,25 @@ function buildAlertaDoc(
     // inicial — re-polls del mismo evento se skipean por `getAll`.
     atendida: false,
   };
-  if (patente) doc.patente = patente;
+  if (patente) {
+    doc.patente = patente;
+    // Snapshot del chofer en ese instante: usamos el log temporal
+    // ASIGNACIONES_VEHICULO (no `EMPLEADOS.VEHICULO` "actual"), porque
+    // si la patente rota después, la atribución del evento no debería
+    // cambiar. Si no hay log para ese momento (típico en eventos de
+    // antes del go-live del sistema), lo dejamos vacío — la pantalla
+    // cae a "chofer asignado actual" como antes.
+    const asignacion = buscarAsignacionEnFecha(
+      asignacionesPorPatente?.get(patente),
+      creadoMs
+    );
+    if (asignacion && asignacion.chofer_dni) {
+      doc.chofer_dni = asignacion.chofer_dni;
+      if (asignacion.chofer_nombre) {
+        doc.chofer_nombre = asignacion.chofer_nombre;
+      }
+    }
+  }
 
   if (alert.receivedDateTime) {
     const recibidoMs = new Date(alert.receivedDateTime).getTime();

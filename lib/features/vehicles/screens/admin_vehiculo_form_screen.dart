@@ -12,6 +12,7 @@ import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
+import '../../asignaciones/screens/asignacion_historial_vehiculo_screen.dart';
 import '../services/volvo_api_service.dart';
 import 'diagnostico_volvo_screen.dart';
 
@@ -518,6 +519,22 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       onTap: () => FocusScope.of(context).unfocus(),
       child: AppScaffold(
         title: 'Ficha: ${widget.vehiculoId}',
+        actions: [
+          if (esTractor)
+            IconButton(
+              icon: const Icon(Icons.history),
+              tooltip: 'Historial de asignaciones',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AsignacionHistorialVehiculoScreen(
+                      patente: widget.vehiculoId,
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
         body: Form(
           key: _formKey,
           child: ListView(

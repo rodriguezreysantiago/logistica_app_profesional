@@ -253,6 +253,49 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // ASIGNACIONES_VEHICULO — log temporal de quién manejó qué unidad
+    // ========================================================================
+    // Cada doc representa el período en que un chofer manejó una patente.
+    // El doc activo (vigente) tiene `hasta == null`. Cuando hay un cambio,
+    // se "cierra" el activo (`hasta = now`) y se crea uno nuevo. Permite
+    // responder "¿quién manejaba la patente X el día Y?" para multas
+    // tardías, atribución de eventos Volvo y disputas.
+    //
+    // Las escrituras pasan por `AsignacionVehiculoService` desde el cliente
+    // (no hay Cloud Function dedicada). Por eso las reglas validan la
+    // estructura para que el admin no pueda meter basura ni reescribir
+    // historial.
+
+    match /ASIGNACIONES_VEHICULO/{doc} {
+      // Lectura: admin/supervisor. El chofer no necesita ver el log.
+      allow read: if isAdminOrSupervisor();
+
+      // Crear una nueva asignación: requiere admin/supervisor + estructura
+      // mínima. `hasta` debe ser null (las nuevas SIEMPRE arrancan
+      // activas). `asignado_por_dni` tiene que ser quien escribe — el
+      // admin no puede atribuir el cambio a otro.
+      allow create: if isAdminOrSupervisor()
+        && request.resource.data.asignado_por_dni == request.auth.uid
+        && request.resource.data.vehiculo_id is string
+        && request.resource.data.chofer_dni is string
+        && request.resource.data.desde is timestamp
+        && request.resource.data.hasta == null;
+
+      // Actualizar: solo se permite cerrar (setear `hasta`). No se puede
+      // editar `desde`, `chofer_dni`, `vehiculo_id`, etc — el log es
+      // inmutable salvo por el cierre. Y solo si todavía estaba activa.
+      allow update: if isAdminOrSupervisor()
+        && resource.data.hasta == null
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['hasta'])
+        && request.resource.data.hasta is timestamp;
+
+      // Borrar: nunca. Si hay que corregir un dato, se cierra y se
+      // crea uno nuevo (audit > corrección silenciosa).
+      allow delete: if false;
+    }
+
+    // ========================================================================
     // META — estado interno de los pollers (cursor, etc.)
     // ========================================================================
     // Subcolección de docs internos del server (cursor del poller Volvo

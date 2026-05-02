@@ -60,6 +60,14 @@ class AppCollections {
   /// scheduled function `volvoAlertasPoller` cada 5 min — el admin
   /// los marca como atendidos desde el tablero.
   static const String volvoAlertas = 'VOLVO_ALERTAS';
+
+  /// Registro temporal inmutable de asignaciones chofer↔vehículo.
+  /// Cada doc: `{vehiculo_id, chofer_dni, desde, hasta, ...}`. La
+  /// asignación activa tiene `hasta == null`. Permite responder
+  /// "¿quién manejaba la patente X el día Y?" sin importar cuántas
+  /// veces rotó después. Único punto de escritura:
+  /// `AsignacionVehiculoService`.
+  static const String asignacionesVehiculo = 'ASIGNACIONES_VEHICULO';
 }
 
 class AppRoles {

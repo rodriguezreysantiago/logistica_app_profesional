@@ -17,6 +17,7 @@ import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
+import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 
 // =============================================================================
 // SERVICIOS DE ACTUALIZACIÓN — NAMESPACE EmpleadoActions
@@ -557,13 +558,7 @@ class EmpleadoActions {
                     cleanActual != 'S/D';
                 final desvincular = (nueva == null || nueva == '-');
 
-                // Guard contra no-ops y un bug atomico: si el admin
-                // tappea la MISMA unidad que ya tiene asignada, el
-                // batch hacia update(OCUPADO) y despues update(LIBRE)
-                // sobre el mismo doc → ultimo write gana → unidad
-                // quedaba LIBRE pero el empleado seguia apuntandola.
-                // Caso analogo: tappear "Ninguna" cuando ya no habia
-                // unidad — comiteabamos un update inutil.
+                // Guard contra no-ops antes de tocar Firestore.
                 final misma = !desvincular && nueva == cleanActual;
                 final yaSinUnidad = desvincular && !hayActualValido;
                 if (misma || yaSinUnidad) {
@@ -571,56 +566,68 @@ class EmpleadoActions {
                   return;
                 }
 
-                final batch = db.batch();
-
-                if (!desvincular) {
-                  batch.update(
-                    db.collection('VEHICULOS').doc(nueva),
-                    {'ESTADO': 'OCUPADO'},
-                  );
-                  batch.update(
-                    db.collection('EMPLEADOS').doc(dni),
-                    {campo: nueva},
-                  );
-                } else {
-                  batch.update(
-                    db.collection('EMPLEADOS').doc(dni),
-                    {campo: '-'},
-                  );
-                }
-
-                // Liberar la unidad anterior siempre dentro del mismo batch.
-                // Si el doc no existe, batch.commit() falla — pero eso ya
-                // pasaba antes con el update individual, así que el
-                // comportamiento es equivalente al del fix.
-                if (hayActualValido) {
-                  batch.update(
-                    db.collection('VEHICULOS').doc(cleanActual),
-                    {'ESTADO': 'LIBRE'},
-                  );
-                }
-
                 try {
-                  await batch.commit();
+                  if (esTractor) {
+                    // Tractor: pasa por el servicio centralizado, que
+                    // mantiene el log temporal en ASIGNACIONES_VEHICULO,
+                    // los espejos en EMPLEADOS/VEHICULOS y dispara el
+                    // audit. Resuelve también un mini-bug donde dos
+                    // choferes podían apuntar a la misma patente.
+                    final adminUid =
+                        FirebaseAuth.instance.currentUser?.uid ?? '';
+                    await AsignacionVehiculoService().cambiarAsignacion(
+                      choferDni: dni,
+                      nuevaPatente: nueva,
+                      asignadoPorDni: adminUid,
+                    );
+                  } else {
+                    // Enganche (batea/tolva/bivuelco/tanque): por ahora
+                    // mantenemos el flujo antiguo con batch directo. Si
+                    // se necesita historial de enganches, replicar el
+                    // mismo patrón del servicio para ese caso.
+                    final batch = db.batch();
+                    if (!desvincular) {
+                      batch.update(
+                        db.collection('VEHICULOS').doc(nueva),
+                        {'ESTADO': 'OCUPADO'},
+                      );
+                      batch.update(
+                        db.collection('EMPLEADOS').doc(dni),
+                        {campo: nueva},
+                      );
+                    } else {
+                      batch.update(
+                        db.collection('EMPLEADOS').doc(dni),
+                        {campo: '-'},
+                      );
+                    }
+                    if (hayActualValido) {
+                      batch.update(
+                        db.collection('VEHICULOS').doc(cleanActual),
+                        {'ESTADO': 'LIBRE'},
+                      );
+                    }
+                    await batch.commit();
 
-                  unawaited(AuditLog.registrar(
-                    accion: (nueva == null || nueva == '-')
-                        ? AuditAccion.desvincularEquipo
-                        : AuditAccion.asignarEquipo,
-                    entidad: 'EMPLEADOS',
-                    entidadId: dni,
-                    detalles: {
-                      'campo': campo,
-                      'unidad_anterior': cleanActual,
-                      'unidad_nueva': nueva ?? '',
-                    },
-                  ));
+                    unawaited(AuditLog.registrar(
+                      accion: desvincular
+                          ? AuditAccion.desvincularEquipo
+                          : AuditAccion.asignarEquipo,
+                      entidad: 'EMPLEADOS',
+                      entidadId: dni,
+                      detalles: {
+                        'campo': campo,
+                        'unidad_anterior': cleanActual,
+                        'unidad_nueva': nueva ?? '',
+                      },
+                    ));
+                  }
 
                   if (ctx.mounted) Navigator.of(ctx).pop();
 
                   // Feedback de éxito: distinto copy según haya sido
                   // desvinculación o asignación nueva.
-                  final mensaje = (nueva == null || nueva == '-')
+                  final mensaje = desvincular
                       ? 'Se desvinculó el $etiquetaUnidad de este chofer.'
                       : 'Se asignó el $etiquetaUnidad $nueva.';
                   AppFeedback.successOn(messenger, mensaje);

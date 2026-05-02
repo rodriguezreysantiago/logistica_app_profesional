@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 // `flutter/foundation` re-exporta Uint8List (de dart:typed_data) además de
 // debugPrint, así que cubre los dos usos de este archivo en un solo import.
 import 'package:flutter/foundation.dart';
 
 import '../../../core/services/storage_service.dart';
+import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 
 /// Servicio del feature de revisiones.
 ///
@@ -148,19 +150,34 @@ class RevisionService {
           camposAActualizar[campoArchivo] = datos['url_archivo'];
           camposAActualizar['ultima_auditoria'] =
               FieldValue.serverTimestamp();
-        } else if (campoAct == 'SOLICITUD_VEHICULO' ||
-            campoAct == 'SOLICITUD_ENGANCHE') {
-          final campoDestino =
-              campoAct == 'SOLICITUD_VEHICULO' ? 'VEHICULO' : 'ENGANCHE';
+        } else if (campoAct == 'SOLICITUD_VEHICULO') {
+          // Cambio de tractor: el servicio centralizado se encarga de
+          // ASIGNACIONES_VEHICULO + EMPLEADOS.VEHICULO + VEHICULOS.ESTADO
+          // + audit log. Se hace antes del batch porque corre su propia
+          // transaction. La pequeña pérdida de atomicidad con el delete
+          // de REVISIONES de abajo es aceptable: si falla en el medio,
+          // re-aprobar es un no-op idempotente.
+          final nuevaUnidad = (datos['patente'] ?? '').toString().trim();
+          final adminUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+          await AsignacionVehiculoService().cambiarAsignacion(
+            choferDni: idDoc,
+            nuevaPatente: nuevaUnidad,
+            asignadoPorDni: adminUid,
+            motivo: 'Aprobado desde REVISIONES',
+          );
+          // No agregamos nada al batch: el servicio ya escribió todo.
+        } else if (campoAct == 'SOLICITUD_ENGANCHE') {
+          // Enganche: por ahora mantenemos el flujo viejo con batch
+          // directo (no hay todavía historial de enganches).
           final nuevaUnidad = (datos['patente'] ?? '').toString().trim();
           final unidadActual = (datos['unidad_actual'] ?? '').toString().trim();
 
-          camposAActualizar[campoDestino] = nuevaUnidad;
+          camposAActualizar['ENGANCHE'] = nuevaUnidad;
 
           if (nuevaUnidad.isNotEmpty && nuevaUnidad != '-') {
             batch.update(
               _db.collection('VEHICULOS').doc(nuevaUnidad),
-              {'ESTADO': 'ASIGNADO'},
+              {'ESTADO': 'OCUPADO'},
             );
           }
           if (unidadActual.isNotEmpty &&
@@ -175,7 +192,9 @@ class RevisionService {
           camposAActualizar[campoAct] = datos['fecha_vencimiento'];
         }
 
-        batch.update(destinoRef, camposAActualizar);
+        if (camposAActualizar.isNotEmpty) {
+          batch.update(destinoRef, camposAActualizar);
+        }
       }
 
       // Si fue rechazada, borramos el archivo de Storage
