@@ -448,6 +448,45 @@ La sesión wwebjs se "quemó" porque mezclamos: bot manual del user `santi` + se
 | `206da8b` | chore(bot): script verificar_destinatario_service para chequear setup de Emmanuel |
 | `b0d0532` | fix(bot): logger usa formato local DD-MM-AAAA HH:MM:SS |
 
+### 6.12 Sesión 2-mayo 2026 — Migración Functions a sa-east1 + Volvo Alerts Fase 1a
+
+#### 6.12.1 Migración de Cloud Functions us-central1 → southamerica-east1 (commit `c56cbf7`)
+
+Las 5 Functions del proyecto vivían en `us-central1` mientras que Firestore estaba en `southamerica-east1` desde el inicio del proyecto. Cada read/write desde una function pagaba ~150ms de latencia inter-region. Aprovechando que la app está en etapa de testeo (nadie la tiene instalada todavía), se hizo la migración completa sin cuidar backward-compat:
+
+- `setGlobalOptions({ region: "southamerica-east1" })` en `functions/src/index.ts`.
+- 4 URLs hardcoded actualizadas en cliente Flutter (todas usan Dio HTTPS directo, no `cloud_functions` plugin):
+  - `lib/features/auth/services/auth_service.dart` (loginConDni).
+  - `lib/core/services/audit_log_service.dart` (auditLogWrite).
+  - `lib/features/employees/services/empleado_actions.dart` (actualizarRolEmpleado).
+  - `lib/features/vehicles/services/volvo_api_service.dart` (volvoProxy).
+- Deploy con `N` a la pregunta de Firebase sobre borrar las viejas — para validar smoke test antes de borrar.
+- IAM `allUsers Cloud Run Invoker` reaplicado a las 4 callables públicas en sa-east1 (Gen2 lo pierde en cada deploy).
+- Smoke test OK: login + acción auditable + sync Volvo + cambiar rol.
+- 5 functions viejas borradas con `gcloud functions delete --region=us-central1 --quiet`.
+
+**Gotcha encontrado**: en el primer deploy multi-function en una región nueva, una function (`loginConDni`) falló con `NAME_UNKNOWN: Repository "gcf-artifacts" not found` (race en la creación del repo Artifact Registry). Reintento simple con `--only functions:loginConDni` resolvió. Documentado en RUNBOOK §"Migrar Cloud Functions de region".
+
+#### 6.12.2 Volvo Vehicle Alerts — Fase 1a backend (commit `42dacea`)
+
+Implementada la primera fase del roadmap de integración con Volvo Vehicle Alerts API:
+
+- **`volvoAlertasPoller`** — scheduled function `every 5 minutes` en sa-east1 que pollea `/alert/vehiclealerts` con paginación (`moreDataAvailableLink`), cursor en `META/volvo_alertas_cursor` con `requestServerDateTime`, cold start desde "ahora −1h".
+- **Modelo `VOLVO_ALERTAS/{vin}_{createdMs}_{tipo}`** — docId composite e idempotente. Naming castellano (`tipo`/`severidad`/`creado_en`/`patente`/`detalle_<subtipo>`/`atendida`/etc.). Cross-ref VIN→patente con `customerVehicleName` y fallback a tabla `VEHICULOS`.
+- **Estrategia anti-pisoneo**: `getAll` batch antes de escribir → solo crea los nuevos, NO pisa campos de gestión (`atendida`, `atendida_por`, `atendida_en`) seteados por el admin desde el tablero.
+- **Reglas Firestore**: `VOLVO_ALERTAS` read+update=admin/supervisor, create+delete=`if false` (solo Admin SDK). `META/{doc=**}` read+write=`if false`.
+- Build + lint + 46/46 tests OK. Deploy a sa-east1 OK. Cloud Scheduler job `firebase-schedule-volvoAlertasPoller-southamerica-east1` activo con `every 5 minutes`.
+
+**Pendiente (Fase 1b)**: tablero "Alertas" en sidebar admin Flutter consumiendo `VOLVO_ALERTAS` + filtros + marcar como atendida via `auditLogWrite`. Pre-requisito antes de codear: volcar `firestore.indexes.json` cuando aparezca el primer error de query compuesta en consola.
+
+**Bloqueado por decisiones de Santiago para Fases 2-5** (no Fase 1b): PTO operativo S/N, enforce identificación chofer S/N, Scores API spec.
+
+#### 6.12.3 Commits del día
+| Commit | Resumen |
+|---|---|
+| `c56cbf7` | feat(infra): migrar Cloud Functions a southamerica-east1 |
+| `42dacea` | feat(volvo-alerts): poller scheduled + reglas Firestore (Fase 1a) |
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29

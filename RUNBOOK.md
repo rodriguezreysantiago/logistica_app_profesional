@@ -12,10 +12,12 @@ Documento operativo para resolver incidentes en producción. Pensado para que **
 2. [Bot WhatsApp no envía mensajes](#bot-whatsapp-no-envía-mensajes)
 3. [Login no funciona / la app no deja entrar](#login-no-funciona)
 4. [Volvo Connect: telemetría sin actualizar](#volvo-connect-telemetría-sin-actualizar)
-5. [Rollback de un deploy malo](#rollback-de-un-deploy-malo)
-6. [Backup y disaster recovery](#backup-y-disaster-recovery)
-7. [Comandos rápidos de diagnóstico](#comandos-rápidos-de-diagnóstico)
-8. [Contactos y secretos](#contactos-y-secretos)
+5. [Volvo Alertas: tablero sin eventos nuevos](#volvo-alertas-tablero-sin-eventos-nuevos)
+6. [Migrar Cloud Functions de region (gotchas)](#migrar-cloud-functions-de-region)
+7. [Rollback de un deploy malo](#rollback-de-un-deploy-malo)
+8. [Backup y disaster recovery](#backup-y-disaster-recovery)
+9. [Comandos rápidos de diagnóstico](#comandos-rápidos-de-diagnóstico)
+10. [Contactos y secretos](#contactos-y-secretos)
 
 ---
 
@@ -150,6 +152,79 @@ Errores comunes:
   firebase deploy --only functions:telemetriaSnapshotScheduled,functions:volvoProxy
   ```
 - **`uptimeData.serviceDistance` undefined**: paquete UPTIME inactivo en la cuenta Volvo. Hay ticket abierto. Mientras tanto el bot usa Plan B (`ULTIMO_SERVICE_KM + 50.000 - KM_ACTUAL`).
+
+---
+
+## Volvo Alertas: tablero sin eventos nuevos
+
+`volvoAlertasPoller` corre cada 5 min y escribe a `VOLVO_ALERTAS` los eventos del Vehicle Alerts API (IDLING, DISTANCE_ALERT, OVERSPEED, PTO, TELL_TALE, ALARM, etc.). Si el tablero "Alertas" del admin no muestra nada nuevo:
+
+```powershell
+# Logs del poller — buscar el último ciclo OK
+firebase functions:log --only volvoAlertasPoller --lines 30
+
+# Estado del cursor (si quedó atascado)
+# Ir a Firestore Console → META/volvo_alertas_cursor
+# Campos: ultimo_request_server_datetime, ultimo_exito_at, ultimo_recibidos
+```
+
+**Si los logs muestran `OK` con `recibidos: 0` por varios ciclos**: no es un bug — significa que la flota Volvo no generó eventos en la última ventana. Confirmá mirando el `ultimo_exito_at` del cursor, debería actualizarse cada 5 min.
+
+**Errores comunes:**
+
+- **401 Unauthorized en logs**: credenciales Volvo expiraron. Mismo fix que `telemetriaSnapshotScheduled` arriba (rotar `VOLVO_PASSWORD` y redeploy).
+- **`Volvo HTTP error statusCode: 429`**: rate limit de Volvo. El poller se sale silencio sin avanzar el cursor → próximo ciclo reintenta. Si pasa seguido, bajar la cadencia (cambiar `every 5 minutes` a `every 10 minutes` en el código + redeploy).
+- **`fetch falló` con timeout**: glitch de red. Idem 429 — no avanza cursor, próximo ciclo reintenta.
+- **Cursor atascado**: si el poller falló muchas veces seguidas, el `ultimo_request_server_datetime` apunta a un punto del pasado y cada run trae mucho histórico. Para resetear: borrar el doc `META/volvo_alertas_cursor` desde Firestore Console (próximo run hace cold start desde "ahora −1h").
+
+**Modelo del doc en VOLVO_ALERTAS:**
+```
+docId: {VIN}_{createdMs}_{TIPO}      // composite e idempotente
+fields:
+  vin, tipo, severidad,              // alertType, severity del payload
+  patente,                           // customerVehicleName o cross-ref VEHICULOS
+  creado_en, recibido_en,            // Timestamps ARG (UTC en Firestore)
+  posicion_gps: {lat, lng, ...},     // si vino gnssPosition
+  detalle_<subtipo>: {...},          // sub-objeto del payload (idling, pto, etc.)
+  driver_id,                         // si vino tachoDriverIdentification
+  distancia_total_metros, horas_motor,
+  polled_en,                         // serverTimestamp del run
+  // Campos de gestión (los setea el admin desde la app, NO el poller):
+  // atendida, atendida_por, atendida_en
+```
+
+El poller usa `getAll` antes de escribir para detectar duplicados — **no pisa los campos de gestión** seteados por el admin.
+
+---
+
+## Migrar Cloud Functions de region
+
+Cambiar la region de las Cloud Functions (ej: us-central1 → southamerica-east1) toca prod completo. Orden correcto aprendido en la migración del 2026-05-02:
+
+1. **Cambiar el código**:
+   - `functions/src/index.ts:setGlobalOptions({ region: "<nueva>" })`.
+   - **Buscar TODAS las URLs hardcoded** en el cliente Flutter (`grep -r "us-central1-coopertrans"`). En esta app son 4: `auth_service.dart`, `audit_log_service.dart`, `empleado_actions.dart`, `volvo_api_service.dart`. Reemplazar por la región nueva.
+2. **Build + lint + tests local** (`npm run build && npm run lint && npm test` en `functions/`).
+3. **Commit + merge a main** (si trabajás desde un worktree, ojo: el deploy lee del repo principal, no del worktree).
+4. **Deploy**: `firebase deploy --only functions`. Firebase detecta que las viejas están en otra region y pregunta `Would you like to proceed with deletion?` — **respondé `N`** para que cree las nuevas sin borrar las viejas. Las viejas quedan vivas pero huérfanas (no las gestiona Firebase).
+5. **Reaplicar IAM `allUsers Cloud Run Invoker`** en las callables públicas (Gen2 lo pierde en cada deploy nuevo):
+   ```powershell
+   foreach ($svc in @("logincondni","auditlogwrite","actualizarrolempleado","volvoproxy")) {
+     gcloud run services add-iam-policy-binding $svc --region=<nueva> --member="allUsers" --role="roles/run.invoker"
+   }
+   ```
+6. **Smoke test** desde un cliente Flutter rebuildeado: login admin + acción auditable + sync Volvo + actualizar rol. Si **algo** falla → `git revert` + redeploy en la región vieja.
+7. **Borrar viejas con `gcloud`** (Firebase NO las borra automáticamente):
+   ```powershell
+   foreach ($fn in @("loginConDni","auditLogWrite","actualizarRolEmpleado","volvoProxy","telemetriaSnapshotScheduled","volvoAlertasPoller")) {
+     gcloud functions delete $fn --region=<vieja> --quiet
+   }
+   ```
+
+**Gotchas conocidos:**
+
+- En el primer deploy multi-function en una región nueva, una function puede fallar con `NAME_UNKNOWN: Repository "gcf-artifacts" not found` (race en la creación del repo Artifact Registry). Reintento simple con `firebase deploy --only functions:<nombre>` resuelve.
+- Filter combinado `--only functions:NAME,firestore:rules` puede tirar `No function matches given --only filters` aún si la function existe en el código. Workaround: dos comandos separados.
 
 ---
 
