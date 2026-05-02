@@ -362,8 +362,12 @@ class ReportConsumoService {
         currentRow++;
       }
 
+      // Auto-fit: el ancho de cada columna se ajusta al contenido más
+      // largo en lugar de un valor fijo. Más cómodo de leer porque las
+      // patentes (cortas) no quedan con espacio sobrante y los números
+      // grandes (1.234.567,89) tampoco se truncan.
       for (var i = 0; i < titulos.length; i++) {
-        hojaDetalle.setColumnWidth(i, 22.0);
+        hojaDetalle.setColumnAutoFit(i);
       }
 
       // ============= Hoja RANKING (top 10 más consumidores) =============
@@ -611,14 +615,10 @@ class ReportConsumoService {
           .value = ex.TextCellValue(barra);
     }
 
-    // Anchos cómodos para lectura
-    hoja.setColumnWidth(0, 6);   // #
-    hoja.setColumnWidth(1, 14);  // PATENTE
-    hoja.setColumnWidth(2, 28);  // MARCA / MODELO
-    hoja.setColumnWidth(3, 14);  // L/100KM
-    hoja.setColumnWidth(4, 14);  // LITROS
-    hoja.setColumnWidth(5, 14);  // KM
-    hoja.setColumnWidth(6, 36);  // BARRA
+    // Auto-fit: ancho de cada columna ajustado al contenido más largo.
+    for (var i = 0; i < titulos.length; i++) {
+      hoja.setColumnAutoFit(i);
+    }
   }
 }
 
