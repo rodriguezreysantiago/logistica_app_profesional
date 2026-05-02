@@ -369,6 +369,25 @@ gcloud scheduler jobs create http firestore-backup-diario `
 
 **Costo**: ~3 centavos USD/mes para una flota chica. El export en sí es gratis; solo paga storage en GCS.
 
+#### Retención automática del bucket (lifecycle policy)
+
+Sin lifecycle, los exports se acumulan para siempre. La regla en `scripts/lifecycle_backups.json` borra automáticamente exports con más de **30 días**, excluyendo el snapshot `pre-migration-2026-05-01_2259/` (salvaguarda histórica que NO debe borrarse).
+
+Aplicar la policy (idempotente — se puede correr varias veces):
+
+```powershell
+gcloud storage buckets update gs://coopertrans-movil-backups `
+  --lifecycle-file=scripts/lifecycle_backups.json
+```
+
+Verificar:
+
+```powershell
+gcloud storage buckets describe gs://coopertrans-movil-backups --format="value(lifecycle)"
+```
+
+Si en el futuro querés cambiar la retención, editás `scripts/lifecycle_backups.json` (campo `condition.age`) y volvés a aplicar el mismo comando — sobrescribe la policy actual.
+
 ### Backup `.wwebjs_auth/` (`whatsapp-bot/scripts/backup_wwebjs_auth.ps1`)
 
 La sesión es el "estado autenticado" de WhatsApp Web. Si se pierde, hay que reescanear QR desde el celular descartable. El script comprime la carpeta a un zip con timestamp y aplica retención (60 días por default).

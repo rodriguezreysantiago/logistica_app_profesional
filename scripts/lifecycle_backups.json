@@ -1,0 +1,19 @@
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": { "type": "Delete" },
+        "condition": {
+          "age": 30,
+          "matchesPrefix": [
+            "2026-",
+            "2027-",
+            "2028-",
+            "2029-",
+            "2030-"
+          ]
+        }
+      }
+    ]
+  }
+}
