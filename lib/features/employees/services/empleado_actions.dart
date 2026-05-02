@@ -551,18 +551,29 @@ class EmpleadoActions {
 
               Future<void> procesarCambio(String? nueva) async {
                 final db = FirebaseFirestore.instance;
-                final batch = db.batch();
                 final cleanActual = patenteActual.trim();
-
-                // Bug C5 del code review: el update de la unidad anterior
-                // estaba FUERA del batch. Si fallaba, la unidad anterior
-                // quedaba en OCUPADO sin que nadie pudiera asignarla.
-                // Ahora todo va en el mismo batch — atómico.
                 final hayActualValido = cleanActual.isNotEmpty &&
                     cleanActual != '-' &&
                     cleanActual != 'S/D';
+                final desvincular = (nueva == null || nueva == '-');
 
-                if (nueva != null && nueva != '-') {
+                // Guard contra no-ops y un bug atomico: si el admin
+                // tappea la MISMA unidad que ya tiene asignada, el
+                // batch hacia update(OCUPADO) y despues update(LIBRE)
+                // sobre el mismo doc → ultimo write gana → unidad
+                // quedaba LIBRE pero el empleado seguia apuntandola.
+                // Caso analogo: tappear "Ninguna" cuando ya no habia
+                // unidad — comiteabamos un update inutil.
+                final misma = !desvincular && nueva == cleanActual;
+                final yaSinUnidad = desvincular && !hayActualValido;
+                if (misma || yaSinUnidad) {
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  return;
+                }
+
+                final batch = db.batch();
+
+                if (!desvincular) {
                   batch.update(
                     db.collection('VEHICULOS').doc(nueva),
                     {'ESTADO': 'OCUPADO'},
