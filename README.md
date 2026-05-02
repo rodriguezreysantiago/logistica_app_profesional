@@ -66,8 +66,10 @@ logistica_app_profesional/
 
 | Archivo | Para qué |
 |---|---|
-| **[`RUNBOOK.md`](RUNBOOK.md)** | Apagar incendios. Bot caído, login roto, rollback, backup, disaster recovery. Leerlo si algo NO ESTÁ ANDANDO en producción. |
+| **[`RUNBOOK.md`](RUNBOOK.md)** | Apagar incendios. Bot caído, login roto, rollback, backup, Sentry, disaster recovery. Leerlo si algo NO ESTÁ ANDANDO en producción. |
 | **[`ESTADO_PROYECTO.md`](ESTADO_PROYECTO.md)** | Handoff completo. Stack, arquitectura, convenciones, decisiones técnicas, sesiones de trabajo, pendientes. Leerlo si vas a CAMBIAR algo. |
+| **[`MANUAL_USUARIO.md`](MANUAL_USUARIO.md)** | Guía para usuarios finales (chofer, admin, supervisor). Para entregar al cliente. |
+| **[`DEMO_CHECKLIST.md`](DEMO_CHECKLIST.md)** | Checklist pre-demo: 8 flujos clave para validar la app antes de presentarla al cliente. |
 | **`README.md`** (este) | Onboarding inicial. Cómo arrancar el proyecto la primera vez. |
 
 ## Roles y permisos

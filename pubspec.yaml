@@ -90,6 +90,13 @@ dependencies:
   # Solo funciona en Android e iOS — en Windows / Web se degrada.
   google_mlkit_text_recognition: ^0.13.1
 
+  # ================= OBSERVABILIDAD =================
+  # Sentry para error tracking + performance monitoring. Se inicializa
+  # solo si SENTRY_DSN viene seteado (--dart-define=SENTRY_DSN=...).
+  # Si está vacío, la app corre sin Sentry (modo dev/local).
+  # Setup: ver RUNBOOK.md sección "Sentry — observabilidad".
+  sentry_flutter: ^8.10.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

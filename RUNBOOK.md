@@ -332,6 +332,59 @@ Están en **Bitwarden** (vault personal de Santiago). Si Santiago no está dispo
 
 ---
 
+## Sentry — observabilidad
+
+Sentry se integró en el cliente Flutter para capturar errores y métricas de performance en producción. Si **no hay DSN seteado**, la app corre sin Sentry (modo dev/local) y solo loguea errores con `debugPrint` + Crashlytics (este último solo en mobile).
+
+### Setup one-time (cuando quieras activar Sentry en producción)
+
+1. **Crear cuenta y proyecto en Sentry**:
+   - Ir a https://sentry.io/signup/ (plan free cubre ~5000 eventos/mes — suficiente para una flota chica).
+   - Crear organización (ej. `coopertrans`).
+   - Crear proyecto Flutter llamado `smart-logistica-app`.
+   - Copiar el **DSN** del proyecto (formato `https://abc123@o12345.ingest.sentry.io/67890`).
+
+2. **Sumar el DSN a `secrets.json`** del proyecto (ya está gitignored):
+   ```json
+   {
+     "VOLVO_USERNAME": "...",
+     "VOLVO_PASSWORD": "...",
+     "SENTRY_DSN": "https://abc123@o12345.ingest.sentry.io/67890",
+     "SENTRY_ENV": "production"
+   }
+   ```
+
+   En desarrollo dejá `SENTRY_DSN` vacío (o no incluyas el campo) — Sentry no se inicializa.
+
+3. **Buildear con el flag**:
+   ```powershell
+   flutter run -d windows --dart-define-from-file=secrets.json
+   flutter build windows --release --dart-define-from-file=secrets.json
+   ```
+
+   El flag `--dart-define-from-file=secrets.json` ya viene configurado en `.vscode/launch.json`, así que F5 toma los valores automáticamente.
+
+4. **Validar en Sentry Console**: corré la app con `SENTRY_DSN` seteado, hacé que tire un error a propósito (ej. password mal). En Sentry → Issues debería aparecer el evento en < 30 segundos.
+
+### Configuración actual
+
+- `tracesSampleRate: 0.2` — 20% de transactions trackeadas para perf monitoring. Para una flota chica con uso bajo es razonable; bajar a 0.05 si crece el volumen y los costos de Sentry suben.
+- `sendDefaultPii: false` — NO se mandan IPs ni identificadores del usuario sin consentimiento explícito. Importante por compliance AR (Ley 25.326).
+- `environment: 'production'` por default — ajustable con `SENTRY_ENV`.
+
+### Cuándo desactivar Sentry
+
+- Durante desarrollo local: `SENTRY_DSN` vacío → modo dev sin Sentry.
+- Si sale del free tier (5K events/mes), bajar `tracesSampleRate` o filtrar errores triviales con `beforeSend` en `SentryFlutter.init`.
+- Si Sentry falla / cae: la app sigue funcionando (Sentry init fallido no rompe runApp).
+
+### Costo
+
+- Plan free: 5K events/mes. Con flota chica (~57 empleados, errores raros) sobra.
+- Si supera, plan Team es ~26 USD/mes.
+
+---
+
 ## Otros gotchas operativos (Windows)
 
 ### `start_bot.ps1` aborta por package-lock "modificado" pero `git diff` está vacío

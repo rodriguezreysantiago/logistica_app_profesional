@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'firebase_options.dart';
 import 'core/services/app_logger.dart';
@@ -50,57 +51,92 @@ void main() async {
   await PrefsService.init();
   await NotificationService.init();
 
-  runApp(
-    MultiProvider(
-      providers: [
-        // 🔹 API
-        Provider(create: (_) => VolvoApiService()),
+  // ================= SENTRY (opcional, solo si DSN está seteado) =================
+  // Sentry se activa pasando --dart-define=SENTRY_DSN=https://...@sentry.io/...
+  // al `flutter run` o `flutter build`. Sin esa variable, la app corre
+  // SIN Sentry (modo desarrollo / local). En producción se setea via
+  // --dart-define-from-file=secrets.json (junto con las credenciales Volvo).
+  //
+  // Setup operativo: ver RUNBOOK.md sección "Sentry — observabilidad".
+  const sentryDsn = String.fromEnvironment('SENTRY_DSN');
+  const sentryEnv = String.fromEnvironment(
+    'SENTRY_ENV',
+    defaultValue: 'production',
+  );
 
-        // 🔹 REPO
-        ProxyProvider<VolvoApiService, VehiculoRepository>(
-          update: (_, api, __) => VehiculoRepository(api: api),
-        ),
+  if (sentryDsn.isEmpty) {
+    AppLogger.log('SENTRY_DSN vacío → Sentry deshabilitado (modo dev)');
+    runApp(_armarApp());
+  } else {
+    await SentryFlutter.init(
+      (options) {
+        options.dsn = sentryDsn;
+        options.environment = sentryEnv;
+        // tracesSampleRate: 0.2 = 20% de transactions trackeadas para
+        // perf monitoring. En una flota chica con uso bajo es razonable;
+        // bajar a 0.05 si crece el volumen y los costos suben.
+        options.tracesSampleRate = 0.2;
+        // sendDefaultPii: false por privacidad (no mandar IPs ni
+        // identificadores del usuario sin consentimiento explícito).
+        options.sendDefaultPii = false;
+      },
+      appRunner: () => runApp(_armarApp()),
+    );
+    AppLogger.log('Sentry inicializado (env: $sentryEnv)');
+  }
+}
 
-        // 🔹 MANAGER
-        ProxyProvider2<VehiculoRepository, VolvoApiService, VehiculoManager>(
-          update: (_, repo, api, __) => VehiculoManager(repo, api),
-        ),
+/// Construye el árbol de Providers + LogisticaApp. Extraído acá para
+/// reusarlo desde el branch con/sin Sentry de `main()`.
+Widget _armarApp() {
+  return MultiProvider(
+    providers: [
+      // 🔹 API
+      Provider(create: (_) => VolvoApiService()),
 
-        // 🔹 PROVIDER UI
-        ChangeNotifierProxyProvider2<VehiculoManager, VehiculoRepository, VehiculoProvider>(
-          create: (context) => VehiculoProvider(
-            manager: context.read<VehiculoManager>(),
-            repository: context.read<VehiculoRepository>(),
-          ),
-          update: (_, manager, repo, provider) {
-            provider!.manager = manager;
-            provider.repository = repo;
-            return provider;
-          },
-        ),
+      // 🔹 REPO
+      ProxyProvider<VolvoApiService, VehiculoRepository>(
+        update: (_, api, __) => VehiculoRepository(api: api),
+      ),
 
-        // 🔥 DASHBOARD OBSERVABILIDAD
-        ChangeNotifierProvider(
-          create: (_) => SyncDashboardProvider(),
-        ),
+      // 🔹 MANAGER
+      ProxyProvider2<VehiculoRepository, VolvoApiService, VehiculoManager>(
+        update: (_, repo, api, __) => VehiculoManager(repo, api),
+      ),
 
-        // 🔥 AUTO-SYNC SERVICE
-        // Se crea una sola vez (cuando prev es null) y se le pasa al
-        // dispose del provider la baja del Timer interno. El botón
-        // "ejecutar ahora" del dashboard usa runNow() de esta instancia.
-        ProxyProvider2<VehiculoProvider, SyncDashboardProvider,
-            AutoSyncService>(
-          update: (_, vehProv, dashProv, prev) {
-            if (prev != null) return prev;
-            final svc = AutoSyncService(vehProv, dashboard: dashProv);
-            svc.start();
-            return svc;
-          },
-          dispose: (_, svc) => svc.stop(),
+      // 🔹 PROVIDER UI
+      ChangeNotifierProxyProvider2<VehiculoManager, VehiculoRepository, VehiculoProvider>(
+        create: (context) => VehiculoProvider(
+          manager: context.read<VehiculoManager>(),
+          repository: context.read<VehiculoRepository>(),
         ),
-      ],
-      child: const LogisticaApp(),
-    ),
+        update: (_, manager, repo, provider) {
+          provider!.manager = manager;
+          provider.repository = repo;
+          return provider;
+        },
+      ),
+
+      // 🔥 DASHBOARD OBSERVABILIDAD
+      ChangeNotifierProvider(
+        create: (_) => SyncDashboardProvider(),
+      ),
+
+      // 🔥 AUTO-SYNC SERVICE
+      // Se crea una sola vez (cuando prev es null) y se le pasa al
+      // dispose del provider la baja del Timer interno. El botón
+      // "ejecutar ahora" del dashboard usa runNow() de esta instancia.
+      ProxyProvider2<VehiculoProvider, SyncDashboardProvider, AutoSyncService>(
+        update: (_, vehProv, dashProv, prev) {
+          if (prev != null) return prev;
+          final svc = AutoSyncService(vehProv, dashboard: dashProv);
+          svc.start();
+          return svc;
+        },
+        dispose: (_, svc) => svc.stop(),
+      ),
+    ],
+    child: const LogisticaApp(),
   );
 }
 
