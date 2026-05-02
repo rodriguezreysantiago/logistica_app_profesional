@@ -457,7 +457,7 @@ export const actualizarRolEmpleado = onCall(
  * `compareSync`) cede el event loop -- con `compareSync` y 5 logins
  * concurrentes el proceso quedaba bloqueado ~80ms por intento.
  */
-async function verificarPassword(
+export async function verificarPassword(
   password: string,
   storedHash: string
 ): Promise<boolean> {
@@ -472,7 +472,7 @@ async function verificarPassword(
   return sha256Hex(password) === storedHash;
 }
 
-function esBcrypt(hash: string): boolean {
+export function esBcrypt(hash: string): boolean {
   return (
     hash.startsWith("$2a$") ||
     hash.startsWith("$2b$") ||
@@ -480,11 +480,11 @@ function esBcrypt(hash: string): boolean {
   );
 }
 
-function esLegacy(hash: string): boolean {
+export function esLegacy(hash: string): boolean {
   return !esBcrypt(hash);
 }
 
-function sha256Hex(text: string): string {
+export function sha256Hex(text: string): string {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
@@ -494,7 +494,7 @@ function sha256Hex(text: string): string {
  * contra enumeración (el dominio de DNIs es chico, ~10^8) — solo para
  * correlación de logs y para que el path de Firestore no contenga PII.
  */
-function hashId(text: string): string {
+export function hashId(text: string): string {
   return crypto
     .createHash("sha256")
     .update(text, "utf8")

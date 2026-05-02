@@ -109,3 +109,11 @@ jobs:
         # Si en el futuro queremos tratar warnings como bloqueantes,
         # cambiar a: npm run lint -- --max-warnings 0
         run: npm run lint
+
+      - name: Unit tests (node:test sobre lib/ compilado)
+        # Tests de helpers puros: verificarPassword, esBcrypt, sha256Hex,
+        # hashId. Cubren regression del fix de bcrypt async + el flujo
+        # de migracion silenciosa SHA-256 → bcrypt al primer login OK.
+        # Tests de los handlers completos (callable functions) requieren
+        # firebase-functions-test SDK + mocks -- queda para futura iteracion.
+        run: npm test
