@@ -24,9 +24,9 @@ import '../../../shared/widgets/fecha_dialog.dart';
 // Centraliza las operaciones que tocan Firestore/Storage para gestión de
 // personal desde las pantallas de admin (dialogs, sheets, audit, feedback).
 //
-// Esta capa es UI-aware: abre showModalBottomSheet, levanta SnackBars,
-// registra `AuditLog`, etc. Si necesitás CRUD puro de Firestore sin UI,
-// usá `EmpleadoService` en este mismo directorio.
+// Capa UI-aware: abre showModalBottomSheet, levanta SnackBars, registra
+// `AuditLog`, etc. La app trabaja directamente con `Map<String,dynamic>`
+// desde Firestore — no hay capa intermedia de modelos tipados.
 //
 // Originalmente vivía como `_Actualizar` privado dentro de
 // `admin_personal_lista_screen.dart`. Extraído acá para bajar de 1295
