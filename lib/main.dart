@@ -92,14 +92,6 @@ void main() async {
       appRunner: () => runApp(_armarApp()),
     );
     AppLogger.log('Sentry inicializado (env: $sentryEnv)');
-    // TEMPORAL: ping de verificación al arrancar para confirmar que el
-    // pipeline de Sentry funciona end-to-end. Genera 1 evento por
-    // arranque de app — borrarlo después de validar que llega al
-    // dashboard.
-    await Sentry.captureMessage(
-      'App arrancó OK (test ping desde main.dart)',
-      level: SentryLevel.info,
-    );
   }
 }
 
