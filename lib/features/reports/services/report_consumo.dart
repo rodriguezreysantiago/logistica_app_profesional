@@ -296,8 +296,15 @@ class ReportConsumoService {
         list.sort((a, b) => a.fecha.compareTo(b.fecha));
       }
 
+      // Solo tractores: los enganches (BATEA, TOLVA, ACOPLADO, etc.)
+      // no tienen motor, no tienen VIN cargado en la cuenta de Volvo
+      // y siempre saldrían con "0 (acum.)" inflando el reporte con
+      // ruido. El reporte de consumo es específico de unidades con
+      // motor — los enganches se reportan en su propio reporte de
+      // flota.
       final snapshot = await db
           .collection(AppCollections.vehiculos)
+          .where('TIPO', isEqualTo: AppTiposVehiculo.tractor)
           .get();
 
       final excel = ex.Excel.createExcel();
