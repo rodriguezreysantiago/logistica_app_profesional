@@ -41,14 +41,24 @@ const cron = require('./cron');
 // solo para resolver el remitente. Con cache de 5min eso baja a
 // ~57 reads por intervalo, ahorrando ordenes de magnitud.
 //
-// El TTL es corto (5 min) porque no queremos que un alta o cambio
-// de telefono recien hecho tarde demasiado en propagarse al bot.
-// Si una baja crea un mismatch (chofer dado de baja contacta al
-// bot dentro de la ventana de cache), el peor caso es responder
-// como si todavia estuviera activo durante hasta 5 min -- aceptable.
-const _CACHE_TTL_MS = parseInt(process.env.EMPLEADOS_CACHE_TTL_MS || '300000', 10);
+// El TTL bajado de 5min a 1min para que altas/bajas/cambios de
+// telefono se reflejen rapido. Con ~60 empleados y polling cada 15s,
+// ~4 reads/min (1 cada vez que llega un mensaje y vence el TTL) son
+// despreciables. Si un comando admin sabe que cambio EMPLEADOS,
+// puede llamar `invalidarCache()` para forzar refresh inmediato.
+const _CACHE_TTL_MS = parseInt(process.env.EMPLEADOS_CACHE_TTL_MS || '60000', 10);
 let _cacheEmpleados = null;
 let _cacheTimestamp = 0;
+
+/**
+ * Fuerza el descarte del cache de empleados. La próxima llamada va a
+ * leer de Firestore de nuevo. Útil cuando un comando admin sabe que
+ * cambió EMPLEADOS y no quiere esperar al TTL.
+ */
+function invalidarCacheEmpleados() {
+  _cacheEmpleados = null;
+  _cacheTimestamp = 0;
+}
 
 async function _refrescarCacheEmpleados(db) {
   const snap = await db.collection('EMPLEADOS').get();
@@ -387,6 +397,7 @@ function crearHandler(fs, wa) {
 
 module.exports = {
   crearHandler,
+  invalidarCacheEmpleados,
   // Exportados para tests:
   _resolverChofer,
   _asociarConAviso,

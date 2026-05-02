@@ -147,18 +147,33 @@ function iniciar(db, firestoreModule, whatsappModule) {
   log.info(`Heartbeat cada ${intervaloSeg}s a BOT_HEALTH/main.`);
 
   // Primera escritura inmediata para que la app vea algo enseguida.
-  escribirHeartbeat().catch((e) => {
-    log.warn(`Heartbeat inicial falló: ${e.message}`);
-  });
+  _escribirSerializado();
 
   _timer = setInterval(() => {
-    escribirHeartbeat().catch((e) => {
-      // Si Firestore está caído o hay un problema de red, no abortamos
-      // el bot — el próximo intervalo lo intenta de nuevo. Solo
-      // logueamos para que el operador vea el patrón si se vuelve crónico.
-      log.warn(`Heartbeat falló: ${e.message}`);
-    });
+    _escribirSerializado();
   }, intervaloSeg * 1000);
+}
+
+// Serializa las escrituras de heartbeat para evitar que dos calls
+// concurrentes (ej: el setInterval anterior tardó más que su período)
+// se pisen entre sí escribiendo al mismo doc. Si Firestore está lento
+// y un heartbeat tarda 90s mientras el intervalo es 60s, sin esto
+// habría dos escrituras concurrentes en flight con potencial conflict.
+let _escribiendoHeartbeat = false;
+
+function _escribirSerializado() {
+  if (_escribiendoHeartbeat) {
+    log.debug('Heartbeat anterior aún en curso, skip este intervalo.');
+    return;
+  }
+  _escribiendoHeartbeat = true;
+  escribirHeartbeat()
+    .catch((e) => {
+      log.warn(`Heartbeat falló: ${e.message}`);
+    })
+    .finally(() => {
+      _escribiendoHeartbeat = false;
+    });
 }
 
 function detener() {

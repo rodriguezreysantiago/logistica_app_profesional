@@ -76,12 +76,44 @@ function inicializar() {
     health.setEstadoCliente('DESCONECTADO');
     health.registrarError('cliente_wa', `Cliente desconectado: ${reason}`);
     log.warn(`Cliente desconectado: ${reason}.`);
+    // Limpieza preventiva: si hay callers esperando `_esperarListo()`
+    // antes de la desconexión, sus resolvers están en el array. La
+    // reconexión va a disparar `ready` de nuevo y se resuelven solos —
+    // no los limpiamos para no romper esa promesa. Si la reconexión
+    // falla 5 veces y exit(1), las promesas mueren con el proceso.
     _intentarReconexion();
   });
 
-  client.initialize();
+  // Bug observado en producción: si `client.initialize()` lanza un
+  // error sincrónico o rechaza la promesa antes de que dispare el
+  // evento `authenticated`, el watchdog (que solo arranca con ese
+  // evento) NUNCA arranca → bot queda colgado en estado INICIANDO sin
+  // recovery. NSSM lo reinicia pero arranca con el mismo problema →
+  // loop de cuelgues que requiere reejecutar manual.
+  //
+  // Fix: catcheamos el error y disparamos el flujo de reconexión
+  // (mismo backoff exponencial que `disconnected`), de modo que el
+  // bot intente reinicializar N veces antes de exit(1).
+  _safeInitialize();
 
   return _esperarListo();
+}
+
+function _safeInitialize() {
+  client.initialize().catch((e) => {
+    log.error(`client.initialize() falló: ${e.message}`);
+    health.registrarError(
+      "cliente_wa",
+      `Initialize falló: ${e.message}`
+    );
+    // Importante: NO llamar _intentarReconexion() acá si ya estamos
+    // dentro del watchdog — eso lo maneja el watchdog mismo. Solo
+    // disparamos reconexión cuando el initialize falló afuera de un
+    // ciclo de watchdog (caso del primer arranque).
+    if (!_readyWatchdogTimer) {
+      _intentarReconexion();
+    }
+  });
 }
 
 function _esperarListo() {
@@ -192,6 +224,20 @@ function _arrancarWatchdogReady() {
       await client.initialize();
     } catch (e) {
       log.error(`Reinicialización falló: ${e.message}`);
+      health.registrarError(
+        'cliente_wa',
+        `Reinicialización tras timeout falló: ${e.message}`
+      );
+      // Si la reinicialización dentro del watchdog también falla, el
+      // bot queda en INICIANDO sin watchdog activo. Re-arrancamos uno
+      // nuevo con el mismo timeout para que el ciclo de retry no se
+      // pierda — sin esto, el bot se cuelga silenciosamente.
+      if (_intentosReadyTimeout < _maxReadyTimeouts) {
+        _arrancarWatchdogReady();
+      } else {
+        log.error('Watchdog agotado después de fallo en reinicialización. exit(1).');
+        process.exit(1);
+      }
     }
   }, timeoutSeg * 1000);
 }

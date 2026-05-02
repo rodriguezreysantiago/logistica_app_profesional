@@ -19,6 +19,7 @@ const fsNode = require('fs');
 const path = require('path');
 const os = require('os');
 
+const admin = require('firebase-admin');
 const log = require('./logger');
 
 // Handlers globales de excepciones no atrapadas. Antes el bot las
@@ -267,7 +268,14 @@ async function procesarSiguiente() {
       return;
     }
 
-    await fs.marcarProcesando(docRef);
+    // Lock atómico: si otra instancia se adelantó (race poco probable
+    // ya que el anti-doble-bot debería garantizar single-instance, pero
+    // defensa en profundidad), retorna false y skipeamos sin enviar.
+    const tomamosElLock = await fs.marcarProcesandoSiPendiente(docRef);
+    if (!tomamosElLock) {
+      log.debug(`${docId}: otro proceso lo tomó primero, salto.`);
+      return;
+    }
     const delay = delayAleatorioMs();
     log.info(`→ Enviando ${docId} a ${data.telefono} en ${Math.round(delay / 1000)}s...`);
     await sleep(delay);
@@ -282,16 +290,37 @@ async function procesarSiguiente() {
     try {
       await _despacharFalloEnvio(docRef, e);
     } catch (e2) {
-      log.error(`No se pudo despachar fallo de envío: ${e2.message}`);
+      // Si _despacharFalloEnvio falla (típicamente Firestore caído al
+      // momento de marcar PENDIENTE/ERROR), el doc queda en estado
+      // inconsistente. Antes el bot llamaba `procesarSiguiente()` de
+      // inmediato → martillaba Firestore varias veces por segundo. Ahora
+      // marcamos la flag para que el `finally` salte la siguiente
+      // iteración y deje al polling reintentar dentro de 15s.
+      log.error(
+        `No se pudo despachar fallo de envío: ${e2.message}. ` +
+        `Cortando procesarSiguiente — el polling reintenta en el próximo ciclo.`
+      );
+      _despachoFalloErrorReciente = Date.now();
     }
   } finally {
     procesando = false;
-    if (colaProcesar.length > 0) {
+    // Si hubo fallo en el despacho hace poco, no llamamos
+    // procesarSiguiente — esperamos al polling. Esto da tiempo a que
+    // Firestore se recupere y evita el loop apretado.
+    const haceCuanto = Date.now() - _despachoFalloErrorReciente;
+    const recienHuboFallo = haceCuanto < 5000;
+    if (!recienHuboFallo && colaProcesar.length > 0) {
       await sleep(500);
       procesarSiguiente();
     }
   }
 }
+
+// Timestamp del último fallo en `_despacharFalloEnvio()`. Si fue hace
+// menos de 5s, `procesarSiguiente()` corta para no martillar Firestore
+// con reintentos sincrónicos. El polling normal (cada 15s) toma el
+// relevo. 0 = nunca falló (no hay corte activo).
+let _despachoFalloErrorReciente = 0;
 
 // ─── Polling de COLA_WHATSAPP ───────────────────────────────────────
 let _pollingTimer = null;
@@ -300,7 +329,42 @@ let _pollingTimer = null;
 // poll de la sesion.
 let _ultimoEstadoHorario = null;
 
+// Guard contra overlap del polling: si un ciclo tarda más que
+// POLLING_INTERVAL_SECONDS (típicamente 15s, pero Firestore lento puede
+// hacer que tarde 30s+), el setInterval dispara uno nuevo antes de que
+// termine el anterior → dos pollings concurrentes encolan los mismos
+// docs → un doc se procesa dos veces. Esta flag serializa.
+let _polleando = false;
+
+const POLL_TIMEOUT_MS = parseInt(
+  process.env.POLL_TIMEOUT_MS || '10000',
+  10
+);
+
+/**
+ * Envuelve una promesa con un timeout. Si la promesa no resuelve en
+ * `ms`, se rechaza con un error etiquetado. Útil para queries de
+ * Firestore que de otro modo podrían quedar colgadas indefinidamente
+ * cuando hay problemas de red.
+ */
+function _withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Timeout (${ms}ms): ${label}`)),
+        ms
+      )
+    ),
+  ]);
+}
+
 async function pollearCola(db) {
+  if (_polleando) {
+    log.debug('Polling previo aún en curso, skip este ciclo.');
+    return;
+  }
+  _polleando = true;
   try {
     // Sweeper de docs stale en PROCESANDO: si el bot crasheo durante
     // un envio anterior (entre marcarProcesando y marcarEnviado), el
@@ -308,7 +372,11 @@ async function pollearCola(db) {
     // PENDIENTE para que entre al ciclo actual. Corre SIEMPRE -- aun
     // fuera de horario habil queremos mantener el estado de la cola.
     try {
-      const recuperados = await fs.recuperarStaleProcesando(db);
+      const recuperados = await _withTimeout(
+        fs.recuperarStaleProcesando(db),
+        POLL_TIMEOUT_MS,
+        'sweeper PROCESANDO'
+      );
       if (recuperados > 0) {
         log.warn(`Sweeper: recupere ${recuperados} doc(s) stale en PROCESANDO → PENDIENTE.`);
       }
@@ -337,10 +405,14 @@ async function pollearCola(db) {
     _ultimoEstadoHorario = enHorario;
     if (!enHorario) return;
 
-    const qs = await db
-      .collection(fs.COLECCION)
-      .where('estado', '==', fs.ESTADO.pendiente)
-      .get();
+    const qs = await _withTimeout(
+      db
+        .collection(fs.COLECCION)
+        .where('estado', '==', fs.ESTADO.pendiente)
+        .get(),
+      POLL_TIMEOUT_MS,
+      'pollearCola query'
+    );
     const ahora = Date.now();
     qs.forEach((doc) => {
       const data = doc.data();
@@ -355,6 +427,8 @@ async function pollearCola(db) {
     });
   } catch (e) {
     log.warn(`Polling Firestore falló: ${e.message}`);
+  } finally {
+    _polleando = false;
   }
 }
 
@@ -389,68 +463,85 @@ async function _verificarNoHayOtraInstancia(db) {
     return;
   }
 
-  let snap;
+  // Check + claim atómico: usamos transacción para que dos PCs que
+  // arranquen casi simultáneamente NO pasen el check ambas. Una gana
+  // la transacción y escribe su pcId; la otra ve la escritura ganadora
+  // y aborta. Sin transacción había race window de ~100ms en que dos
+  // bots procesaban la misma cola → mensajes duplicados → baneo.
+  const ref = db.collection('BOT_HEALTH').doc('main');
+  let abortInfo = null;
+
   try {
-    snap = await db.collection('BOT_HEALTH').doc('main').get();
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+
+      if (snap.exists) {
+        const data = snap.data();
+        const ultimoHb = data.ultimoHeartbeat;
+        const otroPcId = data.pcId || 'desconocida';
+        if (ultimoHb) {
+          const ultimoMs = typeof ultimoHb.toMillis === 'function'
+            ? ultimoHb.toMillis()
+            : new Date(ultimoHb).getTime();
+          const segDesdeUltimo = Math.round((Date.now() - ultimoMs) / 1000);
+          const fresco = segDesdeUltimo <= UMBRAL_HEARTBEAT_FRESCO_SEG;
+          if (fresco && otroPcId !== PC_ID) {
+            // Heartbeat fresco de OTRA PC — la otra está viva. Vamos
+            // a abortar después de salir de la transacción (no
+            // queremos process.exit dentro de una tx).
+            abortInfo = { otroPcId, segDesdeUltimo };
+            // Lanzamos error para abortar la tx (no queremos escribir).
+            throw new Error('OTRA_INSTANCIA_VIVA');
+          }
+        }
+      }
+
+      // Llegamos acá si: no había doc, no había heartbeat, el heartbeat
+      // estaba viejo (otra PC muerta), o el heartbeat era nuestro
+      // (somos nosotros reiniciado). En todos los casos, claimeamos el
+      // lock escribiendo nuestro pcId con un heartbeat fresco. Si dos
+      // PCs llegan acá simultáneamente, Firestore detecta conflicto en
+      // commit y reintenta — la perdedora va a ver el heartbeat de la
+      // ganadora y entrar al branch de abort.
+      tx.set(
+        ref,
+        {
+          pcId: PC_ID,
+          ultimoHeartbeat: admin.firestore.FieldValue.serverTimestamp(),
+          estadoCliente: 'INICIANDO',
+          ultimoStartup: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
   } catch (e) {
-    // Si no podemos leer (rules, red), arrancamos igual y dejamos que
-    // el bot se haga cargo si Firestore esta caido. Mejor un bot
-    // arrancando de mas que un bot bloqueado por una lectura fallida.
-    log.warn(`No pude leer BOT_HEALTH para chequear otra instancia: ${e.message}`);
-    return;
-  }
-
-  if (!snap.exists) {
-    log.info('No hay BOT_HEALTH previo, arrancando primera vez.');
-    return;
-  }
-
-  const data = snap.data();
-  const ultimoHb = data.ultimoHeartbeat;
-  const otroPcId = data.pcId || 'desconocida';
-
-  if (!ultimoHb) {
-    log.info('BOT_HEALTH existe pero sin ultimoHeartbeat. Arrancando.');
-    return;
-  }
-
-  // ultimoHeartbeat es un Timestamp de Firestore. Lo convertimos a ms.
-  const ultimoMs = typeof ultimoHb.toMillis === 'function'
-    ? ultimoHb.toMillis()
-    : new Date(ultimoHb).getTime();
-  const segDesdeUltimo = Math.round((Date.now() - ultimoMs) / 1000);
-
-  if (segDesdeUltimo > UMBRAL_HEARTBEAT_FRESCO_SEG) {
-    log.info(
-      `Ultimo heartbeat fue hace ${segDesdeUltimo}s ` +
-      `(> ${UMBRAL_HEARTBEAT_FRESCO_SEG}s). La otra PC parece muerta, arranco.`
+    if (abortInfo) {
+      // Branch de abort: hay otra PC viva. Mostramos mensaje claro y
+      // exit(1). NSSM se va a quedar quieto (NO reinicia indefinidamente
+      // porque el exit es deliberado, no por crash).
+      log.error(
+        `\nABORTANDO: el bot YA esta corriendo en otra PC.\n\n` +
+        `  PC remota:        ${abortInfo.otroPcId}\n` +
+        `  Mi PC:            ${PC_ID}\n` +
+        `  Ultimo heartbeat: hace ${abortInfo.segDesdeUltimo}s\n` +
+        `  Umbral:           ${UMBRAL_HEARTBEAT_FRESCO_SEG}s\n\n` +
+        `Para evitar que dos bots procesen la misma cola y dupliquen ` +
+        `mensajes (riesgo de baneo de WhatsApp), no arranco.\n\n` +
+        `Soluciones:\n` +
+        `  1. Detener el bot en "${abortInfo.otroPcId}" (recomendado).\n` +
+        `  2. Si sabes que esa PC esta muerta y el heartbeat es residual, ` +
+        `seteá FORCE_START=true en .env y reintentá.\n`
+      );
+      process.exit(1);
+    }
+    // Otro error de transacción (red, rules, conflicto irrecuperable) —
+    // arrancamos igual. Mejor un bot arrancando con riesgo bajo de
+    // duplicado que un bot bloqueado por una falla intermitente.
+    log.warn(
+      `Error en transacción de check de instancia: ${e.message}. ` +
+      `Arrancando igual (best-effort).`
     );
-    return;
   }
-
-  if (otroPcId === PC_ID) {
-    log.info(
-      `Heartbeat reciente (${segDesdeUltimo}s atras) pero del mismo PC_ID ` +
-      `(${PC_ID}). Asumo que soy yo reiniciado, arranco.`
-    );
-    return;
-  }
-
-  // Bloqueo: hay heartbeat fresco de otra PC.
-  log.error(
-    `\nABORTANDO: el bot YA esta corriendo en otra PC.\n\n` +
-    `  PC remota:        ${otroPcId}\n` +
-    `  Mi PC:            ${PC_ID}\n` +
-    `  Ultimo heartbeat: hace ${segDesdeUltimo}s\n` +
-    `  Umbral:           ${UMBRAL_HEARTBEAT_FRESCO_SEG}s\n\n` +
-    `Para evitar que dos bots procesen la misma cola y dupliquen ` +
-    `mensajes (riesgo de baneo de WhatsApp), no arranco.\n\n` +
-    `Soluciones:\n` +
-    `  1. Detener el bot en "${otroPcId}" (recomendado).\n` +
-    `  2. Si sabes que esa PC esta muerta y el heartbeat es residual, ` +
-    `seteá FORCE_START=true en .env y reintentá.\n`
-  );
-  process.exit(1);
 }
 
 async function main() {

@@ -98,6 +98,35 @@ async function marcarProcesando(docRef) {
 }
 
 /**
+ * Versión transaccional de marcarProcesando: verifica DENTRO de una
+ * transacción que el doc sigue en estado PENDIENTE antes de marcarlo
+ * PROCESANDO. Si en el medio (entre la lectura del polling y este
+ * call) otro proceso lo cambió, retorna false y el caller skipea.
+ *
+ * Útil para evitar race condition cuando hay dos PCs corriendo y
+ * ambas leen el mismo doc PENDIENTE casi al mismo tiempo. Sin esto,
+ * ambas marcaban PROCESANDO y las dos enviaban el mensaje (chofer
+ * recibe duplicado, riesgo de baneo de WhatsApp).
+ *
+ * @returns {Promise<boolean>} true si tomamos el lock, false si otro
+ *   proceso ya lo tenía.
+ */
+async function marcarProcesandoSiPendiente(docRef) {
+  const db = docRef.firestore;
+  return await db.runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    if (!snap.exists) return false;
+    if (snap.data().estado !== ESTADO.pendiente) return false;
+    tx.update(docRef, {
+      estado: ESTADO.procesando,
+      intentos: admin.firestore.FieldValue.increment(1),
+      procesando_en: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+}
+
+/**
  * Marca un doc como enviado exitosamente. Si se pasa el [waMessageId]
  * (id devuelto por wwebjs al enviar) lo guardamos para asociar
  * después las respuestas que cite ese mensaje (Fase 3).
@@ -113,10 +142,20 @@ async function marcarEnviado(docRef, { waMessageId } = {}) {
 
 /** Marca un doc con error y guarda el detalle para que lo vea el admin. */
 async function marcarError(docRef, mensaje) {
+  const error = String(mensaje).slice(0, 500);
   await docRef.update({
     estado: ESTADO.error,
-    error: String(mensaje).slice(0, 500),
+    error,
     error_en: admin.firestore.FieldValue.serverTimestamp(),
+    // Histórico de errores: arrayUnion suma el error con timestamp ISO
+    // sin sobrescribir los anteriores. Útil cuando un doc tuvo varios
+    // reintentos transitorios antes de fallar — el campo `error` solo
+    // muestra el último, pero `historial_errores` deja la traza
+    // completa. Cada entrada es {msg, at} (at en ISO local).
+    historial_errores: admin.firestore.FieldValue.arrayUnion({
+      msg: error,
+      at: new Date().toISOString(),
+    }),
   });
 }
 
@@ -134,11 +173,16 @@ async function marcarError(docRef, mensaje) {
  * @param {Date}   cuandoReintentar - fecha futura del próximo intento.
  */
 async function marcarReintento(docRef, mensajeError, cuandoReintentar) {
+  const err = String(mensajeError).slice(0, 500);
   await docRef.update({
     estado: ESTADO.pendiente,
-    error: String(mensajeError).slice(0, 500),
+    error: err,
     error_en: admin.firestore.FieldValue.serverTimestamp(),
     proximoIntentoEn: admin.firestore.Timestamp.fromDate(cuandoReintentar),
+    historial_errores: admin.firestore.FieldValue.arrayUnion({
+      msg: err,
+      at: new Date().toISOString(),
+    }),
   });
 }
 
@@ -202,6 +246,7 @@ module.exports = {
   COLECCION,
   ESTADO,
   marcarProcesando,
+  marcarProcesandoSiPendiente,
   marcarEnviado,
   marcarError,
   marcarReintento,

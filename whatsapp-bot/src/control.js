@@ -22,7 +22,11 @@ let _db = null;
 let _cache = { pausado: false, motivo: null, leidoEn: 0 };
 
 function _ttlMs() {
-  return parseInt(process.env.BOT_CONTROL_CACHE_TTL_MS || '10000', 10);
+  // TTL bajado de 10s a 2s para que pausas/reanudaciones rápidas del
+  // admin se reflejen casi al instante sin overhead notable de reads
+  // (con polling cada 15s y ~30 mensajes/hora, un read cada 2s significa
+  // ~3-5 reads/min máximo — despreciable).
+  return parseInt(process.env.BOT_CONTROL_CACHE_TTL_MS || '2000', 10);
 }
 
 /**
@@ -76,8 +80,18 @@ function ultimoEstado() {
   return { pausado: _cache.pausado, motivo: _cache.motivo };
 }
 
+/**
+ * Fuerza el descarte del cache. La próxima llamada a `estaPausado()`
+ * va a leer de Firestore de nuevo. Útil después de un cambio
+ * intencional (ej: comando admin /pausar que escribe BOT_CONTROL).
+ */
+function invalidarCache() {
+  _cache = { pausado: false, motivo: null, leidoEn: 0 };
+}
+
 module.exports = {
   inicializar,
   estaPausado,
   ultimoEstado,
+  invalidarCache,
 };

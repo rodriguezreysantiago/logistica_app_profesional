@@ -112,14 +112,43 @@ function start(fs) {
   }
 
   const intervaloMin = parseInt(process.env.CRON_INTERVAL_MINUTES || '60', 10);
+  const intervaloMs = intervaloMin * 60 * 1000;
   log.info(`Cron de avisos automáticos HABILITADO (cada ${intervaloMin} min).`);
-  setTimeout(() => _runOnce(fs), 30000);
-  _timer = setInterval(() => _runOnce(fs), intervaloMin * 60 * 1000);
+
+  // Patrón setTimeout recursivo (no setInterval): el siguiente ciclo
+  // solo se programa DESPUÉS de que termina el anterior. Evita brechas
+  // cuando un ciclo tarda más que el intervalo (ej: cron tarda 70min
+  // con intervalo de 60min → con setInterval se perdían ciclos; con
+  // setTimeout recursivo el siguiente arranca a los 60min DESPUÉS de
+  // que el anterior termine).
+  const programarProximo = () => {
+    _timer = setTimeout(async () => {
+      try {
+        await _runOnce(fs);
+      } catch (e) {
+        log.error(`Cron _runOnce no atrapado: ${e.message}`);
+      } finally {
+        if (_timer) programarProximo(); // si stop() corrió, _timer = null
+      }
+    }, intervaloMs);
+  };
+
+  // Primera corrida más rápida (30s después de arrancar) y después se
+  // engancha al ciclo recursivo.
+  _timer = setTimeout(async () => {
+    try {
+      await _runOnce(fs);
+    } catch (e) {
+      log.error(`Cron _runOnce inicial no atrapado: ${e.message}`);
+    } finally {
+      if (_timer) programarProximo();
+    }
+  }, 30000);
 }
 
 function stop() {
   if (_timer) {
-    clearInterval(_timer);
+    clearTimeout(_timer);
     _timer = null;
   }
 }
@@ -139,6 +168,19 @@ async function _runOnce(fs) {
   const stats = { encolados: 0, agrupados: 0, salteados: 0, errores: 0 };
 
   try {
+    // ─── Cleanup de historico viejo (mantenimiento de coleccion) ──
+    // Borra hasta 500 docs de AVISOS_AUTOMATICOS_HISTORICO con
+    // `creado_en` > 90 dias atras. Sin esto, la coleccion crece
+    // indefinidamente (cada urgencia + cada chofer + cada fecha
+    // genera un doc). Es barato (1 query + 1 batch) y se hace cada
+    // ciclo del cron (1x por hora aprox), asi que la limpieza es
+    // gradual y nunca acumula.
+    try {
+      await hist.limpiarObsoletos(db);
+    } catch (e) {
+      log.warn(`Cleanup de historico fallo: ${e.message}`);
+    }
+
     // ─── Cargar empleados + índice patente → chofer ───
     const empleadosSnap = await db.collection('EMPLEADOS').get();
     const empleadosByDni = new Map();

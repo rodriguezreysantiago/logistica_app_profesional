@@ -280,15 +280,51 @@ async function registrarAlertasResumen(db, dniDestinatario, meta) {
 }
 
 /**
- * Helper para limpiar históricos de avisos cuyo papel ya se renovó.
- * No se llama hoy — pensado para una tarea de mantenimiento futura.
- * Se deja documentado para no perder la idea.
+ * Limpia docs viejos de AVISOS_AUTOMATICOS_HISTORICO.
+ *
+ * Borra los docs con `creado_en` anterior a `diasMin` días atrás
+ * (default 90). Pensado para correr diariamente desde el cron — sin
+ * limpieza, la colección crece indefinidamente (cada chofer + cada
+ * fecha de vencimiento + cada nivel de urgencia genera 1 doc, miles
+ * por año).
+ *
+ * Hace un batch único de hasta 500 deletes (límite de Firestore).
+ * Si hay más, los siguientes ciclos del cron los eliminan.
+ *
+ * @returns {Promise<number>} cantidad de docs borrados.
  */
-async function limpiarObsoletos(db, dryRun = true) {
-  // TODO: querer all docs, comparar fecha_vencimiento con la fecha
-  // actual del papel en EMPLEADOS/VEHICULOS, borrar los que ya
-  // pasaron al próximo período.
-  log.info(`limpiarObsoletos no implementado todavía (dryRun=${dryRun})`);
+async function limpiarObsoletos(db, opciones = {}) {
+  const diasMin = opciones.diasMin || 90;
+  const limite = opciones.limite || 500;
+  const cutoffMs = Date.now() - diasMin * 24 * 60 * 60 * 1000;
+  const cutoff = admin.firestore.Timestamp.fromMillis(cutoffMs);
+
+  let snap;
+  try {
+    snap = await db
+      .collection(COLECCION)
+      .where('creado_en', '<', cutoff)
+      .limit(limite)
+      .get();
+  } catch (e) {
+    log.warn(`limpiarObsoletos fallo al consultar: ${e.message}`);
+    return 0;
+  }
+
+  if (snap.empty) return 0;
+
+  const batch = db.batch();
+  snap.forEach((doc) => batch.delete(doc.ref));
+  try {
+    await batch.commit();
+  } catch (e) {
+    log.warn(`limpiarObsoletos fallo al borrar: ${e.message}`);
+    return 0;
+  }
+  log.info(
+    `limpiarObsoletos: ${snap.size} docs borrados (creados antes de hace ${diasMin} dias).`
+  );
+  return snap.size;
 }
 
 module.exports = {
