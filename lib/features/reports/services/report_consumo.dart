@@ -762,7 +762,15 @@ class _FilaConsumo {
 
     var ultimaSync = '-';
     if (volvoData != null) {
-      final ts = (volvoData['triggerTimestamp'] ??
+      // El endpoint /vehiclestatuses (que usamos via traerEstadosFlota)
+      // devuelve `createdDateTime` (cuando el vehículo generó el dato)
+      // y `receivedDateTime` (cuando llegó al server Volvo). Preferimos
+      // createdDateTime que es lo más cercano a "cuándo se midió esto".
+      // Fallback a triggerTimestamp/samplingTime por si algún caso
+      // todavía pasa data del endpoint legacy /vehicles.
+      final ts = (volvoData['createdDateTime'] ??
+              volvoData['receivedDateTime'] ??
+              volvoData['triggerTimestamp'] ??
               volvoData['samplingTime'] ??
               '')
           .toString();
