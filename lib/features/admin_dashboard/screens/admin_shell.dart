@@ -266,7 +266,25 @@ class _AdminShellState extends State<AdminShell> {
   Widget _buildDesktopLayout(_ShellSection section) {
     return Row(
       children: [
-        _buildNavigationRail(),
+        // El rail necesita scroll cuando no entran todas las secciones a lo
+        // alto (ej: pantallas chicas o cuando agregamos secciones nuevas).
+        // NavigationRail por sí solo no scrollea — hay que envolverlo en
+        // SingleChildScrollView + IntrinsicHeight con minHeight del viewport
+        // para que se vea normal cuando entra todo y permita scroll cuando
+        // no.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints:
+                    BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: _buildNavigationRail(),
+                ),
+              ),
+            );
+          },
+        ),
         Container(width: 1, color: Colors.white10),
         Expanded(
           child: AppShellContext(
