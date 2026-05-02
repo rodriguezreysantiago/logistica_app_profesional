@@ -54,6 +54,11 @@ class AppCollections {
   /// tractor cruza un umbral, escribimos un doc para no notificar dos
   /// veces el mismo evento en el mismo "ciclo".
   static const String mantenimientosAvisados = 'MANTENIMIENTOS_AVISADOS';
+  /// Eventos del Volvo Vehicle Alerts API (IDLING, OVERSPEED,
+  /// DISTANCE_ALERT, PTO, TELL_TALE, ALARM, etc.). La popula la
+  /// scheduled function `volvoAlertasPoller` cada 5 min — el admin
+  /// los marca como atendidos desde el tablero.
+  static const String volvoAlertas = 'VOLVO_ALERTAS';
 }
 
 class AppRoles {

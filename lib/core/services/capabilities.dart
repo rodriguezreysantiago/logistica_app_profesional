@@ -36,6 +36,10 @@ enum Capability {
   verMantenimiento,
   verEstadoBot,
   verSyncDashboard,
+  /// Tablero de alertas de Volvo Vehicle Alerts API (eventos de la flota:
+  /// IDLING, OVERSPEED, DISTANCE_ALERT, PTO, TELL_TALE, etc.). Tanto admin
+  /// como supervisor pueden verlas y marcarlas como atendidas.
+  verAlertasVolvo,
 
   // ─── Acciones sobre personal ───
   crearEmpleado,
@@ -84,6 +88,7 @@ class Capabilities {
       Capability.verReportes,
       Capability.verMantenimiento,
       Capability.verEstadoBot,
+      Capability.verAlertasVolvo,
       // Editar y crear personal/vehículos: sí. Pero NO puede asignar
       // rol ADMIN ni cambiar rol de admins existentes.
       Capability.crearEmpleado,

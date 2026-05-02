@@ -18,6 +18,7 @@ import '../../vehicles/screens/admin_vehiculos_lista_screen.dart';
 
 import 'admin_estado_bot_screen.dart';
 import 'admin_panel_screen.dart';
+import 'admin_volvo_alertas_screen.dart';
 
 /// Shell principal del admin con navegación lateral.
 ///
@@ -85,6 +86,20 @@ class _AdminShellState extends State<AdminShell> {
           .where('ultimo_estado', isEqualTo: 'VENCIDO')
           .snapshots(),
       build: () => const AdminMantenimientoScreen(),
+    ),
+    _ShellSection(
+      label: 'Alertas',
+      icon: Icons.notifications_active_outlined,
+      iconActive: Icons.notifications_active,
+      requiredCapability: Capability.verAlertasVolvo,
+      // Badge: cuenta alertas pendientes (atendida == false). Single
+      // field where → no necesita índice compuesto. Las popula el
+      // poller cada 5 min desde el Vehicle Alerts API de Volvo.
+      badgeStream: FirebaseFirestore.instance
+          .collection('VOLVO_ALERTAS')
+          .where('atendida', isEqualTo: false)
+          .snapshots(),
+      build: () => const AdminVolvoAlertasScreen(),
     ),
     _ShellSection(
       label: 'Personal',

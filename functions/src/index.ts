@@ -1118,12 +1118,15 @@ const AUDIT_ACCIONES_PERMITIDAS = new Set<string>([
   // Revisiones
   "APROBAR_REVISION",
   "RECHAZAR_REVISION",
+  // Alertas Volvo
+  "MARCAR_ALERTA_VOLVO_ATENDIDA",
 ]);
 
 const AUDIT_ENTIDADES_PERMITIDAS = new Set<string>([
   "EMPLEADOS",
   "VEHICULOS",
   "REVISIONES",
+  "VOLVO_ALERTAS",
 ]);
 
 const AUDIT_MAX_DETALLES_BYTES = 10 * 1024; // 10KB
@@ -1607,6 +1610,11 @@ function buildAlertaDoc(
     severidad,
     creado_en: Timestamp.fromMillis(creadoMs),
     polled_en: FieldValue.serverTimestamp(),
+    // Estado de gestión inicial. El admin lo flippa a `true` desde el
+    // tablero al marcarla atendida (junto con `atendida_por` y
+    // `atendida_en`). El poller solo escribe `false` en la creación
+    // inicial — re-polls del mismo evento se skipean por `getAll`.
+    atendida: false,
   };
   if (patente) doc.patente = patente;
 

@@ -165,7 +165,10 @@ enum AuditAccion {
 
   // ---- Revisiones ----
   aprobarRevision('APROBAR_REVISION'),
-  rechazarRevision('RECHAZAR_REVISION');
+  rechazarRevision('RECHAZAR_REVISION'),
+
+  // ---- Alertas Volvo ----
+  marcarAlertaVolvoAtendida('MARCAR_ALERTA_VOLVO_ATENDIDA');
 
   final String codigo;
   const AuditAccion(this.codigo);
