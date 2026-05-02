@@ -74,8 +74,8 @@ class ReportConsumoService {
     final Map<String, bool> opciones = {
       "PATENTE": true,
       "MODELO": true,
-      "KM ACTUAL": true,
-      "LITROS TOTALES": true,
+      "KM RECORRIDOS (km)": true,
+      "LITROS CONSUMIDOS (L)": true,
       "PROMEDIO L/100KM": true,
       "ULTIMA SINCRONIZACION": true,
     };
@@ -509,9 +509,12 @@ class ReportConsumoService {
       case 'MODELO':
         cell.value = ex.TextCellValue(f.modelo);
         break;
-      case 'KM ACTUAL':
+      case 'KM RECORRIDOS (km)':
         if (f.esPeriodo) {
-          cell.value = ex.DoubleCellValue(f.km);
+          // Redondeamos a 1 decimal — la API Volvo da km con precisión
+          // de metros pero para un reporte humano alcanza con .x.
+          cell.value = ex.DoubleCellValue(
+              double.parse(f.km.toStringAsFixed(1)));
           cell.cellStyle = numStyle;
         } else {
           // Sin histórico no podemos saber km del período. Mostramos
@@ -520,9 +523,12 @@ class ReportConsumoService {
           cell.value = ex.TextCellValue('${f.km.round()} (acum.)');
         }
         break;
-      case 'LITROS TOTALES':
+      case 'LITROS CONSUMIDOS (L)':
         if (f.esPeriodo) {
-          cell.value = ex.DoubleCellValue(f.litros);
+          // Redondeamos a 2 decimales — el API trae mililitros pero
+          // un consumo del período se lee mejor en L.cc.
+          cell.value = ex.DoubleCellValue(
+              double.parse(f.litros.toStringAsFixed(2)));
           cell.cellStyle = numStyle;
         } else {
           cell.value =
