@@ -87,8 +87,13 @@ function aDdMmYyyyLocal(fecha) {
  * componentes UTC (cuando es fecha calendario, hora UTC = 00:00:00.000)
  * o componentes locales (cuando es momento real con hora). Ver el
  * comentario al top del modulo para el rationale.
+ *
+ * Defensivo: si el input no es Date o es Date invalido (NaN), devuelve
+ * null. Sin esto, los getters devuelven NaN y el template literal
+ * armaba "NaN-NaN-NaN" como si fuera una fecha valida.
  */
 function _dateToIsoSafe(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return null;
   const esFechaCalendario =
     d.getUTCHours() === 0 &&
     d.getUTCMinutes() === 0 &&

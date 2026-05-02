@@ -234,4 +234,8 @@ async function _comandoAyuda(msg) {
 
 module.exports = {
   manejarSiEsComando,
+  // Exportado para tests.
+  _esAdmin,
+  _adminWhitelist,
+  MIN_DIGITOS_PARA_MATCH,
 };
