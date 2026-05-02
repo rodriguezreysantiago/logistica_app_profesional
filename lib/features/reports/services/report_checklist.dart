@@ -1,111 +1,127 @@
-import 'dart:io';
 import 'dart:async';
+import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as ex;
-import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import '../../../core/constants/app_constants.dart'; // ✅ Para AppCollections
+
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/app_feedback.dart';
+import 'excel_utils.dart' as xu;
 
+/// Reporte de Novedades (admin) — exporta solo respuestas REG y MAL
+/// de los CHECKLISTS de los últimos 45 días.
+///
+/// Cada doc de CHECKLISTS contiene un mapa `RESPUESTAS` con los items
+/// del checklist y su estado (BIEN / REG / MAL). Para no inundar el
+/// reporte con todas las respuestas BIEN, exportamos solo las que
+/// requieren atención (REG o MAL).
+///
+/// El reporte tiene UNA fila por cada item con problema (no una por
+/// checklist). Eso permite filtrar/ordenar fácil por DOMINIO, ITEM o
+/// ESTADO sin perder granularidad.
 class ReportChecklistService {
+  ReportChecklistService._();
 
-  ReportChecklistService._(); // Constructor privado
+  /// Cantidad de días de histórico a incluir en el reporte. Hardcoded
+  /// como "freno de mano" anti-costos: traer 45 días con miles de
+  /// docs de checklist es trivial; traer histórico completo (años)
+  /// puede explotar el bill de Firestore.
+  static const _diasHistorico = 45;
 
   static Future<void> mostrarOpcionesYGenerar(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
 
-    // Web no soporta dart:io.File ni Process.run. Cortamos limpio aquí
-    // para evitar crash al guardar el .xlsx en disco.
     if (kIsWeb) {
-      AppFeedback.warningOn(messenger, 'Los reportes Excel solo están disponibles en Windows y Android.');
+      AppFeedback.warningOn(messenger,
+          'Los reportes Excel solo están disponibles en Windows y Android.');
       return;
     }
-    
-    // Definición de columnas disponibles
-    final Map<String, bool> opciones = {
-      "FECHA": true,
-      "DOMINIO": true,
-      "TIPO": true,
-      "CHOFER": true,
-      "ITEM": true,
-      "ESTADO": true,
-      "OBSERVACIÓN": true,
-    };
 
-    bool? confirmar = await showDialog<bool>(
+    // Confirmación rápida — sin checkboxes (las 7 columnas del
+    // checklist son siempre necesarias para investigar la novedad).
+    final confirmar = await showDialog<bool>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(color: Colors.white.withAlpha(20))
-          ),
-          title: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("Reporte de Novedades", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              Text("Se exportarán solo estados REG y MAL", style: TextStyle(color: Colors.orangeAccent, fontSize: 11)),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: opciones.keys.map((key) {
-                return CheckboxListTile(
-                  dense: true,
-                  title: Text(key, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                  value: opciones[key],
-                  activeColor: Colors.greenAccent,
-                  onChanged: (val) => setState(() => opciones[key] = val ?? false),
-                );
-              }).toList(),
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: Theme.of(dCtx).colorScheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withAlpha(20)),
+        ),
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Reporte de Novedades',
+              style: TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false), 
-              child: const Text("CANCELAR", style: TextStyle(color: Colors.white54))
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text("GENERAR EXCEL"),
+            SizedBox(height: 4),
+            Text(
+              'Items con estado REG o MAL en los últimos $_diasHistorico días',
+              style: TextStyle(color: Colors.orangeAccent, fontSize: 11),
             ),
           ],
         ),
+        content: const Text(
+          'Cada fila es un item del checklist marcado como REG o MAL '
+          'por un chofer en los últimos 45 días. Incluye fecha, '
+          'patente, tipo de unidad, chofer, item, estado y observación.',
+          style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('CANCELAR',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('GENERAR EXCEL'),
+          ),
+        ],
       ),
     );
 
-    if (confirmar == true && context.mounted) {
-      _showLoadingSnackBar(messenger);
-      await _ejecutarGeneracion(opciones, messenger);
-    }
+    if (confirmar != true || !context.mounted) return;
+    _notificarProgreso(messenger);
+    await _ejecutarGeneracion(messenger);
   }
 
-  static void _showLoadingSnackBar(ScaffoldMessengerState messenger) {
+  static void _notificarProgreso(ScaffoldMessengerState messenger) {
     messenger.showSnackBar(
       const SnackBar(
         content: Row(
           children: [
-            SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                  color: Colors.white, strokeWidth: 2),
+            ),
             SizedBox(width: 15),
-            Text("Procesando datos de mantenimiento..."),
+            Text('Procesando datos de checklists...'),
           ],
         ),
         backgroundColor: Colors.blueGrey,
-      )
+      ),
     );
   }
 
-  static Future<void> _ejecutarGeneracion(Map<String, bool> filtros, ScaffoldMessengerState messenger) async {
+  // ===========================================================================
+  // GENERACIÓN
+  // ===========================================================================
+
+  static Future<void> _ejecutarGeneracion(
+      ScaffoldMessengerState messenger) async {
     try {
-      // ✅ MEJORA PRO: Filtro por fecha (Freno de mano de costos)
-      // Solo traemos los checklists de los últimos 45 días para evitar descargar miles de docs inútiles
-      final DateTime limiteCarga = DateTime.now().subtract(const Duration(days: 45));
+      // Filtro por fecha: traer solo los checklists recientes para
+      // no descargar miles de docs históricos sin sentido.
+      final limiteCarga =
+          DateTime.now().subtract(const Duration(days: _diasHistorico));
 
       final snapshot = await FirebaseFirestore.instance
           .collection(AppCollections.checklists)
@@ -113,99 +129,124 @@ class ReportChecklistService {
           .orderBy('FECHA', descending: true)
           .get();
 
-      var excel = ex.Excel.createExcel(); 
-      String sheetName = "NOVEDADES_MANTENIMIENTO";
-      excel.rename('Sheet1', sheetName);
-      ex.Sheet sheetObject = excel[sheetName];
+      final excel = ex.Excel.createExcel();
+      excel.rename('Sheet1', 'NOVEDADES');
+      final hoja = excel['NOVEDADES'];
 
-      // Estilos
-      var headerStyle = ex.CellStyle(
-        bold: true, 
-        backgroundColorHex: ex.ExcelColor.fromHexString("#1A3A5A"),
-        fontColorHex: ex.ExcelColor.fromHexString("#FFFFFF"),
+      final headerStyle = ex.CellStyle(
+        bold: true,
+        backgroundColorHex: ex.ExcelColor.fromHexString('#1A3A5A'),
+        fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
         horizontalAlign: ex.HorizontalAlign.Center,
       );
 
-      // 1. Crear Encabezados dinámicos
-      List<String> columnasActivas = [];
-      filtros.forEach((key, val) { if (val) columnasActivas.add(key); });
-
-      for (var i = 0; i < columnasActivas.length; i++) {
-        var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
-        cell.value = ex.TextCellValue(columnasActivas[i]);
+      // Cabeceras en fila 0. Renombrado: DOMINIO → PATENTE para
+      // consistencia con el resto del proyecto (toda la app usa
+      // PATENTE; "DOMINIO" era terminología legal/RTA pero la oficina
+      // habla de patentes).
+      const titulos = [
+        'FECHA',
+        'PATENTE',
+        'TIPO',
+        'CHOFER',
+        'ITEM',
+        'ESTADO',
+        'OBSERVACION',
+      ];
+      for (var i = 0; i < titulos.length; i++) {
+        final cell = hoja
+            .cell(ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+        cell.value = ex.TextCellValue(titulos[i]);
         cell.cellStyle = headerStyle;
       }
 
-      // 2. Cargar Datos
-      int currentRow = 1;
-      for (var doc in snapshot.docs) {
+      // Filas de datos: 1 por item con estado REG o MAL.
+      var currentRow = 1;
+      for (final doc in snapshot.docs) {
         final data = doc.data();
         final Map respuestas = data['RESPUESTAS'] ?? {};
         final Map observaciones = data['OBSERVACIONES'] ?? {};
-        
-        String fechaStr = "-";
+
+        var fechaStr = '-';
         if (data['FECHA'] != null) {
-          fechaStr = DateFormat('dd/MM/yyyy').format((data['FECHA'] as Timestamp).toDate());
+          fechaStr =
+              DateFormat('dd/MM/yyyy').format((data['FECHA'] as Timestamp).toDate());
         }
+        final patente = (data['DOMINIO'] ?? '').toString();
+        final tipo = (data['TIPO'] ?? '').toString();
+        final chofer = (data['NOMBRE'] ?? '').toString();
 
         respuestas.forEach((item, estado) {
-          // Solo exportamos lo que requiere atención
-          if (estado == "REG" || estado == "MAL") {
-            for (var i = 0; i < columnasActivas.length; i++) {
-              var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: currentRow));
-              
-              // Mapeo dinámico de datos según la columna activa
-              cell.value = ex.TextCellValue(_obtenerValorCelda(columnasActivas[i], data, item, estado, observaciones, fechaStr));
-            }
-            currentRow++; 
-          }
+          final estadoStr = estado.toString();
+          if (estadoStr != 'REG' && estadoStr != 'MAL') return;
+
+          final obs = (observaciones[item] ?? '').toString();
+          _setText(hoja, 0, currentRow, fechaStr);
+          _setText(hoja, 1, currentRow, patente);
+          _setText(hoja, 2, currentRow, tipo);
+          _setText(hoja, 3, currentRow, chofer);
+          _setText(hoja, 4, currentRow, item.toString());
+          _setEstado(hoja, 5, currentRow, estadoStr);
+          _setText(hoja, 6, currentRow, obs);
+          currentRow++;
         });
       }
 
-      // ✅ MEJORA PRO: UX de Excel (Auto-filtros y columnas anchas)
-      for (var i = 0; i < columnasActivas.length; i++) {
-        sheetObject.setColumnWidth(i, 25.0); 
-      }
+      xu.autoFitColumnas(hoja, titulos.length, currentRow);
 
-      // 3. Guardado y apertura nativa
-      final String fileName = "Novedades_${DateFormat('yyyy_MM_dd').format(DateTime.now())}.xlsx";
-      final directory = await getTemporaryDirectory(); // Mejor usar temp para reportes volátiles
-      final path = "${directory.path}/$fileName";
+      final fileName =
+          'Novedades_${DateFormat('yyyy_MM_dd').format(DateTime.now())}.xlsx';
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/$fileName';
 
       final fileBytes = excel.save();
       if (fileBytes != null) {
-        File(path).writeAsBytesSync(fileBytes);
-
-        // Mismo patrón que report_flota: en Windows abrimos el archivo
-        // directamente con la app por defecto (Excel). En mobile no hay
-        // "abrir con", así que caemos al sheet de compartir nativo.
+        final patched = xu.aplicarAutoFilterAlXlsx(fileBytes);
+        File(path).writeAsBytesSync(patched);
         if (Platform.isWindows) {
           await Process.run('cmd', ['/c', 'start', '', path]);
         } else {
           await Share.shareXFiles(
             [XFile(path)],
-            text: '📋 Reporte de Novedades - Flete MB\n'
+            text: '📋 Reporte de Novedades — Coopertrans Móvil\n'
                 'Generado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}',
           );
         }
       }
     } catch (e) {
-      debugPrint("❌ Error Excel: $e");
-      AppFeedback.errorOn(messenger, "Error al generar reporte: $e");
+      debugPrint('❌ Error reporte checklist: $e');
+      AppFeedback.errorOn(messenger, 'Error al generar reporte: $e');
     }
   }
 
-  // Helper para mapear los datos a las celdas
-  static String _obtenerValorCelda(String columna, Map data, String item, dynamic estado, Map obs, String fecha) {
-    switch (columna) {
-      case "FECHA": return fecha;
-      case "DOMINIO": return data['DOMINIO'] ?? "";
-      case "TIPO": return data['TIPO'] ?? "";
-      case "CHOFER": return data['NOMBRE'] ?? "";
-      case "ITEM": return item;
-      case "ESTADO": return estado.toString();
-      case "OBSERVACIÓN": return obs[item] ?? "";
-      default: return "";
+  // ===========================================================================
+  // HELPERS DE CELDAS
+  // ===========================================================================
+
+  static void _setText(ex.Sheet hoja, int col, int row, String value) {
+    hoja
+        .cell(ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row))
+        .value = ex.TextCellValue(value);
+  }
+
+  /// Estado coloreado: REG = naranja (atención), MAL = rojo (crítico).
+  /// Hace evidente la severidad sin tener que leer la palabra.
+  static void _setEstado(ex.Sheet hoja, int col, int row, String estado) {
+    final cell = hoja
+        .cell(ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row));
+    cell.value = ex.TextCellValue(estado);
+    if (estado == 'MAL') {
+      cell.cellStyle = ex.CellStyle(
+        backgroundColorHex: ex.ExcelColor.fromHexString('#D32F2F'),
+        fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
+        bold: true,
+      );
+    } else if (estado == 'REG') {
+      cell.cellStyle = ex.CellStyle(
+        backgroundColorHex: ex.ExcelColor.fromHexString('#EF6C00'),
+        fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
+        bold: true,
+      );
     }
   }
 }

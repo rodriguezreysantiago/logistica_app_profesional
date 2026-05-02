@@ -50,7 +50,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       setState(() => _generando = false);
 
       // 2) Abrimos el diálogo de opciones de exportación
-      await ReportGenerator.mostrarOpcionesYGenerar(context, cacheVolvo);
+      await ReportFlotaService.mostrarOpcionesYGenerar(context, cacheVolvo);
     } catch (e) {
       if (mounted) {
         setState(() => _generando = false);

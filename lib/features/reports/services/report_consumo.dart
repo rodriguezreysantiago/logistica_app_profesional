@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'package:archive/archive.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as ex;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -12,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/app_feedback.dart';
+import 'excel_utils.dart' as xu;
 
 /// Reporte de Consumo de Combustible (admin).
 ///
@@ -302,15 +301,7 @@ class ReportConsumoService {
         fontColorHex: ex.ExcelColor.fromHexString("#FFFFFF"),
         horizontalAlign: ex.HorizontalAlign.Center,
       );
-      // Formato argentino: 1.234.567,89 (punto miles, coma decimal).
-      // El prefijo `[$-2C0A]` fuerza el locale es-AR independiente de
-      // la configuración regional de la PC del lector. Sin él, Excel
-      // mostraría `1,234,567.89` en una PC con locale en-US.
-      final numStyle = ex.CellStyle(
-        numberFormat: const ex.CustomNumericNumFormat(
-          formatCode: r'[$-2C0A]#,##0.00',
-        ),
-      );
+      final numStyle = ex.CellStyle(numberFormat: xu.formatoAR);
 
       // Sin header informativo arriba — el admin aplica AutoFilter
       // (Ctrl+Shift+L) directamente sobre la fila 0 y filtra/ordena
@@ -362,13 +353,7 @@ class ReportConsumoService {
         currentRow++;
       }
 
-      // Auto-fit manual: calculamos el ancho como el max entre el largo
-      // del título y el contenido más largo de los datos. La librería
-      // `excel` tiene `setColumnAutoFit` pero solo marca la columna —
-      // delega el cálculo a Excel al abrir, y Excel suele truncar
-      // headers largos (como 'LITROS CONSUMIDOS (L)'). Calculando acá
-      // garantizamos que tanto el título como cualquier celda entran.
-      _autoFitColumnas(hojaDetalle, titulos.length, currentRow);
+      xu.autoFitColumnas(hojaDetalle, titulos.length, currentRow);
 
       // ============= Hoja RANKING (top 10 más consumidores) =============
       _construirHojaRanking(excel, filas);
@@ -380,11 +365,7 @@ class ReportConsumoService {
       final path = '${dir.path}/$fileName';
       final fileBytes = excel.save();
       if (fileBytes != null) {
-        // Post-procesar: inyectar AutoFilter a todas las hojas para
-        // que Excel active filtros automáticamente al abrir el archivo.
-        // La librería `excel` 4.x no expone esa API, así que parcheamos
-        // el XML del .xlsx directamente.
-        final patched = _aplicarAutoFilterAlXlsx(fileBytes);
+        final patched = xu.aplicarAutoFilterAlXlsx(fileBytes);
         File(path).writeAsBytesSync(patched);
         if (Platform.isWindows) {
           await Process.run('cmd', ['/c', 'start', '', path]);
@@ -400,64 +381,6 @@ class ReportConsumoService {
       debugPrint('❌ Error reporte consumo: $e');
       AppFeedback.errorOn(messenger, 'Error al generar reporte: $e');
     }
-  }
-
-  // ===========================================================================
-  // POST-PROCESAMIENTO: AutoFilter inyectado en el XML
-  // ===========================================================================
-  //
-  // La librería `excel: ^4.0.6` no expone API para AutoFilter (pendiente
-  // en su roadmap hace 20+ meses). Como upgrade a syncfusion_flutter_xlsio
-  // (la única alternativa Dart pure que sí lo soporta) requiere licencia
-  // comercial para Vecchi (no califica para Community), parcheamos el
-  // XML del .xlsx generado: abrimos el ZIP, inyectamos
-  // `<autoFilter ref="A1:Z10000"/>` en cada hoja después de
-  // `</sheetData>`, y re-empaquetamos.
-  //
-  // Resultado: al abrir el archivo, Excel muestra las flechas de
-  // filtro automáticamente en la fila de cabecera (sin tener que
-  // hacer Ctrl+Shift+L manual).
-
-  /// Decodifica el .xlsx (ZIP), inyecta AutoFilter en cada worksheet,
-  /// y re-empaqueta. Devuelve los bytes modificados.
-  static List<int> _aplicarAutoFilterAlXlsx(List<int> bytes) {
-    final archive = ZipDecoder().decodeBytes(bytes);
-    final patron = RegExp(r'^xl/worksheets/sheet\d+\.xml$');
-
-    final out = Archive();
-    for (final file in archive.files) {
-      if (file.isFile && patron.hasMatch(file.name)) {
-        final content = utf8.decode(file.content as List<int>);
-        final modified = _inyectarAutoFilter(content);
-        final newBytes = utf8.encode(modified);
-        out.addFile(ArchiveFile(file.name, newBytes.length, newBytes));
-      } else {
-        out.addFile(file);
-      }
-    }
-    final encoded = ZipEncoder().encode(out);
-    // Defensa: si por algún motivo encode devuelve null (no debería con
-    // un Archive válido), devolvemos los bytes originales — el archivo
-    // se abre sin AutoFilter pero al menos no se rompe.
-    return encoded ?? bytes;
-  }
-
-  /// Inyecta `<autoFilter ref="A1:Z10000"/>` en el XML de un worksheet.
-  /// El elemento debe ir DESPUÉS de `</sheetData>` (orden requerido por
-  /// el spec OOXML — sino Excel rechaza el archivo como corrupto).
-  ///
-  /// Rango "A1:Z10000": amplio para cubrir cualquier reporte razonable
-  /// (Excel ignora celdas vacías al filtrar). Si en el futuro tenemos
-  /// reportes con más de 26 columnas o 10000 filas, ampliar.
-  ///
-  /// Si el XML ya tiene un `<autoFilter>` previo (caso raro), no
-  /// duplicamos — devolvemos sin cambios.
-  static String _inyectarAutoFilter(String xml) {
-    if (xml.contains('<autoFilter ')) return xml;
-    return xml.replaceFirst(
-      '</sheetData>',
-      '</sheetData><autoFilter ref="A1:Z10000"/>',
-    );
   }
 
   /// Escribe el valor de una columna específica en la celda según el
@@ -572,11 +495,7 @@ class ReportConsumoService {
     }
 
     final maxConsumo = ranking.first.consumoLPor100Km;
-    final numStyle = ex.CellStyle(
-      numberFormat: const ex.CustomNumericNumFormat(
-        formatCode: r'[$-2C0A]#,##0.00',
-      ),
-    );
+    final numStyle = ex.CellStyle(numberFormat: xu.formatoAR);
 
     for (var i = 0; i < ranking.length; i++) {
       final f = ranking[i];
@@ -623,62 +542,7 @@ class ReportConsumoService {
           .value = ex.TextCellValue(barra);
     }
 
-    // Auto-fit manual — ver explicación en hoja DETALLE.
-    _autoFitColumnas(hoja, titulos.length, ranking.length + 1);
-  }
-
-  /// Recorre todas las celdas escritas en `hoja` (filas 0..numRows,
-  /// columnas 0..numCols) y aplica `setColumnWidth` con el max entre
-  /// el largo del título (fila 0) y el contenido más largo de las
-  /// celdas siguientes. Suma 2 chars de padding para que no quede
-  /// pegado al borde.
-  ///
-  /// Para celdas DoubleCellValue/IntCellValue, simulamos el formato AR
-  /// (1.234.567,89) para estimar el ancho visual real, no solo los
-  /// dígitos crudos.
-  static void _autoFitColumnas(ex.Sheet hoja, int numCols, int numRows) {
-    for (var col = 0; col < numCols; col++) {
-      var maxLen = 0;
-      for (var row = 0; row < numRows; row++) {
-        final cell = hoja.cell(ex.CellIndex.indexByColumnRow(
-            columnIndex: col, rowIndex: row));
-        final len = _anchoCelda(cell);
-        if (len > maxLen) maxLen = len;
-      }
-      // Mínimo 8 chars para que no quede ridículamente angosta si
-      // la columna no tiene contenido. Padding de 2 a cada lado.
-      final ancho = (maxLen < 6 ? 6 : maxLen) + 2;
-      hoja.setColumnWidth(col, ancho.toDouble());
-    }
-  }
-
-  /// Estima el ancho visual de una celda en chars, contemplando el
-  /// formato AR para números (1.234.567,89).
-  static int _anchoCelda(ex.Data cell) {
-    final value = cell.value;
-    if (value == null) return 0;
-    if (value is ex.TextCellValue) {
-      return value.value.toString().length;
-    }
-    if (value is ex.DoubleCellValue) {
-      return _renderArgFormatLength(value.value);
-    }
-    if (value is ex.IntCellValue) {
-      return _renderArgFormatLength(value.value.toDouble());
-    }
-    return value.toString().length;
-  }
-
-  /// Devuelve el largo de un número formateado al estilo AR
-  /// (1.234.567,89). Útil para calcular ancho de columna sin
-  /// renderizar el string completo.
-  static int _renderArgFormatLength(double value) {
-    final fixed = value.toStringAsFixed(2); // "1234567.89"
-    final partes = fixed.split('.');
-    final entera = partes[0].replaceAll('-', '');
-    final puntos = ((entera.length - 1) ~/ 3); // separadores de miles
-    final signo = value < 0 ? 1 : 0;
-    return entera.length + puntos + 1 /* coma */ + 2 /* decimales */ + signo;
+    xu.autoFitColumnas(hoja, titulos.length, ranking.length + 1);
   }
 }
 
