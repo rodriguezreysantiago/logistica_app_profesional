@@ -61,13 +61,22 @@ function invalidarCacheEmpleados() {
 }
 
 async function _refrescarCacheEmpleados(db) {
+  // El cache se usa para `_resolverChofer` (asociar el número que escribió
+  // al bot con un chofer del sistema). Solo CHOFER puede manejar y
+  // recibir/responder avisos automáticos — admins/supervisores/planta
+  // pueden tener TELEFONO cargado pero no son destinatarios del bot,
+  // así que los excluimos del cache. Acepta el legacy 'USUARIO' por
+  // compatibilidad y trata ROL vacío como CHOFER (datos viejos).
   const snap = await db.collection('EMPLEADOS').get();
-  _cacheEmpleados = snap.docs.map((doc) => ({
-    dni: doc.id,
-    data: doc.data(),
-  }));
+  const todos = snap.docs.length;
+  _cacheEmpleados = snap.docs
+    .map((doc) => ({ dni: doc.id, data: doc.data() }))
+    .filter(({ data }) => {
+      const rol = String(data.ROL || '').toUpperCase().trim();
+      return rol === '' || rol === 'CHOFER' || rol === 'USUARIO';
+    });
   _cacheTimestamp = Date.now();
-  log.info(`[empleados-cache] refresh: ${_cacheEmpleados.length} empleados (TTL ${_CACHE_TTL_MS}ms)`);
+  log.info(`[empleados-cache] refresh: ${_cacheEmpleados.length} choferes (de ${todos} empleados, TTL ${_CACHE_TTL_MS}ms)`);
 }
 
 async function _resolverChofer(db, fromNumber) {

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -66,9 +67,14 @@ class _AdminVencimientosCalendarioScreenState
       map.putIfAbsent(clave, () => []).add(item);
     }
 
-    // EMPLEADOS — papeles del chofer
+    // EMPLEADOS — papeles del chofer (licencia, ART, psicofísico).
+    // Solo aplican a CHOFER: admins/supervisores/planta no manejan ni
+    // tienen estos vencimientos profesionales — los excluimos para no
+    // ensuciar el calendario.
     for (final doc in empleados.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      final rol = AppRoles.normalizar(data['ROL']?.toString());
+      if (!AppRoles.tieneVehiculo(rol)) continue;
       final nombre = (data['NOMBRE'] ?? 'Sin nombre').toString();
       final dni = doc.id.trim();
 

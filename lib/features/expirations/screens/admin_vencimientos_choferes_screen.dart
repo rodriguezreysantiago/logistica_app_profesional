@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -36,6 +37,12 @@ class _AdminVencimientosChoferesScreenState
     final items = <VencimientoItem>[];
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Auditoría DE MANEJO: licencia, ART, psicofísico aplican solo a
+      // CHOFER. Admins/supervisores/planta no tienen estos vencimientos
+      // profesionales — los filtramos para no inflar la lista con
+      // "vencimientos" vacíos de empleados que no manejan.
+      final rol = AppRoles.normalizar(data['ROL']?.toString());
+      if (!AppRoles.tieneVehiculo(rol)) continue;
       final nombre = (data['NOMBRE'] ?? 'Sin nombre').toString();
       final dni = doc.id.trim();
 

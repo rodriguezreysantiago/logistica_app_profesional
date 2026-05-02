@@ -68,11 +68,29 @@ class AsignacionVehiculoService {
     final patenteNorm = _normalizarPatente(nuevaPatente);
     final desvincular = patenteNorm == null;
 
-    // Pre-lectura de nombres si el caller no los pasó. Los queremos
-    // como SNAPSHOT en el doc para que el historial siga siendo legible
-    // aunque el chofer/admin sean borrados o renombrados después.
+    // Pre-lectura del doc del empleado para 2 cosas:
+    //   1. Validar que sea CHOFER (admins/supervisores/planta no manejan).
+    //      Solo aplica al ASIGNAR — desvincular siempre se permite, así
+    //      podemos limpiar si quedó un dato sucio de antes de esta regla.
+    //   2. Tomar el snapshot del nombre.
+    final empSnap =
+        await _db.collection(AppCollections.empleados).doc(dniLimpio).get();
+    if (!empSnap.exists) {
+      throw StateError('Empleado $dniLimpio no existe');
+    }
+    final empData = empSnap.data() ?? const <String, dynamic>{};
+    if (!desvincular) {
+      final rolCrudo = empData['ROL']?.toString() ?? '';
+      final rolNorm = AppRoles.normalizar(rolCrudo);
+      if (!AppRoles.tieneVehiculo(rolNorm)) {
+        throw StateError(
+          'No se puede asignar vehículo a $dniLimpio: tiene rol $rolNorm. '
+          'Solo los empleados con rol CHOFER pueden tener unidad asignada.',
+        );
+      }
+    }
     final choferNombreFinal =
-        choferNombre ?? await _leerNombreEmpleado(dniLimpio);
+        choferNombre ?? empData['NOMBRE']?.toString();
     final asignadoPorNombreFinal =
         asignadoPorNombre ?? await _leerNombreEmpleado(asignadorLimpio);
 

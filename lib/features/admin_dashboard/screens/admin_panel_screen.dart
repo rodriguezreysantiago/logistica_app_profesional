@@ -385,9 +385,14 @@ class _Stats {
       }
     }
 
-    // Empleados
+    // Empleados — KPI "choferes activos" y vencimientos personales son
+    // ambas métricas DE MANEJO. Admins/supervisores/planta no manejan
+    // ni tienen vencimientos profesionales (licencia, ART, psicofísico),
+    // así que los filtramos para no contaminar el dashboard.
     for (final doc in empleados.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      final rol = AppRoles.normalizar(data['ROL']?.toString());
+      if (!AppRoles.tieneVehiculo(rol)) continue;
       final estado = (data['estado_cuenta'] ?? 'ACTIVO').toString();
       if (estado.toUpperCase() == 'ACTIVO') activos++;
       for (final campoBase in docsEmpleado.values) {

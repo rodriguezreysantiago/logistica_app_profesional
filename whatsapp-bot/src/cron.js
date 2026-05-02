@@ -182,11 +182,22 @@ async function _runOnce(fs) {
     }
 
     // ─── Cargar empleados + índice patente → chofer ───
+    // Solo CHOFER cuenta como conductor: admins/supervisores/planta no
+    // manejan ni reciben avisos de vencimientos profesionales (licencia,
+    // ART, psicofísico). Los filtramos in-memory para no dispararles
+    // mensajes de WhatsApp y para no mapearlos como dueños de patentes
+    // en el índice. Acepta el legacy 'USUARIO' por compatibilidad.
     const empleadosSnap = await db.collection('EMPLEADOS').get();
     const empleadosByDni = new Map();
     const choferByPatente = new Map();
     for (const doc of empleadosSnap.docs) {
       const data = doc.data();
+      const rolRaw = String(data.ROL || '').toUpperCase().trim();
+      if (rolRaw !== 'CHOFER' && rolRaw !== 'USUARIO' && rolRaw !== '') {
+        // ADMIN, SUPERVISOR, PLANTA → out. Si ROL viene vacío/null lo
+        // tratamos como CHOFER (datos viejos de antes del rol-split).
+        continue;
+      }
       const emp = { id: doc.id, data };
       empleadosByDni.set(doc.id.trim(), emp);
       const veh = String(data.VEHICULO || '').trim().toUpperCase();
