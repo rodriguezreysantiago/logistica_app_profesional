@@ -67,7 +67,7 @@ class ReportConsumoService {
       "EMPRESA": true,
       "KM ACTUAL": true,
       "LITROS TOTALES": true,
-      "PROMEDIO KM/L": true,
+      "PROMEDIO L/100KM": true,
       "ULTIMA SINCRONIZACION": true,
       "ESTADO CONEXION": true,
     };
@@ -130,7 +130,7 @@ class ReportConsumoService {
               ),
               SizedBox(height: 4),
               Text(
-                "Litros y promedio km/L por unidad",
+                "Litros y promedio L/100km por unidad",
                 style: TextStyle(color: Colors.white54, fontSize: 11),
               ),
             ],
@@ -462,9 +462,9 @@ class ReportConsumoService {
               ex.TextCellValue('${f.litros.round()} (acum.)');
         }
         break;
-      case 'PROMEDIO KM/L':
+      case 'PROMEDIO L/100KM':
         cell.value = ex.DoubleCellValue(
-            double.parse(f.promedioKmPorLitro.toStringAsFixed(2)));
+            double.parse(f.consumoLPor100Km.toStringAsFixed(2)));
         cell.cellStyle = numStyle;
         break;
       case 'ULTIMA SINCRONIZACION':
@@ -609,8 +609,12 @@ class _FilaConsumo {
     required this.conectado,
   });
 
-  /// Promedio km/L; 0 si no tenemos litros (evita división por cero).
-  double get promedioKmPorLitro => litros > 0 ? km / litros : 0.0;
+  /// Consumo en L/100km — métrica estándar de flotas (cuántos litros
+  /// se gastan cada 100 km). Cuanto más bajo, más eficiente. Tractores
+  /// cargados típicamente caen en 30-40 L/100km.
+  ///
+  /// Devuelve 0 si km == 0 (vehículo parado, evita división por cero).
+  double get consumoLPor100Km => km > 0 ? (litros / km) * 100.0 : 0.0;
 
   factory _FilaConsumo.from({
     required String patente,

@@ -161,7 +161,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
               _ReportCard(
                 titulo: 'Consumo de Combustible',
                 descripcion:
-                    'Litros, KM y promedio km/L por unidad, con ranking visual de top consumidores.',
+                    'Litros, KM y promedio L/100km por unidad, con ranking visual de top consumidores.',
                 icono: Icons.local_gas_station_rounded,
                 color: Colors.orangeAccent,
                 onTap: _generando ? null : _ejecutarReporteConsumo,

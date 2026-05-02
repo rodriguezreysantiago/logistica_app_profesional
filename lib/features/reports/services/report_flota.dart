@@ -31,7 +31,7 @@ class ReportGenerator {
       "VIN": true,
       "KM ACTUAL": true,
       "CONSUMO (L)": true,
-      "PROMEDIO KM/L": true,
+      "PROMEDIO L/100KM": true,
       "VENCIMIENTO RTO": true,
       "VENCIMIENTO SEGURO": true,
       "VENCIMIENTO EXT. CABINA": true,
@@ -189,11 +189,14 @@ class ReportGenerator {
           cell.cellStyle = numStyle;
         }
         
-        if (filtros["PROMEDIO KM/L"]!) {
+        if (filtros["PROMEDIO L/100KM"]!) {
           double km = (data['KM_ACTUAL'] ?? 0.0).toDouble();
-          double promedio = (litros > 0) ? (km / litros) : 0.0;
+          // L/100km: cuántos litros se gastan cada 100 km. Métrica
+          // estándar de flotas (un tractor cargado anda en 30-40
+          // L/100km típicamente). Cuanto más bajo, más eficiente.
+          double consumo = (km > 0) ? (litros / km) * 100.0 : 0.0;
           var cell = sheetObject.cell(ex.CellIndex.indexByColumnRow(columnIndex: currentCol++, rowIndex: currentRow));
-          cell.value = ex.DoubleCellValue(double.parse(promedio.toStringAsFixed(2)));
+          cell.value = ex.DoubleCellValue(double.parse(consumo.toStringAsFixed(2)));
           cell.cellStyle = numStyle;
         }
 
