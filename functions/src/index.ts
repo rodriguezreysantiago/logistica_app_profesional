@@ -110,6 +110,16 @@ export const loginConDni = onCall(
         "El DNI tiene un formato inválido."
       );
     }
+    if (password.length > 128) {
+      // bcrypt.compare es O(N) sobre el largo del input. Sin este
+      // chequeo, un POST con password de varios MB bloquea el event
+      // loop por segundos -- vector de DoS barato. 128 es muy generoso
+      // para un usuario real; nadie tipea passwords mas largas.
+      throw new HttpsError(
+        "invalid-argument",
+        "Contraseña demasiado larga."
+      );
+    }
 
     // ─── Lectura del legajo ────────────────────────────────────────
     const docRef = db.collection("EMPLEADOS").doc(dni);
@@ -162,7 +172,7 @@ export const loginConDni = onCall(
       );
     }
 
-    const passwordOk = verificarPassword(password, storedHash);
+    const passwordOk = await verificarPassword(password, storedHash);
     if (!passwordOk) {
       // Registramos intento fallido. La transaccion atomicamente
       // incrementa el contador Y devuelve si quedo bloqueado, asi no
@@ -441,11 +451,19 @@ export const actualizarRolEmpleado = onCall(
 // Helpers
 // ============================================================================
 
-/** Compara una contraseña en plano con un hash en formato bcrypt o SHA-256. */
-function verificarPassword(password: string, storedHash: string): boolean {
+/**
+ * Compara una contraseña en plano con un hash en formato bcrypt o
+ * SHA-256. Async porque `bcrypt.compare` (a diferencia de
+ * `compareSync`) cede el event loop -- con `compareSync` y 5 logins
+ * concurrentes el proceso quedaba bloqueado ~80ms por intento.
+ */
+async function verificarPassword(
+  password: string,
+  storedHash: string
+): Promise<boolean> {
   if (esBcrypt(storedHash)) {
     try {
-      return bcrypt.compareSync(password, storedHash);
+      return await bcrypt.compare(password, storedHash);
     } catch {
       return false;
     }

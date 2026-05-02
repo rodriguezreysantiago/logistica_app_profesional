@@ -20,6 +20,13 @@
 
 const log = require('./logger');
 
+// Minimo de digitos para que un sufijo cuente como match. Argentina
+// tiene 10 (sin codigo pais) -- un numero corto como "4567890" NO
+// puede matchear con admin "5492914567890". Antes el match laxo
+// permitia que cualquier numero terminado en 7 digitos del admin
+// ejecute /pausar, /forzar-cron, etc.
+const MIN_DIGITOS_PARA_MATCH = 10;
+
 /**
  * Devuelve la lista de teléfonos admin autorizados (solo dígitos).
  */
@@ -28,17 +35,29 @@ function _adminWhitelist() {
   return raw
     .split(',')
     .map((s) => s.trim().replace(/\D+/g, ''))
-    .filter((s) => s.length >= 10);
+    .filter((s) => s.length >= MIN_DIGITOS_PARA_MATCH);
 }
 
 /**
  * `true` si el teléfono que envió el mensaje está autorizado.
+ *
+ * Acepta: igualdad estricta, o sufijo de >= MIN_DIGITOS_PARA_MATCH
+ * digitos. El sufijo es necesario porque whitelist puede tener
+ * "5492914567890" (con codigo pais) y el numero entrante venir como
+ * "2914567890" (sin codigo pais), o viceversa. Pero NUNCA se acepta
+ * un sufijo corto: "4567890" NO matchea.
  */
 function _esAdmin(fromNumber) {
   const fromDigits = String(fromNumber).replace(/\D+/g, '');
-  if (!fromDigits) return false;
+  if (fromDigits.length < MIN_DIGITOS_PARA_MATCH) return false;
   const whitelist = _adminWhitelist();
-  return whitelist.some((w) => w === fromDigits || fromDigits.endsWith(w) || w.endsWith(fromDigits));
+  return whitelist.some((w) => {
+    if (w === fromDigits) return true;
+    const longer = w.length >= fromDigits.length ? w : fromDigits;
+    const shorter = w.length < fromDigits.length ? w : fromDigits;
+    return shorter.length >= MIN_DIGITOS_PARA_MATCH &&
+      longer.endsWith(shorter);
+  });
 }
 
 /**
