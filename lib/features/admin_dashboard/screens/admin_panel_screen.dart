@@ -1,12 +1,9 @@
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../core/services/capabilities.dart';
-import '../../../core/services/notification_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -29,9 +26,6 @@ class AdminPanelScreen extends StatefulWidget {
 }
 
 class _AdminPanelScreenState extends State<AdminPanelScreen> {
-  StreamSubscription? _revisionesSubscription;
-  bool _esPrimeraCarga = true;
-
   late final Stream<QuerySnapshot> _empleadosStream;
   late final Stream<QuerySnapshot> _vehiculosStream;
   late final Stream<QuerySnapshot> _revisionesStream;
@@ -43,46 +37,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     _empleadosStream = db.collection('EMPLEADOS').snapshots();
     _vehiculosStream = db.collection('VEHICULOS').snapshots();
     _revisionesStream = db.collection('REVISIONES').snapshots();
-    _activarEscuchaRevisiones();
-  }
-
-  @override
-  void dispose() {
-    _revisionesSubscription?.cancel();
-    super.dispose();
-  }
-
-  /// Listener separado para disparar notificación push cuando llega una
-  /// revisión nueva. La primera carga se ignora para no spamear al
-  /// admin con todas las que ya estaban al abrir la pantalla.
-  void _activarEscuchaRevisiones() {
-    _revisionesSubscription?.cancel();
-    _revisionesSubscription =
-        FirebaseFirestore.instance.collection('REVISIONES').snapshots().listen(
-      (snapshot) {
-        if (_esPrimeraCarga) {
-          _esPrimeraCarga = false;
-          return;
-        }
-        for (final change in snapshot.docChanges) {
-          if (change.type == DocumentChangeType.added) {
-            try {
-              final data = change.doc.data();
-              if (data != null) {
-                NotificationService.mostrarAvisoAdmin(
-                  chofer: data['nombre_usuario'] ?? 'Un chofer',
-                  documento: data['etiqueta'] ?? 'documento',
-                );
-              }
-            } catch (e) {
-              debugPrint('Error en radar de notificaciones: $e');
-            }
-          }
-        }
-      },
-      onError: (error) =>
-          debugPrint('Error en stream de revisiones: $error'),
-    );
+    // El listener de notificaciones push para revisiones nuevas vive
+    // en AdminShell (durante toda la sesion admin), no aca. Si lo
+    // duplicaramos en este State, el admin recibiria 2 push identicas
+    // por cada revision mientras este en "Inicio".
   }
 
   @override
