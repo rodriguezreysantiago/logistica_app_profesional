@@ -142,11 +142,36 @@ class ReportConsumoService {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const _LabelSeccion('Rango de referencia'),
+                  // Presets rápidos para los rangos más usados. Tocás
+                  // un chip y se setea desde/hasta sin tener que abrir
+                  // el calendario. El "Personalizado" se usa abriendo
+                  // el botón de abajo directamente.
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      for (final preset in _presetsRangos())
+                        _ChipPreset(
+                          label: preset.label,
+                          activo: _esPresetActivo(
+                              preset, localDesde, localHasta),
+                          onTap: () {
+                            setDialogState(() {
+                              localDesde = preset.desde;
+                              localHasta = preset.hasta;
+                            });
+                            onRangoCambiado(localDesde, localHasta);
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   const Padding(
                     padding: EdgeInsets.only(bottom: 8, left: 4),
                     child: Text(
-                      'Tocá el botón para abrir el calendario. '
-                      'Marcá primero la fecha de inicio y después la de fin.',
+                      'O tocá el botón para abrir el calendario y elegir '
+                      'un rango personalizado (primero la fecha de inicio, '
+                      'después la de fin).',
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 11,
@@ -719,6 +744,88 @@ class _LabelSeccion extends StatelessWidget {
   }
 }
 
+// =============================================================================
+// PRESETS RÁPIDOS DE RANGO
+// =============================================================================
+//
+// Los rangos más comunes que pide un admin sin tener que navegar el
+// calendario. Si la fecha actual cae dentro del preset y `desde`/`hasta`
+// matchean, mostramos el chip resaltado para que el admin sepa qué
+// preset está activo.
+
+class _PresetRango {
+  final String label;
+  final DateTime desde;
+  final DateTime hasta;
+  const _PresetRango(this.label, this.desde, this.hasta);
+}
+
+List<_PresetRango> _presetsRangos() {
+  final hoy = DateTime.now();
+  final inicioHoy = DateTime(hoy.year, hoy.month, hoy.day);
+  final inicioSemana =
+      inicioHoy.subtract(Duration(days: inicioHoy.weekday - 1));
+  final inicioMesActual = DateTime(hoy.year, hoy.month, 1);
+  final inicioMesPasado = DateTime(hoy.year, hoy.month - 1, 1);
+  final finMesPasado = DateTime(hoy.year, hoy.month, 1)
+      .subtract(const Duration(days: 1));
+  return [
+    _PresetRango('Hoy', inicioHoy, inicioHoy),
+    _PresetRango('Esta semana', inicioSemana, inicioHoy),
+    _PresetRango('Mes actual', inicioMesActual, inicioHoy),
+    _PresetRango('Mes pasado', inicioMesPasado, finMesPasado),
+    _PresetRango(
+        'Últimos 7 días', inicioHoy.subtract(const Duration(days: 6)), inicioHoy),
+    _PresetRango(
+        'Últimos 30 días', inicioHoy.subtract(const Duration(days: 29)), inicioHoy),
+  ];
+}
+
+bool _esPresetActivo(_PresetRango p, DateTime desde, DateTime hasta) {
+  bool eq(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+  return eq(p.desde, desde) && eq(p.hasta, hasta);
+}
+
+class _ChipPreset extends StatelessWidget {
+  final String label;
+  final bool activo;
+  final VoidCallback onTap;
+  const _ChipPreset({
+    required this.label,
+    required this.activo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = activo ? Colors.greenAccent : Colors.white54;
+    final bg = activo
+        ? Colors.greenAccent.withAlpha(40)
+        : Colors.white.withAlpha(15);
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withAlpha(120), width: 1),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontWeight: activo ? FontWeight.bold : FontWeight.w500,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Un solo botón que abre `showDateRangePicker` de Material —
 /// calendario unificado donde el admin marca primero la fecha de
 /// inicio y después la de fin en el mismo flow. UX mejor que dos
@@ -745,12 +852,18 @@ class _BotonRangoFecha extends StatelessWidget {
         // Limites: 2 años atrás (suficiente para cualquier reporte
         // razonable) y 1 día hacia adelante (no permitimos rangos
         // futuros, pero sí incluir hoy entero).
+        //
+        // initialEntryMode: en desktop por default abre en modo "input"
+        // (solo campos de texto sin calendario). Forzamos `calendar`
+        // para que SIEMPRE muestre el grid navegable mes a mes con
+        // flechas ◀ ▶ — lo que el admin espera al pedir un calendario.
         final picked = await showDateRangePicker(
           context: context,
           initialDateRange: DateTimeRange(start: desde, end: hasta),
           firstDate: DateTime(hoy.year - 2, 1, 1),
           lastDate: hoy.add(const Duration(days: 1)),
           locale: const Locale('es', 'AR'),
+          initialEntryMode: DatePickerEntryMode.calendar,
           helpText: 'Seleccioná el rango del reporte',
           saveText: 'CONFIRMAR',
           cancelText: 'CANCELAR',
