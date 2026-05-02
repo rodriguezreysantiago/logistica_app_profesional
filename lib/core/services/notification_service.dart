@@ -53,7 +53,7 @@ class NotificationService {
     );
 
     await _notificationsPlugin.initialize(
-      initializationSettings,
+      settings: initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse details) {
         debugPrint("NOTIFICACIÓN TOCADA CON PAYLOAD: ${details.payload}");
         // ✅ MEJORA PRO: Emitimos el payload para que el main.dart pueda navegar a la pantalla correcta
@@ -104,7 +104,13 @@ class NotificationService {
     );
 
     // Payload 'vencimiento' será atrapado por el StreamController
-    await _notificationsPlugin.show(id, titulo, mensaje, platformDetails, payload: 'vencimiento');
+    await _notificationsPlugin.show(
+      id: id,
+      title: titulo,
+      body: mensaje,
+      notificationDetails: platformDetails,
+      payload: 'vencimiento',
+    );
   }
 
   /// NOTIFICACIÓN PARA EL ADMIN (Mantenimiento vencido)
@@ -152,11 +158,11 @@ class NotificationService {
     final id = _idDeterministico('mantenimiento_$patente');
 
     await _notificationsPlugin.show(
-      id,
-      'Service vencido',
-      'El tractor $unidad pasó el momento de service. '
+      id: id,
+      title: 'Service vencido',
+      body: 'El tractor $unidad pasó el momento de service. '
           'Programá el ingreso al taller cuanto antes.',
-      platformDetails,
+      notificationDetails: platformDetails,
       payload: 'mantenimiento_$patente',
     );
   }
@@ -201,10 +207,10 @@ class NotificationService {
     final id = _idDeterministico('admin_${chofer}_${documento}_$hoyIso');
 
     await _notificationsPlugin.show(
-      id,
-      "Nueva Revisión Pendiente",
-      "$chofer subió: $documento",
-      platformDetails,
+      id: id,
+      title: "Nueva Revisión Pendiente",
+      body: "$chofer subió: $documento",
+      notificationDetails: platformDetails,
       payload: 'admin_revision',
     );
   }
@@ -278,11 +284,11 @@ class NotificationService {
 
         try {
           await _notificationsPlugin.zonedSchedule(
-            id,
-            'Vencimiento ${aviso.tipoDoc}',
-            mensaje,
-            cuando,
-            const NotificationDetails(
+            id: id,
+            title: 'Vencimiento ${aviso.tipoDoc}',
+            body: mensaje,
+            scheduledDate: cuando,
+            notificationDetails: const NotificationDetails(
               android: AndroidNotificationDetails(
                 'vencimientos_canal',
                 'Alertas de Vencimientos',
@@ -299,12 +305,12 @@ class NotificationService {
               ),
             ),
             androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-            // En iOS hay que decir cómo interpretar el `tz.TZDateTime`
-            // que pasamos: `absoluteTime` significa "en este momento
-            // exacto, no relativo al huso del dispositivo cuando llegue
-            // la fecha". Es lo que queremos para vencimientos fijos.
-            uiLocalNotificationDateInterpretation:
-                UILocalNotificationDateInterpretation.absoluteTime,
+            // El parámetro `uiLocalNotificationDateInterpretation` se
+            // removió en flutter_local_notifications v18+. Antes era
+            // necesario para iOS UILocalNotification (deprecado por Apple
+            // hace años); ahora `zonedSchedule` siempre interpreta el
+            // `tz.TZDateTime` como momento absoluto en su huso, que es
+            // el comportamiento que queremos para vencimientos fijos.
             payload: 'vencimiento',
             // Solo necesitamos el momento absoluto en el huso local; no
             // marcamos `matchDateTimeComponents` para que no se repita.

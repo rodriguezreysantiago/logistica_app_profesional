@@ -206,10 +206,12 @@ class ReportChecklistService {
         if (Platform.isWindows) {
           await Process.run('cmd', ['/c', 'start', '', path]);
         } else {
-          await Share.shareXFiles(
-            [XFile(path)],
-            text: '📋 Reporte de Novedades — Coopertrans Móvil\n'
-                'Generado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}',
+          await SharePlus.instance.share(
+            ShareParams(
+              files: [XFile(path)],
+              text: '📋 Reporte de Novedades — Coopertrans Móvil\n'
+                  'Generado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}',
+            ),
           );
         }
       }

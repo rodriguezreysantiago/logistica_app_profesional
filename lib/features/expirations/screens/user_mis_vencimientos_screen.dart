@@ -300,7 +300,7 @@ class _UserMisVencimientosScreenState
               onTap: () async {
                 // withData: true asegura que `bytes` venga poblado en todas
                 // las plataformas (en Web `path` no existe).
-                final res = await FilePicker.platform.pickFiles(
+                final res = await FilePicker.pickFiles(
                   type: FileType.custom,
                   allowedExtensions: const ['pdf', 'jpg', 'png', 'jpeg'],
                   withData: true,

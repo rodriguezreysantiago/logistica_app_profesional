@@ -282,9 +282,11 @@ class ReportFlotaService {
         if (Platform.isWindows) {
           await Process.run('cmd', ['/c', 'start', '', path]);
         } else {
-          await Share.shareXFiles(
-            [XFile(path)],
-            text: '🚛 Reporte de Flota — Coopertrans Móvil',
+          await SharePlus.instance.share(
+            ShareParams(
+              files: [XFile(path)],
+              text: '🚛 Reporte de Flota — Coopertrans Móvil',
+            ),
           );
         }
       }

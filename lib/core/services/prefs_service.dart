@@ -42,11 +42,12 @@ class PrefsService {
   static const String _keyMigrationDone = '__migrated_from_shared_prefs_v1';
 
   // ─── Backend storage ──────────────────────────────────────────────
-  static const FlutterSecureStorage _secure = FlutterSecureStorage(
-    // Opciones específicas por plataforma para activar mejor seguridad
-    // donde está disponible.
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
+  // En flutter_secure_storage 10+, `encryptedSharedPreferences: true` se
+  // deprecó (Jetpack Security está en sunset por Google) y la migración
+  // al cifrado nuevo es automática en el primer acceso. Por eso el
+  // constructor queda sin parámetros — el plugin elige el backend
+  // adecuado por plataforma.
+  static const FlutterSecureStorage _secure = FlutterSecureStorage();
 
   // ─── Cache en memoria (devuelto por los getters sync) ─────────────
   static String _dni = '';

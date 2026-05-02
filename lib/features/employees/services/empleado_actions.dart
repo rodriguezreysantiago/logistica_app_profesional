@@ -373,7 +373,7 @@ class EmpleadoActions {
         break;
       case _FuenteArchivoChofer.archivo:
         // withData: true para que `bytes` venga poblado en Web también.
-        final res = await FilePicker.platform.pickFiles(
+        final res = await FilePicker.pickFiles(
           type: FileType.custom,
           allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
           withData: true,

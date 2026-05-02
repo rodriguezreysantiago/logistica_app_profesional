@@ -194,7 +194,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     } else {
       // Solo permitimos imágenes para foto de unidad — un PDF acá no
       // tiene sentido y rompería el preview circular en la card.
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['jpg', 'jpeg', 'png'],
         withData: true,
@@ -255,7 +255,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       }
     } else {
       // withData: true asegura que `bytes` venga poblado en Web también.
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.any,
         withData: true,
       );

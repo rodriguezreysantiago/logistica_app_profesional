@@ -370,10 +370,12 @@ class ReportConsumoService {
         if (Platform.isWindows) {
           await Process.run('cmd', ['/c', 'start', '', path]);
         } else {
-          await Share.shareXFiles(
-            [XFile(path)],
-            text: '⛽ Reporte de consumo de combustible — '
-                '${fmt.format(desde)} a ${fmt.format(hasta)}',
+          await SharePlus.instance.share(
+            ShareParams(
+              files: [XFile(path)],
+              text: '⛽ Reporte de consumo de combustible — '
+                  '${fmt.format(desde)} a ${fmt.format(hasta)}',
+            ),
           );
         }
       }

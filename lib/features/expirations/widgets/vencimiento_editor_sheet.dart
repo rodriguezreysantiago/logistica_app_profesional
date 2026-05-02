@@ -80,7 +80,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
   Future<void> _seleccionarArchivo() async {
     // withData: true para que `bytes` venga poblado en todas las plataformas
     // (en Web `path` es null porque no hay filesystem).
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['jpg', 'jpeg', 'png', 'pdf'],
       withData: true,
