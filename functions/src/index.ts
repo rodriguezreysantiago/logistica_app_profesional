@@ -641,6 +641,7 @@ const ACCEPT_STATUSES =
 // requests con VINs malformados (typos, fuzzing) sin tocar la API
 // externa.
 const VIN_REGEX = /^[A-Z0-9]{17}$/;
+const VIN_INVALIDO_MSG = "`params.vin` no es un VIN valido (17 chars, A-Z y 0-9).";
 
 interface VolvoProxyResult {
   statusCode: number;
@@ -690,7 +691,7 @@ export const volvoProxy = onCall(
         throw new HttpsError("invalid-argument", "Falta `params.vin`.");
       }
       if (!VIN_REGEX.test(vin)) {
-        throw new HttpsError("invalid-argument", "`params.vin` no es un VIN valido (17 chars, A-Z y 0-9).");
+        throw new HttpsError("invalid-argument", VIN_INVALIDO_MSG);
       }
       const qs = new URLSearchParams({
         vin,
@@ -716,7 +717,7 @@ export const volvoProxy = onCall(
         throw new HttpsError("invalid-argument", "Falta `params.vin`.");
       }
       if (!VIN_REGEX.test(vin)) {
-        throw new HttpsError("invalid-argument", "`params.vin` no es un VIN valido (17 chars, A-Z y 0-9).");
+        throw new HttpsError("invalid-argument", VIN_INVALIDO_MSG);
       }
       const qs = new URLSearchParams({
         vin,

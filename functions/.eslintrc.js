@@ -21,6 +21,11 @@ module.exports = {
     "/lib/**/*", // Ignora salidas del compilador.
     "/generated/**/*",
     ".eslintrc.js", // El propio config no está en tsconfig.json.
+    "/test/**/*", // Tests usan node:test simple, no requieren lint
+                  // typescript. El parser typescript-eslint exige que
+                  // los archivos esten en tsconfig.json y no quiero
+                  // sumar test/ al include de TS (compilaria tests
+                  // a lib/ y se subirian al deploy).
   ],
   plugins: ["@typescript-eslint", "import"],
   rules: {
