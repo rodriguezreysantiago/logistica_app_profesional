@@ -8,7 +8,7 @@ process.env.TZ = 'America/Argentina/Buenos_Aires';
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
-const { aIsoLocal, aDdMmYyyyLocal } = require('../src/fechas');
+const { aIsoLocal, aDdMmYyyyLocal, aLocalDateTime } = require('../src/fechas');
 
 describe('fechas.aIsoLocal — string inputs', () => {
   test('string YYYY-MM-DD se devuelve tal cual', () => {
@@ -131,5 +131,50 @@ describe('fechas.aDdMmYyyyLocal', () => {
     assert.strictEqual(aDdMmYyyyLocal(null), '-');
     assert.strictEqual(aDdMmYyyyLocal(''), '-');
     assert.strictEqual(aDdMmYyyyLocal('xxxx'), '-');
+  });
+});
+
+describe('fechas.aLocalDateTime', () => {
+  test('Date local a "DD/MM/YYYY HH:MM" sin componentes UTC', () => {
+    // 30 mayo 2026 14:30 LOCAL ART. El helper toma getDate/getHours
+    // (no getUTCDate) -- como TZ del proceso esta forzada a ART, da
+    // 30/05/2026 14:30 sin importar en qué runtime corra.
+    const dt = new Date(2026, 4, 30, 14, 30);
+    assert.strictEqual(aLocalDateTime(dt), '30/05/2026 14:30');
+  });
+
+  test('preserva la HORA (a diferencia de aDdMmYyyyLocal que es solo fecha)', () => {
+    const dt = new Date(2026, 0, 5, 8, 5);
+    assert.strictEqual(aLocalDateTime(dt), '05/01/2026 08:05');
+  });
+
+  test('Timestamp Firestore via toDate() funciona', () => {
+    const fakeTs = {
+      toDate: () => new Date(2026, 4, 30, 9, 15),
+    };
+    assert.strictEqual(aLocalDateTime(fakeTs), '30/05/2026 09:15');
+  });
+
+  test('Timestamp serializado JSON con _seconds funciona', () => {
+    // 2026-05-30T12:00:00 ART = 2026-05-30T15:00:00 UTC
+    const utcSecs = Date.UTC(2026, 4, 30, 15, 0, 0) / 1000;
+    const fakeJson = { _seconds: utcSecs, _nanoseconds: 0 };
+    // El timestamp es las 15:00 UTC = 12:00 ART
+    assert.strictEqual(aLocalDateTime(fakeJson), '30/05/2026 12:00');
+  });
+
+  test('input invalido devuelve "-"', () => {
+    assert.strictEqual(aLocalDateTime(null), '-');
+    assert.strictEqual(aLocalDateTime(undefined), '-');
+    assert.strictEqual(aLocalDateTime(''), '-');
+    assert.strictEqual(aLocalDateTime('xxxx'), '-');
+    assert.strictEqual(aLocalDateTime(new Date('xx')), '-');
+  });
+
+  test('REGRESSION: NO devuelve formato ISO con T y Z (anti-patrón)', () => {
+    const dt = new Date(2026, 4, 30, 14, 30);
+    const r = aLocalDateTime(dt);
+    assert.ok(!r.includes('T'), `No debe contener "T": ${r}`);
+    assert.ok(!r.includes('Z'), `No debe contener "Z": ${r}`);
   });
 });

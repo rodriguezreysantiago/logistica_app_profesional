@@ -67,6 +67,7 @@ const {
   sleep,
   normalizarTelefonoAWid,
 } = require('./humano');
+const { aLocalDateTime } = require('./fechas');
 
 // Limpieza preventiva al arrancar — desbloquea Chromium si quedó
 // medio muerto del proceso anterior.
@@ -194,7 +195,7 @@ async function _despacharFalloEnvio(docRef, error) {
     await fs.marcarReintento(docRef, error.message, cuando);
     log.info(
       `↻ Reintento ${intentos}/${maxRetries} de ${docRef.id} en ${backoffSeg}s ` +
-        `(${cuando.toISOString()})`
+        `(${aLocalDateTime(cuando)})`
     );
     return;
   }

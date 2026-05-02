@@ -760,8 +760,11 @@ class _AccesoChecklist extends StatelessWidget {
 
         if (completado) {
           color = Colors.greenAccent;
+          // .toLocal() defensivo: Timestamp.toDate() en Dart suele
+          // devolver local pero no esta garantizado en todos los runtimes.
+          // Sin esto, format en zonas UTC podria mostrar dia anterior.
           final fechaDoc =
-              (snap.data!.docs.first['FECHA'] as Timestamp).toDate();
+              (snap.data!.docs.first['FECHA'] as Timestamp).toDate().toLocal();
           mensaje =
               'Control realizado (${DateFormat('dd/MM').format(fechaDoc)})';
           icono = Icons.check_circle;

@@ -316,7 +316,7 @@ class _ListaVacia extends StatelessWidget {
   Widget build(BuildContext context) {
     final texto = dia == null
         ? 'Tocá un día para ver los vencimientos'
-        : 'Sin vencimientos el ${AppFormatters.formatearFecha(dia!.toIso8601String())}';
+        : 'Sin vencimientos el ${AppFormatters.formatearFecha(dia!)}';
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),

@@ -83,6 +83,43 @@ function aDdMmYyyyLocal(fecha) {
 }
 
 /**
+ * Formatea cualquier representacion de fecha a 'DD/MM/YYYY HH:MM' usando
+ * componentes LOCALES. A diferencia de `aDdMmYyyyLocal` (que es para
+ * fechas calendario), este preserva la HORA -- usalo cuando la
+ * granularidad es momento real, no dia.
+ *
+ * Para timestamps de retries, logs, "ultima actualizacion", etc.
+ * Anti-patrón: NO usar `new Date().toISOString()` que devuelve UTC --
+ * obliga al admin a restar 3hs en la cabeza.
+ *
+ * Devuelve '-' si no se pudo parsear.
+ */
+function aLocalDateTime(fecha) {
+  if (fecha === null || fecha === undefined || fecha === '') return '-';
+
+  let d;
+  if (fecha instanceof Date) {
+    d = fecha;
+  } else if (fecha && typeof fecha.toDate === 'function') {
+    d = fecha.toDate();
+  } else if (typeof fecha === 'string') {
+    d = new Date(fecha);
+  } else if (fecha && typeof fecha === 'object') {
+    const secs = fecha._seconds ?? fecha.seconds;
+    if (typeof secs === 'number') d = new Date(secs * 1000);
+  }
+
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
+
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
+/**
  * Helper interno: convierte un Date a YYYY-MM-DD eligiendo entre
  * componentes UTC (cuando es fecha calendario, hora UTC = 00:00:00.000)
  * o componentes locales (cuando es momento real con hora). Ver el
@@ -115,6 +152,7 @@ function _dateToIsoSafe(d) {
 module.exports = {
   aIsoLocal,
   aDdMmYyyyLocal,
+  aLocalDateTime,
   // Exportado para tests / debugging.
   _dateToIsoSafe,
 };
