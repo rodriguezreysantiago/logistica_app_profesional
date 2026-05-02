@@ -143,6 +143,16 @@ class ReportConsumoService {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const _LabelSeccion('Rango de referencia'),
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8, left: 4),
+                    child: Text(
+                      'Tocá cada botón para abrir el calendario y elegir la fecha.',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
                   Row(
                     children: [
                       Expanded(
@@ -744,31 +754,47 @@ class _BotonFecha extends StatelessWidget {
         if (f != null) onPick(f);
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.black.withAlpha(80),
+          color: Colors.greenAccent.withAlpha(20),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white12),
+          // Border más prominente para que sea evidente que el botón
+          // es interactivo. Antes era Colors.white12 (casi invisible)
+          // y los usuarios no se daban cuenta de que podían tocarlo
+          // para cambiar la fecha.
+          border: Border.all(color: Colors.greenAccent.withAlpha(120), width: 1.5),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white38,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1,
-              ),
+            const Icon(
+              Icons.calendar_today,
+              color: Colors.greenAccent,
+              size: 22,
             ),
-            const SizedBox(height: 4),
-            Text(
-              fmt.format(fecha),
-              style: const TextStyle(
-                color: Colors.greenAccent,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    fmt.format(fecha),
+                    style: const TextStyle(
+                      color: Colors.greenAccent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
