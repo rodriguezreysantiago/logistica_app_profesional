@@ -54,11 +54,11 @@ Si el heartbeat es de hace > 2 min, el bot está caído **aunque el servicio dig
 
 ```powershell
 cd C:\Users\santi\logistica_app_profesional\whatsapp-bot
-.\stop_bot.ps1   # auto-eleva UAC, espera grace period 90s
-.\start_bot.ps1  # hace git pull + npm install + nssm start
+.\scripts\stop_bot.ps1   # auto-eleva UAC, espera grace period 90s
+.\scripts\start_bot.ps1  # hace git pull + npm install + nssm start
 ```
 
-`stop_bot.ps1` hace stop ordenado respetando el `grace_shutdown` del bot (deja terminar mensajes en vuelo). `start_bot.ps1` rechaza arrancar si hay cambios sin commitear (proteger producción).
+`scripts\stop_bot.ps1` hace stop ordenado respetando el `grace_shutdown` del bot (deja terminar mensajes en vuelo). `scripts\start_bot.ps1` rechaza arrancar si hay cambios sin commitear (proteger producción).
 
 ### Si el restart no alcanza
 
