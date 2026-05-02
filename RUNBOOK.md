@@ -236,8 +236,8 @@ Si nunca deployaste desde esta PC (o pasó tiempo), tres cosas que hay que verif
 
 **1. Project alias activo** (`No currently active project`):
 ```powershell
-firebase use logisticaapp-e539a
-# → "Now using project logisticaapp-e539a"
+firebase use coopertrans-movil
+# → "Now using project coopertrans-movil"
 ```
 Queda guardado en `.firebaserc` local de la PC.
 
@@ -336,17 +336,17 @@ Hay dos backups críticos: **Firestore** (datos del negocio) y **`.wwebjs_auth/`
 
 # 2. Login y proyecto activo:
 gcloud auth login
-gcloud config set project logisticaapp-e539a
+gcloud config set project coopertrans-movil
 
 # 3. Crear el bucket de backups (region SA = menor latencia desde AR):
-gcloud storage buckets create gs://logisticaapp-backups `
-  --project=logisticaapp-e539a `
+gcloud storage buckets create gs://coopertrans-movil-backups `
+  --project=coopertrans-movil `
   --location=southamerica-east1 `
   --uniform-bucket-level-access
 
 # 4. Probar el script una vez manual:
 .\scripts\backup_firestore.ps1
-# Si OK, debería decir "Backup OK: gs://logisticaapp-backups/2026-..."
+# Si OK, debería decir "Backup OK: gs://coopertrans-movil-backups/2026-..."
 ```
 
 **Programar** (recomendado: Cloud Scheduler en GCP — corre aunque la PC esté apagada):
@@ -357,10 +357,10 @@ gcloud scheduler jobs create http firestore-backup-diario `
   --location=southamerica-east1 `
   --schedule="0 3 * * *" `
   --time-zone="America/Argentina/Buenos_Aires" `
-  --uri="https://firestore.googleapis.com/v1/projects/logisticaapp-e539a/databases/(default):exportDocuments" `
+  --uri="https://firestore.googleapis.com/v1/projects/coopertrans-movil/databases/(default):exportDocuments" `
   --http-method=POST `
   --oauth-service-account-email=<service-account-email> `
-  --message-body='{"outputUriPrefix":"gs://logisticaapp-backups"}'
+  --message-body='{"outputUriPrefix":"gs://coopertrans-movil-backups"}'
 ```
 
 (El `<service-account-email>` lo sacás de Firebase Console → Project Settings → Service accounts. Permisos requeridos: `Cloud Datastore Import Export Admin`.)
@@ -529,7 +529,7 @@ git status -uno                                 # cambios sin .claude/
 | **Santiago** (dueño/dev) | (TODO: agregar teléfono / email) |
 | Contacto Vecchi (cliente) | (TODO: agregar contacto del cliente) |
 | Bitwarden vault | Cuenta personal de Santiago — `secrets.json`, `serviceAccountKey.json`, password de portal Volvo |
-| Firebase Console | https://console.firebase.google.com/project/logisticaapp-e539a |
+| Firebase Console | https://console.firebase.google.com/project/coopertrans-movil |
 | GitHub | https://github.com/rodriguezreysantiago/logistica_app_profesional |
 | Email Volvo Connect | (TODO: agregar email del contacto técnico de Volvo) |
 | Número de WhatsApp del bot | (TODO: agregar número descartable) |

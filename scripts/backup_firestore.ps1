@@ -8,15 +8,16 @@
 # REQUISITOS antes de correr (one-time setup):
 #   1. gcloud CLI instalado y autenticado:
 #        gcloud auth login
-#        gcloud config set project logisticaapp-e539a
+#        gcloud config set project coopertrans-movil
 #
 #   2. Bucket GCS para los backups:
-#        gcloud storage buckets create gs://logisticaapp-backups `
-#          --project=logisticaapp-e539a `
+#        gcloud storage buckets create gs://coopertrans-movil-backups `
+#          --project=coopertrans-movil `
 #          --location=southamerica-east1 `
 #          --uniform-bucket-level-access
 #
-#      Region southamerica-east1 minimiza latencia desde Argentina.
+#      Region southamerica-east1 minimiza latencia desde Argentina y
+#      matchea la region de Firestore (mismo proyecto migrado el 2026-05).
 #
 #   3. Permisos: la SA por default ya tiene permisos para hacer export.
 #      Si falla con "permission denied", asignar Cloud Datastore Import
@@ -40,13 +41,13 @@ $ErrorActionPreference = 'Stop'
 $projectId = if ($env:FIREBASE_PROJECT_ID) {
     $env:FIREBASE_PROJECT_ID
 } else {
-    'logisticaapp-e539a'
+    'coopertrans-movil'
 }
 
 $bucket = if ($env:FIRESTORE_BACKUP_BUCKET) {
     $env:FIRESTORE_BACKUP_BUCKET
 } else {
-    "gs://logisticaapp-backups"
+    "gs://coopertrans-movil-backups"
 }
 
 # Retencion: cuantos dias mantener (default 30).
@@ -79,10 +80,14 @@ try {
     # Export. Toma todas las colecciones que el bot/app usan
     # explicitamente. Si en el futuro se suman colecciones, hay que
     # actualizarlas aca o sacar el flag para exportar todo.
+    #
+    # ASIGNACIONES_VEHICULO, VOLVO_ALERTAS y META se sumaron el 2026-05-02
+    # (sistema histórico chofer↔vehículo + Volvo Alerts API).
     $colecciones = @(
         'EMPLEADOS',
         'VEHICULOS',
         'REVISIONES',
+        'CHECKLISTS',
         'COLA_WHATSAPP',
         'AVISOS_AUTOMATICOS_HISTORICO',
         'RESPUESTAS_BOT_AMBIGUAS',
@@ -91,7 +96,10 @@ try {
         'MANTENIMIENTOS_AVISADOS',
         'BOT_HEALTH',
         'BOT_CONTROL',
-        'LOGIN_ATTEMPTS'
+        'LOGIN_ATTEMPTS',
+        'ASIGNACIONES_VEHICULO',
+        'VOLVO_ALERTAS',
+        'META'
     ) -join ','
 
     & gcloud firestore export $prefix `

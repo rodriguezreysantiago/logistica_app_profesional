@@ -53,7 +53,7 @@ if (!fsNode.existsSync(absPath)) {
 
 admin.initializeApp({
   credential: admin.credential.cert(require(absPath)),
-  projectId: process.env.FIREBASE_PROJECT_ID || 'logisticaapp-e539a',
+  projectId: process.env.FIREBASE_PROJECT_ID || 'coopertrans-movil',
 });
 
 const db = admin.firestore();

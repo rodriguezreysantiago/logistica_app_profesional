@@ -681,7 +681,7 @@ Confusión de Santiago al ver "958 km en un mes" en el reporte: el cron `telemet
 ### Pre-requisitos
 - Flutter SDK 3.0+
 - Python 3.10+ (solo para scripts de migración)
-- Cuenta Firebase del proyecto `logisticaapp-e539a`
+- Cuenta Firebase del proyecto `coopertrans-movil`
 - Editor: VS Code con extensiones Dart + Flutter
 
 ### Pasos
