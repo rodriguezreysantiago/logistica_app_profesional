@@ -34,13 +34,13 @@
 #   .\scripts\stop_bot.ps1
 #
 # Para desinstalar:
-#   nssm stop SmartLogisticaBot
-#   nssm remove SmartLogisticaBot confirm
+#   nssm stop CoopertransMovilBot
+#   nssm remove CoopertransMovilBot confirm
 
 $ErrorActionPreference = 'Stop'
 
 # --- 1. Variables --------------------------------------------------
-$serviceName = 'SmartLogisticaBot'
+$serviceName = 'CoopertransMovilBot'
 # El root del bot lo derivamos de la ubicacion de ESTE script para que
 # funcione igual en casa y en la oficina (no hardcodeamos un path
 # absoluto a un usuario especifico de Windows). El script vive en

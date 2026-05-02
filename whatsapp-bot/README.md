@@ -132,16 +132,16 @@ restart inteligente.
 
 ```powershell
 choco install nssm  # si no lo tenés
-nssm install SmartLogisticaWhatsAppBot "C:\Program Files\nodejs\node.exe"
+nssm install CoopertransMovilBot "C:\Program Files\nodejs\node.exe"
 # UI gráfica: completar AppDirectory con la ruta del bot, AppParameters
 # con `src/index.js`, y habilitar Auto-restart en Exit Actions.
-nssm start SmartLogisticaWhatsAppBot
+nssm start CoopertransMovilBot
 ```
 
 Para ver logs:
 
 ```powershell
-nssm edit SmartLogisticaWhatsAppBot
+nssm edit CoopertransMovilBot
 # pestaña I/O → completar Output (stdout) y Error (stderr) con paths
 # tipo C:\bot-logs\out.log y C:\bot-logs\err.log
 ```

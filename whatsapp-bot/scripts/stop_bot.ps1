@@ -1,4 +1,4 @@
-# Detiene el bot WhatsApp (servicio NSSM 'SmartLogisticaBot') de
+# Detiene el bot WhatsApp (servicio NSSM 'CoopertransMovilBot') de
 # forma ordenada, esperando que termine cualquier mensaje en curso.
 #
 # Pensado para el flujo de 2 PCs (casa + oficina): SIEMPRE corre esto
@@ -11,7 +11,7 @@
 #   .\scripts\stop_bot.ps1
 
 $ErrorActionPreference = 'Stop'
-$serviceName = 'SmartLogisticaBot'
+$serviceName = 'CoopertransMovilBot'
 
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()

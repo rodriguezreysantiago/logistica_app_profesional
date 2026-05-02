@@ -410,7 +410,7 @@ Ahora el logger usa formato AR familiar `[DD-MM-AAAA HH:MM:SS]` con componentes 
 
 #### 6.11.10 Setup operativo Windows (no commiteable, hecho en la PC casa)
 Estos pasos son del lado del operador, no del repo:
-- NSSM 2.24 instalado en `C:\nssm\`. Servicio `SmartLogisticaBot` creado en modo `SERVICE_DEMAND_START` corriendo como `LocalSystem`.
+- NSSM 2.24 instalado en `C:\nssm\`. Servicio `CoopertransMovilBot` creado en modo `SERVICE_DEMAND_START` corriendo como `LocalSystem`.
 - `whatsapp-bot/.env` cargado con `BOT_PC_ID=casa`, `SERVICE_DESTINATARIO_DNI=29820141`, `AUTO_AVISOS_ENABLED=true`.
 - `icacls` aplicados sobre `C:\Users\santi\logistica_app_profesional\` y `C:\Users\santi\.cache\puppeteer\` para que `LocalSystem` pueda leer.
 - `PUPPETEER_CACHE_DIR=C:\Users\santi\.cache\puppeteer` configurado en NSSM via `AppEnvironmentExtra`.

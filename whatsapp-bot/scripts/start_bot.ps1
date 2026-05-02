@@ -1,4 +1,4 @@
-# Arranca el bot WhatsApp (servicio NSSM 'SmartLogisticaBot') despues
+# Arranca el bot WhatsApp (servicio NSSM 'CoopertransMovilBot') despues
 # de sincronizar el codigo con git y refrescar dependencias npm.
 #
 # Pensado para el flujo de 2 PCs (casa + oficina): cada vez que llegas
@@ -14,11 +14,11 @@
 # Que hace:
 #   1. git pull en la raiz del repo (trae los ultimos cambios).
 #   2. npm install --silent en whatsapp-bot/ (solo instala si cambio package.json).
-#   3. Start-Service SmartLogisticaBot (con auto-elevacion UAC si hace falta).
+#   3. Start-Service CoopertransMovilBot (con auto-elevacion UAC si hace falta).
 #   4. Te dice donde ver los logs en vivo.
 
 $ErrorActionPreference = 'Stop'
-$serviceName = 'SmartLogisticaBot'
+$serviceName = 'CoopertransMovilBot'
 
 # Resolvemos paths desde el script para que funcione igual en
 # cualquier PC, sin importar donde clonaste el repo.

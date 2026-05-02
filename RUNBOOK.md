@@ -39,13 +39,13 @@ Documento operativo para resolver incidentes en producción. Pensado para que **
 
 ## Bot WhatsApp no envía mensajes
 
-El bot corre como **servicio NSSM en una PC con Windows** (PC casa). El proceso se llama `SmartLogisticaBot`.
+El bot corre como **servicio NSSM en una PC con Windows** (PC casa). El proceso se llama `CoopertransMovilBot`.
 
 ### Verificar si el bot está corriendo
 
 ```powershell
 # Estado del servicio Windows
-Get-Service SmartLogisticaBot
+Get-Service CoopertransMovilBot
 
 # Heartbeat a Firestore (lo que ve la app)
 # Pantalla admin > "Estado del Bot" muestra ultimoHeartbeat,
@@ -70,7 +70,7 @@ El "calvario operativo" del 1-mayo PM (sec. 6.11.11 del `ESTADO_PROYECTO.md`) de
 
 ```powershell
 # 1. Stop service desde PowerShell-Admin
-Stop-Service SmartLogisticaBot -Force
+Stop-Service CoopertransMovilBot -Force
 
 # 2. Borrar la sesión rota (requiere admin porque LocalSystem la creó)
 Remove-Item C:\Users\santi\logistica_app_profesional\whatsapp-bot\.wwebjs_auth -Recurse -Force
@@ -79,7 +79,7 @@ Remove-Item C:\Users\santi\logistica_app_profesional\whatsapp-bot\.wwebjs_auth -
 Remove-Item C:\Users\santi\logistica_app_profesional\whatsapp-bot\.wwebjs_cache -Recurse -Force
 
 # 4. Start service. Va a pedir QR fresco.
-Start-Service SmartLogisticaBot
+Start-Service CoopertransMovilBot
 
 # 5. Mirar logs de NSSM para ver el QR
 Get-Content C:\Users\santi\logistica_app_profesional\whatsapp-bot\logs\bot-out.log -Tail 50 -Wait
@@ -499,7 +499,7 @@ Eso es el state directory del agent (Claude Code). Está ignorado por `.gitignor
 
 ```powershell
 # === Bot ===
-Get-Service SmartLogisticaBot                   # Estado del servicio
+Get-Service CoopertransMovilBot                   # Estado del servicio
 Get-Content whatsapp-bot\logs\bot-out.log -Tail 50 -Wait   # Logs en vivo
 Get-Content whatsapp-bot\logs\bot-err.log -Tail 50         # Errores
 
