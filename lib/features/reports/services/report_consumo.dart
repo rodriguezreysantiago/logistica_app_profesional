@@ -362,13 +362,13 @@ class ReportConsumoService {
         currentRow++;
       }
 
-      // Auto-fit: el ancho de cada columna se ajusta al contenido más
-      // largo en lugar de un valor fijo. Más cómodo de leer porque las
-      // patentes (cortas) no quedan con espacio sobrante y los números
-      // grandes (1.234.567,89) tampoco se truncan.
-      for (var i = 0; i < titulos.length; i++) {
-        hojaDetalle.setColumnAutoFit(i);
-      }
+      // Auto-fit manual: calculamos el ancho como el max entre el largo
+      // del título y el contenido más largo de los datos. La librería
+      // `excel` tiene `setColumnAutoFit` pero solo marca la columna —
+      // delega el cálculo a Excel al abrir, y Excel suele truncar
+      // headers largos (como 'LITROS CONSUMIDOS (L)'). Calculando acá
+      // garantizamos que tanto el título como cualquier celda entran.
+      _autoFitColumnas(hojaDetalle, titulos.length, currentRow);
 
       // ============= Hoja RANKING (top 10 más consumidores) =============
       _construirHojaRanking(excel, filas);
@@ -615,10 +615,62 @@ class ReportConsumoService {
           .value = ex.TextCellValue(barra);
     }
 
-    // Auto-fit: ancho de cada columna ajustado al contenido más largo.
-    for (var i = 0; i < titulos.length; i++) {
-      hoja.setColumnAutoFit(i);
+    // Auto-fit manual — ver explicación en hoja DETALLE.
+    _autoFitColumnas(hoja, titulos.length, ranking.length + 1);
+  }
+
+  /// Recorre todas las celdas escritas en `hoja` (filas 0..numRows,
+  /// columnas 0..numCols) y aplica `setColumnWidth` con el max entre
+  /// el largo del título (fila 0) y el contenido más largo de las
+  /// celdas siguientes. Suma 2 chars de padding para que no quede
+  /// pegado al borde.
+  ///
+  /// Para celdas DoubleCellValue/IntCellValue, simulamos el formato AR
+  /// (1.234.567,89) para estimar el ancho visual real, no solo los
+  /// dígitos crudos.
+  static void _autoFitColumnas(ex.Sheet hoja, int numCols, int numRows) {
+    for (var col = 0; col < numCols; col++) {
+      var maxLen = 0;
+      for (var row = 0; row < numRows; row++) {
+        final cell = hoja.cell(ex.CellIndex.indexByColumnRow(
+            columnIndex: col, rowIndex: row));
+        final len = _anchoCelda(cell);
+        if (len > maxLen) maxLen = len;
+      }
+      // Mínimo 8 chars para que no quede ridículamente angosta si
+      // la columna no tiene contenido. Padding de 2 a cada lado.
+      final ancho = (maxLen < 6 ? 6 : maxLen) + 2;
+      hoja.setColumnWidth(col, ancho.toDouble());
     }
+  }
+
+  /// Estima el ancho visual de una celda en chars, contemplando el
+  /// formato AR para números (1.234.567,89).
+  static int _anchoCelda(ex.Data cell) {
+    final value = cell.value;
+    if (value == null) return 0;
+    if (value is ex.TextCellValue) {
+      return value.value.toString().length;
+    }
+    if (value is ex.DoubleCellValue) {
+      return _renderArgFormatLength(value.value);
+    }
+    if (value is ex.IntCellValue) {
+      return _renderArgFormatLength(value.value.toDouble());
+    }
+    return value.toString().length;
+  }
+
+  /// Devuelve el largo de un número formateado al estilo AR
+  /// (1.234.567,89). Útil para calcular ancho de columna sin
+  /// renderizar el string completo.
+  static int _renderArgFormatLength(double value) {
+    final fixed = value.toStringAsFixed(2); // "1234567.89"
+    final partes = fixed.split('.');
+    final entera = partes[0].replaceAll('-', '');
+    final puntos = ((entera.length - 1) ~/ 3); // separadores de miles
+    final signo = value < 0 ? 1 : 0;
+    return entera.length + puntos + 1 /* coma */ + 2 /* decimales */ + signo;
   }
 }
 
