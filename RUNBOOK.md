@@ -29,6 +29,8 @@ Documento operativo para resolver incidentes en producción. Pensado para que **
 | App pide login pero rechaza credenciales válidas | [Cloud Function loginConDni](#login-no-funciona) |
 | Tractores Volvo aparecen sin telemetría | [Volvo Connect 401](#volvo-connect-telemetría-sin-actualizar) o ticket de paquete UPTIME |
 | Después de un deploy todo se rompe | [Rollback](#rollback-de-un-deploy-malo) |
+| `firebase deploy` falla con `eslint no se reconoce` o `No currently active project` | [Pre-checks de deploy](#pre-checks-antes-de-correr-firebase-deploy) |
+| `start_bot.ps1` aborta diciendo que hay cambios pero `git diff` está vacío | [Stat dirty del package-lock](#start_botps1-aborta-por-package-lock-modificado-pero-git-diff-está-vacío) |
 | Pantalla blanca al abrir la app | Crashlytics en Firebase Console (solo mobile) — desktop solo logs locales |
 
 ---
@@ -151,6 +153,61 @@ Errores comunes:
 
 ---
 
+## Deploy de Cloud Functions
+
+### Pre-checks antes de correr `firebase deploy`
+
+Si nunca deployaste desde esta PC (o pasó tiempo), tres cosas que hay que verificar antes para no chocarse con errores de tooling:
+
+**1. Project alias activo** (`No currently active project`):
+```powershell
+firebase use logisticaapp-e539a
+# → "Now using project logisticaapp-e539a"
+```
+Queda guardado en `.firebaserc` local de la PC.
+
+**2. Dev dependencies de `functions/` instaladas** (`"eslint" no se reconoce`):
+```powershell
+cd functions
+npm install
+cd ..
+```
+El predeploy hook de `firebase.json` corre `npm run lint` + `npm run build` — sin las dev deps falla a la primera. Una vez al setupear la PC alcanza.
+
+**3. Build local OK** (sanity check antes de quemar el deploy):
+```powershell
+cd functions
+npm run build
+cd ..
+```
+Si `tsc` tira error, el deploy va a fallar igual — mejor verlo acá. Sigue: `flutter analyze` + `flutter test` + `cd whatsapp-bot ; npm test` para confirmar que el repo entero está limpio.
+
+### Comando de deploy
+
+```powershell
+# Deploy de UNA function (recomendado para producción)
+firebase deploy --only functions:loginConDni
+
+# Deploy de todas las functions del codebase
+firebase deploy --only functions
+
+# Deploy de rules + functions juntos (peligroso si rules cambia: puede cortar acceso)
+firebase deploy --only firestore:rules,functions
+```
+
+### Validación post-deploy obligatoria
+
+**Apenas termine el deploy**, validar:
+- Login admin desde la app Flutter en < 5 segundos.
+- Login chofer cualquiera, también OK.
+- Si alguno falla: rollback inmediato (siguiente sección). No esperar a que se quejen los usuarios.
+
+Errores comunes después de un deploy:
+- `iam.serviceAccounts.signBlob denied` → ver tabla en [Login no funciona](#login-no-funciona).
+- `permission-denied: ...allUsers Cloud Run Invoker missing` → idem.
+
+---
+
 ## Rollback de un deploy malo
 
 ### Cloud Functions
@@ -223,6 +280,38 @@ Están en **Bitwarden** (vault personal de Santiago). Si Santiago no está dispo
 
 - `serviceAccountKey.json`: Firebase Console → Project Settings → Service accounts → Generate new private key. La key vieja seguirá funcionando hasta que se revoque manualmente.
 - `secrets.json`: contenido reconstruible desde el portal Volvo Connect (admin de la cuenta Volvo del cliente).
+
+---
+
+## Otros gotchas operativos (Windows)
+
+### `start_bot.ps1` aborta por package-lock "modificado" pero `git diff` está vacío
+
+Síntoma:
+```
+ADVERTENCIA: hay cambios sin commitear en el repo:
+ M whatsapp-bot/package-lock.json
+```
+pero al correr `git diff whatsapp-bot/package-lock.json` no muestra nada.
+
+Es un **stat dirty**: `npm install` actualizó el `mtime` del archivo aunque el contenido es idéntico al committeado. Pasa seguido en Windows + npm.
+
+Fix:
+```powershell
+git restore whatsapp-bot/package-lock.json
+git status   # debe decir "working tree clean"
+.\whatsapp-bot\scripts\start_bot.ps1
+```
+
+`git restore` re-escribe el archivo desde el index. Como el contenido es idéntico, no rompe nada — solo limpia la marca.
+
+### El bot está corriendo pero las notificaciones no llegan a la app
+
+Cliente Flutter: la pantalla "Estado del Bot" muestra heartbeat OK pero los push notifications de admin no llegan. Causa típica: la sesión del admin está cacheando claims viejos. **Logout + login** en la app suele arreglarlo (renueva el JWT con custom claims actuales).
+
+### "Working tree clean" pero `git status` muestra `.claude/` untracked
+
+Eso es el state directory del agent (Claude Code). Está ignorado por `.gitignore` desde el commit `80874b3`. Si igual aparece, tu copia local del repo no tiene ese commit — `git pull` y debería desaparecer.
 
 ---
 
