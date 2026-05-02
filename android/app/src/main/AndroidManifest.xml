@@ -12,16 +12,16 @@
 
     <!-- Notificaciones runtime permission (Android 13+ / API 33).
          Sin esto flutter_local_notifications no puede mostrar avisos en
-         celulares modernos aunque el canal esté creado. -->
+         celulares modernos aunque el canal est� creado. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Cámara: image_picker la usa cuando el chofer/admin elige
-         "Tomar foto con la cámara" para subir comprobantes o foto de perfil. -->
+    <!-- C�mara: image_picker la usa cuando el chofer/admin elige
+         "Tomar foto con la c�mara" para subir comprobantes o foto de perfil. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
-        android:label="logistica_app_profesional"
+        android:label="Coopertrans Movil"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:extractNativeLibs="true"

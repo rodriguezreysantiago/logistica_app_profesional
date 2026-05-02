@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:808925655961:android:8cbc568b31cd0f95a4d908",
+        "mobilesdk_app_id": "1:808925655961:android:9238749f27b21130a4d908",
         "android_client_info": {
-          "package_name": "com.example.logistica_app_profesional"
+          "package_name": "com.coopertrans.movil"
         }
       },
       "oauth_client": [],

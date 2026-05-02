@@ -1,18 +1,18 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // El plugin de Google Services debe ir después de los de Android/Kotlin
+    // El plugin de Google Services debe ir despu�s de los de Android/Kotlin
     id("com.google.gms.google-services")
-    // Crashlytics: requiere google-services declarado antes — el plugin
-    // se engancha al build para subir el mapping de obfuscación a
+    // Crashlytics: requiere google-services declarado antes � el plugin
+    // se engancha al build para subir el mapping de obfuscaci�n a
     // Firebase. En debug es no-op porque AppLogger desactiva la
-    // colección, pero el plugin igual debe estar declarado.
+    // colecci�n, pero el plugin igual debe estar declarado.
     id("com.google.firebase.crashlytics")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
-    namespace = "com.example.logistica_app_profesional"
+    namespace = "com.coopertrans.movil"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -27,15 +27,15 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.logistica_app_profesional"
+        applicationId = "com.coopertrans.movil"
         
-        // 🔥 FORZAMOS minSdk a 23 para evitar errores de compatibilidad con Firebase
+        // ?? FORZAMOS minSdk a 23 para evitar errores de compatibilidad con Firebase
         minSdk = 23 
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 🔥 ACTIVAMOS MULTIDEX: Vital para que no choquen los hilos en apps grandes
+        // ?? ACTIVAMOS MULTIDEX: Vital para que no choquen los hilos en apps grandes
         multiDexEnabled = true
     }
 
@@ -44,7 +44,7 @@ android {
             // Signing with the debug keys for now
             signingConfig = signingConfigs.getByName("debug")
             
-            // Sugerencia: optimización de recursos
+            // Sugerencia: optimizaci�n de recursos
             minifyEnabled = false
             shrinkResources = false
         }
@@ -56,6 +56,6 @@ flutter {
 }
 
 dependencies {
-    // Agregamos la dependencia de multidex explícita por seguridad
+    // Agregamos la dependencia de multidex expl�cita por seguridad
     implementation("androidx.multidex:multidex:2.0.1")
 }

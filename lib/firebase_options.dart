@@ -45,7 +45,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyD1Ll6WhwlIHd_Mr08jfMH9Yda1IhWzdfs',
-    appId: '1:808925655961:android:8cbc568b31cd0f95a4d908',
+    appId: '1:808925655961:android:9238749f27b21130a4d908',
     messagingSenderId: '808925655961',
     projectId: 'coopertrans-movil',
     storageBucket: 'coopertrans-movil.firebasestorage.app',
