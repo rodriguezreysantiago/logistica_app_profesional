@@ -26,8 +26,14 @@ class _AdminVencimientosChasisScreenState
   @override
   void initState() {
     super.initState();
-    _vehiculosStream =
-        FirebaseFirestore.instance.collection('VEHICULOS').snapshots();
+    // where('TIPO', 'in', ...) filtra server-side: bajamos solo los
+    // tractores/chasis en lugar de toda la flota. Con flota chica
+    // ahorra ~50% de docs (mitad enganches mitad tractores); con flota
+    // grande el ahorro escala lineal.
+    _vehiculosStream = FirebaseFirestore.instance
+        .collection('VEHICULOS')
+        .where('TIPO', whereIn: _tiposIncluidos)
+        .snapshots();
   }
 
   List<VencimientoItem> _construirItems(QuerySnapshot snapshot) {
@@ -35,6 +41,8 @@ class _AdminVencimientosChasisScreenState
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final tipo = (data['TIPO'] ?? '').toString().toUpperCase();
+      // Defensivo: el where ya filtra server-side, pero si algun doc
+      // tiene TIPO null o casing distinto, igual lo skipeamos aca.
       if (!_tiposIncluidos.contains(tipo)) continue;
 
       final patente = doc.id.toUpperCase();

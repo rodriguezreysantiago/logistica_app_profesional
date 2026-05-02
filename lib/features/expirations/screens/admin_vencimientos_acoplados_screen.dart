@@ -28,8 +28,15 @@ class _AdminVencimientosAcopladosScreenState
   @override
   void initState() {
     super.initState();
-    _vehiculosStream =
-        FirebaseFirestore.instance.collection('VEHICULOS').snapshots();
+    // where('TIPO', 'in', ...) filtra server-side los 5 tipos de
+    // enganche (BATEA/TOLVA/BIVUELCO/TANQUE/ACOPLADO). Bajamos solo
+    // los enganches en vez de toda la flota. Firestore acepta hasta
+    // 30 valores en `whereIn`, asi que sumar tipos nuevos a
+    // AppTiposVehiculo.enganches no rompe nada.
+    _vehiculosStream = FirebaseFirestore.instance
+        .collection('VEHICULOS')
+        .where('TIPO', whereIn: _tiposIncluidos)
+        .snapshots();
   }
 
   List<VencimientoItem> _construirItems(QuerySnapshot snapshot) {
@@ -37,6 +44,8 @@ class _AdminVencimientosAcopladosScreenState
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       final tipo = (data['TIPO'] ?? '').toString().toUpperCase();
+      // Defensivo: el where ya filtra server-side, pero igual chequeamos
+      // por casing o nulls inconsistentes.
       if (!_tiposIncluidos.contains(tipo)) continue;
 
       final patente = doc.id.toUpperCase();

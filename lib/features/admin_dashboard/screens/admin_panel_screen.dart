@@ -36,7 +36,21 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     final db = FirebaseFirestore.instance;
     _empleadosStream = db.collection('EMPLEADOS').snapshots();
     _vehiculosStream = db.collection('VEHICULOS').snapshots();
-    _revisionesStream = db.collection('REVISIONES').snapshots();
+    // REVISIONES: las aprobadas/rechazadas se BORRAN del collection
+    // (no soft-delete), asi que en condiciones normales solo hay
+    // pendientes. Igual sumamos limit(50) como defensa: si en el
+    // futuro se decide guardar historico, el contador no se infla
+    // ni el snapshot push baja miles de docs en cada cambio.
+    //
+    // DEUDA TECNICA (escalabilidad a 1000+ empleados/vehiculos):
+    // _empleadosStream y _vehiculosStream traen la coleccion entera.
+    // Los KPIs recalculan O(N x M) en cada snapshot push. Hasta ~500
+    // docs es aceptable; arriba conviene migrar a aggregate stats
+    // server-side: una collection STATS/dashboard con contadores
+    // mantenidos por trigger Cloud Function en cambios de
+    // EMPLEADOS/VEHICULOS/REVISIONES. La app lee 1 doc en lugar
+    // de N+M+R. Postergado hasta que el dimensionamiento lo amerite.
+    _revisionesStream = db.collection('REVISIONES').limit(50).snapshots();
     // El listener de notificaciones push para revisiones nuevas vive
     // en AdminShell (durante toda la sesion admin), no aca. Si lo
     // duplicaramos en este State, el admin recibiria 2 push identicas
