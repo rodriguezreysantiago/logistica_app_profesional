@@ -549,7 +549,7 @@ class ReportConsumoService {
     const titulos = [
       '#',
       'PATENTE',
-      'MARCA / MODELO',
+      'MODELO',
       'LITROS',
       'KILOMETROS',
       'PROMEDIO',
@@ -590,7 +590,7 @@ class ReportConsumoService {
           .value = ex.TextCellValue(f.patente);
       hoja
           .cell(ex.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: fila))
-          .value = ex.TextCellValue('${f.marca} ${f.modelo}'.trim());
+          .value = ex.TextCellValue(f.modelo);
 
       // Orden: LITROS (col 3), KILOMETROS (col 4), PROMEDIO (col 5).
       // Coincide con el orden en la hoja DETALLE para que el lector
