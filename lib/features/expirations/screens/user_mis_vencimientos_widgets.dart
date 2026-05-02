@@ -400,10 +400,15 @@ class _BotonDetectarFechaState extends State<_BotonDetectarFecha> {
       widget.onFechaDetectada(fecha);
       AppFeedback.successOn(messenger,
           'Fecha detectada: ${fecha.day}/${fecha.month}/${fecha.year}');
-    } catch (e) {
+    } catch (e, s) {
       if (mounted) {
         setState(() => _procesando = false);
-        AppFeedback.errorOn(messenger, 'OCR falló: $e');
+        AppFeedback.errorTecnicoOn(
+          messenger,
+          usuario: 'No pude leer la fecha de la foto. Tipeala a mano abajo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }

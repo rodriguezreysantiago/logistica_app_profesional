@@ -76,7 +76,7 @@ class _AdminVehiculoAltaScreenState
 
       if (doc.exists) {
         if (!mounted) return;
-        AppFeedback.errorOn(messenger, 'Error: esta patente ya está registrada en la flota');
+        AppFeedback.errorOn(messenger, 'Esta patente ya está registrada en la flota.');
         setState(() => _guardando = false);
         return;
       }

@@ -75,7 +75,7 @@ class _AdminPersonalFormScreenState
       if (!mounted) return;
 
       if (doc.exists) {
-        AppFeedback.errorOn(messenger, 'Error: este DNI ya está registrado');
+        AppFeedback.errorOn(messenger, 'Este DNI ya está registrado.');
         setState(() => _guardando = false);
         return;
       }

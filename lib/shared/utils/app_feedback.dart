@@ -99,6 +99,67 @@ class AppFeedback {
   }
 
   // ---------------------------------------------------------------------------
+  // ERROR CON DETALLE TÉCNICO
+  // ---------------------------------------------------------------------------
+
+  /// Helper para errores con excepción capturada. Muestra al usuario un
+  /// mensaje claro y accionable, y loguea el error técnico aparte.
+  ///
+  /// Convención de la app: NUNCA mostrar `$e` crudo al usuario — puede
+  /// tirar `FirebaseException(plugin: cloud_firestore, code: ...)` u
+  /// otros wrappers que confunden y dan mala impresión.
+  ///
+  /// Uso típico:
+  /// ```dart
+  /// try {
+  ///   await db.collection('EMPLEADOS').doc(dni).update({...});
+  ///   AppFeedback.successOn(messenger, 'Datos guardados');
+  /// } catch (e, s) {
+  ///   AppFeedback.errorTecnicoOn(
+  ///     messenger,
+  ///     usuario: 'No se pudo guardar el cambio. Probá de nuevo.',
+  ///     tecnico: e,
+  ///     stack: s,
+  ///   );
+  /// }
+  /// ```
+  ///
+  /// El `tecnico` va a `debugPrint` (en mobile sube a Crashlytics si
+  /// `AppLogger.recordError` está enganchado). El `usuario` es lo que ve
+  /// el chofer/admin en pantalla — corto, sin jerga, y si es posible
+  /// con próximo paso ("probá de nuevo", "avisale al admin", etc.).
+  static void errorTecnicoOn(
+    ScaffoldMessengerState messenger, {
+    required String usuario,
+    required Object tecnico,
+    StackTrace? stack,
+  }) {
+    debugPrint('AppFeedback error técnico: $tecnico');
+    if (stack != null) debugPrint('$stack');
+
+    messenger.showSnackBar(_build(
+      mensaje: usuario,
+      icono: Icons.error_outline,
+      color: colorError,
+      duration: _durationLong,
+    ));
+  }
+
+  /// Variante con BuildContext (para callers sin async).
+  static void errorTecnico(
+    BuildContext context, {
+    required String usuario,
+    required Object tecnico,
+    StackTrace? stack,
+  }) =>
+      errorTecnicoOn(
+        ScaffoldMessenger.of(context),
+        usuario: usuario,
+        tecnico: tecnico,
+        stack: stack,
+      );
+
+  // ---------------------------------------------------------------------------
   // INTERNAL
   // ---------------------------------------------------------------------------
 

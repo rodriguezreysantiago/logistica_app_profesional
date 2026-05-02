@@ -53,10 +53,15 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
       if (!mounted) return;
       AppLoadingDialog.hide(navigator);
       AppFeedback.successOn(messenger, mensajeExito);
-    } catch (e) {
+    } catch (e, s) {
       if (!mounted) return;
       AppLoadingDialog.hide(navigator);
-      AppFeedback.errorOn(messenger, 'Error: $e');
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo guardar el cambio. Probá de nuevo en unos segundos.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 

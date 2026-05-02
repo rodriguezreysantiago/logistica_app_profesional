@@ -106,10 +106,15 @@ class _UserMisVencimientosScreenState
       if (!mounted) return;
       AppLoadingDialog.hide(navigator);
       AppFeedback.successOn(messenger, mensajeExito);
-    } catch (e) {
+    } catch (e, s) {
       if (!mounted) return;
       AppLoadingDialog.hide(navigator);
-      AppFeedback.errorOn(messenger, 'Error: $e');
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo completar la operación. Probá de nuevo en unos segundos.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 

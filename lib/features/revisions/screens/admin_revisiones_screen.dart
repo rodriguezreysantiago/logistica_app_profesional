@@ -388,12 +388,16 @@ class _DetalleRevision extends StatelessWidget {
       // corrupción).
       if (context.mounted) navigator.pop();
       AppFeedback.warningOn(messenger, e.message);
-    } catch (e) {
-      debugPrint('Error procesando revisión: $e');
+    } catch (e, s) {
       // En error genérico el sheet QUEDA abierto para que el admin
       // vea que la operación falló y pueda reintentar o cancelar
       // manualmente.
-      AppFeedback.errorOn(messenger, 'Error en la base de datos: $e');
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo conectar con la base de datos. Probá de nuevo en unos segundos.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 
