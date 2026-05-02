@@ -487,6 +487,153 @@ Implementada la primera fase del roadmap de integración con Volvo Vehicle Alert
 | `c56cbf7` | feat(infra): migrar Cloud Functions a southamerica-east1 |
 | `42dacea` | feat(volvo-alerts): poller scheduled + reglas Firestore (Fase 1a) |
 
+### 6.13 Sesión 2-mayo 2026 (PM/noche) — Volvo Alerts Fase 1b/2 + bot hardening + rebrand + reportes
+
+Continuación maratónica de la sesión del 2-mayo. Cierre de Volvo Alerts hasta Fase 2, auditoría profunda del bot WhatsApp, rebrand completo y rediseño de los 3 reportes Excel.
+
+#### 6.13.1 Volvo Vehicle Alerts — Fase 1b cliente (commits `2cd362a`, `ad5a1d7`, `7f6779f`)
+
+Tablero "Alertas" en sidebar admin Flutter consumiendo `VOLVO_ALERTAS`:
+- `lib/features/admin_dashboard/screens/admin_volvo_alertas_screen.dart` con stream + toggle "solo pendientes" + filter por patente/tipo + "Marcar atendida".
+- `Capability.verAlertasVolvo` (admin + supervisor) en `capabilities.dart`.
+- `AppCollections.volvoAlertas` en `app_constants.dart`.
+- `AuditAccion.marcarAlertaVolvoAtendida` en `audit_log_service.dart`.
+- Whitelist server: `MARCAR_ALERTA_VOLVO_ATENDIDA` + entidad `VOLVO_ALERTAS` agregadas a `auditLogWrite`.
+- Backend: `volvoAlertasPoller` ahora setea `atendida: false` en docs nuevos.
+- `AdminShell._ShellSection` "Alertas" con badge `where('atendida', isEqualTo: false)`.
+- Ruta `AppRoutes.adminVolvoAlertas` registrada en `app_router.dart`.
+- Tile "ALERTAS" en `admin_panel_screen.dart` accesos rápidos (entre SERVICE y PERSONAL).
+- Fix overflow del rail con 10 secciones: wrap del NavigationRail en `SingleChildScrollView` + `IntrinsicHeight`.
+
+#### 6.13.2 Volvo Vehicle Alerts — Fase 2 (commit `26f1dfa`)
+
+Notificación al chofer (HIGH realtime) + resumen diario al admin:
+- `onAlertaVolvoCreated` Cloud Function trigger en `functions/src/index.ts` — `onDocumentCreated('VOLVO_ALERTAS/{alertId}')` que filtra HIGH, busca chofer por `EMPLEADOS where VEHICULO == patente`, y encola en `COLA_WHATSAPP`. El bot procesa la cola respetando horarios laborales (no dispara fuera de horario).
+- Resumen diario en el cron del bot Node.js (`whatsapp-bot/src/cron.js`): replica del patrón existente `SERVICE_DESTINATARIO_DNI` → `ALERTAS_RESUMEN_DESTINATARIO_DNI` (Santiago, DNI 35244439). Nuevo builder `aviso_alertas_volvo_builder.js` con `buildResumenDiario` que agrupa eventos HIGH 24h por chofer + patente + tipo. Idempotencia diaria con `historico.yaSeEnvioAlertasResumen`. Si no hubo HIGH en 24h, no se manda nada (silencio = nada que reportar).
+- Mapa de tipos a etiquetas legibles (`DISTANCE_ALERT` → "Cerca del vehículo de adelante", etc.) duplicado entre cliente Flutter y server (Cloud Function + bot).
+
+#### 6.13.3 Settings.json del proyecto: reducir permission prompts (commit `9f896f6`)
+
+Crear `.claude/settings.json` (commited) con:
+- `defaultMode: "acceptEdits"` → Edit/Write no piden confirmación.
+- Allowlist amplio para Bash de uso rutinario (git no destructivo, npm/flutter, gcloud read-only, firebase logs/use).
+- `ask:` para destructivo en prod (`git push`, `firebase deploy`, `gcloud delete`, `rm -rf`).
+- `.gitignore` ajustado: `.claude/*` + `!.claude/settings.json` para que se sincronice entre las 2 PCs vía git.
+
+#### 6.13.4 Bot WhatsApp — auditoría profunda + 12 fixes (commit `afe2732`)
+
+Resuelve el síntoma reportado por Santiago: "se cuelga al iniciar, hay que reejecutar mucho". Fixes en 8 archivos del bot:
+
+**Críticos (causa raíz del cuelgue)**:
+- `whatsapp.js`: `client.initialize()` ahora con try/catch + reintentos (antes si fallaba el initialize antes de `authenticated`, el watchdog nunca arrancaba → cuelgue silencioso). Confirmado en logs: el watchdog disparó el 02/05 a las 13:30, reinicializó y se recuperó solo (antes esto era el bug que requería reejecutar manual).
+- `whatsapp.js`: si la reinicialización dentro del watchdog también falla, re-arrancar el watchdog.
+- `index.js`: `_verificarNoHayOtraInstancia()` ahora con transacción atómica sobre `BOT_HEALTH/main` (antes había race window de ~100ms en que dos PCs podían pasar el check ambas → mensajes duplicados → riesgo de baneo).
+- `index.js`: si `_despacharFalloEnvio()` falla, cortar `procesarSiguiente()` y esperar al próximo polling (5s mínimo) en vez de loop apretado martillando Firestore.
+
+**Altos**:
+- `index.js`: timeout de 10s + guard contra overlap en `pollearCola()` con helper `_withTimeout`.
+- `firestore.js`: `marcarProcesandoSiPendiente()` transaccional para evitar race con multi-PC.
+
+**Medios**:
+- `health.js`: heartbeat serializado con flag (evita pisones si Firestore tarda).
+- `cron.js`: `setTimeout` recursivo en lugar de `setInterval` para que el siguiente ciclo arranque DESPUÉS del anterior, sin brechas.
+- `control.js`: TTL cache pausa 10s → 2s + `invalidarCache()`.
+- `firestore.js`: campo `historial_errores` con `arrayUnion` para preservar traza de reintentos.
+- `message_handler.js`: TTL cache empleados 5min → 1min + `invalidarCacheEmpleados()`.
+
+**Bajo**:
+- `historico.js`: `limpiarObsoletos()` implementado (era TODO) — borra hasta 500 docs > 90 días por ciclo del cron.
+
+#### 6.13.5 Rebrand "S.M.A.R.T. Logística" → "Coopertrans Móvil" (commits `941293b`, `8e1063d`)
+
+Renombrado en strings visibles + servicio Windows + docs:
+- 3 builders del bot (`aviso_builder.js`, `aviso_alertas_volvo_builder.js`, `aviso_service_builder.js`): firma de mensajes WhatsApp.
+- `start_bot.ps1`: banner CLI.
+- `instalar_servicio.ps1`: `DisplayName` del servicio NSSM.
+- `package.json` + `package-lock.json`: name + description.
+- `README.md`: título.
+- Servicio Windows: `SmartLogisticaBot` → `CoopertransMovilBot` en los 3 scripts ps1, requiere reinstall manual (nssm remove + instalar_servicio.ps1) — Santiago lo hizo en su PC. Pendiente repetir en la otra PC (oficina).
+
+#### 6.13.6 Reporte de Consumo — fixes profundos (commits varios)
+
+Bug original reportado: "no me está generando el consumo en litros los camiones en el reporte". Cadena de fixes:
+
+- **Endpoint correcto**: `traerDatosFlota()` (operation `flota` → `/vehicle/vehicles` solo metadata) → `traerEstadosFlota()` (operation `estadosFlota` → `/vehiclestatuses` con `accumulatedData.totalFuelConsumption`).
+- **Período = 0 ahora válido**: antes el código rechazaba diferencias de 0 km/L y caía al fallback acumulado (que también estaba en 0 por el bug del endpoint). Ahora "vehículo parado en sábado" se reporta como 0 (período) correctamente.
+- **Filtro `TIPO == TRACTOR`**: las 67 unidades sin motor (BATEA + TOLVA) inflaban el reporte con 50%+ de filas en cero ruido visual.
+- **Métrica km/L → L/100km**: cambio de unidad estándar (las flotas argentinas hablan L/100km, no km/L).
+- **UI dialog**: `showDateRangePicker` scrolleable (no `showDatePicker` secuenciales), sin checkboxes de columnas, solo el botón de calendario.
+- **Excel**: 3 filas de info eliminadas (cabecera en fila 0), AutoFilter inyectado via parche XML del .xlsx (la lib `excel` 4.0.6 no expone API y `syncfusion_flutter_xlsio` requiere licencia paga), formato AR `1.234.567,89` forzado con format code `[$-2C0A]#,##0.00`, auto-fit calculado manual respetando el largo del título, columnas finalizadas: `PATENTE | MODELO | LITROS | KILOMETROS | PROMEDIO | ULTIMA SINCRONIZACION`, ranking por L/100km descendente con TODA la flota (no top 10), columna `MODELO` (sin marca) en ranking.
+- **Bug de ULTIMA SINCRONIZACION vacía**: `triggerTimestamp`/`samplingTime` (campos del endpoint legacy) → `createdDateTime`/`receivedDateTime` (campos del endpoint nuevo).
+
+#### 6.13.7 Reporte de Flota — rediseño completo (commit `85e0d55`)
+
+Reescrito desde cero con enfoque correcto: estado general de flota, vencimientos, services. NO combustible (eso es del reporte de Consumo).
+
+Columnas finales (14):
+```
+PATENTE | TIPO | MODELO | EMPRESA | CHOFER ASIGNADO | KM ACTUAL |
+VENC. RTO | VENC. SEGURO | VENC. EXT. CABINA | VENC. EXT. EXTERIOR |
+ULTIMO SERVICE (FECHA) | ULTIMO SERVICE (KM) | PROX. SERVICE EN (KM) |
+ESTADO SERVICE
+```
+
+Coloreo automático según urgencia:
+- Vencimientos: rojo si vencido, naranja ≤7d, amarillo ≤30d.
+- ESTADO SERVICE: rojo VENCIDO, naranja URGENTE, amarillo PROGRAMAR, verde claro ATENCION.
+
+Incluye toda la flota (tractores + enganches), tractores arriba. CHOFER ASIGNADO se obtiene cruzando con `EMPLEADOS where ROL=CHOFER` para ignorar el campo VEHICULO con basura legacy en supervisores/admins. PROX SERVICE prefiere `serviceDistance` del API Volvo, fallback al cálculo manual `ULTIMO_SERVICE_KM + 50000 - KM_ACTUAL`. Class renombrada `ReportGenerator` → `ReportFlotaService`.
+
+#### 6.13.8 Reporte de Checklist — refactor (commit `85e0d55`)
+
+- `DOMINIO` → `PATENTE` (consistente con resto del proyecto).
+- Sin checkboxes (las 7 columnas son siempre necesarias).
+- Estado coloreado: rojo MAL, naranja REG.
+- AutoFilter + autofit + branding Coopertrans Móvil.
+
+#### 6.13.9 `excel_utils.dart` — helpers compartidos (commit `85e0d55`)
+
+`lib/features/reports/services/excel_utils.dart` extraído para no duplicar entre los 3 reportes:
+- `aplicarAutoFilterAlXlsx`: parche XML del .xlsx que inyecta `<autoFilter>` en cada hoja después de `</sheetData>`. Workaround a que la lib `excel` 4.0.6 no expone esa API.
+- `autoFitColumnas`: cálculo manual del ancho como `max(largo_título, max_largo_celda) + 2 chars padding`. Necesario porque `setColumnAutoFit` de la lib solo flagea sin calcular.
+- `formatoAR` / `formatoARSinDecimales`: format codes `[$-2C0A]#,##0.xx` que fuerzan locale es-AR independiente de la PC del lector.
+
+#### 6.13.10 Investigación de librerías Excel (no commit, decisión documentada)
+
+Auditamos alternativas a `excel: ^4.0.6` para soporte de AutoFilter nativo. Conclusión:
+- `syncfusion_flutter_xlsio`: única alternativa Dart pure con AutoFilter nativo + charts + conditional formatting. Pero **requiere Community License** que Vecchi no califica (>10 empleados típicos en transporte de larga distancia) → costo ~$995 USD/dev/año.
+- `excel_community` (fork): tampoco soporta AutoFilter.
+- Generar OOXML a mano: scope brutal, no vale la pena.
+
+Decisión: quedarse con `excel: ^4.0.6` + parche XML para AutoFilter. Si en el futuro Vecchi crece y queremos charts nativos, reevaluar Syncfusion.
+
+#### 6.13.11 Reporte de bug operacional: TELEMETRIA_HISTORICO solo tiene 4 días
+
+Confusión de Santiago al ver "958 km en un mes" en el reporte: el cron `telemetriaSnapshotScheduled` solo guarda snapshots desde el 29/4 (4 días al cierre de la sesión). Para rangos mayores el reporte se limita a los días disponibles. Pendiente: agregar warning en el dialog cuando el rango pedido excede el histórico disponible (mejora futura).
+
+#### 6.13.12 Commits del día (segunda tanda)
+| Commit | Resumen |
+|---|---|
+| `2cd362a` | feat(volvo-alerts): tablero Alertas en sidebar admin (Fase 1b) |
+| `ad5a1d7` | fix(admin-shell): rail scrolleable cuando no entran todas las secciones |
+| `7f6779f` | feat(admin-panel): tile 'Alertas' en accesos rápidos + ruta /admin_volvo_alertas |
+| `26f1dfa` | feat(volvo-alerts): Fase 2 — notificación al chofer (HIGH) + resumen diario al admin |
+| `9f896f6` | chore(claude-code): allowlist + acceptEdits para reducir prompts |
+| `afe2732` | fix(bot): hardening de robustez — auditoría completa (críticos + altos + medios + 1 bajo) |
+| `941293b` | chore(bot): rebrand 'S.M.A.R.T. Logística' → 'Coopertrans Móvil' |
+| `8e1063d` | chore(bot): rebrand servicio Windows 'SmartLogisticaBot' → 'CoopertransMovilBot' |
+| `dc41ffa` | feat(reportes/consumo): AutoFilter automático al abrir el .xlsx (workaround OOXML) |
+| `7ba7ec6` | ux(reportes/consumo): quitar columnas que no aportan al análisis de combustible |
+| `71af2c0` | fix(reportes/consumo): leer createdDateTime/receivedDateTime del endpoint correcto |
+| `a4d8282` | ux(reportes/consumo): unidades explícitas en cabeceras + menos decimales |
+| `dbae4d4` | ux(reportes/consumo): dialog simplificado — solo calendario, sin checkboxes ni presets |
+| `80083d1` | ux(reportes/consumo): formato argentino 1.234.567,89 en celdas numéricas |
+| `bb735eb` | ux(reportes/consumo): auto-fit de columnas al contenido |
+| `812c3a5` | ux(reportes/consumo): auto-fit calculado manual respetando largo del título |
+| `aca2593` | ux(reportes/consumo): renombrar columnas a LITROS / KILOMETROS / PROMEDIO en ese orden |
+| `504274e` | ux(reportes/consumo/ranking): columna 'MARCA / MODELO' → 'MODELO' (sin marca) |
+| `85e0d55` | feat(reportes): rediseño completo de Flota + Checklist + util compartido |
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
