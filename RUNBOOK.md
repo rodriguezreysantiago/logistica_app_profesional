@@ -334,37 +334,40 @@ Están en **Bitwarden** (vault personal de Santiago). Si Santiago no está dispo
 
 ## Sentry — observabilidad
 
-Sentry se integró en el cliente Flutter para capturar errores y métricas de performance en producción. Si **no hay DSN seteado**, la app corre sin Sentry (modo dev/local) y solo loguea errores con `debugPrint` + Crashlytics (este último solo en mobile).
+Sentry está integrado en el cliente Flutter. Captura errores y métricas de performance en producción. **El DSN está embebido como `defaultValue`** en `lib/main.dart` (no es un secret crítico — solo permite enviar eventos al proyecto, no leer/borrar datos). Esto significa que **NO necesitás pasar nada** para activarlo: corre activado por default.
 
-### Setup one-time (cuando quieras activar Sentry en producción)
+### Estado actual
 
-1. **Crear cuenta y proyecto en Sentry**:
-   - Ir a https://sentry.io/signup/ (plan free cubre ~5000 eventos/mes — suficiente para una flota chica).
-   - Crear organización (ej. `coopertrans`).
-   - Crear proyecto Flutter llamado `smart-logistica-app`.
-   - Copiar el **DSN** del proyecto (formato `https://abc123@o12345.ingest.sentry.io/67890`).
+Activo en producción contra el proyecto Sentry de Coopertrans (org `coopertrans` o equivalente). DSN visible en `lib/main.dart`.
 
-2. **Sumar el DSN a `secrets.json`** del proyecto (ya está gitignored):
-   ```json
-   {
-     "VOLVO_USERNAME": "...",
-     "VOLVO_PASSWORD": "...",
-     "SENTRY_DSN": "https://abc123@o12345.ingest.sentry.io/67890",
-     "SENTRY_ENV": "production"
-   }
-   ```
+### Cómo deshabilitar Sentry temporalmente (dev/local)
 
-   En desarrollo dejá `SENTRY_DSN` vacío (o no incluyas el campo) — Sentry no se inicializa.
+```powershell
+flutter run -d windows --dart-define=SENTRY_DSN=
+```
 
-3. **Buildear con el flag**:
-   ```powershell
-   flutter run -d windows --dart-define-from-file=secrets.json
-   flutter build windows --release --dart-define-from-file=secrets.json
-   ```
+Pasar `SENTRY_DSN=` (vacío explícito) override el defaultValue → la app corre sin Sentry.
 
-   El flag `--dart-define-from-file=secrets.json` ya viene configurado en `.vscode/launch.json`, así que F5 toma los valores automáticamente.
+### Cómo rotar el DSN
 
-4. **Validar en Sentry Console**: corré la app con `SENTRY_DSN` seteado, hacé que tire un error a propósito (ej. password mal). En Sentry → Issues debería aparecer el evento en < 30 segundos.
+1. Ir a https://sentry.io → Settings → Projects → tu proyecto → Client Keys (DSN).
+2. Generate new key → revoke la vieja.
+3. Editar `lib/main.dart`: cambiar el `defaultValue` con el DSN nuevo.
+4. Commit + push.
+
+### Cómo cambiar de proyecto Sentry (ej. crear uno nuevo)
+
+1. Crear nuevo proyecto en sentry.io.
+2. Copiar el DSN.
+3. Editar `lib/main.dart` reemplazando el `defaultValue`.
+4. Commit + push.
+
+### Validar en Sentry Console que está funcionando
+
+Corré la app y hacé que tire un error a propósito (ej. login con password mal). En el dashboard Sentry → **Issues** debería aparecer el evento en < 30 segundos. Si no aparece:
+- Verificar que el DSN no se haya invalidado.
+- Verificar conectividad a `sentry.io` desde la máquina cliente.
+- Mirar logs de la app — debería decir `Sentry inicializado (env: production)` al arrancar.
 
 ### Configuración actual
 

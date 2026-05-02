@@ -51,14 +51,23 @@ void main() async {
   await PrefsService.init();
   await NotificationService.init();
 
-  // ================= SENTRY (opcional, solo si DSN está seteado) =================
-  // Sentry se activa pasando --dart-define=SENTRY_DSN=https://...@sentry.io/...
-  // al `flutter run` o `flutter build`. Sin esa variable, la app corre
-  // SIN Sentry (modo desarrollo / local). En producción se setea via
-  // --dart-define-from-file=secrets.json (junto con las credenciales Volvo).
+  // ================= SENTRY =================
+  // El DSN de Sentry NO es un secret crítico (solo permite enviar
+  // eventos, no leer/borrar datos del proyecto), así que lo embebemos
+  // como defaultValue en lugar de obligar a pasar
+  // --dart-define-from-file. Cualquiera puede extraerlo del .exe build
+  // de todos modos -- es público por diseño de Sentry.
   //
-  // Setup operativo: ver RUNBOOK.md sección "Sentry — observabilidad".
-  const sentryDsn = String.fromEnvironment('SENTRY_DSN');
+  // Para deshabilitar Sentry en dev / corridas locales:
+  //   flutter run -d windows --dart-define=SENTRY_DSN=
+  //
+  // Para rotar el DSN: ir a sentry.io → Settings → Projects → Keys, y
+  // cambiar el defaultValue de abajo + commit.
+  const sentryDsn = String.fromEnvironment(
+    'SENTRY_DSN',
+    defaultValue:
+        'https://4f80dcfb9d5a40506e61e0a5884fe362@o4511318386540544.ingest.us.sentry.io/4511318389358593',
+  );
   const sentryEnv = String.fromEnvironment(
     'SENTRY_ENV',
     defaultValue: 'production',
