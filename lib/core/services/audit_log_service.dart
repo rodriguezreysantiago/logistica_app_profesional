@@ -61,7 +61,7 @@ class AuditLog {
 
   /// URL del callable. Mismo patrón que AuthService/volvoProxy.
   static const String _endpoint =
-      'https://us-central1-logisticaapp-e539a.cloudfunctions.net/auditLogWrite';
+      'https://us-central1-coopertrans-movil.cloudfunctions.net/auditLogWrite';
 
   /// Dio compartido entre llamadas. Lo dejamos lazy para no inicializarlo
   /// si el admin nunca dispara una acción auditable (ej. solo lee).
