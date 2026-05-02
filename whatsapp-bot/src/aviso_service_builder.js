@@ -9,7 +9,7 @@
 // la oficina..." que usa el bot para los demás avisos.
 
 const FIRMA =
-  '_Mensaje automático del sistema de gestión S.M.A.R.T. Logística._\n' +
+  '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
   '_Para coordinar el ingreso al taller, comunicate con la oficina._';
 
 /**

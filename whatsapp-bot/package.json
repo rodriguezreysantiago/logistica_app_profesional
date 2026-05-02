@@ -1,8 +1,8 @@
 {
-  "name": "smart-logistica-whatsapp-bot",
+  "name": "coopertrans-movil-whatsapp-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Bot de WhatsApp para envío automatizado de avisos de vencimiento a choferes (S.M.A.R.T. Logística / Vecchi).",
+  "description": "Bot de WhatsApp para envío automatizado de avisos de vencimiento a choferes (Coopertrans Móvil / Vecchi).",
   "main": "src/index.js",
   "engines": {
     "node": ">=18"

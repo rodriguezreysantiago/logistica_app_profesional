@@ -12,7 +12,7 @@
 // reportar" y mandar un mensaje vacio seria ruido).
 
 const FIRMA =
-  '_Mensaje automático del sistema de gestión S.M.A.R.T. Logística._\n' +
+  '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
   '_Detalle completo en la app → Alertas._';
 
 // Mapa de alertType (Vehicle Alerts API) a etiqueta legible en

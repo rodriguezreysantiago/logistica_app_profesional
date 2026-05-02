@@ -160,7 +160,7 @@ Write-Host "[PKG] Creando servicio Windows '$serviceName'..." -ForegroundColor C
 & $nssmExe set $serviceName AppEnvironmentExtra "PUPPETEER_CACHE_DIR=$puppeteerCache" | Out-Null
 
 # Descripcion visible en services.msc.
-& $nssmExe set $serviceName DisplayName 'S.M.A.R.T. Logistica - Bot WhatsApp' | Out-Null
+& $nssmExe set $serviceName DisplayName 'Coopertrans Movil - Bot WhatsApp' | Out-Null
 & $nssmExe set $serviceName Description 'Bot Node.js que procesa la cola COLA_WHATSAPP de Firestore y envia avisos automaticos por WhatsApp Web. Modo MANUAL: usar start_bot.ps1 para encenderlo.' | Out-Null
 
 Write-Host "OK Servicio '$serviceName' creado (modo MANUAL)." -ForegroundColor Green

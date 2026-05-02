@@ -1,4 +1,4 @@
-# WhatsApp Bot — S.M.A.R.T. Logística
+# WhatsApp Bot — Coopertrans Móvil
 
 Bot de Node.js que escucha la cola `COLA_WHATSAPP` en Firestore y envía
 mensajes vía WhatsApp Web automatizado (`whatsapp-web.js`).

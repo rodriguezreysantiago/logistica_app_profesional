@@ -58,7 +58,7 @@ function Invoke-ElevatedServiceAction {
 }
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "INICIANDO BOT - S.M.A.R.T. Logistica" -ForegroundColor Cyan
+Write-Host "INICIANDO BOT - Coopertrans Movil" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 

@@ -6,7 +6,7 @@
 // modificá acá también.
 
 const FIRMA =
-  '_Mensaje automático del sistema de gestión S.M.A.R.T. Logística._\n' +
+  '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
   '_Para responder o gestionar el trámite, comunicate con la oficina._';
 
 /**
