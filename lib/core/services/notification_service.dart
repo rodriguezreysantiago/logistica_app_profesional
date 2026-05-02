@@ -46,10 +46,31 @@ class NotificationService {
     const LinuxInitializationSettings initializationSettingsLinux =
         LinuxInitializationSettings(defaultActionName: 'Open');
 
+    // CONFIGURACIÓN WINDOWS
+    // Requerido por flutter_local_notifications 21+: si el binario corre
+    // en Windows desktop y no se pasa este bloque, `initialize()` tira
+    // `Invalid argument(s): Windows settings must be set when targeting
+    // Windows platform` y la app crashea silenciosamente en release.
+    //
+    // - `appUserModelId`: identificador único del shell de Windows
+    //   (formato Microsoft "Empresa.Producto.SubProducto"). NO usar
+    //   espacios ni caracteres especiales — Windows agrupa toasts por
+    //   este id en el centro de notificaciones.
+    // - `guid`: identificador del callback de activación de toast.
+    //   Generado una sola vez y debe quedar fijo (cambiarlo invalida
+    //   los toasts persistidos).
+    const WindowsInitializationSettings initializationSettingsWindows =
+        WindowsInitializationSettings(
+      appName: 'Coopertrans Móvil',
+      appUserModelId: 'Coopertrans.Movil.Logistica',
+      guid: '4F8A7B2E-9D6C-4B3A-8F1E-2C7D9A5B4E8F',
+    );
+
     const InitializationSettings initializationSettings = InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsIOS,
       linux: initializationSettingsLinux,
+      windows: initializationSettingsWindows,
     );
 
     await _notificationsPlugin.initialize(
