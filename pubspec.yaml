@@ -34,6 +34,12 @@ dependencies:
 
   # ================= REPORTE Y DATOS =================
   excel: ^4.0.6
+  # `archive` para post-procesar el .xlsx generado por `excel` —
+  # inyectamos `<autoFilter>` en el XML de las hojas para que Excel
+  # active filtros automáticamente al abrir (la lib `excel` no expone
+  # esa API). `excel` ya lo trae como dependencia transitiva, lo
+  # declaramos explícito para que sea estable.
+  archive: ^3.6.1
   # `csv` se removió (2026-04-28): los reportes exportan solo Excel.
   intl: ^0.20.2
 

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'package:archive/archive.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as ex;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -404,7 +406,12 @@ class ReportConsumoService {
       final path = '${dir.path}/$fileName';
       final fileBytes = excel.save();
       if (fileBytes != null) {
-        File(path).writeAsBytesSync(fileBytes);
+        // Post-procesar: inyectar AutoFilter a todas las hojas para
+        // que Excel active filtros automáticamente al abrir el archivo.
+        // La librería `excel` 4.x no expone esa API, así que parcheamos
+        // el XML del .xlsx directamente.
+        final patched = _aplicarAutoFilterAlXlsx(fileBytes);
+        File(path).writeAsBytesSync(patched);
         if (Platform.isWindows) {
           await Process.run('cmd', ['/c', 'start', '', path]);
         } else {
@@ -419,6 +426,64 @@ class ReportConsumoService {
       debugPrint('❌ Error reporte consumo: $e');
       AppFeedback.errorOn(messenger, 'Error al generar reporte: $e');
     }
+  }
+
+  // ===========================================================================
+  // POST-PROCESAMIENTO: AutoFilter inyectado en el XML
+  // ===========================================================================
+  //
+  // La librería `excel: ^4.0.6` no expone API para AutoFilter (pendiente
+  // en su roadmap hace 20+ meses). Como upgrade a syncfusion_flutter_xlsio
+  // (la única alternativa Dart pure que sí lo soporta) requiere licencia
+  // comercial para Vecchi (no califica para Community), parcheamos el
+  // XML del .xlsx generado: abrimos el ZIP, inyectamos
+  // `<autoFilter ref="A1:Z10000"/>` en cada hoja después de
+  // `</sheetData>`, y re-empaquetamos.
+  //
+  // Resultado: al abrir el archivo, Excel muestra las flechas de
+  // filtro automáticamente en la fila de cabecera (sin tener que
+  // hacer Ctrl+Shift+L manual).
+
+  /// Decodifica el .xlsx (ZIP), inyecta AutoFilter en cada worksheet,
+  /// y re-empaqueta. Devuelve los bytes modificados.
+  static List<int> _aplicarAutoFilterAlXlsx(List<int> bytes) {
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final patron = RegExp(r'^xl/worksheets/sheet\d+\.xml$');
+
+    final out = Archive();
+    for (final file in archive.files) {
+      if (file.isFile && patron.hasMatch(file.name)) {
+        final content = utf8.decode(file.content as List<int>);
+        final modified = _inyectarAutoFilter(content);
+        final newBytes = utf8.encode(modified);
+        out.addFile(ArchiveFile(file.name, newBytes.length, newBytes));
+      } else {
+        out.addFile(file);
+      }
+    }
+    final encoded = ZipEncoder().encode(out);
+    // Defensa: si por algún motivo encode devuelve null (no debería con
+    // un Archive válido), devolvemos los bytes originales — el archivo
+    // se abre sin AutoFilter pero al menos no se rompe.
+    return encoded ?? bytes;
+  }
+
+  /// Inyecta `<autoFilter ref="A1:Z10000"/>` en el XML de un worksheet.
+  /// El elemento debe ir DESPUÉS de `</sheetData>` (orden requerido por
+  /// el spec OOXML — sino Excel rechaza el archivo como corrupto).
+  ///
+  /// Rango "A1:Z10000": amplio para cubrir cualquier reporte razonable
+  /// (Excel ignora celdas vacías al filtrar). Si en el futuro tenemos
+  /// reportes con más de 26 columnas o 10000 filas, ampliar.
+  ///
+  /// Si el XML ya tiene un `<autoFilter>` previo (caso raro), no
+  /// duplicamos — devolvemos sin cambios.
+  static String _inyectarAutoFilter(String xml) {
+    if (xml.contains('<autoFilter ')) return xml;
+    return xml.replaceFirst(
+      '</sheetData>',
+      '</sheetData><autoFilter ref="A1:Z10000"/>',
+    );
   }
 
   /// Escribe el valor de una columna específica en la celda según el
