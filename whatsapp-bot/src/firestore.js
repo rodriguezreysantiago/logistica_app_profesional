@@ -142,6 +142,60 @@ async function marcarReintento(docRef, mensajeError, cuandoReintentar) {
   });
 }
 
+/**
+ * Recupera docs que quedaron stale en PROCESANDO. Caso tipico:
+ * el bot crashea entre `marcarProcesando` y `enviarMensaje` (o entre
+ * `enviarMensaje` y `marcarEnviado`). NSSM lo reinicia, pero el polling
+ * solo trae docs PENDIENTE asi que el doc queda en PROCESANDO para
+ * siempre y el mensaje se pierde sin alerta.
+ *
+ * Este sweeper detecta docs en PROCESANDO con `procesando_en` mas
+ * antiguo que `umbralMs` (default 5 min) y los devuelve a PENDIENTE
+ * para que el polling los retome. Conservador: si el doc no tiene
+ * timestamp valido, no lo toca (defensivo, evita corromper algo raro).
+ *
+ * Filtramos localmente por timestamp en lugar de combinarlo con un
+ * `where('procesando_en', '<', cutoff)` para no requerir indice
+ * compuesto -- la cantidad de docs PROCESANDO en un momento dado es
+ * 0 o 1 en condiciones normales, asi que el filtro local es trivial.
+ *
+ * @param {FirebaseFirestore.Firestore} db
+ * @param {number} umbralMs - default 5 minutos.
+ * @returns {Promise<number>} cantidad de docs recuperados.
+ */
+async function recuperarStaleProcesando(db, umbralMs = 5 * 60 * 1000) {
+  const cutoffMs = Date.now() - umbralMs;
+  const snap = await db
+    .collection(COLECCION)
+    .where('estado', '==', ESTADO.procesando)
+    .get();
+  if (snap.empty) return 0;
+
+  let recuperados = 0;
+  const batch = db.batch();
+  snap.forEach((doc) => {
+    const data = doc.data();
+    const ts = data.procesando_en;
+    if (!ts || typeof ts.toMillis !== 'function') {
+      // Doc PROCESANDO sin timestamp valido: dato inconsistente, no
+      // sabemos cuanto tiempo lleva ahi. No lo tocamos.
+      return;
+    }
+    if (ts.toMillis() >= cutoffMs) {
+      // Esta procesando recien -- otro intento legitimo en curso.
+      return;
+    }
+    batch.update(doc.ref, {
+      estado: ESTADO.pendiente,
+      error: 'Recuperado por sweeper: el bot se reinicio durante el envio. Reintentando.',
+      error_en: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    recuperados++;
+  });
+  if (recuperados > 0) await batch.commit();
+  return recuperados;
+}
+
 module.exports = {
   inicializar,
   subirAStorage,
@@ -151,4 +205,5 @@ module.exports = {
   marcarEnviado,
   marcarError,
   marcarReintento,
+  recuperarStaleProcesando,
 };

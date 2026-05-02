@@ -20,6 +20,34 @@ const path = require('path');
 const os = require('os');
 
 const log = require('./logger');
+
+// Handlers globales de excepciones no atrapadas. Antes el bot las
+// dejaba burbujear: NSSM reiniciaba el proceso y nadie sabia que paso
+// (timer rejection en polling? heartbeat? watchdog?). Ahora siempre
+// queda el stack en stdout/NSSM logs.
+//
+// Decision sobre exit:
+//   - unhandledRejection: NO matamos. Una promesa puntual que falla
+//     (ej. Firestore timeout en un .get()) no debe tirar el proceso
+//     entero -- los polling loops y el cron deben seguir. Solo logear.
+//   - uncaughtException: SI matamos. Excepcion sincronica = bug
+//     serio en estado dificil de razonar. Mejor reset limpio y que
+//     NSSM reinicie. exit(1) hace que el supervisor lo detecte como
+//     fallo y aplique backoff.
+process.on('unhandledRejection', (reason, _promise) => {
+  log.error('UNHANDLED PROMISE REJECTION:', reason);
+  if (reason instanceof Error && reason.stack) {
+    log.error(reason.stack);
+  }
+});
+process.on('uncaughtException', (error) => {
+  log.error('UNCAUGHT EXCEPTION:', error);
+  if (error instanceof Error && error.stack) {
+    log.error(error.stack);
+  }
+  process.exit(1);
+});
+
 const fs = require('./firestore');
 const wa = require('./whatsapp');
 const cron = require('./cron');
@@ -269,6 +297,19 @@ let _pollingTimer = null;
 
 async function pollearCola(db) {
   try {
+    // Sweeper de docs stale en PROCESANDO: si el bot crasheo durante
+    // un envio anterior (entre marcarProcesando y marcarEnviado), el
+    // doc quedo PROCESANDO y nadie lo repesca. Lo devolvemos a
+    // PENDIENTE para que entre al ciclo actual.
+    try {
+      const recuperados = await fs.recuperarStaleProcesando(db);
+      if (recuperados > 0) {
+        log.warn(`Sweeper: recupere ${recuperados} doc(s) stale en PROCESANDO → PENDIENTE.`);
+      }
+    } catch (e) {
+      log.warn(`Sweeper de PROCESANDO fallo: ${e.message}`);
+    }
+
     const qs = await db
       .collection(fs.COLECCION)
       .where('estado', '==', fs.ESTADO.pendiente)
