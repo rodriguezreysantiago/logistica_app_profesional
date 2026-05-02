@@ -75,7 +75,13 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       final volvoService = VolvoApiService();
       List<dynamic> cacheVolvo = const [];
       try {
-        cacheVolvo = await volvoService.traerDatosFlota();
+        // Usar `traerEstadosFlota` (endpoint /vehiclestatuses) y NO
+        // `traerDatosFlota` (endpoint /vehicles que solo trae metadata).
+        // El reporte de consumo necesita `accumulatedData.totalFuelConsumption`
+        // como fallback cuando no se puede calcular el período (vehículo
+        // parado, fin de semana, sin snapshots suficientes). Ese campo
+        // viene SOLO en /vehiclestatuses.
+        cacheVolvo = await volvoService.traerEstadosFlota();
       } catch (e) {
         debugPrint('Volvo no respondió, sigo sin telemetría: $e');
       }
