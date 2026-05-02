@@ -10,7 +10,6 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/app_feedback.dart';
-import '../../../shared/widgets/fecha_dialog.dart';
 
 /// Reporte de Consumo de Combustible (admin).
 ///
@@ -146,37 +145,24 @@ class ReportConsumoService {
                   const Padding(
                     padding: EdgeInsets.only(bottom: 8, left: 4),
                     child: Text(
-                      'Tocá cada botón para abrir el calendario y elegir la fecha.',
+                      'Tocá el botón para abrir el calendario. '
+                      'Marcá primero la fecha de inicio y después la de fin.',
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 11,
                       ),
                     ),
                   ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _BotonFecha(
-                          label: 'DESDE',
-                          fecha: localDesde,
-                          onPick: (f) {
-                            setDialogState(() => localDesde = f);
-                            onRangoCambiado(localDesde, localHasta);
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _BotonFecha(
-                          label: 'HASTA',
-                          fecha: localHasta,
-                          onPick: (f) {
-                            setDialogState(() => localHasta = f);
-                            onRangoCambiado(localDesde, localHasta);
-                          },
-                        ),
-                      ),
-                    ],
+                  _BotonRangoFecha(
+                    desde: localDesde,
+                    hasta: localHasta,
+                    onPick: (d, h) {
+                      setDialogState(() {
+                        localDesde = d;
+                        localHasta = h;
+                      });
+                      onRangoCambiado(localDesde, localHasta);
+                    },
                   ),
                   const SizedBox(height: 4),
                   const Padding(
@@ -733,14 +719,19 @@ class _LabelSeccion extends StatelessWidget {
   }
 }
 
-class _BotonFecha extends StatelessWidget {
-  final String label;
-  final DateTime fecha;
-  final void Function(DateTime) onPick;
+/// Un solo botón que abre `showDateRangePicker` de Material —
+/// calendario unificado donde el admin marca primero la fecha de
+/// inicio y después la de fin en el mismo flow. UX mejor que dos
+/// pickers separados porque ve los dos extremos del rango en el
+/// mismo calendario.
+class _BotonRangoFecha extends StatelessWidget {
+  final DateTime desde;
+  final DateTime hasta;
+  final void Function(DateTime desde, DateTime hasta) onPick;
 
-  const _BotonFecha({
-    required this.label,
-    required this.fecha,
+  const _BotonRangoFecha({
+    required this.desde,
+    required this.hasta,
     required this.onPick,
   });
 
@@ -750,44 +741,56 @@ class _BotonFecha extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(10),
       onTap: () async {
-        final f = await pickFecha(context, initial: fecha, titulo: label);
-        if (f != null) onPick(f);
+        final hoy = DateTime.now();
+        // Limites: 2 años atrás (suficiente para cualquier reporte
+        // razonable) y 1 día hacia adelante (no permitimos rangos
+        // futuros, pero sí incluir hoy entero).
+        final picked = await showDateRangePicker(
+          context: context,
+          initialDateRange: DateTimeRange(start: desde, end: hasta),
+          firstDate: DateTime(hoy.year - 2, 1, 1),
+          lastDate: hoy.add(const Duration(days: 1)),
+          locale: const Locale('es', 'AR'),
+          helpText: 'Seleccioná el rango del reporte',
+          saveText: 'CONFIRMAR',
+          cancelText: 'CANCELAR',
+          fieldStartLabelText: 'Desde',
+          fieldEndLabelText: 'Hasta',
+        );
+        if (picked != null) onPick(picked.start, picked.end);
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
           color: Colors.greenAccent.withAlpha(20),
           borderRadius: BorderRadius.circular(10),
-          // Border más prominente para que sea evidente que el botón
-          // es interactivo. Antes era Colors.white12 (casi invisible)
-          // y los usuarios no se daban cuenta de que podían tocarlo
-          // para cambiar la fecha.
-          border: Border.all(color: Colors.greenAccent.withAlpha(120), width: 1.5),
+          border: Border.all(
+              color: Colors.greenAccent.withAlpha(120), width: 1.5),
         ),
         child: Row(
           children: [
             const Icon(
-              Icons.calendar_today,
+              Icons.date_range,
               color: Colors.greenAccent,
-              size: 22,
+              size: 26,
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
+                  const Text(
+                    'RANGO DE FECHAS',
+                    style: TextStyle(
                       color: Colors.white70,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(
-                    fmt.format(fecha),
+                    '${fmt.format(desde)}  a  ${fmt.format(hasta)}',
                     style: const TextStyle(
                       color: Colors.greenAccent,
                       fontWeight: FontWeight.bold,
@@ -796,6 +799,11 @@ class _BotonFecha extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+            const Icon(
+              Icons.edit_calendar,
+              color: Colors.white54,
+              size: 18,
             ),
           ],
         ),
