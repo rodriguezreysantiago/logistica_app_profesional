@@ -28,6 +28,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Fetch full history para que el git diff contra el commit base
+          # del PR/push detecte correctamente las líneas nuevas (sin
+          # esto solo viene el último commit y el diff queda vacío).
+          fetch-depth: 0
 
       - uses: subosito/flutter-action@v2
         with:
@@ -42,6 +47,36 @@ jobs:
 
       - name: Flutter test
         run: flutter test
+
+      - name: No nuevos colors hardcoded
+        # Falla si en este commit se INTRODUCEN nuevos usos de
+        # `Colors.<accent>` (greenAccent, redAccent, orangeAccent,
+        # blueAccent, cyanAccent) en archivos .dart de lib/.
+        #
+        # Estos colores tienen alias en `lib/shared/constants/app_colors.dart`
+        # (AppColors.accentGreen, etc.) — usar la constante centralizada
+        # facilita rebrand y mantiene consistencia visual.
+        #
+        # NOTA: NO baneamos `Colors.white|black|transparent|whiteXX|blackXX`
+        # ni colores específicos del Material design — esos siguen siendo
+        # tokens estándar legítimos.
+        #
+        # Existen ~820 ocurrencias legacy que se migran incremental cuando
+        # se toca cada archivo. Este guard solo previene que la deuda crezca.
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="HEAD~1"
+          fi
+          DIFF=$(git diff "$BASE" HEAD -- 'lib/**/*.dart' || true)
+          NUEVOS=$(echo "$DIFF" | grep -E "^\+[^+].*Colors\.(greenAccent|redAccent|orangeAccent|blueAccent|cyanAccent|amberAccent)" || true)
+          if [ -n "$NUEVOS" ]; then
+            echo "::error::Hay nuevos usos de Colors.<accent> hardcoded. Usá AppColors.accentGreen/Red/Orange/Blue/Cyan en su lugar."
+            echo "Líneas detectadas:"
+            echo "$NUEVOS"
+            exit 1
+          fi
+          echo "OK: ningún nuevo Colors.<accent> hardcoded en este push."
 
   bot:
     name: WhatsApp Bot (npm test)

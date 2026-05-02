@@ -9,14 +9,23 @@ import 'package:flutter/material.dart';
 ///   esos tokens.
 /// - Para colores semánticos puntuales (un badge de éxito en una card,
 ///   un border de warning, etc.) usar las constantes de `AppColors`.
-/// - **No** usar `Colors.greenAccent` / `Colors.redAccent` / etc. directo
-///   en código nuevo. Son los mismos valores pero descentralizados —
-///   cuando cambies la paleta vas a tener que buscarlos archivo por
-///   archivo.
+/// - **NO** usar `Colors.greenAccent` / `Colors.redAccent` / `Colors.orangeAccent`
+///   / `Colors.blueAccent` / `Colors.cyanAccent` / `Colors.amberAccent`
+///   directo en código nuevo. Son los mismos valores pero descentralizados —
+///   cuando cambies la paleta vas a tener que buscarlos archivo por archivo.
 ///
-/// El código existente todavía usa `Colors.*` en muchos lugares; la
-/// migración es incremental — cada vez que toques un archivo, aprovechá
-/// para reemplazar.
+/// **El CI gatea esto** (`.github/workflows/ci.yml` step "No nuevos colors
+/// hardcoded"): si introducís en un commit/PR un `Colors.<accent>` nuevo
+/// en `lib/`, el job falla con un error claro. Esto previene que la deuda
+/// histórica siga creciendo.
+///
+/// **`Colors.white` / `Colors.black` / `Colors.transparent` / `Colors.whiteXX`
+/// SÍ siguen siendo válidos** — son tokens del design system de Material,
+/// no marca propia. El guard del CI los ignora.
+///
+/// El código existente todavía usa `Colors.*<accent>` en ~820 lugares; la
+/// migración es incremental — cada vez que toques un archivo por otro
+/// motivo, aprovechá para reemplazar.
 class AppColors {
   AppColors._();
 
