@@ -36,7 +36,7 @@ if (!fsNode.existsSync(botNodeModules)) {
 }
 module.paths.unshift(botNodeModules);
 process.chdir(botDir);
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const admin = require('firebase-admin');
 

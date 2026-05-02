@@ -5,7 +5,10 @@
 //   4. Listener de COLA_WHATSAPP que procesa mensajes uno por uno
 //      respetando horario hábil y delay aleatorio.
 
-require('dotenv').config();
+// `quiet: true` silencia el splash informativo que dotenv 17+ imprime
+// al cargar (algo tipo "◇ injected env (15) from .env"). Es ruido en
+// el log del bot que se confunde con eventos reales.
+require('dotenv').config({ quiet: true });
 
 // Fijamos la TZ del proceso EN EL TOP, antes de cualquier require que
 // dependa de fechas (cron, historico, calcularDiasRestantes). Sin esto
