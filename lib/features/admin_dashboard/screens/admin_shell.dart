@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../core/services/capabilities.dart';
 import '../../../core/services/notification_service.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 import '../../employees/screens/admin_personal_lista_screen.dart';
@@ -274,18 +275,23 @@ class _AdminShellState extends State<AdminShell> {
       body: CommandPaletteShortcut(
         child: Stack(
           children: [
-            // Fondo unificado (se ve a través del rail/bottombar)
-            Positioned.fill(
-              child: Image.asset(
-                'assets/images/fondo_login.jpg',
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Theme.of(context).scaffoldBackgroundColor,
+            // Gradient brand → fondo oscuro (mismo tratamiento que login,
+            // splash y AppScaffold). Se ve a través del rail/bottombar.
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      AppColors.brandDark,
+                      AppColors.background,
+                      AppColors.background,
+                    ],
+                    stops: [0.0, 0.55, 1.0],
+                  ),
                 ),
               ),
-            ),
-            Positioned.fill(
-              child: Container(color: Colors.black.withAlpha(200)),
             ),
             // Layout responsive
             SafeArea(

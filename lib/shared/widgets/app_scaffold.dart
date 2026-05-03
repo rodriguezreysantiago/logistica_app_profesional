@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../constants/app_colors.dart';
 import 'app_shell_context.dart';
 import 'coopertrans_logo.dart';
 
@@ -123,16 +124,30 @@ class AppScaffold extends StatelessWidget {
       body: showBackground
           ? Stack(
               children: [
-                Positioned.fill(
-                  child: Image.asset(
-                    'assets/images/fondo_login.jpg',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: Theme.of(context).scaffoldBackgroundColor,
+                // Gradient brand → fondo oscuro. Reemplaza la foto histórica
+                // (fondo_login.jpg) por algo coherente con el rebrand visual.
+                // Si una pantalla concreta quiere otro tratamiento, puede
+                // pasar `showBackground: false` y armarse el suyo.
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          AppColors.brandDark,
+                          AppColors.background,
+                          AppColors.background,
+                        ],
+                        stops: [0.0, 0.55, 1.0],
+                      ),
                     ),
                   ),
                 ),
-                Positioned.fill(child: Container(color: effectiveOverlay)),
+                // Overlay opcional (si la pantalla pidió un teñido extra
+                // sobre el gradient).
+                if (overlayColor != null)
+                  Positioned.fill(child: Container(color: effectiveOverlay)),
                 SafeArea(child: body),
               ],
             )
