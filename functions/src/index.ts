@@ -60,8 +60,15 @@ const auth = getAuth();
 // El reset del contador es automático: cualquier login OK lo borra.
 // Después del bloqueo, el próximo intento fallido empieza un nuevo
 // ciclo desde 1.
-const MAX_INTENTOS_FALLIDOS = 5;
-const BLOQUEO_DURACION_MS = 5 * 60 * 1000; // 5 minutos
+//
+// Endurecido el 2026-05-03: pasó de 5 intentos / 5 min a 3 intentos /
+// 15 min. Una flota chica (~50 empleados) tiene casi cero falsos
+// positivos legítimos (el chofer/admin sabe su DNI o tiene "recordar
+// DNI" del login), así que 3 intentos cubre los typos genuinos.
+// Fuerza bruta: con la config vieja un atacante podía probar 60 combos
+// por hora; con la nueva, 12. Reducción 5x del techo de tasa.
+const MAX_INTENTOS_FALLIDOS = 3;
+const BLOQUEO_DURACION_MS = 15 * 60 * 1000; // 15 minutos
 
 // ============================================================================
 // loginConDni
@@ -1881,24 +1888,44 @@ export const onAlertaVolvoCreated = onDocumentCreated(
       return;
     }
 
-    // Lookup chofer por patente. EMPLEADOS.VEHICULO guarda la patente
-    // del tractor asignado al chofer ("-" si sin asignar). El campo es
-    // único entre choferes activos — no debería haber dos con la misma.
-    const empleadosSnap = await db
-      .collection("EMPLEADOS")
-      .where("VEHICULO", "==", patente)
-      .limit(1)
-      .get();
-    if (empleadosSnap.empty) {
-      logger.info("[onAlertaVolvoCreated] patente sin chofer asignado", {
-        patente,
-        tipo,
-      });
-      return;
+    // Lookup chofer: priorizamos el `chofer_dni` snapshoteado por
+    // `volvoAlertasPoller` al crear la alerta (atribución del chofer del
+    // MOMENTO del evento, no el chofer actual asignado). Esto es crítico
+    // si el chofer rotó entre la creación de la alerta y este trigger
+    // (raro pero posible si el trigger se demora por backlog/quotas).
+    //
+    // Fallback al lookup por VEHICULO==patente para:
+    //  - Alertas viejas pre-snapshot (compatibilidad con docs legacy).
+    //  - Caso defensivo si por algún motivo `chofer_dni` quedó vacío.
+    //
+    // Side benefit: `.doc(id).get()` es lookup por clave (lectura O(1) en
+    // Firestore) vs `.where().limit(1)` que igual va a la collection y
+    // matchea — la query por ID es más barata.
+    const choferDniSnapshot = (data.chofer_dni ?? "").toString().trim();
+    let choferDoc;
+    if (choferDniSnapshot) {
+      const docSnap = await db.collection("EMPLEADOS").doc(choferDniSnapshot).get();
+      if (docSnap.exists) {
+        choferDoc = docSnap;
+      }
     }
-
-    const choferDoc = empleadosSnap.docs[0];
-    const choferData = choferDoc.data();
+    if (!choferDoc) {
+      const empleadosSnap = await db
+        .collection("EMPLEADOS")
+        .where("VEHICULO", "==", patente)
+        .limit(1)
+        .get();
+      if (empleadosSnap.empty) {
+        logger.info("[onAlertaVolvoCreated] patente sin chofer asignado", {
+          patente,
+          tipo,
+          intentadoDni: choferDniSnapshot || "(sin snapshot)",
+        });
+        return;
+      }
+      choferDoc = empleadosSnap.docs[0];
+    }
+    const choferData = choferDoc.data() ?? {};
     const telefonoRaw = (choferData.TELEFONO ?? "").toString().trim();
     if (!telefonoRaw || telefonoRaw === "-") {
       logger.info("[onAlertaVolvoCreated] chofer sin TELEFONO", {

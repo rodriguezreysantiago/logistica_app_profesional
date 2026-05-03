@@ -140,11 +140,11 @@ describe('registrarIntentoFallido', () => {
     assert.strictEqual(ref._peek().intentos, 1);
   });
 
-  test('intento 4 (debajo del umbral 5) → no bloquea', async () => {
-    const ref = fakeRef({ intentos: 3 });
+  test('intento 2 (debajo del umbral 3) → no bloquea', async () => {
+    const ref = fakeRef({ intentos: 1 });
     const db = fakeDb();
     const r = await registrarIntentoFallido(ref, db);
-    assert.strictEqual(r.intentos, 4);
+    assert.strictEqual(r.intentos, 2);
     assert.strictEqual(r.bloqueadoMinRestantes, 0);
     assert.strictEqual(
       ref._peek().bloqueadoHasta,
@@ -153,11 +153,11 @@ describe('registrarIntentoFallido', () => {
     );
   });
 
-  test('cruzar umbral (5to intento) → activa bloqueo', async () => {
-    const ref = fakeRef({ intentos: 4 });
+  test('cruzar umbral (3er intento) → activa bloqueo de 15 min', async () => {
+    const ref = fakeRef({ intentos: 2 });
     const db = fakeDb();
     const r = await registrarIntentoFallido(ref, db);
-    assert.strictEqual(r.intentos, 5);
+    assert.strictEqual(r.intentos, 3);
     assert.ok(
       r.bloqueadoMinRestantes > 0,
       'Debe devolver minutos > 0'
