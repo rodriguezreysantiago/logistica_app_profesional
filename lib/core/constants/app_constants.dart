@@ -93,6 +93,41 @@ class AppCollections {
   /// Único punto de escritura: `AsignacionEngancheService`.
   static const String asignacionesEnganche = 'ASIGNACIONES_ENGANCHE';
 
+  // ─── Módulo Gomería (2026-05-04) ───
+  /// Marcas de cubiertas. Doc: `{nombre, activo}`. ABM desde la app
+  /// por ADMIN. Soft-delete (campo `activo`) para no romper referencias
+  /// históricas si se "borra" una marca que ya tiene cubiertas asociadas.
+  static const String cubiertasMarcas = 'CUBIERTAS_MARCAS';
+
+  /// Modelos de cubiertas (combinación marca + modelo + medida + tipo_uso).
+  /// Doc: `{marca_id, marca_nombre (snapshot), modelo, medida, tipo_uso,
+  /// km_vida_estimada_nueva, km_vida_estimada_recapada, recapable, activo}`.
+  /// El `tipo_uso` (DIRECCION | TRACCION) determina en qué posiciones
+  /// se puede instalar la cubierta.
+  static const String cubiertasModelos = 'CUBIERTAS_MODELOS';
+
+  /// Cubiertas individuales (1 doc por cubierta física). Doc:
+  /// `{codigo (CUB-XXXX legible), modelo_id, modelo_snapshot, estado,
+  /// vidas, km_acumulados, observaciones}`.
+  /// Estado: `EN_DEPOSITO` | `INSTALADA` | `EN_RECAPADO` | `DESCARTADA`.
+  /// `vidas` arranca en 1 (nueva), incrementa con cada recapado exitoso.
+  static const String cubiertas = 'CUBIERTAS';
+
+  /// Registro temporal inmutable de instalaciones cubierta↔posición.
+  /// Espejo conceptual de ASIGNACIONES_VEHICULO pero para cubiertas.
+  /// Doc: `{cubierta_id, codigo (snapshot), unidad_id, unidad_tipo
+  /// (TRACTOR|ENGANCHE), posicion, vida (al instalar), desde, hasta,
+  /// km_unidad_al_instalar, km_unidad_al_retirar, km_recorridos}`.
+  /// La instalación activa tiene `hasta == null`. Único punto de
+  /// escritura: `GomeriaService`.
+  static const String cubiertasInstaladas = 'CUBIERTAS_INSTALADAS';
+
+  /// Eventos de recapado (1 doc por cada vez que se manda a recapar).
+  /// Doc: `{cubierta_id, codigo (snapshot), vida_recapado, proveedor,
+  /// fecha_envio, fecha_retorno, costo, resultado (RECIBIDA |
+  /// DESCARTADA_POR_PROVEEDOR), notas}`.
+  static const String cubiertasRecapados = 'CUBIERTAS_RECAPADOS';
+
   /// Scores diarios de eco-driving (Volvo Group Scores API v2.0.2).
   /// La popula la scheduled function `volvoScoresPoller` (1x por día
   /// a las 04:00 ART). DocId: `{patente}_{YYYY-MM-DD}` para vehículos,

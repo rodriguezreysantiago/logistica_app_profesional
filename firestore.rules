@@ -334,6 +334,119 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // CUBIERTAS_MARCAS — catálogo de marcas de cubiertas (ABM admin)
+    // ========================================================================
+    // Soft-delete con `activo: false` para no romper referencias históricas
+    // en cubiertas/modelos ya cargados con esa marca.
+
+    match /CUBIERTAS_MARCAS/{doc} {
+      // Lectura: cualquier admin/supervisor (incluido supervisor de gomería).
+      allow read: if isAdminOrSupervisor();
+      // Escritura: solo admin. La gomería usa lo que el admin definió.
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // CUBIERTAS_MODELOS — catálogo de modelos (marca + modelo + medida + tipo_uso)
+    // ========================================================================
+    // El admin define qué modelos se manejan, sus km_vida_estimada (nueva y
+    // recapada) y si son recapables. La gomería instala cubiertas de estos
+    // modelos pero no edita el catálogo.
+
+    match /CUBIERTAS_MODELOS/{doc} {
+      allow read: if isAdminOrSupervisor();
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // CUBIERTAS — inventario individual (1 doc por cubierta física)
+    // ========================================================================
+    // El supervisor de gomería da de alta cubiertas (al recibir nuevas del
+    // proveedor) y actualiza estado/vidas/km_acumulados a través del flujo
+    // de instalación/retiro/recapado.
+
+    match /CUBIERTAS/{doc} {
+      allow read: if isAdminOrSupervisor();
+      // Escritura: admin/supervisor (supervisor de gomería opera acá).
+      allow write: if isAdminOrSupervisor();
+    }
+
+    // ========================================================================
+    // CUBIERTAS_INSTALADAS — log temporal cubierta↔posición
+    // ========================================================================
+    // Espejo conceptual de ASIGNACIONES_VEHICULO pero para la relación
+    // cubierta↔posición. La activa tiene `hasta == null`. Al retirar se
+    // cierra (`hasta = now`, km_unidad_al_retirar, km_recorridos calculados).
+    //
+    // Las escrituras pasan por `GomeriaService` desde el cliente. Las reglas
+    // validan estructura mínima al crear y bloquean ediciones arbitrarias
+    // del histórico — solo se puede "cerrar" la activa.
+
+    match /CUBIERTAS_INSTALADAS/{doc} {
+      // Lectura: admin/supervisor (incluye supervisor de gomería).
+      allow read: if isAdminOrSupervisor();
+
+      // Crear: requiere admin/supervisor + estructura mínima + `hasta == null`
+      // (las nuevas siempre arrancan activas). `instalado_por_dni` debe ser
+      // quien escribe — no se puede atribuir el cambio a otro.
+      allow create: if isAdminOrSupervisor()
+        && request.resource.data.instalado_por_dni == request.auth.uid
+        && request.resource.data.cubierta_id is string
+        && request.resource.data.unidad_id is string
+        && request.resource.data.posicion is string
+        && request.resource.data.desde is timestamp
+        && request.resource.data.hasta == null;
+
+      // Actualizar: solo se permite cerrar (setear `hasta`, los km_*_retirar
+      // y km_recorridos, y los campos de auditoría del retiro). El log es
+      // inmutable para los demás campos.
+      allow update: if isAdminOrSupervisor()
+        && resource.data.hasta == null
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['hasta', 'km_unidad_al_retirar', 'km_recorridos',
+                      'retirado_por_dni', 'retirado_por_nombre'])
+        && request.resource.data.hasta is timestamp;
+
+      // Borrar: nunca. Si hubo error, se cierra y se registra una corrección.
+      allow delete: if false;
+    }
+
+    // ========================================================================
+    // CUBIERTAS_RECAPADOS — eventos de envío a recapar
+    // ========================================================================
+    // 1 doc por envío. Se crea con `fecha_retorno = null` y `resultado = null`
+    // (la cubierta queda EN_RECAPADO). Cuando vuelve, se completa con
+    // `fecha_retorno`, `resultado` (RECIBIDA o DESCARTADA_POR_PROVEEDOR),
+    // `costo` y `notas`. La cubierta vuelve a EN_DEPOSITO (vidas++) o
+    // DESCARTADA según el resultado.
+
+    match /CUBIERTAS_RECAPADOS/{doc} {
+      allow read: if isAdminOrSupervisor();
+
+      // Crear envío a recapado: estructura mínima + en proceso (no cerrado).
+      allow create: if isAdminOrSupervisor()
+        && request.resource.data.enviado_por_dni == request.auth.uid
+        && request.resource.data.cubierta_id is string
+        && request.resource.data.proveedor is string
+        && request.resource.data.fecha_envio is timestamp
+        && request.resource.data.fecha_retorno == null
+        && request.resource.data.resultado == null;
+
+      // Cerrar el recapado al recibir la cubierta. Se permite setear
+      // `fecha_retorno`, `resultado`, `costo`, `notas` y los campos de
+      // auditoría del cierre. El resto es inmutable.
+      allow update: if isAdminOrSupervisor()
+        && resource.data.fecha_retorno == null
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['fecha_retorno', 'resultado', 'costo', 'notas',
+                      'cerrado_por_dni', 'cerrado_por_nombre'])
+        && request.resource.data.fecha_retorno is timestamp;
+
+      // Borrar: nunca.
+      allow delete: if false;
+    }
+
+    // ========================================================================
     // VOLVO_SCORES_DIARIOS — scores de eco-driving (Volvo Group Scores API)
     // ========================================================================
     // La scheduled function `volvoScoresPoller` corre 1x por día a las 04:00
