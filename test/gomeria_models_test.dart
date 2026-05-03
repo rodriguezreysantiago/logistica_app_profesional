@@ -173,6 +173,41 @@ void main() {
   // ===========================================================================
   // CUBIERTA_MARCA — modelo simple
   // ===========================================================================
+  // Equality por id — sin esto, los DropdownButtonFormField en los
+  // diálogos pierden la selección entre rebuilds del StreamBuilder.
+  // Bug encontrado en producción 2026-05-04 (Santiago no podía guardar
+  // un modelo porque el dropdown de marca se "des-seleccionaba" al
+  // refrescar el snapshot).
+  group('Equality por id (anti-regresión dropdown bug)', () {
+    test('CubiertaMarca: dos instancias con mismo id son iguales', () {
+      final a = CubiertaMarca.fromMap('id1', {'nombre': 'Bridgestone'});
+      final b = CubiertaMarca.fromMap('id1', {'nombre': 'Bridgestone'});
+      expect(identical(a, b), isFalse, reason: 'son instancias distintas');
+      expect(a == b, isTrue, reason: 'pero deben ser equals por id');
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('CubiertaMarca: distinto id → no iguales', () {
+      final a = CubiertaMarca.fromMap('id1', {'nombre': 'X'});
+      final b = CubiertaMarca.fromMap('id2', {'nombre': 'X'});
+      expect(a == b, isFalse);
+    });
+
+    test('CubiertaModelo: dos instancias con mismo id son iguales', () {
+      final a = CubiertaModelo.fromMap('id1', {'modelo': 'R268'});
+      final b = CubiertaModelo.fromMap('id1', {'modelo': 'OTRO'});
+      expect(a == b, isTrue);
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('Cubierta: dos instancias con mismo id son iguales', () {
+      final a = Cubierta.fromMap('id1', {'codigo': 'CUB-0001'});
+      final b = Cubierta.fromMap('id1', {'codigo': 'CUB-0099'});
+      expect(a == b, isTrue);
+      expect(a.hashCode, b.hashCode);
+    });
+  });
+
   group('CubiertaMarca.fromMap', () {
     test('parsea correctamente', () {
       final m = CubiertaMarca.fromMap('marcaA', {

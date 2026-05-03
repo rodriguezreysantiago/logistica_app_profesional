@@ -30,4 +30,15 @@ class CubiertaMarca {
         'nombre': nombre,
         'activo': activo,
       };
+
+  // Equality por id — necesario para que los DropdownButtonFormField
+  // mantengan la selección entre rebuilds del StreamBuilder. Sin esto,
+  // cada snapshot del stream genera instancias nuevas y el dropdown
+  // pierde la selección porque Dart compara por identidad por default.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || other is CubiertaMarca && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
 }

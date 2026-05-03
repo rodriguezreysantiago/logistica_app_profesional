@@ -107,4 +107,13 @@ class CubiertaModelo {
         'recapable': recapable,
         'activo': activo,
       };
+
+  // Equality por id — necesario para DropdownButtonFormField (ver nota
+  // en CubiertaMarca).
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || other is CubiertaModelo && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
 }

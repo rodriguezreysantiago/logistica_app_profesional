@@ -69,6 +69,15 @@ class Cubierta {
   factory Cubierta.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
       Cubierta.fromMap(doc.id, doc.data());
 
+  // Equality por id — necesario para DropdownButtonFormField en los
+  // diálogos de instalar / mandar a recapar (ver nota en CubiertaMarca).
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || other is Cubierta && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+
   factory Cubierta.fromMap(String id, Map<String, dynamic>? data) {
     final d = data ?? const <String, dynamic>{};
     return Cubierta(
