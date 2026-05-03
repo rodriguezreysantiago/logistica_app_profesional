@@ -608,18 +608,34 @@ git status -uno                                 # cambios sin .claude/
 
 ## Contactos y secretos
 
-> **Completar antes del primer incidente real**. Estos son los datos que un colaborador necesita para llamar a alguien que sepa.
+> **Completar antes del primer handoff a un segundo operador o ante el primer incidente real**. Estos son los datos que un colaborador necesita para llamar a alguien que sepa. Los `⚠️ TODO` están explícitos para que cualquiera que abra esta sección sepa que hay info crítica faltando — completarlos a medida que estén disponibles.
 
-| Recurso | Dónde / a quién |
+### Personas
+
+| Recurso | Dato |
 |---|---|
-| **Santiago** (dueño/dev) | (TODO: agregar teléfono / email) |
-| Contacto Vecchi (cliente) | (TODO: agregar contacto del cliente) |
-| Bitwarden vault | Cuenta personal de Santiago — `secrets.json`, `serviceAccountKey.json`, password de portal Volvo |
-| Firebase Console | https://console.firebase.google.com/project/coopertrans-movil |
-| GitHub | https://github.com/rodriguezreysantiago/logistica_app_profesional |
-| Email Volvo Connect | (TODO: agregar email del contacto técnico de Volvo) |
-| Número de WhatsApp del bot | (TODO: agregar número descartable) |
-| `ADMIN_PHONES` (whitelist comandos) | En `whatsapp-bot/.env` de la PC casa |
+| **Santiago** (dueño/dev/operador) | ⚠️ TODO: completar teléfono móvil + email personal de respaldo. Punto de contacto único hoy. Sacar del Bitwarden vault de Santiago cuando se complete. |
+| **Contacto Vecchi** (cliente) | ⚠️ TODO: completar nombre + teléfono + email del responsable en Vecchi (la persona que reclama si el sistema cae). Pedirlo a Santiago la próxima vez que vea al cliente. |
+| **Contacto técnico Volvo Connect** | ⚠️ TODO: completar email del contacto que ayuda si la API se cae o pierde permisos. Buscar en el portal de Volvo Connect → soporte / contacto del distribuidor local. |
+
+### Servicios
+
+| Recurso | Dato |
+|---|---|
+| **Bitwarden vault** | Cuenta personal de Santiago. Tiene: Volvo Connect (user `018B1E992E` + password v2 vigente), Google/Firebase/GCP (`santiagocoopertrans@gmail.com`), GitHub (`rodriguezreysantiago`), email principal, WhatsApp del bot. Master password en sobre cerrado en casa de Santiago + recovery code de 2FA en el mismo sobre. |
+| **Firebase Console** | https://console.firebase.google.com/project/coopertrans-movil |
+| **Google Cloud Console** | https://console.cloud.google.com/?project=coopertrans-movil — project number `808925655961`. |
+| **GitHub** | https://github.com/rodriguezreysantiago/logistica_app_profesional |
+| **WhatsApp del bot** | ⚠️ TODO: completar número del celular descartable. Solo Santiago lo conoce hoy. Una vez completado, ese número va al campo de Bitwarden item "WhatsApp del bot" si todavía no está. |
+| **`ADMIN_PHONES`** (whitelist comandos del bot) | En `whatsapp-bot/.env` de la PC casa (NO en git por seguridad). |
+
+### Credenciales sensibles (NUNCA por chat / repo)
+
+| Credencial | Dónde vive (autoridad) |
+|---|---|
+| `VOLVO_USERNAME` / `VOLVO_PASSWORD` | Secret Manager de GCP del proyecto coopertrans-movil. La copia maestra está acá. La copia de Bitwarden es para acceso humano (al portal Volvo). Rotación: ver `RUNBOOK.md` sección Sentry / Secrets (mismo flujo). |
+| `serviceAccountKey.json` | Generar en Firebase Console → Project Settings → Service accounts → Generate new private key. NO commit. Copia local en cada PC con bot/scripts admin (no la del usuario común). |
+| `secrets.json` (cliente Flutter) | Plantilla en `secrets.example.json`. Contenido en Bitwarden. Cargado vía `--dart-define-from-file=secrets.json` al `flutter run`. |
 
 ---
 
