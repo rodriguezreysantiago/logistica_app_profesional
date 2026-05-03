@@ -62,7 +62,7 @@ class _FotoUnidad extends StatelessWidget {
                     ),
                     child: const Center(
                       child: CircularProgressIndicator(
-                        color: Colors.greenAccent,
+                        color: AppColors.accentGreen,
                         strokeWidth: 3,
                       ),
                     ),
@@ -76,12 +76,12 @@ class _FotoUnidad extends StatelessWidget {
             icon: Icon(
               tieneFoto ? Icons.edit : Icons.add_a_photo,
               size: 16,
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
             ),
             label: Text(
               tieneFoto ? 'Cambiar foto' : 'Agregar foto',
               style: const TextStyle(
-                color: Colors.greenAccent,
+                color: AppColors.accentGreen,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -103,7 +103,7 @@ class _SectionTitle extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         style: const TextStyle(
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           fontSize: 11,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.5,
@@ -179,9 +179,9 @@ class _BloqueVolvo extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.blueAccent.withAlpha(20),
+        color: AppColors.accentBlue.withAlpha(20),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.blueAccent.withAlpha(50)),
+        border: Border.all(color: AppColors.accentBlue.withAlpha(50)),
       ),
       child: Column(
         children: [
@@ -195,23 +195,23 @@ class _BloqueVolvo extends StatelessWidget {
           if (isSyncing)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: CircularProgressIndicator(color: Colors.blueAccent),
+              child: CircularProgressIndicator(color: AppColors.accentBlue),
             )
           else
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
                 onPressed: onSync,
-                icon: const Icon(Icons.sync, color: Colors.blueAccent),
+                icon: const Icon(Icons.sync, color: AppColors.accentBlue),
                 label: const Text(
                   'FORZAR SINCRO VOLVO',
                   style: TextStyle(
-                    color: Colors.blueAccent,
+                    color: AppColors.accentBlue,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.blueAccent),
+                  side: const BorderSide(color: AppColors.accentBlue),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -227,11 +227,11 @@ class _BloqueVolvo extends StatelessWidget {
             child: TextButton.icon(
               onPressed: onDiagnostico,
               icon: const Icon(Icons.bug_report,
-                  color: Colors.orangeAccent, size: 18),
+                  color: AppColors.accentOrange, size: 18),
               label: const Text(
                 'DIAGNÓSTICO',
                 style: TextStyle(
-                  color: Colors.orangeAccent,
+                  color: AppColors.accentOrange,
                   fontWeight: FontWeight.bold,
                   fontSize: 12,
                   letterSpacing: 1,
@@ -259,7 +259,7 @@ class _EmpresaTile extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          const Icon(Icons.business, color: Colors.greenAccent),
+          const Icon(Icons.business, color: AppColors.accentGreen),
           const SizedBox(width: 15),
           Expanded(
             child: Column(
@@ -357,7 +357,7 @@ class _DateTile extends StatelessWidget {
           if (tieneArchivo)
             IconButton(
               icon: const Icon(Icons.visibility,
-                  color: Colors.greenAccent, size: 22),
+                  color: AppColors.accentGreen, size: 22),
               tooltip: 'Ver archivo',
               onPressed: () => Navigator.push(
                 context,
@@ -370,7 +370,7 @@ class _DateTile extends StatelessWidget {
           IconButton(
             icon: Icon(
               tieneArchivo ? Icons.file_upload_outlined : Icons.upload_file,
-              color: tieneArchivo ? Colors.blueAccent : Colors.white54,
+              color: tieneArchivo ? AppColors.accentBlue : Colors.white54,
               size: 22,
             ),
             tooltip:
@@ -446,7 +446,7 @@ class _FechaTileSimple extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          Icon(icono, color: Colors.greenAccent),
+          Icon(icono, color: AppColors.accentGreen),
           const SizedBox(width: 15),
           Expanded(
             child: Column(

@@ -15,7 +15,6 @@
 // El batch + storage delete + delete de la solicitud quedaron en
 // `finalizarRevision` y no se cubren acá (delegación al SDK).
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:logistica_app_profesional/features/revisions/services/revision_service.dart';
 

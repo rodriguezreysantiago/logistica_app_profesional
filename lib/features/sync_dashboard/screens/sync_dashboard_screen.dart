@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/services/auto_sync_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -58,21 +59,21 @@ class _Body extends StatelessWidget {
             _LiveCard(
               label: 'Activos',
               value: dash.activeSyncs.toString(),
-              color: Colors.orangeAccent,
+              color: AppColors.accentOrange,
               icon: Icons.sync,
             ),
             const SizedBox(width: 10),
             _LiveCard(
               label: 'Éxito',
               value: dash.successSyncs.toString(),
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               icon: Icons.check_circle,
             ),
             const SizedBox(width: 10),
             _LiveCard(
               label: 'Errores',
               value: dash.failedSyncs.toString(),
-              color: Colors.redAccent,
+              color: AppColors.accentRed,
               icon: Icons.error,
             ),
           ],
@@ -110,10 +111,10 @@ class _Body extends StatelessWidget {
               label: 'Tasa de éxito',
               value: '${(dash.successRate * 100).toStringAsFixed(1)}%',
               accent: dash.successRate >= 0.9
-                  ? Colors.greenAccent
+                  ? AppColors.accentGreen
                   : (dash.successRate >= 0.7
-                      ? Colors.orangeAccent
-                      : Colors.redAccent),
+                      ? AppColors.accentOrange
+                      : AppColors.accentRed),
             ),
             _StatTile(
               label: 'Latencia avg',
@@ -202,19 +203,19 @@ class _BotonEjecutarAhoraState extends State<_BotonEjecutarAhora> {
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.cyanAccent),
+                    strokeWidth: 2, color: AppColors.accentCyan),
               )
-            : const Icon(Icons.play_arrow, color: Colors.cyanAccent),
+            : const Icon(Icons.play_arrow, color: AppColors.accentCyan),
         label: Text(
           _ejecutando ? 'EJECUTANDO...' : 'EJECUTAR CICLO AHORA',
           style: const TextStyle(
-            color: Colors.cyanAccent,
+            color: AppColors.accentCyan,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.2,
           ),
         ),
         style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: Colors.cyanAccent),
+          side: const BorderSide(color: AppColors.accentCyan),
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -273,13 +274,13 @@ class _EventoTile extends StatelessWidget {
       case SyncEventTipo.exito:
         return (
           icon: Icons.check_circle,
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           label: 'OK'
         );
       case SyncEventTipo.error:
         return (
           icon: Icons.error,
-          color: Colors.redAccent,
+          color: AppColors.accentRed,
           label: 'ERROR'
         );
       case SyncEventTipo.saltado:
@@ -425,7 +426,7 @@ class _Hdr extends StatelessWidget {
   Widget build(BuildContext context) => Text(
         t,
         style: const TextStyle(
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           fontSize: 9,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.2,
@@ -466,15 +467,15 @@ class _CicloTile extends StatelessWidget {
             ),
           ),
           Expanded(child: _Num(c.total, Colors.white)),
-          Expanded(child: _Num(c.exito, Colors.greenAccent)),
-          Expanded(child: _Num(c.error, Colors.redAccent)),
+          Expanded(child: _Num(c.exito, AppColors.accentGreen)),
+          Expanded(child: _Num(c.error, AppColors.accentRed)),
           Expanded(child: _Num(c.saltado, Colors.white54)),
           SizedBox(
             width: 50,
             child: Text(
               '${c.duracion.inSeconds}s',
               style: const TextStyle(
-                color: Colors.cyanAccent,
+                color: AppColors.accentCyan,
                 fontSize: 11,
                 fontFamily: 'monospace',
               ),
@@ -516,7 +517,7 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         style: const TextStyle(
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           fontSize: 11,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.2,
@@ -595,12 +596,12 @@ class _CicloProgress extends StatelessWidget {
           Row(
             children: [
               const Icon(Icons.timelapse,
-                  color: Colors.cyanAccent, size: 18),
+                  color: AppColors.accentCyan, size: 18),
               const SizedBox(width: 8),
               Text(
                 'Ciclo #$cycle',
                 style: const TextStyle(
-                  color: Colors.cyanAccent,
+                  color: AppColors.accentCyan,
                   fontWeight: FontWeight.bold,
                   fontSize: 12,
                   letterSpacing: 1,
@@ -624,7 +625,7 @@ class _CicloProgress extends StatelessWidget {
               value: progress,
               minHeight: 8,
               backgroundColor: Colors.white12,
-              valueColor: const AlwaysStoppedAnimation(Colors.cyanAccent),
+              valueColor: const AlwaysStoppedAnimation(AppColors.accentCyan),
             ),
           ),
         ],

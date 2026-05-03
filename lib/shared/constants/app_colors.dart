@@ -89,6 +89,10 @@ class AppColors {
   /// Cyan accent — específico del Sync Dashboard / telemetría Volvo.
   static const Color accentCyan = Colors.cyanAccent;
 
+  /// Amber accent — usado en alertas intermedias del bot, indicador
+  /// "atención" que no llega a warning sólido.
+  static const Color accentAmber = Colors.amberAccent;
+
   // ===========================================================================
   // BACKGROUND / SURFACE
   // ===========================================================================

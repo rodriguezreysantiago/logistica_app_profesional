@@ -123,10 +123,10 @@ class _VehiculoCard extends StatelessWidget {
                           ),
                         if (state.success)
                           const Icon(Icons.check_circle,
-                              color: Colors.greenAccent, size: 16),
+                              color: AppColors.accentGreen, size: 16),
                         if (state.error != null)
                           const Icon(Icons.error_outline,
-                              color: Colors.redAccent, size: 16),
+                              color: AppColors.accentRed, size: 16),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -150,7 +150,7 @@ class _VehiculoCard extends StatelessWidget {
                         Text(
                           '${AppFormatters.formatearKilometraje(km)} km',
                           style: const TextStyle(
-                            color: Colors.greenAccent,
+                            color: AppColors.accentGreen,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -219,7 +219,7 @@ void abrirDetalleVehiculo(BuildContext context, String patente,
     icon: Icons.local_shipping,
     actions: [
       IconButton(
-        icon: const Icon(Icons.edit, color: Colors.greenAccent, size: 20),
+        icon: const Icon(Icons.edit, color: AppColors.accentGreen, size: 20),
         tooltip: 'Editar ficha',
         onPressed: () {
           Navigator.pop(context);
@@ -365,13 +365,13 @@ class _DetalleVehiculo extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.cyanAccent.withAlpha(20),
+                    color: AppColors.accentCyan.withAlpha(20),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     (data['SINCRO_TIPO'] ?? '').toString(),
                     style: const TextStyle(
-                      color: Colors.cyanAccent,
+                      color: AppColors.accentCyan,
                       fontSize: 9,
                       fontWeight: FontWeight.bold,
                     ),
@@ -428,16 +428,16 @@ class _EstadoBadge extends StatelessWidget {
   Color get _color {
     switch (estado.toUpperCase()) {
       case 'LIBRE':
-        return Colors.greenAccent;
+        return AppColors.accentGreen;
       case 'OCUPADO':
       case 'ASIGNADO':
-        return Colors.blueAccent;
+        return AppColors.accentBlue;
       case 'TALLER':
       case 'MANTENIMIENTO':
-        return Colors.orangeAccent;
+        return AppColors.accentOrange;
       case 'BAJA':
       case 'INACTIVO':
-        return Colors.redAccent;
+        return AppColors.accentRed;
       default:
         return Colors.white54;
     }
@@ -498,12 +498,12 @@ class _SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
-          Icon(icon, color: Colors.greenAccent, size: 16),
+          Icon(icon, color: AppColors.accentGreen, size: 16),
           const SizedBox(width: 8),
           Text(
             label.toUpperCase(),
             style: const TextStyle(
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               fontSize: 11,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
@@ -571,9 +571,9 @@ double? _toDouble(dynamic v) {
 
 /// Color para la barrita de combustible: verde > 50, naranja 20-50, rojo < 20.
 Color _colorCombustible(double pct) {
-  if (pct >= 50) return Colors.greenAccent;
-  if (pct >= 20) return Colors.orangeAccent;
-  return Colors.redAccent;
+  if (pct >= 50) return AppColors.accentGreen;
+  if (pct >= 20) return AppColors.accentOrange;
+  return AppColors.accentRed;
 }
 
 /// Versión compacta de la telemetría para usar dentro del card de la lista.
@@ -607,7 +607,7 @@ class _TelemetriaCompacta extends StatelessWidget {
           if (auton != null)
             _ChipTelemetria(
               icono: Icons.route,
-              color: Colors.cyanAccent,
+              color: AppColors.accentCyan,
               texto: '${auton.toStringAsFixed(0)} km',
             ),
         ],
@@ -672,9 +672,9 @@ class _PanelTelemetria extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.greenAccent.withAlpha(15),
+        color: AppColors.accentGreen.withAlpha(15),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.greenAccent.withAlpha(40)),
+        border: Border.all(color: AppColors.accentGreen.withAlpha(40)),
       ),
       child: hayTelemetria
           ? Row(
@@ -682,7 +682,7 @@ class _PanelTelemetria extends StatelessWidget {
                 Expanded(
                   child: _CeldaTelemetria(
                     icono: Icons.speed,
-                    color: Colors.greenAccent,
+                    color: AppColors.accentGreen,
                     valor: km != null
                         ? AppFormatters.formatearKilometraje(km)
                         : '—',
@@ -698,7 +698,7 @@ class _PanelTelemetria extends StatelessWidget {
                   Expanded(
                     child: _CeldaTelemetria(
                       icono: Icons.route,
-                      color: Colors.cyanAccent,
+                      color: AppColors.accentCyan,
                       valor: auton.toStringAsFixed(0),
                       unidad: 'km',
                       etiqueta: 'AUTONOMÍA',
@@ -709,7 +709,7 @@ class _PanelTelemetria extends StatelessWidget {
           // Fallback: igual que antes para unidades sin combustible/autonomía.
           : Row(
               children: [
-                const Icon(Icons.speed, color: Colors.greenAccent),
+                const Icon(Icons.speed, color: AppColors.accentGreen),
                 const SizedBox(width: 10),
                 const Text('Kilometraje',
                     style: TextStyle(color: Colors.white60, fontSize: 12)),

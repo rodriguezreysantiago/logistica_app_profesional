@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/volvo_score_diario.dart';
 import '../services/eco_driving_service.dart';
@@ -124,7 +125,7 @@ class _ResumenFleet extends StatelessWidget {
         if (docs.isEmpty) {
           return const _AvisoCard(
             icono: Icons.info_outline,
-            color: Colors.blueAccent,
+            color: AppColors.accentBlue,
             titulo: 'Sin data en este rango',
             mensaje: 'El poller diario empezó a correr el día que '
                 'se deployó. Si recién se activó, los datos aparecen '
@@ -151,7 +152,7 @@ class _ResumenFleet extends StatelessWidget {
         );
 
         return AppCard(
-          borderColor: Colors.greenAccent.withAlpha(50),
+          borderColor: AppColors.accentGreen.withAlpha(50),
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,7 +160,7 @@ class _ResumenFleet extends StatelessWidget {
               Text(
                 'FLOTA · score promedio últimos $diasRango días',
                 style: const TextStyle(
-                  color: Colors.greenAccent,
+                  color: AppColors.accentGreen,
                   fontWeight: FontWeight.bold,
                   fontSize: 11,
                   letterSpacing: 2,
@@ -288,19 +289,19 @@ class _RankingVehiculos extends StatelessWidget {
         }
 
         return AppCard(
-          borderColor: Colors.blueAccent.withAlpha(40),
+          borderColor: AppColors.accentBlue.withAlpha(40),
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.leaderboard, color: Colors.blueAccent, size: 18),
+                  const Icon(Icons.leaderboard, color: AppColors.accentBlue, size: 18),
                   const SizedBox(width: 8),
                   Text(
                     'RANKING POR VEHÍCULO · $diasRango DÍAS',
                     style: const TextStyle(
-                      color: Colors.blueAccent,
+                      color: AppColors.accentBlue,
                       fontWeight: FontWeight.bold,
                       fontSize: 11,
                       letterSpacing: 1.5,
@@ -342,9 +343,9 @@ class _FilaRanking extends StatelessWidget {
 
   Color get _colorScore {
     final s = item.scorePromedio;
-    if (s < 60) return Colors.redAccent;
-    if (s < 80) return Colors.orangeAccent;
-    return Colors.greenAccent;
+    if (s < 60) return AppColors.accentRed;
+    if (s < 80) return AppColors.accentOrange;
+    return AppColors.accentGreen;
   }
 
   @override
@@ -417,10 +418,10 @@ class _ScoreGrande extends StatelessWidget {
     final colorScore = s == null
         ? Colors.white38
         : s < 60
-            ? Colors.redAccent
+            ? AppColors.accentRed
             : s < 80
-                ? Colors.orangeAccent
-                : Colors.greenAccent;
+                ? AppColors.accentOrange
+                : AppColors.accentGreen;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -501,10 +502,10 @@ class _MiniSubScore extends StatelessWidget {
     final color = s == null
         ? Colors.white38
         : s < 60
-            ? Colors.redAccent
+            ? AppColors.accentRed
             : s < 80
-                ? Colors.orangeAccent
-                : Colors.greenAccent;
+                ? AppColors.accentOrange
+                : AppColors.accentGreen;
     return Row(
       children: [
         SizedBox(
@@ -570,7 +571,7 @@ class _SkeletonCard extends StatelessWidget {
       child: SizedBox(
         height: altura,
         child: const Center(
-          child: CircularProgressIndicator(color: Colors.greenAccent),
+          child: CircularProgressIndicator(color: AppColors.accentGreen),
         ),
       ),
     );
@@ -625,7 +626,7 @@ class _ErrorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _AvisoCard(
       icono: Icons.error_outline,
-      color: Colors.redAccent,
+      color: AppColors.accentRed,
       titulo: titulo,
       mensaje: error?.toString() ?? 'Error desconocido',
     );

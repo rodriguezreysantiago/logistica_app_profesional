@@ -51,28 +51,28 @@ class _ResumenContador extends StatelessWidget {
               _MiniContador(
                   label: 'Pendientes',
                   count: pendientes,
-                  color: Colors.orangeAccent,
+                  color: AppColors.accentOrange,
                   activo: filtroActivo == 'PENDIENTE',
                   onTap: () => onTapEstado('PENDIENTE')),
               const SizedBox(width: 8),
               _MiniContador(
                   label: 'En envío',
                   count: procesando,
-                  color: Colors.blueAccent,
+                  color: AppColors.accentBlue,
                   activo: filtroActivo == 'PROCESANDO',
                   onTap: () => onTapEstado('PROCESANDO')),
               const SizedBox(width: 8),
               _MiniContador(
                   label: 'Enviados',
                   count: enviados,
-                  color: Colors.greenAccent,
+                  color: AppColors.accentGreen,
                   activo: filtroActivo == 'ENVIADO',
                   onTap: () => onTapEstado('ENVIADO')),
               const SizedBox(width: 8),
               _MiniContador(
                   label: 'Con error',
                   count: errores,
-                  color: Colors.redAccent,
+                  color: AppColors.accentRed,
                   activo: filtroActivo == 'ERROR',
                   onTap: () => onTapEstado('ERROR')),
             ],
@@ -247,12 +247,12 @@ class _ItemCola extends StatelessWidget {
               ),
               if (enviadoTs != null) ...[
                 const SizedBox(width: 12),
-                const Icon(Icons.check, size: 11, color: Colors.greenAccent),
+                const Icon(Icons.check, size: 11, color: AppColors.accentGreen),
                 const SizedBox(width: 4),
                 Text(
                   _formatTs(enviadoTs, prefijo: 'Enviado'),
                   style: const TextStyle(
-                      color: Colors.greenAccent, fontSize: 10),
+                      color: AppColors.accentGreen, fontSize: 10),
                 ),
               ],
             ],
@@ -262,13 +262,13 @@ class _ItemCola extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.redAccent.withAlpha(15),
+                color: AppColors.accentRed.withAlpha(15),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
                 error,
                 style: const TextStyle(
-                  color: Colors.redAccent,
+                  color: AppColors.accentRed,
                   fontSize: 11,
                   height: 1.3,
                 ),
@@ -294,11 +294,11 @@ class _ItemCola extends StatelessWidget {
                 TextButton.icon(
                   onPressed: onReintentar,
                   icon: const Icon(Icons.refresh,
-                      color: Colors.greenAccent, size: 16),
+                      color: AppColors.accentGreen, size: 16),
                   label: const Text(
                     'Reintentar',
                     style: TextStyle(
-                      color: Colors.greenAccent,
+                      color: AppColors.accentGreen,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
@@ -329,13 +329,13 @@ class _ItemCola extends StatelessWidget {
   static Color _colorEstado(String estado) {
     switch (estado) {
       case 'PENDIENTE':
-        return Colors.orangeAccent;
+        return AppColors.accentOrange;
       case 'PROCESANDO':
-        return Colors.blueAccent;
+        return AppColors.accentBlue;
       case 'ENVIADO':
-        return Colors.greenAccent;
+        return AppColors.accentGreen;
       case 'ERROR':
-        return Colors.redAccent;
+        return AppColors.accentRed;
       default:
         return Colors.white38;
     }
@@ -558,20 +558,20 @@ class _DetalleColaSheet extends StatelessWidget {
               const _SeccionTitulo(
                   icono: Icons.error_outline,
                   texto: 'Error',
-                  color: Colors.redAccent),
+                  color: AppColors.accentRed),
               const SizedBox(height: 6),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.redAccent.withAlpha(15),
+                  color: AppColors.accentRed.withAlpha(15),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.redAccent.withAlpha(80)),
+                  border: Border.all(color: AppColors.accentRed.withAlpha(80)),
                 ),
                 child: SelectableText(
                   error,
                   style: const TextStyle(
-                    color: Colors.redAccent,
+                    color: AppColors.accentRed,
                     fontSize: 12,
                     fontFamily: 'monospace',
                     height: 1.4,
@@ -593,7 +593,7 @@ class _SeccionTitulo extends StatelessWidget {
   const _SeccionTitulo({
     required this.icono,
     required this.texto,
-    this.color = Colors.greenAccent,
+    this.color = AppColors.accentGreen,
   });
 
   @override
@@ -682,13 +682,13 @@ class _FilaItemAgrupado extends StatelessWidget {
       final d = dias.toInt();
       if (d < 0) {
         estadoLegible = 'vencido hace ${d.abs()}d';
-        colorDias = Colors.redAccent;
+        colorDias = AppColors.accentRed;
       } else if (d == 0) {
         estadoLegible = 'vence hoy';
-        colorDias = Colors.orangeAccent;
+        colorDias = AppColors.accentOrange;
       } else {
         estadoLegible = 'vence en ${d}d';
-        colorDias = d <= 7 ? Colors.orangeAccent : Colors.greenAccent;
+        colorDias = d <= 7 ? AppColors.accentOrange : AppColors.accentGreen;
       }
     } else {
       estadoLegible = '-';
