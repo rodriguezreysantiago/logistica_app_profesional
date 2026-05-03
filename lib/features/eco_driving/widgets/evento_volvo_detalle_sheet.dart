@@ -9,6 +9,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../utils/etiquetas_alerta_volvo.dart';
 
 /// Bottom sheet con el detalle de UN evento de VOLVO_ALERTAS.
 ///
@@ -84,7 +85,7 @@ class EventoVolvoDetalleSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _etiquetaTipo(tipo),
+                      etiquetaAlertaVolvo(tipo),
                       style: TextStyle(
                         color: _colorSeveridad(severidad),
                         fontSize: 13,
@@ -310,37 +311,3 @@ Color _colorSeveridad(String severidad) {
   }
 }
 
-String _etiquetaTipo(String tipo) {
-  // Mismo mapa que admin_volvo_alertas_screen.dart. Si Volvo agrega un
-  // tipo nuevo, cae al código crudo. Mantener sincronizado con el otro
-  // archivo si se agregan entradas (idealmente extraer a un módulo
-  // compartido en una próxima limpieza).
-  const mapa = <String, String>{
-    'DISTANCE_ALERT': 'Cerca del vehículo de adelante',
-    'IDLING': 'Motor en ralentí',
-    'OVERSPEED': 'Exceso de velocidad',
-    'PTO': 'Toma de fuerza activada',
-    'HARSH': 'Aceleración / frenada brusca',
-    'GENERIC': 'Evento genérico',
-    'TELL_TALE': 'Luz de tablero encendida',
-    'FUEL': 'Cambio anormal de combustible',
-    'CATALYST': 'Cambio de nivel AdBlue',
-    'ALARM': 'Alarma anti-robo',
-    'GEOFENCE': 'Entrada/salida de geocerca',
-    'SAFETY_ZONE': 'Zona de velocidad reducida',
-    'TPM': 'Presión de neumático',
-    'TTM': 'Temperatura de neumático',
-    'AEBS': 'Frenado automático de emergencia',
-    'ESP': 'Control de estabilidad',
-    'DAS': 'Alerta de cansancio',
-    'LKS': 'Asistente de carril',
-    'LCS': 'Asistente de cambio de carril',
-    'UNSAFE_LANE_CHANGE': 'Cambio de carril inseguro',
-    'TACHO_OUT_OF_SCOPE_MODE_CHANGE': 'Tacógrafo fuera de servicio',
-    'CARGO': 'Cambio en carga (puerta / temp)',
-    'ADBLUELEVEL_LOW': 'AdBlue bajo',
-    'WITHOUT_ADBLUE': 'Sin AdBlue',
-    'DRIVING_WITHOUT_BEING_LOGGED_IN': 'Conducción sin chofer identificado',
-  };
-  return mapa[tipo] ?? tipo;
-}

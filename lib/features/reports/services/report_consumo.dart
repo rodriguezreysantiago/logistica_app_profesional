@@ -40,6 +40,44 @@ import 'excel_utils.dart' as xu;
 class ReportConsumoService {
   ReportConsumoService._();
 
+  /// Cache de la fecha mínima del histórico de telemetría. Se calcula
+  /// la primera vez que se abre el dialog del reporte y queda en memoria
+  /// por el resto de la sesión — la fecha del snapshot más viejo no
+  /// cambia (el bot solo agrega snapshots nuevos, nunca borra los
+  /// viejos en este horizonte). Si en el futuro se implementa retención
+  /// automática de TELEMETRIA_HISTORICO, invalidar este cache.
+  static DateTime? _fechaMinHistoricoCache;
+  static Future<DateTime?>? _fechaMinHistoricoFuture;
+
+  /// Devuelve la fecha del snapshot más antiguo en TELEMETRIA_HISTORICO,
+  /// o `null` si la colección está vacía o el query falla. Cacheada por
+  /// sesión.
+  static Future<DateTime?> _fechaMinHistorico() {
+    if (_fechaMinHistoricoCache != null) {
+      return Future.value(_fechaMinHistoricoCache);
+    }
+    return _fechaMinHistoricoFuture ??= () async {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('TELEMETRIA_HISTORICO')
+            .orderBy('fecha', descending: false)
+            .limit(1)
+            .get();
+        if (snap.docs.isEmpty) return null;
+        final ts = snap.docs.first.data()['fecha'];
+        if (ts is! Timestamp) return null;
+        final fecha = ts.toDate();
+        _fechaMinHistoricoCache = fecha;
+        return fecha;
+      } catch (_) {
+        // Si el query falla (sin permisos, sin red), no romper el dialog.
+        // El warning simplemente no aparece — comportamiento equivalente
+        // al anterior a esta feature.
+        return null;
+      }
+    }();
+  }
+
   static Future<void> mostrarOpcionesYGenerar(
     BuildContext context,
     List<dynamic> cacheVolvo,
@@ -169,6 +207,7 @@ class ReportConsumoService {
                     onRangoCambiado(localDesde, localHasta);
                   },
                 ),
+                _WarningHistoricoLimitado(desdeSeleccionado: localDesde),
                 const SizedBox(height: 8),
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 4),
@@ -813,6 +852,72 @@ class _BotonRangoFecha extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Banner de advertencia que aparece SOLO si la fecha "desde"
+/// seleccionada en el dialog es ANTERIOR al snapshot más antiguo de
+/// `TELEMETRIA_HISTORICO`. Sin esto, el reporte recortaba silencioso
+/// los días sin data y confundía al admin (mostraba "958 km en un mes"
+/// cuando en realidad solo había 4 días de histórico).
+///
+/// FutureBuilder cacheado: el lookup de la fecha mínima se hace una
+/// sola vez por sesión (ver `ReportConsumoService._fechaMinHistorico`).
+class _WarningHistoricoLimitado extends StatelessWidget {
+  final DateTime desdeSeleccionado;
+
+  const _WarningHistoricoLimitado({required this.desdeSeleccionado});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<DateTime?>(
+      future: ReportConsumoService._fechaMinHistorico(),
+      builder: (ctx, snap) {
+        // Sin data o cargando → no mostrar nada (silencioso para no
+        // ensuciar el dialog mientras carga).
+        if (!snap.hasData || snap.data == null) {
+          return const SizedBox.shrink();
+        }
+        final fechaMin = snap.data!;
+        // Si el "desde" elegido es posterior o igual al snapshot más
+        // viejo, no hay nada que advertir.
+        if (!desdeSeleccionado.isBefore(fechaMin)) {
+          return const SizedBox.shrink();
+        }
+        final fmt = DateFormat('dd/MM/yyyy');
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.orangeAccent.withAlpha(30),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orangeAccent.withAlpha(120)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline,
+                    color: Colors.orangeAccent, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'El histórico de telemetría arranca el ${fmt.format(fechaMin)}. '
+                    'Los días anteriores al ${fmt.format(fechaMin)} no van a tener '
+                    'data en el reporte (se reportan como "(acum.)" o vacíos).',
+                    style: const TextStyle(
+                      color: Colors.orangeAccent,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

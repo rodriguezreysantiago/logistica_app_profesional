@@ -8,6 +8,7 @@ import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../../eco_driving/utils/etiquetas_alerta_volvo.dart';
 
 /// Pantalla "Alertas Volvo" del admin/supervisor.
 ///
@@ -132,7 +133,7 @@ class _AlertaCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    _etiquetaTipo(tipo),
+                    etiquetaAlertaVolvo(tipo),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
@@ -231,42 +232,6 @@ class _AlertaCard extends StatelessWidget {
 // =============================================================================
 // HELPERS
 // =============================================================================
-
-String _etiquetaTipo(String tipo) {
-  // Mapa rápido de tipos del Vehicle Alerts API a etiquetas legibles
-  // para el admin AR. Si aparece un tipo nuevo de Volvo, cae al
-  // fallback (el código crudo).
-  const mapa = <String, String>{
-    'DISTANCE_ALERT': 'Cerca del vehículo de adelante',
-    'IDLING': 'Motor en ralentí',
-    'OVERSPEED': 'Exceso de velocidad',
-    'PTO': 'Toma de fuerza activada',
-    'HARSH': 'Aceleración / frenada brusca',
-    'GENERIC': 'Evento genérico',
-    'TELL_TALE': 'Luz de tablero encendida',
-    'FUEL': 'Cambio anormal de combustible',
-    'CATALYST': 'Cambio de nivel AdBlue',
-    'ALARM': 'Alarma anti-robo',
-    'GEOFENCE': 'Entrada/salida de geocerca',
-    'SAFETY_ZONE': 'Zona de velocidad reducida',
-    'TPM': 'Presión de neumático',
-    'TTM': 'Temperatura de neumático',
-    'AEBS': 'Frenado automático de emergencia',
-    'ESP': 'Control de estabilidad',
-    'DAS': 'Alerta de cansancio',
-    'LKS': 'Asistente de carril',
-    'LCS': 'Asistente de cambio de carril',
-    'UNSAFE_LANE_CHANGE': 'Cambio de carril inseguro',
-    'TACHO_OUT_OF_SCOPE_MODE_CHANGE': 'Tacógrafo fuera de servicio',
-    'CARGO': 'Cambio en carga (puerta / temp)',
-    'ADBLUELEVEL_LOW': 'AdBlue bajo',
-    'WITHOUT_ADBLUE': 'Sin AdBlue',
-    'DRIVING_WITHOUT_BEING_LOGGED_IN': 'Conducción sin chofer identificado',
-    'BATTERY_PACK_HIGH_DISCHARGE': 'Descarga alta de batería',
-    'BATTERY_PACK_CHARGING_STATUS_CHANGE': 'Cambio en estado de carga',
-  };
-  return mapa[tipo] ?? tipo;
-}
 
 String _formatTimestamp(Timestamp? ts) {
   if (ts == null) return '—';
