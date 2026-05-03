@@ -85,6 +85,14 @@ class AppCollections {
   /// `AsignacionVehiculoService`.
   static const String asignacionesVehiculo = 'ASIGNACIONES_VEHICULO';
 
+  /// Registro temporal inmutable de asignaciones tractor↔enganche.
+  /// Cada doc: `{enganche_id, tractor_id, desde, hasta, ...}`. La
+  /// asignación activa tiene `hasta == null`. Permite calcular cuántos
+  /// km recorrió una cubierta de enganche cruzando con
+  /// `TELEMETRIA_HISTORICO` los km de cada tractor durante su período.
+  /// Único punto de escritura: `AsignacionEngancheService`.
+  static const String asignacionesEnganche = 'ASIGNACIONES_ENGANCHE';
+
   /// Scores diarios de eco-driving (Volvo Group Scores API v2.0.2).
   /// La popula la scheduled function `volvoScoresPoller` (1x por día
   /// a las 04:00 ART). DocId: `{patente}_{YYYY-MM-DD}` para vehículos,

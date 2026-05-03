@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../models/asignacion_vehiculo.dart';
+import 'asignacion_enganche_service.dart';
 
 /// Único punto de entrada para cambiar la asignación chofer↔vehículo.
 ///
@@ -219,6 +220,37 @@ class AsignacionVehiculoService {
         if (motivo != null && motivo.trim().isNotEmpty) 'motivo': motivo.trim(),
       },
     ));
+
+    // 9) Cascade: si el chofer tenía un enganche, hay que reasignarlo
+    // al nuevo tractor (Fase 0 Gomería 2026-05-04). Sin esto, el log
+    // de ASIGNACIONES_ENGANCHE quedaría desfasado: el enganche dice
+    // estar en el tractor viejo cuando físicamente está en el nuevo.
+    //
+    // Si desvinculamos al chofer (le sacamos el tractor), el enganche
+    // se desengancha también. El campo EMPLEADOS.ENGANCHE en el
+    // espejo NO se modifica acá — el chofer puede mantener su enganche
+    // "asignado" al volver a tomar otro tractor.
+    try {
+      final engancheActual = (empData['ENGANCHE'] ?? '').toString().trim();
+      final tieneEnganche =
+          engancheActual.isNotEmpty && engancheActual != _sinAsignar;
+      if (tieneEnganche) {
+        await AsignacionEngancheService(firestore: _db).cambiarAsignacion(
+          engancheId: engancheActual,
+          nuevoTractorId: patenteNorm,
+          asignadoPorDni: asignadorLimpio,
+          asignadoPorNombre: asignadoPorNombreFinal,
+          motivo: motivo != null && motivo.trim().isNotEmpty
+              ? '${motivo.trim()} (cascade tractor change)'
+              : 'Cascade: cambio de tractor del chofer',
+        );
+      }
+    } catch (e) {
+      // No bloqueamos el cambio de tractor por un fallo del cascade.
+      // El log temporal puede repararse manualmente si hace falta.
+      // ignore: avoid_print
+      print('Aviso: cascade ASIGNACIONES_ENGANCHE falló (no bloquea): $e');
+    }
   }
 
   /// Devuelve la asignación que estaba activa para [vehiculoId] en

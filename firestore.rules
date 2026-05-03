@@ -296,6 +296,44 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // ASIGNACIONES_ENGANCHE — log temporal de qué tractor llevó qué enganche
+    // ========================================================================
+    // Espejo conceptual de ASIGNACIONES_VEHICULO pero para la relación
+    // tractor↔enganche. Sin esto, no se puede calcular cuántos km recorrió
+    // una cubierta de enganche (la cubierta está en el enganche, los km
+    // los recorre el tractor — y un enganche pasa por varios tractores).
+    //
+    // Las escrituras pasan por `AsignacionEngancheService` desde el cliente.
+    // Mismas validaciones que ASIGNACIONES_VEHICULO: estructura mínima +
+    // `hasta = null` al crear + solo se permite "cerrar" (setear `hasta`).
+
+    match /ASIGNACIONES_ENGANCHE/{doc} {
+      // Lectura: admin/supervisor (incluye supervisor de gomería).
+      // El chofer no necesita ver el log.
+      allow read: if isAdminOrSupervisor();
+
+      // Crear una nueva asignación: requiere admin/supervisor + estructura
+      // mínima + `hasta == null` (nuevas siempre arrancan activas).
+      allow create: if isAdminOrSupervisor()
+        && request.resource.data.asignado_por_dni == request.auth.uid
+        && request.resource.data.enganche_id is string
+        && request.resource.data.tractor_id is string
+        && request.resource.data.desde is timestamp
+        && request.resource.data.hasta == null;
+
+      // Actualizar: solo se permite cerrar (setear `hasta`). El log es
+      // inmutable salvo por el cierre. Y solo si todavía estaba activa.
+      allow update: if isAdminOrSupervisor()
+        && resource.data.hasta == null
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['hasta'])
+        && request.resource.data.hasta is timestamp;
+
+      // Borrar: nunca.
+      allow delete: if false;
+    }
+
+    // ========================================================================
     // VOLVO_SCORES_DIARIOS — scores de eco-driving (Volvo Group Scores API)
     // ========================================================================
     // La scheduled function `volvoScoresPoller` corre 1x por día a las 04:00

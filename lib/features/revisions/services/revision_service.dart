@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/storage_service.dart';
+import '../../asignaciones/services/asignacion_enganche_service.dart';
 import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 
 /// Plan de acciones a aplicar cuando una solicitud REVISIONES se aprueba.
@@ -48,6 +49,17 @@ class RevisionAprobadaPlan {
   final ({String choferDni, String nuevaPatente, String motivo})?
       asignacionRequest;
 
+  /// Si no es `null`, hay que registrar el cambio en
+  /// `ASIGNACIONES_ENGANCHE` después del batch (vía
+  /// `AsignacionEngancheService`). El caller debe leer el tractor actual
+  /// del chofer para asociarlo — la función pura no hace queries.
+  final ({
+    String choferDni,
+    String engancheNuevo,
+    String? engancheAnterior,
+    String motivo,
+  })? engancheRequest;
+
   const RevisionAprobadaPlan({
     required this.colDestino,
     required this.idDoc,
@@ -55,6 +67,7 @@ class RevisionAprobadaPlan {
     this.camposDestino = const {},
     this.vehiculosUpdates = const [],
     this.asignacionRequest,
+    this.engancheRequest,
   });
 }
 
@@ -122,9 +135,10 @@ RevisionAprobadaPlan planificarAprobacion(Map<String, dynamic> datos) {
     if (nuevaUnidad.isNotEmpty && nuevaUnidad != '-') {
       vehiculosUpdates.add((patente: nuevaUnidad, estado: 'OCUPADO'));
     }
-    if (unidadActual.isNotEmpty &&
+    final tieneUnidadAnteriorValida = unidadActual.isNotEmpty &&
         unidadActual != '-' &&
-        unidadActual.toUpperCase() != 'SIN ASIGNAR') {
+        unidadActual.toUpperCase() != 'SIN ASIGNAR';
+    if (tieneUnidadAnteriorValida) {
       vehiculosUpdates.add((patente: unidadActual, estado: 'LIBRE'));
     }
     return RevisionAprobadaPlan(
@@ -133,6 +147,15 @@ RevisionAprobadaPlan planificarAprobacion(Map<String, dynamic> datos) {
       campoAct: campoAct,
       camposDestino: {'ENGANCHE': nuevaUnidad},
       vehiculosUpdates: vehiculosUpdates,
+      // Sumamos engancheRequest para que `finalizarRevision` registre
+      // en ASIGNACIONES_ENGANCHE (Fase 0 Gomería). El caller debe leer
+      // el tractor del chofer (idDoc) para asociar enganche↔tractor.
+      engancheRequest: (
+        choferDni: idDoc,
+        engancheNuevo: nuevaUnidad,
+        engancheAnterior: tieneUnidadAnteriorValida ? unidadActual : null,
+        motivo: 'Aprobado desde REVISIONES',
+      ),
     );
   }
 
@@ -309,6 +332,54 @@ class RevisionService {
             _db.collection(plan.colDestino).doc(plan.idDoc),
             plan.camposDestino,
           );
+        }
+
+        // Cambio de enganche: registramos en ASIGNACIONES_ENGANCHE
+        // (Fase 0 Gomería). Necesitamos el tractor actual del chofer
+        // para asociar enganche↔tractor. Si el chofer no tiene tractor,
+        // skipeamos con warning — el enganche queda registrado en
+        // EMPLEADOS pero sin asignación física a un tractor.
+        if (plan.engancheRequest != null) {
+          final req = plan.engancheRequest!;
+          try {
+            final empSnap = await _db
+                .collection(AppCollections.empleados)
+                .doc(req.choferDni)
+                .get();
+            final tractorActual = (empSnap.data()?['VEHICULO'] ?? '')
+                .toString()
+                .trim()
+                .toUpperCase();
+            final tieneTractor =
+                tractorActual.isNotEmpty && tractorActual != '-';
+            if (tieneTractor) {
+              final adminUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+              final svc = AsignacionEngancheService();
+              if (req.engancheAnterior != null) {
+                await svc.cambiarAsignacion(
+                  engancheId: req.engancheAnterior!,
+                  nuevoTractorId: null,
+                  asignadoPorDni: adminUid,
+                  motivo: req.motivo,
+                );
+              }
+              await svc.cambiarAsignacion(
+                engancheId: req.engancheNuevo,
+                nuevoTractorId: tractorActual,
+                asignadoPorDni: adminUid,
+                motivo: req.motivo,
+              );
+            } else {
+              debugPrint(
+                'Aviso: chofer ${req.choferDni} sin tractor asignado, '
+                'no se registra ASIGNACIONES_ENGANCHE',
+              );
+            }
+          } catch (e) {
+            // No bloqueamos la aprobación de la revisión por un fallo
+            // del log temporal — es defensivo.
+            debugPrint('Aviso: ASIGNACIONES_ENGANCHE falló (no bloquea): $e');
+          }
         }
       }
 

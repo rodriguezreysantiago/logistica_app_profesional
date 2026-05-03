@@ -1,0 +1,334 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../../core/constants/app_constants.dart';
+import '../../../core/services/audit_log_service.dart';
+import '../models/asignacion_enganche.dart';
+
+/// Único punto de entrada para cambiar la asignación tractor↔enganche.
+///
+/// Espejo conceptual de [AsignacionVehiculoService] (chofer↔tractor)
+/// pero para la relación tractor↔enganche. **Por qué existe:** sin este
+/// registro temporal, no se puede calcular cuántos km recorrió una
+/// cubierta de enganche. La cubierta está en el enganche, pero los km
+/// los recorre el tractor — y un enganche puede pasar por varios
+/// tractores en su vida útil.
+///
+/// **Modelo**: cada cambio cierra la asignación activa anterior
+/// (`hasta = now`) y crea una nueva (`desde: now, hasta: null`).
+///
+/// **Sincronización con flujos existentes**: este servicio es el
+/// destino final. Los callers son:
+/// - Admin desde la app cuando asigna ENGANCHE a un chofer (via
+///   `EmpleadoActions.enganche`): después de cambiar el espejo en
+///   EMPLEADOS, llama a este servicio para registrar el cambio en
+///   el log temporal usando el tractor actual del chofer.
+/// - Aprobación de revisión `SOLICITUD_ENGANCHE` (via
+///   `RevisionService.finalizarRevision`): idem.
+/// - Cambio de tractor del chofer (via `AsignacionVehiculoService`):
+///   si el chofer tenía un enganche, automáticamente se reasigna ese
+///   enganche del tractor viejo al nuevo. Mantiene la coherencia.
+class AsignacionEngancheService {
+  final FirebaseFirestore _db;
+
+  AsignacionEngancheService({FirebaseFirestore? firestore})
+      : _db = firestore ?? FirebaseFirestore.instance;
+
+  /// Convención del codebase: "sin asignar" se representa con `-`.
+  static const String _sinAsignar = '-';
+
+  /// Cambia la asignación del [engancheId] al [nuevoTractorId].
+  ///
+  /// - Si [nuevoTractorId] es `null`, vacío o `-`, desengancha
+  ///   (queda sin tractor — solo cierra la asignación activa).
+  /// - Si [nuevoTractorId] ya tenía OTRO enganche activo, ese enganche
+  ///   queda también desenganchado (cierra su asignación). Esto evita
+  ///   inconsistencias: un tractor solo puede tener UN enganche por vez.
+  /// - Si el enganche ya estaba en ese tractor (no-op), retorna sin
+  ///   tocar nada.
+  ///
+  /// La operación corre dentro de una transaction para evitar race
+  /// conditions con cambios simultáneos. El audit log (fire-and-forget)
+  /// se dispara después.
+  Future<void> cambiarAsignacion({
+    required String engancheId,
+    required String? nuevoTractorId,
+    required String asignadoPorDni,
+    String? tractorModelo,
+    String? asignadoPorNombre,
+    String? motivo,
+  }) async {
+    final engancheLimpio = _normalizarPatente(engancheId);
+    if (engancheLimpio == null) {
+      throw ArgumentError('engancheId vacío');
+    }
+    final asignadorLimpio = asignadoPorDni.trim();
+    if (asignadorLimpio.isEmpty) {
+      throw ArgumentError('asignadoPorDni vacío');
+    }
+
+    final tractorNorm = _normalizarPatente(nuevoTractorId);
+    final desenganchar = tractorNorm == null;
+
+    // Pre-lectura del doc del enganche para validar que sea enganche
+    // (no tractor — tractores no se enganchan a otros tractores).
+    final engancheSnap =
+        await _db.collection(AppCollections.vehiculos).doc(engancheLimpio).get();
+    if (!engancheSnap.exists) {
+      throw StateError('Vehículo $engancheLimpio no existe');
+    }
+    final engancheData = engancheSnap.data() ?? const <String, dynamic>{};
+    final tipoEnganche = (engancheData['TIPO'] ?? '').toString().toUpperCase();
+    if (tipoEnganche == AppTiposVehiculo.tractor) {
+      throw StateError(
+        '$engancheLimpio es TRACTOR, no se puede usar como enganche.',
+      );
+    }
+
+    // Pre-lectura del tractor (si se está asignando uno) para validar y
+    // tomar snapshot del modelo.
+    String? tractorModeloFinal = tractorModelo;
+    if (!desenganchar) {
+      final tractorSnap = await _db
+          .collection(AppCollections.vehiculos)
+          .doc(tractorNorm)
+          .get();
+      if (!tractorSnap.exists) {
+        throw StateError('Tractor $tractorNorm no existe');
+      }
+      final tractorData = tractorSnap.data() ?? const <String, dynamic>{};
+      final tipoTractor = (tractorData['TIPO'] ?? '').toString().toUpperCase();
+      if (tipoTractor != AppTiposVehiculo.tractor) {
+        throw StateError(
+          '$tractorNorm tiene TIPO=$tipoTractor, no es TRACTOR.',
+        );
+      }
+      tractorModeloFinal ??= tractorData['MODELO']?.toString();
+    }
+
+    final asignadoPorNombreFinal =
+        asignadoPorNombre ?? await _leerNombreEmpleado(asignadorLimpio);
+
+    // Snapshot que la transaction llena. Lo usamos después del commit
+    // para escribir el audit log con el tractor anterior real.
+    String? tractorAnterior;
+
+    await _db.runTransaction((tx) async {
+      final colAsig = _db.collection(AppCollections.asignacionesEnganche);
+
+      // 1) Lecturas primero (Firestore exige reads antes de writes).
+      final activaEngancheQ = await colAsig
+          .where('enganche_id', isEqualTo: engancheLimpio)
+          .where('hasta', isNull: true)
+          .limit(1)
+          .get();
+
+      QuerySnapshot<Map<String, dynamic>>? activaTractorQ;
+      if (!desenganchar) {
+        activaTractorQ = await colAsig
+            .where('tractor_id', isEqualTo: tractorNorm)
+            .where('hasta', isNull: true)
+            .limit(1)
+            .get();
+      }
+
+      final activaEngancheDoc =
+          activaEngancheQ.docs.isEmpty ? null : activaEngancheQ.docs.first;
+      final tractorActualEnganche =
+          activaEngancheDoc?.data()['tractor_id']?.toString();
+      tractorAnterior = tractorActualEnganche;
+
+      final activaTractorDoc =
+          (activaTractorQ?.docs.isEmpty ?? true) ? null : activaTractorQ!.docs.first;
+      final engancheActualTractor =
+          activaTractorDoc?.data()['enganche_id']?.toString();
+
+      // 2) No-ops.
+      if (desenganchar && activaEngancheDoc == null) {
+        return;
+      }
+      if (!desenganchar &&
+          tractorActualEnganche == tractorNorm &&
+          engancheActualTractor == engancheLimpio) {
+        return;
+      }
+
+      final ahora = Timestamp.now();
+
+      // 3) Cerrar asignación activa del enganche (si tenía).
+      if (activaEngancheDoc != null) {
+        tx.update(activaEngancheDoc.reference, {'hasta': ahora});
+      }
+
+      // 4) Cerrar asignación activa del tractor nuevo (si tenía OTRO
+      // enganche — caso raro pero posible si el dato venía corrupto).
+      if (activaTractorDoc != null &&
+          activaTractorDoc.id != activaEngancheDoc?.id) {
+        tx.update(activaTractorDoc.reference, {'hasta': ahora});
+      }
+
+      // 5) Crear la nueva asignación si corresponde.
+      if (!desenganchar) {
+        final nuevaRef = colAsig.doc();
+        tx.set(nuevaRef, <String, dynamic>{
+          'enganche_id': engancheLimpio,
+          'tractor_id': tractorNorm,
+          'tractor_modelo': tractorModeloFinal,
+          'desde': ahora,
+          'hasta': null,
+          'asignado_por_dni': asignadorLimpio,
+          'asignado_por_nombre': asignadoPorNombreFinal,
+          if (motivo != null && motivo.trim().isNotEmpty)
+            'motivo': motivo.trim(),
+        });
+      }
+    });
+
+    // 6) Audit log fuera de la transaction (fire-and-forget).
+    unawaited(AuditLog.registrar(
+      accion: desenganchar
+          ? AuditAccion.desvincularEquipo
+          : AuditAccion.asignarEquipo,
+      entidad: AppCollections.vehiculos,
+      entidadId: engancheLimpio,
+      detalles: {
+        'campo': 'TRACTOR_ASIGNADO',
+        'tractor_anterior': tractorAnterior ?? '',
+        'tractor_nuevo': tractorNorm ?? '',
+        if (motivo != null && motivo.trim().isNotEmpty) 'motivo': motivo.trim(),
+      },
+    ));
+  }
+
+  /// Devuelve la asignación que estaba activa para [engancheId] en
+  /// el instante [fecha]. Usar para calcular km recorridos por una
+  /// cubierta del enganche en una ventana temporal específica.
+  ///
+  /// Devuelve `null` si en ese momento no había nadie enganchado, o si
+  /// el enganche no existe.
+  Future<AsignacionEnganche?> obtenerTractorEnFecha({
+    required String engancheId,
+    required DateTime fecha,
+  }) async {
+    final patenteLimpia = engancheId.trim();
+    if (patenteLimpia.isEmpty) return null;
+
+    final fechaTs = Timestamp.fromDate(fecha);
+
+    final snap = await _db
+        .collection(AppCollections.asignacionesEnganche)
+        .where('enganche_id', isEqualTo: patenteLimpia)
+        .where('desde', isLessThanOrEqualTo: fechaTs)
+        .orderBy('desde', descending: true)
+        .limit(1)
+        .get();
+
+    if (snap.docs.isEmpty) return null;
+    final candidata = AsignacionEnganche.fromDoc(snap.docs.first);
+
+    if (candidata.hasta != null && !candidata.hasta!.isAfter(fecha)) {
+      return null;
+    }
+    return candidata;
+  }
+
+  /// Devuelve TODAS las asignaciones del [engancheId] que se solapan
+  /// con la ventana `[desde, hasta]`. Cada item viene con sus fechas
+  /// reales — no recortadas a la ventana. El caller debe recortar al
+  /// calcular km (no contar tiempo fuera de la ventana).
+  ///
+  /// Usado por el cálculo de km recorridos por una cubierta de
+  /// enganche: itera estos resultados y para cada tractor pide los km
+  /// del período correspondiente.
+  Future<List<AsignacionEnganche>> obtenerHistorialEnVentana({
+    required String engancheId,
+    required DateTime desde,
+    required DateTime hasta,
+  }) async {
+    final patenteLimpia = engancheId.trim();
+    if (patenteLimpia.isEmpty) return const <AsignacionEnganche>[];
+
+    // Filtramos asignaciones que no terminaron antes del inicio de
+    // la ventana. Es decir: hasta es null (activa) O hasta > desde.
+    final desdeTs = Timestamp.fromDate(desde);
+    final hastaTs = Timestamp.fromDate(hasta);
+
+    // Asignaciones que empezaron antes del fin de la ventana.
+    final snap = await _db
+        .collection(AppCollections.asignacionesEnganche)
+        .where('enganche_id', isEqualTo: patenteLimpia)
+        .where('desde', isLessThanOrEqualTo: hastaTs)
+        .orderBy('desde')
+        .get();
+
+    return snap.docs
+        .map(AsignacionEnganche.fromDoc)
+        .where((a) {
+          // Filtramos las que terminaron antes del inicio de la ventana.
+          if (a.hasta == null) return true;
+          return a.hasta!.isAfter(desde) ||
+              a.hasta!.isAtSameMomentAs(desde) ||
+              a.hasta!.isAfter(desdeTs.toDate());
+        })
+        .toList();
+  }
+
+  /// Stream del historial completo de [engancheId] (más recientes
+  /// primero). [limit] por default 50.
+  Stream<List<AsignacionEnganche>> streamHistorialPorEnganche(
+    String engancheId, {
+    int limit = 50,
+  }) {
+    final patenteLimpia = engancheId.trim();
+    if (patenteLimpia.isEmpty) {
+      return Stream.value(const <AsignacionEnganche>[]);
+    }
+    return _db
+        .collection(AppCollections.asignacionesEnganche)
+        .where('enganche_id', isEqualTo: patenteLimpia)
+        .orderBy('desde', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map((s) => s.docs.map(AsignacionEnganche.fromDoc).toList());
+  }
+
+  /// Stream del historial completo de [tractorId].
+  Stream<List<AsignacionEnganche>> streamHistorialPorTractor(
+    String tractorId, {
+    int limit = 50,
+  }) {
+    final patenteLimpia = tractorId.trim();
+    if (patenteLimpia.isEmpty) {
+      return Stream.value(const <AsignacionEnganche>[]);
+    }
+    return _db
+        .collection(AppCollections.asignacionesEnganche)
+        .where('tractor_id', isEqualTo: patenteLimpia)
+        .orderBy('desde', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map((s) => s.docs.map(AsignacionEnganche.fromDoc).toList());
+  }
+
+  /// Normaliza la patente recibida: limpia espacios, devuelve null si
+  /// está vacía o representa "sin asignar".
+  static String? _normalizarPatente(String? raw) {
+    if (raw == null) return null;
+    final t = raw.trim();
+    if (t.isEmpty || t == _sinAsignar) return null;
+    return t.toUpperCase();
+  }
+
+  /// Lee `EMPLEADOS/{dni}.NOMBRE`. Devuelve `null` si no existe o
+  /// si la lectura falla (es snapshot opcional, no bloquea el cambio).
+  Future<String?> _leerNombreEmpleado(String dni) async {
+    try {
+      final snap =
+          await _db.collection(AppCollections.empleados).doc(dni).get();
+      return snap.data()?['NOMBRE']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+}

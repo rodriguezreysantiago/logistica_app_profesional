@@ -18,6 +18,7 @@ import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
+import '../../asignaciones/services/asignacion_enganche_service.dart';
 import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 
 // =============================================================================
@@ -582,10 +583,12 @@ class EmpleadoActions {
                       asignadoPorDni: adminUid,
                     );
                   } else {
-                    // Enganche (batea/tolva/bivuelco/tanque): por ahora
-                    // mantenemos el flujo antiguo con batch directo. Si
-                    // se necesita historial de enganches, replicar el
-                    // mismo patrón del servicio para ese caso.
+                    // Enganche (batea/tolva/bivuelco/tanque): batch
+                    // directo para los espejos en EMPLEADOS y VEHICULOS,
+                    // + AsignacionEngancheService para registrar el log
+                    // temporal en ASIGNACIONES_ENGANCHE (Fase 0 del
+                    // módulo Gomería 2026-05-04 — sin esto no se puede
+                    // calcular km recorridos por cubiertas de enganche).
                     final batch = db.batch();
                     if (!desvincular) {
                       batch.update(
@@ -609,6 +612,51 @@ class EmpleadoActions {
                       );
                     }
                     await batch.commit();
+
+                    // Registro en ASIGNACIONES_ENGANCHE: necesita el
+                    // tractor actual del chofer para asociar enganche↔
+                    // tractor. Si el chofer no tiene tractor asignado,
+                    // skipeamos — no tiene sentido enganche sin tractor.
+                    final empSnap = await db
+                        .collection(AppCollections.empleados)
+                        .doc(dni)
+                        .get();
+                    final tractorActual = (empSnap.data()?['VEHICULO'] ?? '')
+                        .toString()
+                        .trim()
+                        .toUpperCase();
+                    final tieneTractor =
+                        tractorActual.isNotEmpty && tractorActual != '-';
+                    if (tieneTractor) {
+                      final adminUid =
+                          FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final svc = AsignacionEngancheService();
+                      try {
+                        // Cerrar asignación del enganche anterior (si
+                        // existía) — ese enganche queda desenganchado.
+                        if (hayActualValido && cleanActual.isNotEmpty) {
+                          await svc.cambiarAsignacion(
+                            engancheId: cleanActual,
+                            nuevoTractorId: null,
+                            asignadoPorDni: adminUid,
+                          );
+                        }
+                        // Abrir asignación del enganche nuevo en el
+                        // tractor del chofer (si no es desvincular).
+                        if (!desvincular) {
+                          await svc.cambiarAsignacion(
+                            engancheId: nueva,
+                            nuevoTractorId: tractorActual,
+                            asignadoPorDni: adminUid,
+                          );
+                        }
+                      } catch (e) {
+                        debugPrint(
+                          'Aviso: registro en ASIGNACIONES_ENGANCHE falló '
+                          '(no bloquea el cambio): $e',
+                        );
+                      }
+                    }
 
                     unawaited(AuditLog.registrar(
                       accion: desvincular
