@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/services/auto_sync_service.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../providers/sync_dashboard_provider.dart';
 
@@ -126,7 +127,7 @@ class _Body extends StatelessWidget {
             _StatTile(
               label: 'Último sync',
               value: dash.lastSyncAt != null
-                  ? _formatHora(dash.lastSyncAt!)
+                  ? AppFormatters.formatearHora(dash.lastSyncAt!, conSegundos: true)
                   : '—',
             ),
             _StatTile(
@@ -156,10 +157,6 @@ class _Body extends StatelessWidget {
     );
   }
 
-  String _formatHora(DateTime d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
-  }
 }
 
 // =============================================================================
@@ -294,11 +291,6 @@ class _EventoTile extends StatelessWidget {
     }
   }
 
-  String _formatHora(DateTime d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final info = _info;
@@ -344,7 +336,7 @@ class _EventoTile extends StatelessWidget {
                     ),
                     const Spacer(),
                     Text(
-                      _formatHora(evento.cuando),
+                      AppFormatters.formatearHora(evento.cuando, conSegundos: true),
                       style: const TextStyle(
                         color: Colors.white38,
                         fontSize: 10,
@@ -445,11 +437,6 @@ class _CicloTile extends StatelessWidget {
   final CicloResumen c;
   const _CicloTile({required this.c});
 
-  String _formatHora(DateTime d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.hour)}:${two(d.minute)}';
-  }
-
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -470,7 +457,7 @@ class _CicloTile extends StatelessWidget {
           SizedBox(
             width: 60,
             child: Text(
-              _formatHora(c.inicio),
+              AppFormatters.formatearHora(c.inicio),
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 11,

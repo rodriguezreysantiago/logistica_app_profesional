@@ -138,6 +138,22 @@ class AppFormatters {
     return fecha?.toString() ?? "Sin datos";
   }
 
+  /// Formatea un DateTime como `HH:mm` (default) o `HH:mm:ss` en hora local.
+  ///
+  /// Útil para mostrar SOLO la hora — para fecha + hora completa usar
+  /// [formatearFechaHora]. Si el DateTime es UTC, lo convierte a local
+  /// antes de formatear.
+  ///
+  /// Reemplaza el patrón duplicado `_formatHora` que vivía privado en
+  /// pantallas que solo necesitaban formatear hora rápido (ej. timeline
+  /// del Sync Dashboard).
+  static String formatearHora(DateTime fecha, {bool conSegundos = false}) {
+    final l = fecha.isUtc ? fecha.toLocal() : fecha;
+    String two(int n) => n.toString().padLeft(2, '0');
+    final base = '${two(l.hour)}:${two(l.minute)}';
+    return conSegundos ? '$base:${two(l.second)}' : base;
+  }
+
   /// Formatea un DateTime como `DD/MM/YYYY HH:mm:ss` en hora local.
   ///
   /// Reemplazo seguro de `.toIso8601String()` para cualquier display que
