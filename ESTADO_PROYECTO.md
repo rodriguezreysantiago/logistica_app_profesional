@@ -858,6 +858,80 @@ Cierre operativo del día con la PREPARACIÓN para bajar `logisticaapp-e539a` cu
 
 Resultado: a partir del 2026-06-02 Santiago tiene todo el pensamiento hecho — solo ejecutar el checklist.
 
+### 6.15 Sesión 2026-05-03 — Rebrand cosmético + cierre de la auditoría de fechas + swap del backup
+
+Sesión nocturna corta enfocada en **cosmética** y **limpieza**. Sin features nuevas. Cinco commits a main (todos ff-only desde el worktree `claude/sad-liskov-f3bfd8`):
+
+| Commit | Qué hace |
+|---|---|
+| `3ea91d5` | feat(brand): remake cosmético Coopertrans Móvil + cierre del rebrand |
+| `59ee9e0` | docs: sacar `secrets.json` desactualizado del flujo de arranque |
+| `950b2d2` | chore(brand): unificar fondo en gradient + borrar `fondo_login.jpg` + fix `.env.example` bot |
+| `edd40e7` | feat(backup): backup automático cloud-side de Firestore (semanal) |
+| `a4b33b9` | refactor(formatters): `formatearFechaHora` + último `.toIso8601String()` saneado |
+
+#### 6.15.1 Identidad visual nueva (`3ea91d5`, `950b2d2`)
+
+Coopertrans no tenía paleta de marca histórica — Santiago fue contratado para renovar. Se diseñó identidad nueva desde cero:
+
+- **Paleta brand**: `AppColors.brand = #0EA5E9` (sky-500, azul cobalto) + `brandSoft` + `brandDark` para gradients. Convivencia limpia con la guard de CI que prohíbe nuevos `Colors.<accent>` directos.
+- **Logo tipográfico** (sin glifo, escalable): widget `CoopertransLogo` con 3 tamaños (XL/M/S). Lockup: "Coopertrans" en blanco bold + " Móvil" en `AppColors.brand`.
+- **SplashScreen** nueva (`/splash` como `initialRoute`): logo XL + spinner + tagline "GESTIÓN DE FLOTA · COOPERTRANS" sobre gradient brandDark → background. 1.5s y salta a `/home`.
+- **Login rediseñado**: gradient en lugar de la foto `fondo_login.jpg` histórica, logo XL al tope, botón primario en brand color.
+- **Mini-logo en AppBar** de TODAS las pantallas (`AppScaffold` + `AdminShell`): logo S + separador vertical + título de pantalla, alineado a la izquierda con `centerTitle: false`. Mantiene back button de Material y compatibilidad con `leading` custom.
+- **Foto histórica `fondo_login.jpg` borrada**: ya no se usaba en ninguna pantalla. Las 2 que faltaban (AppScaffold y AdminShell) pasaron al mismo gradient del login para coherencia visual.
+
+Cierre completo del rebrand "S.M.A.R.T. Logística" → "Coopertrans Móvil":
+
+- **6 strings Dart**: `AppTexts.appName`, `AppTexts.tagline` (constante nueva), main_panel, admin_panel, admin_vencimientos_menu, login_screen.
+- **7 metadata Windows runner**: título de ventana en `main.cpp`, FileDescription/InternalName/OriginalFilename/ProductName en `Runner.rc`, project + BINARY_NAME en `CMakeLists.txt`. **Rename del binario `logistica_app_profesional.exe` → `coopertrans_movil.exe`** — requirió `flutter clean` la primera vez para regenerar CMake cache (gotcha conocido).
+- **9 docs/configs**: README, RUNBOOK, MANUAL_USUARIO, ESTADO_PROYECTO header, firestore.rules, storage.rules, .gitattributes, .gitignore, functions/package.json description, functions/src/index.ts header.
+- **Footer del WhatsApp del bot** (user-facing real, requiere deploy de functions): "_Sistema S.M.A.R.T. Logística — Mensaje automático._" → "_Coopertrans Móvil — Mensaje automático._".
+- **`whatsapp-bot/.env.example`**: `FIREBASE_PROJECT_ID=logisticaapp-e539a` (apuntaba al proyecto viejo) → `coopertrans-movil`. Si alguien arranca el bot desde cero ahora pega contra el proyecto correcto.
+- **NO se renombró** el package Dart (`logistica_app_profesional` en pubspec.yaml + imports `package:`): decisión documentada (alta inversión, valor invisible al usuario).
+
+Detalle del brand en memoria: `feedback_brand_visual.md`.
+
+#### 6.15.2 `secrets.json` sacado del flujo de docs (`59ee9e0`)
+
+Las credenciales Volvo viven en Secret Manager + cliente vía `volvoProxy` desde 2026-04-29. README/RUNBOOK/ESTADO_PROYECTO/whatsapp-bot/* seguían describiendo el flujo viejo de `--dart-define-from-file=secrets.json` que ya no existía. Limpieza:
+
+- README arranque: comando limpio `flutter run -d windows` + nota explicativa de dónde viven ahora las credenciales.
+- ESTADO_PROYECTO: 5 secciones reescritas (estructura, setup, comandos útiles, tabla credenciales, gotchas operativos).
+- RUNBOOK: tabla de credenciales sin la fila obsoleta + nota explicativa.
+- `secrets.example.json` borrado (template ya no aplica).
+- `.gitignore` mantiene `secrets.json` ignorado por defensa en profundidad.
+
+#### 6.15.3 Backup automático Firestore — swap del sistema
+
+**Importante**: hubo confusión en la primera mitad de la sesión porque la memoria local estaba desactualizada. El sistema **ya tenía** un Cloud Scheduler `firestore-backup-diario` corriendo desde el 2026-05-02. La sesión 03 implementó una **Cloud Function nueva** (`backupFirestoreScheduled`) por error, pensando que el backup no existía. Una vez detectado, Santiago decidió migrar al patrón scheduler-via-Function (versionable + frecuencia menor suficiente) en vez de tener ambos:
+
+- **Sistema viejo (2026-05-02)**: Cloud Scheduler `firestore-backup-diario` con cron `0 3 * * *` ART, llamando al endpoint REST de Firestore export. **A borrar manualmente**: `gcloud scheduler jobs delete firestore-backup-diario --location=southamerica-east1 --project=coopertrans-movil`.
+- **Sistema nuevo (commit `edd40e7`)**: Cloud Function `backupFirestoreScheduled` en `functions/src/index.ts` con `onSchedule("0 6 * * 0", America/Argentina/Buenos_Aires)` — domingos 06:00 ART. Usa `FirestoreAdminClient.exportDocuments` (long-running operation; la function termina apenas dispara el job, el export real corre en background en GCP). Output: `gs://coopertrans-movil-backups/auto-{YYYY-MM-DD}_{HHMM}/` con 17 colecciones operativas. Mismo bucket + mismo Object Lifecycle 30d que el sistema viejo (no hay que recrear nada del lado bucket).
+- **Sección `Restaurar Firestore desde backup (disaster recovery)` nueva en RUNBOOK** con pasos para restaurar una colección puntual sin clobberar el resto.
+
+Lección aprendida: la memoria del proyecto desactualizada hace proyectar trabajo que ya está hecho. Esta sesión cerró con un sync bidireccional explícito local ↔ Drive de todas las memorias para evitar repetirlo.
+
+#### 6.15.4 Auditoría sistemática DD-MM-AAAA en cliente Flutter (`a4b33b9`)
+
+Cierra el item "auditoría de fechas" pendiente desde el rebrand del 2026-05-02. Resultado del grep exhaustivo en `lib/**/*.dart`:
+
+| Patrón buscado | Hits | Reales bugs |
+|---|---|---|
+| `.toIso8601String()` | 2 | **1** (sync_dashboard:309 — debug map) |
+| `.toString()` de DateTime | 6 | 0 (todas checks defensivas sobre `dynamic`) |
+| `DateFormat(...)` | 16 | 0 (todos formato AR: `dd/MM/yyyy`, `dd/MM HH:mm`) |
+
+El código ya estaba sano. Cambios mínimos:
+- `AppFormatters.formatearFechaHora(DateTime?)` — helper nuevo que devuelve `DD/MM/YYYY HH:mm:ss` en hora local (con conversión automática de UTC). Reemplazo seguro de `.toIso8601String()` para display.
+- `SyncDashboardProvider.snapshot()`: usa el nuevo helper. Único hit real eliminado.
+
+Deuda DRY conocida (NO bug): los 16 `DateFormat` dispersos podrían centralizarse en `AppFormatters`. Cuando se toque cada archivo por otro motivo, aprovechar para migrar.
+
+#### 6.15.5 Memoria sincronizada bidireccional
+
+Detección post-sesión: la memoria local en `C:\Users\santi\.claude\projects\...` divergía respecto a `G:/Mi unidad/ClaudeCodeSync/memory/` (single source of truth multi-PC). Drive tenía 5 entries que faltaban en local + el roadmap Volvo más actualizado; local tenía la nueva memoria de brand visual + correcciones del 2026-05-03 que faltaban en Drive. Sync bidireccional ejecutado, MEMORY.md mergeado, ambos lados quedaron al día.
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
