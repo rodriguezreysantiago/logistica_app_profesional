@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../../core/constants/app_constants.dart';
 import 'volvo_api_service.dart';
 
 class VehiculoRepository {
@@ -15,7 +17,7 @@ class VehiculoRepository {
 
   // ================= COLLECTION =================
 
-  static const String collection = 'VEHICULOS';
+  static const String collection = AppCollections.vehiculos;
 
   // ================= STREAM CACHE =================
 
@@ -185,7 +187,7 @@ class VehiculoRepository {
   // SNAPSHOTS HISTÓRICOS — colección TELEMETRIA_HISTORICO
   // ===========================================================================
 
-  static const String collectionHistorico = 'TELEMETRIA_HISTORICO';
+  static const String collectionHistorico = AppCollections.telemetriaHistorico;
 
   /// Itera el [cacheVolvo] y guarda un snapshot histórico por unidad
   /// para el día de hoy.

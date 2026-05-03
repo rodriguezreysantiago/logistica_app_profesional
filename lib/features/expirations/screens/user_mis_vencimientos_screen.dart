@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../revisions/services/revision_service.dart';
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../core/services/notification_service.dart';
 import '../../../shared/utils/app_feedback.dart';
@@ -42,7 +43,7 @@ class _UserMisVencimientosScreenState
   void initState() {
     super.initState();
     _empleadoStream = FirebaseFirestore.instance
-        .collection('EMPLEADOS')
+        .collection(AppCollections.empleados)
         .doc(widget.dniUser)
         .snapshots();
     // Cuando el chofer abre la pantalla, reagendamos sus recordatorios
@@ -55,7 +56,7 @@ class _UserMisVencimientosScreenState
   Future<void> _reagendarRecordatoriosLocales() async {
     try {
       final snap = await FirebaseFirestore.instance
-          .collection('EMPLEADOS')
+          .collection(AppCollections.empleados)
           .doc(widget.dniUser)
           .get();
       if (!snap.exists) return;

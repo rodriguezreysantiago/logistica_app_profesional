@@ -7,6 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 // debugPrint, así que cubre los dos usos de este archivo en un solo import.
 import 'package:flutter/foundation.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/services/storage_service.dart';
 import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 
@@ -77,7 +78,7 @@ class RevisionService {
         rutaStorage: nombreArchivo,
       );
 
-      await _db.collection('REVISIONES').add({
+      await _db.collection(AppCollections.revisiones).add({
         'dni': dni.trim(),
         'nombre_usuario': nombreUsuario,
         'campo': campo,
@@ -133,7 +134,7 @@ class RevisionService {
         // Cualquier campo path-relevante vacío ⇒ Firestore revienta.
         if (colDestino.isEmpty || idDoc.isEmpty || campoAct.isEmpty) {
           // Limpiamos la solicitud inválida y devolvemos un error útil.
-          await _db.collection('REVISIONES').doc(idSolicitud).delete();
+          await _db.collection(AppCollections.revisiones).doc(idSolicitud).delete();
           throw StateError(
             'La solicitud está incompleta (faltan datos de destino o '
             'campo a actualizar). Se eliminó del listado.',
@@ -176,7 +177,7 @@ class RevisionService {
 
           if (nuevaUnidad.isNotEmpty && nuevaUnidad != '-') {
             batch.update(
-              _db.collection('VEHICULOS').doc(nuevaUnidad),
+              _db.collection(AppCollections.vehiculos).doc(nuevaUnidad),
               {'ESTADO': 'OCUPADO'},
             );
           }
@@ -184,7 +185,7 @@ class RevisionService {
               unidadActual != '-' &&
               unidadActual.toUpperCase() != 'SIN ASIGNAR') {
             batch.update(
-              _db.collection('VEHICULOS').doc(unidadActual),
+              _db.collection(AppCollections.vehiculos).doc(unidadActual),
               {'ESTADO': 'LIBRE'},
             );
           }
@@ -210,7 +211,7 @@ class RevisionService {
       }
 
       // Eliminar la solicitud al cerrar el batch
-      batch.delete(_db.collection('REVISIONES').doc(idSolicitud));
+      batch.delete(_db.collection(AppCollections.revisiones).doc(idSolicitud));
       await batch.commit();
     } on StateError {
       // Re-lanzamos los errores estructurados sin envolverlos: el caller
@@ -229,7 +230,7 @@ class RevisionService {
   /// ordenadas por fecha (más recientes primero).
   Stream<QuerySnapshot> getPendientes() {
     return _db
-        .collection('REVISIONES')
+        .collection(AppCollections.revisiones)
         .where('estado', isEqualTo: 'PENDIENTE')
         .orderBy('fecha_solicitud', descending: true)
         .limit(50)

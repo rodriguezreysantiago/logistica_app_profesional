@@ -59,7 +59,7 @@ class ReportConsumoService {
     return _fechaMinHistoricoFuture ??= () async {
       try {
         final snap = await FirebaseFirestore.instance
-            .collection('TELEMETRIA_HISTORICO')
+            .collection(AppCollections.telemetriaHistorico)
             .orderBy('fecha', descending: false)
             .limit(1)
             .get();
@@ -289,7 +289,7 @@ class ReportConsumoService {
       final desdeAmpliado = desde.subtract(const Duration(days: 30));
       final hastaAmpliado = hasta.add(const Duration(days: 1));
       final snapshotsHistoricos = await db
-          .collection('TELEMETRIA_HISTORICO')
+          .collection(AppCollections.telemetriaHistorico)
           .where('fecha',
               isGreaterThanOrEqualTo: Timestamp.fromDate(desdeAmpliado))
           .where('fecha',

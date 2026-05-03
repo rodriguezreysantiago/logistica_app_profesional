@@ -42,7 +42,7 @@ class _AdminPersonalListaScreenState
   void initState() {
     super.initState();
     _empleadosStream = FirebaseFirestore.instance
-        .collection('EMPLEADOS')
+        .collection(AppCollections.empleados)
         .orderBy('NOMBRE')
         .snapshots();
   }

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
@@ -30,7 +31,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
   void initState() {
     super.initState();
     _perfilStream = FirebaseFirestore.instance
-        .collection('EMPLEADOS')
+        .collection(AppCollections.empleados)
         .doc(widget.dni)
         .snapshots();
   }
@@ -139,7 +140,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
               // y para anticiparnos a versiones más estrictas del lint.
               unawaited(_ejecutarTarea(
                 tarea: () async => FirebaseFirestore.instance
-                    .collection('EMPLEADOS')
+                    .collection(AppCollections.empleados)
                     .doc(widget.dni)
                     .update({'CONTRASEÑA': nuevoHash}),
                 mensajeExito: 'Contraseña actualizada correctamente',
@@ -226,7 +227,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
           rutaStorage: 'PERFILES/${widget.dni}.jpg',
         );
         await FirebaseFirestore.instance
-            .collection('EMPLEADOS')
+            .collection(AppCollections.empleados)
             .doc(widget.dni)
             .update({'ARCHIVO_PERFIL': url});
       },

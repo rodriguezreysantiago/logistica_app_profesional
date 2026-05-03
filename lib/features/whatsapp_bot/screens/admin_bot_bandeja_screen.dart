@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
@@ -125,7 +126,7 @@ class AdminBotBandejaScreen extends StatelessWidget {
       final db = FirebaseFirestore.instance;
       final batch = db.batch();
       // Crear la revisión nueva
-      final revRef = db.collection('REVISIONES').doc();
+      final revRef = db.collection(AppCollections.revisiones).doc();
       batch.set(revRef, {
         'dni': data['dni'] ?? '',
         'nombre_usuario': data['nombre_usuario'] ?? '',

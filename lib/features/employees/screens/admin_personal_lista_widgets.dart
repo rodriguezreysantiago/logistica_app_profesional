@@ -204,7 +204,7 @@ class _DetalleChofer extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('EMPLEADOS')
+          .collection(AppCollections.empleados)
           .doc(dni)
           .snapshots(),
       builder: (ctx, snap) {

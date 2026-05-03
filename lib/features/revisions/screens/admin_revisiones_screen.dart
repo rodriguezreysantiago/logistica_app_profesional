@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
@@ -30,7 +31,7 @@ class _AdminRevisionesScreenState extends State<AdminRevisionesScreen> {
   void initState() {
     super.initState();
     _revisionesStream = FirebaseFirestore.instance
-        .collection('REVISIONES')
+        .collection(AppCollections.revisiones)
         .orderBy('fecha_vencimiento', descending: false)
         .snapshots();
   }
@@ -347,7 +348,7 @@ class _DetalleRevision extends StatelessWidget {
       } else {
         // Rechazo: solo borramos la solicitud
         await FirebaseFirestore.instance
-            .collection('REVISIONES')
+            .collection(AppCollections.revisiones)
             .doc(idDoc)
             .delete();
       }
@@ -412,7 +413,7 @@ class _DetalleRevision extends StatelessWidget {
     // podemos hacer el update sin crashear con "document path must be a
     // non-empty string". Borramos la solicitud rota y avisamos al admin.
     if (dni.isEmpty || nueva.isEmpty || idDoc.isEmpty) {
-      await db.collection('REVISIONES').doc(idDoc).delete();
+      await db.collection(AppCollections.revisiones).doc(idDoc).delete();
       throw StateError(
         'La solicitud no tiene chofer (dni) o unidad (patente) válidos. '
         'Se eliminó del listado.',
@@ -422,7 +423,7 @@ class _DetalleRevision extends StatelessWidget {
     final batch = db.batch();
 
     // 1) Actualizar empleado con la nueva unidad
-    batch.update(db.collection('EMPLEADOS').doc(dni), {
+    batch.update(db.collection(AppCollections.empleados).doc(dni), {
       esTractor ? 'VEHICULO' : 'ENGANCHE': nueva,
       'ultima_actualizacion': FieldValue.serverTimestamp(),
     });
@@ -432,19 +433,19 @@ class _DetalleRevision extends StatelessWidget {
         actual != '-' &&
         actual.toUpperCase() != 'SIN ASIGNAR') {
       batch.update(
-        db.collection('VEHICULOS').doc(actual),
+        db.collection(AppCollections.vehiculos).doc(actual),
         {'ESTADO': 'LIBRE'},
       );
     }
 
     // 3) Marcar la unidad nueva como ocupada (ya validamos que no es vacía)
     batch.update(
-      db.collection('VEHICULOS').doc(nueva),
+      db.collection(AppCollections.vehiculos).doc(nueva),
       {'ESTADO': 'OCUPADO'},
     );
 
     // 4) Borrar la solicitud
-    batch.delete(db.collection('REVISIONES').doc(idDoc));
+    batch.delete(db.collection(AppCollections.revisiones).doc(idDoc));
 
     await batch.commit();
   }
@@ -465,7 +466,7 @@ class _DetalleRevision extends StatelessWidget {
     }
     if (idDestino.isEmpty || campoVencimiento.isEmpty || coleccion.isEmpty) {
       // Limpiamos la solicitud rota — el admin no la puede salvar.
-      await db.collection('REVISIONES').doc(idDoc).delete();
+      await db.collection(AppCollections.revisiones).doc(idDoc).delete();
       throw StateError(
         'La solicitud no tiene destino (dni/patente) o campo válidos. '
         'Se eliminó del listado.',
@@ -479,7 +480,7 @@ class _DetalleRevision extends StatelessWidget {
       campoArchivo: urlArchivo,
       'ultima_actualizacion_sistema': FieldValue.serverTimestamp(),
     });
-    await db.collection('REVISIONES').doc(idDoc).delete();
+    await db.collection(AppCollections.revisiones).doc(idDoc).delete();
   }
 }
 

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../constants/app_colors.dart';
 
 import '../../features/employees/screens/admin_personal_lista_screen.dart'
@@ -78,9 +79,9 @@ class _PaletteDialogState extends State<_PaletteDialog> {
       // colecciones grandes son EMPLEADOS y VEHICULOS. Si crece mucho
       // esto, conviene paginar — por ahora un fetch simple alcanza.
       final results = await Future.wait([
-        db.collection('EMPLEADOS').get(),
-        db.collection('VEHICULOS').get(),
-        db.collection('REVISIONES').get(),
+        db.collection(AppCollections.empleados).get(),
+        db.collection(AppCollections.vehiculos).get(),
+        db.collection(AppCollections.revisiones).get(),
       ]);
       final items = <_PaletteItem>[];
       for (final doc in results[0].docs) {

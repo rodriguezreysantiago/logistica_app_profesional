@@ -29,7 +29,7 @@ class _AdminVencimientosChoferesScreenState
   void initState() {
     super.initState();
     _empleadosStream =
-        FirebaseFirestore.instance.collection('EMPLEADOS').snapshots();
+        FirebaseFirestore.instance.collection(AppCollections.empleados).snapshots();
   }
 
   /// Construye la lista de items de vencimiento desde el snapshot.

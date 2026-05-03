@@ -68,7 +68,7 @@ class _AdminPersonalFormScreenState
 
       // 1) Verificar que el DNI no exista
       final doc = await FirebaseFirestore.instance
-          .collection('EMPLEADOS')
+          .collection(AppCollections.empleados)
           .doc(dni)
           .get();
 
@@ -87,7 +87,7 @@ class _AdminPersonalFormScreenState
           PasswordHasher.hashBcrypt(_passCtrl.text.trim());
 
       await FirebaseFirestore.instance
-          .collection('EMPLEADOS')
+          .collection(AppCollections.empleados)
           .doc(dni)
           .set({
         'NOMBRE': _nombreCtrl.text.trim().toUpperCase(),

@@ -178,7 +178,7 @@ class _CardUnidad extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('VEHICULOS')
+          .collection(AppCollections.vehiculos)
           .doc(patente)
           .snapshots(),
       builder: (context, snap) {
@@ -556,12 +556,12 @@ class _ListaUnidadesLibres extends StatelessWidget {
   Widget build(BuildContext context) {
     final stream = tipoBusqueda != null
         ? FirebaseFirestore.instance
-            .collection('VEHICULOS')
+            .collection(AppCollections.vehiculos)
             .where('TIPO', isEqualTo: tipoBusqueda)
             .where('ESTADO', isEqualTo: 'LIBRE')
             .snapshots()
         : FirebaseFirestore.instance
-            .collection('VEHICULOS')
+            .collection(AppCollections.vehiculos)
             .where('TIPO', whereIn: AppTiposVehiculo.enganches)
             .where('ESTADO', isEqualTo: 'LIBRE')
             .snapshots();
@@ -666,7 +666,7 @@ class _ListaUnidadesLibres extends StatelessWidget {
     }
 
     try {
-      await FirebaseFirestore.instance.collection('REVISIONES').add({
+      await FirebaseFirestore.instance.collection(AppCollections.revisiones).add({
         'dni': cleanDni,
         'nombre_usuario': nombre,
         'etiqueta':

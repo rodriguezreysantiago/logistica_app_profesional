@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -31,7 +32,7 @@ class _AdminVencimientosChasisScreenState
     // ahorra ~50% de docs (mitad enganches mitad tractores); con flota
     // grande el ahorro escala lineal.
     _vehiculosStream = FirebaseFirestore.instance
-        .collection('VEHICULOS')
+        .collection(AppCollections.vehiculos)
         .where('TIPO', whereIn: _tiposIncluidos)
         .snapshots();
   }

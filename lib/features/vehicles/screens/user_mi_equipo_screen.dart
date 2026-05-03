@@ -34,11 +34,11 @@ class _UserMiEquipoScreenState extends State<UserMiEquipoScreen> {
   void initState() {
     super.initState();
     _empleadoStream = FirebaseFirestore.instance
-        .collection('EMPLEADOS')
+        .collection(AppCollections.empleados)
         .doc(widget.dniUser)
         .snapshots();
     _solicitudesStream = FirebaseFirestore.instance
-        .collection('REVISIONES')
+        .collection(AppCollections.revisiones)
         .where('dni', isEqualTo: widget.dniUser)
         .where('tipo_solicitud', isEqualTo: 'CAMBIO_EQUIPO')
         .snapshots();

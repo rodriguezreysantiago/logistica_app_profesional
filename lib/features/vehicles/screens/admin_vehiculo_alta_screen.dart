@@ -70,7 +70,7 @@ class _AdminVehiculoAltaScreenState
     try {
       // 1) ¿Ya existe?
       final doc = await FirebaseFirestore.instance
-          .collection('VEHICULOS')
+          .collection(AppCollections.vehiculos)
           .doc(patente)
           .get();
 
@@ -105,7 +105,7 @@ class _AdminVehiculoAltaScreenState
       }
 
       await FirebaseFirestore.instance
-          .collection('VEHICULOS')
+          .collection(AppCollections.vehiculos)
           .doc(patente)
           .set(initialFields);
 

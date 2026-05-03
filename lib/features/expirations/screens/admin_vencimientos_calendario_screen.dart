@@ -45,8 +45,8 @@ class _AdminVencimientosCalendarioScreenState
   void initState() {
     super.initState();
     final db = FirebaseFirestore.instance;
-    _empleadosStream = db.collection('EMPLEADOS').snapshots();
-    _vehiculosStream = db.collection('VEHICULOS').snapshots();
+    _empleadosStream = db.collection(AppCollections.empleados).snapshots();
+    _vehiculosStream = db.collection(AppCollections.vehiculos).snapshots();
     // Inicializamos con el día de hoy seleccionado: el admin ve los
     // vencimientos de hoy de entrada.
     _selectedDay = DateTime(_focusedDay.year, _focusedDay.month, _focusedDay.day);

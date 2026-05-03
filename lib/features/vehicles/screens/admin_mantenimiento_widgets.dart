@@ -366,7 +366,7 @@ class _TractorCard extends StatelessWidget {
       // el próximo ciclo del AutoSync (60s). Bug C4 del code review.
       const intervaloKm = AppMantenimiento.intervaloServiceKm;
       await Future.wait([
-        db.collection('VEHICULOS').doc(patente).update({
+        db.collection(AppCollections.vehiculos).doc(patente).update({
           'ULTIMO_SERVICE_KM': kmActual,
           'ULTIMO_SERVICE_FECHA': AppFormatters.aIsoFechaLocal(fechaElegida),
           'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
@@ -374,7 +374,7 @@ class _TractorCard extends StatelessWidget {
         // Reset del estado: el tractor acaba de salir del taller. El
         // próximo ciclo del AutoSync va a recalcular el estado real
         // (que debería ser "OK" porque arranca un ciclo nuevo de 50.000 km).
-        db.collection('MANTENIMIENTOS_AVISADOS').doc(patente).set({
+        db.collection(AppCollections.mantenimientosAvisados).doc(patente).set({
           'patente': patente,
           'ultimo_estado': 'OK',
           'ultimo_service_distance_km': intervaloKm,

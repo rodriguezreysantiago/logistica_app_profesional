@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/services/capabilities.dart';
 import '../../../core/services/notification_service.dart';
 import '../../../core/services/prefs_service.dart';
@@ -71,7 +72,7 @@ class _AdminShellState extends State<AdminShell> {
       // limit(100), si el stream trae 100 docs sé que hay >=100 → muestro
       // "99+". Cap el costo Firestore en O(100) lecturas/sesión.
       badgeStream: FirebaseFirestore.instance
-          .collection('REVISIONES')
+          .collection(AppCollections.revisiones)
           .limit(100)
           .snapshots(),
       build: () => const AdminRevisionesScreen(),
@@ -93,7 +94,7 @@ class _AdminShellState extends State<AdminShell> {
       // sumar/sacar un tractor del estado, el badge se actualiza solo.
       // Filtro simple por un solo campo, no necesita índice compuesto.
       badgeStream: FirebaseFirestore.instance
-          .collection('MANTENIMIENTOS_AVISADOS')
+          .collection(AppCollections.mantenimientosAvisados)
           .where('ultimo_estado', isEqualTo: 'VENCIDO')
           .limit(100)
           .snapshots(),
@@ -108,7 +109,7 @@ class _AdminShellState extends State<AdminShell> {
       // field where → no necesita índice compuesto. Las popula el
       // poller cada 5 min desde el Vehicle Alerts API de Volvo.
       badgeStream: FirebaseFirestore.instance
-          .collection('VOLVO_ALERTAS')
+          .collection(AppCollections.volvoAlertas)
           .where('atendida', isEqualTo: false)
           .limit(100)
           .snapshots(),
@@ -202,7 +203,7 @@ class _AdminShellState extends State<AdminShell> {
   /// La primera carga se ignora para no spamear con todo lo que ya estaba.
   void _activarEscuchaRevisiones() {
     _revisionesSubscription = FirebaseFirestore.instance
-        .collection('REVISIONES')
+        .collection(AppCollections.revisiones)
         .snapshots()
         .listen(
       (snapshot) {

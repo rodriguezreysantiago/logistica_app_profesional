@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../shared/utils/app_feedback.dart';
@@ -218,7 +219,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
         rutaStorage: path,
       );
       await FirebaseFirestore.instance
-          .collection('VEHICULOS')
+          .collection(AppCollections.vehiculos)
           .doc(widget.vehiculoId.trim())
           .update({'ARCHIVO_FOTO': url});
 
@@ -479,7 +480,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
         updates[spec.campoArchivo] = _urls[spec.campoArchivo] ?? '-';
       }
       await FirebaseFirestore.instance
-          .collection('VEHICULOS')
+          .collection(AppCollections.vehiculos)
           .doc(id)
           .update(updates);
       guardadoOk = true;

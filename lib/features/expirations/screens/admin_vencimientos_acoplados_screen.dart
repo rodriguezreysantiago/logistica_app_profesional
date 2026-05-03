@@ -34,7 +34,7 @@ class _AdminVencimientosAcopladosScreenState
     // 30 valores en `whereIn`, asi que sumar tipos nuevos a
     // AppTiposVehiculo.enganches no rompe nada.
     _vehiculosStream = FirebaseFirestore.instance
-        .collection('VEHICULOS')
+        .collection(AppCollections.vehiculos)
         .where('TIPO', whereIn: _tiposIncluidos)
         .snapshots();
   }

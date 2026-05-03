@@ -49,7 +49,7 @@ class EmpleadoActions {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await FirebaseFirestore.instance
-          .collection('EMPLEADOS')
+          .collection(AppCollections.empleados)
           .doc(dni.trim())
           .update({
         campo: valor,
@@ -537,7 +537,7 @@ class EmpleadoActions {
           height: 350,
           child: StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
-                .collection('VEHICULOS')
+                .collection(AppCollections.vehiculos)
                 .where('TIPO', whereIn: tipos)
                 .snapshots(),
             builder: (ctx, snap) {
@@ -588,22 +588,22 @@ class EmpleadoActions {
                     final batch = db.batch();
                     if (!desvincular) {
                       batch.update(
-                        db.collection('VEHICULOS').doc(nueva),
+                        db.collection(AppCollections.vehiculos).doc(nueva),
                         {'ESTADO': 'OCUPADO'},
                       );
                       batch.update(
-                        db.collection('EMPLEADOS').doc(dni),
+                        db.collection(AppCollections.empleados).doc(dni),
                         {campo: nueva},
                       );
                     } else {
                       batch.update(
-                        db.collection('EMPLEADOS').doc(dni),
+                        db.collection(AppCollections.empleados).doc(dni),
                         {campo: '-'},
                       );
                     }
                     if (hayActualValido) {
                       batch.update(
-                        db.collection('VEHICULOS').doc(cleanActual),
+                        db.collection(AppCollections.vehiculos).doc(cleanActual),
                         {'ESTADO': 'LIBRE'},
                       );
                     }

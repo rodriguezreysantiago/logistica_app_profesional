@@ -262,7 +262,7 @@ class _DetalleVehiculo extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('VEHICULOS')
+          .collection(AppCollections.vehiculos)
           .doc(patente)
           .snapshots(),
       builder: (ctx, snap) {

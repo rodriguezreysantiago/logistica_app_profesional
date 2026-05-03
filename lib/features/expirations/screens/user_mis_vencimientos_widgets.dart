@@ -54,7 +54,7 @@ class _CardVencimientoUser extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('REVISIONES')
+          .collection(AppCollections.revisiones)
           .where('dni', isEqualTo: idDoc)
           .where('campo', isEqualTo: campo)
           .snapshots(),
@@ -190,7 +190,7 @@ class _DetalleEquipo extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('VEHICULOS')
+          .collection(AppCollections.vehiculos)
           .doc(patente)
           .snapshots(),
       builder: (context, vSnap) {
@@ -267,7 +267,7 @@ class _AccesoChecklist extends StatelessWidget {
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('CHECKLISTS')
+          .collection(AppCollections.checklists)
           .where('DOMINIO', isEqualTo: patente)
           .where('MES', isEqualTo: now.month)
           .where('ANIO', isEqualTo: now.year)

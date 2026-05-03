@@ -34,8 +34,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   void initState() {
     super.initState();
     final db = FirebaseFirestore.instance;
-    _empleadosStream = db.collection('EMPLEADOS').snapshots();
-    _vehiculosStream = db.collection('VEHICULOS').snapshots();
+    _empleadosStream = db.collection(AppCollections.empleados).snapshots();
+    _vehiculosStream = db.collection(AppCollections.vehiculos).snapshots();
     // REVISIONES: las aprobadas/rechazadas se BORRAN del collection
     // (no soft-delete), asi que en condiciones normales solo hay
     // pendientes. Igual sumamos limit(50) como defensa: si en el
@@ -50,7 +50,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     // mantenidos por trigger Cloud Function en cambios de
     // EMPLEADOS/VEHICULOS/REVISIONES. La app lee 1 doc en lugar
     // de N+M+R. Postergado hasta que el dimensionamiento lo amerite.
-    _revisionesStream = db.collection('REVISIONES').limit(50).snapshots();
+    _revisionesStream = db.collection(AppCollections.revisiones).limit(50).snapshots();
     // El listener de notificaciones push para revisiones nuevas vive
     // en AdminShell (durante toda la sesion admin), no aca. Si lo
     // duplicaramos en este State, el admin recibiria 2 push identicas
@@ -223,7 +223,7 @@ class _SaludoState extends State<_Saludo> {
     if (dni.isEmpty) return;
     try {
       final snap = await FirebaseFirestore.instance
-          .collection('EMPLEADOS')
+          .collection(AppCollections.empleados)
           .doc(dni)
           .get();
       if (!mounted) return;
