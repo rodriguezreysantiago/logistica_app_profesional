@@ -15,7 +15,7 @@
 
 const admin = require('firebase-admin');
 const log = require('./logger');
-const { enHorarioHabil } = require('./humano');
+const { enHorarioHabil, normalizarTelefonoAWid } = require('./humano');
 const aviso = require('./aviso_builder');
 const avisoService = require('./aviso_service_builder');
 const avisoAlertasVolvo = require('./aviso_alertas_volvo_builder');
@@ -221,8 +221,17 @@ async function _runOnce(fs) {
     // 1) Vencimientos personales del chofer
     for (const [dni, emp] of empleadosByDni) {
       const data = emp.data;
-      const telefono = data.TELEFONO ? String(data.TELEFONO) : null;
-      if (!telefono) continue;
+      // Validamos formato (no solo "no vacío") con normalizarTelefonoAWid:
+      // si TELEFONO tiene basura (texto, dígitos < 10), saltamos al chofer
+      // ANTES de encolar — antes esto pasaba la validación naive y recién
+      // se rompía en consumer-time (index.js:250) marcando ERROR en la cola.
+      if (!normalizarTelefonoAWid(data.TELEFONO)) {
+        if (data.TELEFONO) {
+          log.warn(`Chofer ${dni} TELEFONO inválido (${data.TELEFONO}), omitido.`);
+        }
+        continue;
+      }
+      const telefono = String(data.TELEFONO);
 
       for (const [etiqueta, campoBase] of Object.entries(DOCS_EMPLEADO)) {
         // Normalizamos a YYYY-MM-DD via aIsoLocal: cubre strings,
@@ -267,8 +276,16 @@ async function _runOnce(fs) {
       const patente = vDoc.id;
       const chofer = choferByPatente.get(String(patente).trim().toUpperCase());
       if (!chofer) continue;
-      const telefono = chofer.data.TELEFONO ? String(chofer.data.TELEFONO) : null;
-      if (!telefono) continue;
+      if (!normalizarTelefonoAWid(chofer.data.TELEFONO)) {
+        if (chofer.data.TELEFONO) {
+          log.warn(
+            `Chofer ${chofer.id} (asignado a ${patente}) TELEFONO inválido ` +
+            `(${chofer.data.TELEFONO}), omitido.`
+          );
+        }
+        continue;
+      }
+      const telefono = String(chofer.data.TELEFONO);
 
       for (const spec of specs) {
         // Misma normalizacion que para vencimientos personales.
@@ -332,8 +349,19 @@ async function _runOnce(fs) {
     // ─── Encolar mensajes (agrupados por chofer) ───
     for (const [dni, { chofer, items }] of itemsPorChofer) {
       if (items.length === 0) continue;
-      const telefono = chofer.data.TELEFONO ? String(chofer.data.TELEFONO).trim() : null;
-      if (!telefono) continue;
+      // Re-validamos: el set de items se acumuló pasando por validaciones
+      // arriba pero defensa en profundidad — si llega aquí con TELEFONO
+      // inválido, no encolamos.
+      if (!normalizarTelefonoAWid(chofer.data.TELEFONO)) {
+        if (chofer.data.TELEFONO) {
+          log.warn(
+            `Chofer ${dni} TELEFONO inválido (${chofer.data.TELEFONO}) ` +
+            `al momento de encolar, omitido.`
+          );
+        }
+        continue;
+      }
+      const telefono = String(chofer.data.TELEFONO).trim();
       const nombre = aviso.resolverNombreSaludo(chofer.data);
 
       let mensaje;
@@ -457,10 +485,14 @@ async function _runOnce(fs) {
             `Service diario no se envia hoy.`
           );
         } else {
-          const telefonoDest = empDest.data.TELEFONO ? String(empDest.data.TELEFONO).trim() : null;
+          const telefonoDestRaw = empDest.data.TELEFONO;
+          const telefonoDest = normalizarTelefonoAWid(telefonoDestRaw)
+            ? String(telefonoDestRaw).trim()
+            : null;
           if (!telefonoDest) {
             log.warn(
-              `Destinatario service ${dniDestinatarioService} no tiene TELEFONO. ` +
+              `Destinatario service ${dniDestinatarioService} sin TELEFONO ` +
+              `válido (raw: ${telefonoDestRaw ?? 'null'}). ` +
               `Service diario no se envia hoy.`
             );
           } else {
