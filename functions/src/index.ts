@@ -2534,10 +2534,25 @@ export const backupFirestoreScheduled = onSchedule(
     const projectId = process.env.GCLOUD_PROJECT || "coopertrans-movil";
     const bucketName = "coopertrans-movil-backups";
 
-    // YYYY-MM-DD_HHMM en UTC (el folder name es para humanos — la TZ
-    // exacta no importa, lo que importa es que sea ordenable y único).
-    const now = new Date();
-    const fechaTag = now.toISOString().slice(0, 16).replace("T", "_").replace(":", "");
+    // YYYY-MM-DD_HHMM en hora ART (Argentina). Lo lee Santiago al abrir
+    // GCS Console — coherente con la regla del proyecto de NO mostrar UTC
+    // al usuario. Construido manual con Intl.DateTimeFormat porque el
+    // `toISOString()` nativo siempre devuelve UTC y Cloud Functions corre
+    // en UTC por default.
+    const ahora = new Date();
+    const fmtFecha = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const fmtHora = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const fechaTag = `${fmtFecha.format(ahora)}_${fmtHora.format(ahora).replace(":", "")}`;
     const outputUriPrefix = `gs://${bucketName}/auto-${fechaTag}`;
 
     // Mismas colecciones que scripts/backup_firestore.ps1 + VOLVO_SCORES_DIARIOS
