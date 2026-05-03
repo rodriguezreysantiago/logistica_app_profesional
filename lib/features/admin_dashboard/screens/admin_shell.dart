@@ -12,6 +12,8 @@ import '../../employees/screens/admin_personal_lista_screen.dart';
 import '../../expirations/screens/admin_vencimientos_menu_screen.dart';
 import '../../reports/screens/admin_reports_screen.dart';
 import '../../revisions/screens/admin_revisiones_screen.dart';
+import '../../eco_driving/screens/admin_descargas_pto_screen.dart';
+import '../../eco_driving/screens/admin_eco_driving_screen.dart';
 import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
 import '../../vehicles/screens/admin_mantenimiento_screen.dart';
 import '../../vehicles/screens/admin_vehiculos_lista_screen.dart';
@@ -100,6 +102,23 @@ class _AdminShellState extends State<AdminShell> {
           .where('atendida', isEqualTo: false)
           .snapshots(),
       build: () => const AdminVolvoAlertasScreen(),
+    ),
+    _ShellSection(
+      label: 'Eco-Driving',
+      icon: Icons.eco_outlined,
+      iconActive: Icons.eco,
+      // Reusamos la misma capability que Alertas Volvo: si el rol puede
+      // ver eventos del Vehicle Alerts API, también puede ver los scores
+      // agregados (misma fuente de datos, distinto endpoint).
+      requiredCapability: Capability.verAlertasVolvo,
+      build: () => const AdminEcoDrivingScreen(),
+    ),
+    _ShellSection(
+      label: 'Descargas',
+      icon: Icons.local_shipping_outlined,
+      iconActive: Icons.local_shipping,
+      requiredCapability: Capability.verAlertasVolvo,
+      build: () => const AdminDescargasPtoScreen(),
     ),
     _ShellSection(
       label: 'Personal',

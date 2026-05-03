@@ -18,6 +18,8 @@ import '../features/expirations/screens/user_mis_vencimientos_screen.dart';
 import '../features/admin_dashboard/screens/admin_shell.dart';
 import '../features/admin_dashboard/screens/admin_estado_bot_screen.dart';
 import '../features/admin_dashboard/screens/admin_volvo_alertas_screen.dart';
+import '../features/eco_driving/screens/admin_descargas_pto_screen.dart';
+import '../features/eco_driving/screens/admin_eco_driving_screen.dart';
 import '../features/employees/screens/admin_personal_lista_screen.dart';
 import '../features/vehicles/screens/admin_vehiculos_lista_screen.dart';
 import '../features/vehicles/screens/admin_mantenimiento_screen.dart';
@@ -210,6 +212,26 @@ class AppRouter {
       case AppRoutes.adminVolvoAlertas:
         return _buildRoute(
           _protegerAdmin(const AdminVolvoAlertasScreen()),
+          settings,
+        );
+
+      // ================= ECO-DRIVING =================
+      // Resumen + ranking + drilldown de scores diarios de la Volvo Group
+      // Scores API. Populado por `volvoScoresPoller` 1x por día (04:00 ART).
+      case AppRoutes.adminEcoDriving:
+        return _buildRoute(
+          _protegerAdmin(const AdminEcoDrivingScreen()),
+          settings,
+        );
+
+      // ================= DESCARGAS (PTO) =================
+      // Lista de eventos PTO (toma de fuerza) del Vehicle Alerts API. En
+      // la flota Coopertrans = batea levantada para descargar carga.
+      // Útil para anti-fraude, productividad por chofer y planeamiento
+      // de viajes futuro.
+      case AppRoutes.adminDescargasPto:
+        return _buildRoute(
+          _protegerAdmin(const AdminDescargasPtoScreen()),
           settings,
         );
 

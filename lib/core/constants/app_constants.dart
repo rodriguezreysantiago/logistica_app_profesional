@@ -19,6 +19,8 @@ class AppRoutes {
   static const String adminReportes = '/admin_reportes';
   static const String adminMantenimiento = '/admin_mantenimiento';
   static const String adminVolvoAlertas = '/admin_volvo_alertas';
+  static const String adminEcoDriving = '/admin_eco_driving';
+  static const String adminDescargasPto = '/admin_descargas_pto';
   static const String syncDashboard = '/sync_dashboard';
   static const String adminEstadoBot = '/admin_estado_bot';
 
@@ -68,6 +70,14 @@ class AppCollections {
   /// veces rotó después. Único punto de escritura:
   /// `AsignacionVehiculoService`.
   static const String asignacionesVehiculo = 'ASIGNACIONES_VEHICULO';
+
+  /// Scores diarios de eco-driving (Volvo Group Scores API v2.0.2).
+  /// La popula la scheduled function `volvoScoresPoller` (1x por día
+  /// a las 04:00 ART). DocId: `{patente}_{YYYY-MM-DD}` para vehículos,
+  /// `_FLEET_{YYYY-MM-DD}` para el agregado de flota. Cada doc tiene
+  /// score total 0-100 + 17+ sub-scores (anticipation, braking, idling,
+  /// etc.) + métricas operativas crudas (km, combustible, CO2).
+  static const String volvoScoresDiarios = 'VOLVO_SCORES_DIARIOS';
 }
 
 class AppRoles {

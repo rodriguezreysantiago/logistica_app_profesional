@@ -296,6 +296,24 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // VOLVO_SCORES_DIARIOS — scores de eco-driving (Volvo Group Scores API)
+    // ========================================================================
+    // La scheduled function `volvoScoresPoller` corre 1x por día a las 04:00
+    // ART y popula esta colección con el score AGREGADO POR DÍA de cada
+    // vehículo (docId `{patente}_{YYYY-MM-DD}`) y el de la flota completa
+    // (docId `_FLEET_{YYYY-MM-DD}`).
+    //
+    // Sin campos de gestión humana — son métricas calculadas por Volvo.
+    // Idempotente: si el poller corre dos veces el mismo día, sobrescribe
+    // los mismos campos sin pérdida.
+
+    match /VOLVO_SCORES_DIARIOS/{doc} {
+      allow read: if isAdminOrSupervisor();
+      // Escritura: solo desde el poller via Admin SDK (bypass de rules).
+      allow write: if false;
+    }
+
+    // ========================================================================
     // META — estado interno de los pollers (cursor, etc.)
     // ========================================================================
     // Subcolección de docs internos del server (cursor del poller Volvo

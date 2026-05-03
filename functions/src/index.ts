@@ -1992,3 +1992,276 @@ function _formatHoraArg(millis: number): string {
   });
   return fmt.format(new Date(millis));
 }
+
+// ============================================================================
+// volvoScoresPoller — eco-driving (Volvo Group Scores API v2.0.2)
+// ============================================================================
+// Scheduled function que cada día a las 04:00 ART pollea la Volvo Group
+// Scores API (`/score/scores`) con `starttime=ayer&stoptime=ayer` y persiste
+// el score AGREGADO POR DÍA de cada vehículo + el de la flota.
+//
+// A diferencia de `volvoAlertasPoller` (eventos discretos en tiempo real),
+// la Scores API devuelve un AGREGADO DIARIO precalculado por Volvo:
+//   - 1 score "total" 0-100 por vehículo o flota.
+//   - 17+ sub-scores (anticipation, braking, coasting, idling, overspeed,
+//     cruiseControl, etc.) — el algoritmo es propietario de Volvo.
+//   - Métricas operativas crudas (totalDistance, avgFuelConsumption,
+//     totalTime, vehicleUtilization, co2Emissions).
+//
+// Por qué a las 04:00 ART:
+//   La API espera que el día calendario haya cerrado y los datos hayan
+//   llegado a la nube de Volvo. 04:00 da margen para que telemetría
+//   rezagada del día anterior ya esté procesada del lado de Volvo.
+//
+// Idempotencia:
+//   - DocId composite `{patente}_{YYYY-MM-DD}` para vehículos y
+//     `_FLEET_{YYYY-MM-DD}` para el agregado de flota.
+//   - Si la function corre dos veces el mismo día (retry, manual run),
+//     mismo docId → sobrescribe. Sin campos de gestión humana acá, es
+//     seguro sobrescribir.
+
+const ACCEPT_SCORES =
+  "application/x.volvogroup.com.scores.v2.0+json; UTF-8";
+
+interface ScoresApiVehicleScore extends Record<string, unknown> {
+  vin: string;
+  scores?: Record<string, number>;
+  totalTime?: number;
+  avgSpeedDriving?: number;
+  totalDistance?: number;
+  avgFuelConsumption?: number;
+  avgFuelConsumptionGaseous?: number;
+  avgElectricEnergyConsumption?: number;
+  vehicleUtilization?: number;
+  co2Emissions?: number;
+  co2Saved?: number;
+}
+
+interface ScoresApiFleetScore extends Record<string, unknown> {
+  scores?: Record<string, number>;
+  totalTime?: number;
+  avgSpeedDriving?: number;
+  totalDistance?: number;
+  avgFuelConsumption?: number;
+  avgFuelConsumptionGaseous?: number;
+  avgElectricEnergyConsumption?: number;
+  vehicleUtilization?: number;
+  co2Emissions?: number;
+  co2Saved?: number;
+}
+
+interface ScoresApiResponse {
+  vuScoreResponse?: {
+    startTime?: string;
+    stopTime?: string;
+    fleet?: ScoresApiFleetScore;
+    vehicles?: ScoresApiVehicleScore[];
+    moreDataAvailable?: boolean;
+    moreDataAvailableLink?: string;
+  };
+}
+
+const SCORES_MAX_PAGES_PER_RUN = 10;
+
+export const volvoScoresPoller = onSchedule(
+  {
+    schedule: "0 4 * * *",
+    timeZone: "America/Argentina/Buenos_Aires",
+    secrets: [volvoUsername, volvoPassword],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async () => {
+    // Calculamos "ayer" en ART. La API espera fechas YYYY-MM-DD en TZ
+    // de la flota. Ejemplo: corre el 2026-05-03 04:00 ART → pedimos
+    // los scores del día 2026-05-02 (cerrado).
+    const fechaYmd = _ayerYmdArg();
+
+    logger.info("[volvoScoresPoller] iniciando ciclo", { fecha: fechaYmd });
+
+    // Cross-ref VIN → patente. Mismo patrón que volvoAlertasPoller.
+    const vehiculosSnap = await db.collection("VEHICULOS").get();
+    const vinToPatente = new Map<string, string>();
+    for (const doc of vehiculosSnap.docs) {
+      const data = doc.data();
+      const vin = (data.VIN ?? "").toString().trim().toUpperCase();
+      if (vin && vin !== "-") {
+        vinToPatente.set(vin, doc.id);
+      }
+    }
+
+    const authHeader = "Basic " + Buffer.from(
+      `${volvoUsername.value()}:${volvoPassword.value()}`
+    ).toString("base64");
+
+    const qsInicial = new URLSearchParams({
+      starttime: fechaYmd,
+      stoptime: fechaYmd,
+      contentFilter: "FLEET,VEHICLES",
+    });
+    let url = `${VOLVO_BASE}/score/scores?${qsInicial.toString()}`;
+
+    const fechaTs = Timestamp.fromDate(_inicioDelDiaArg(fechaYmd));
+    let totalEscritos = 0;
+    let pages = 0;
+    let fleetEscrita = false;
+
+    while (pages < SCORES_MAX_PAGES_PER_RUN) {
+      pages++;
+
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "GET",
+          headers: { Authorization: authHeader, Accept: ACCEPT_SCORES },
+        });
+      } catch (e) {
+        logger.error("[volvoScoresPoller] fetch falló", {
+          page: pages,
+          error: (e as Error).message,
+        });
+        return;
+      }
+
+      if (!res.ok) {
+        logger.warn("[volvoScoresPoller] Volvo HTTP error", {
+          statusCode: res.status,
+          page: pages,
+        });
+        return;
+      }
+
+      const body = (await res.json()) as ScoresApiResponse;
+      const response = body.vuScoreResponse ?? {};
+
+      // Persistir el score de la FLOTA (solo en la primera página, no
+      // se repite en páginas siguientes según el spec).
+      if (!fleetEscrita && response.fleet) {
+        await db
+          .collection("VOLVO_SCORES_DIARIOS")
+          .doc(`_FLEET_${fechaYmd}`)
+          .set(
+            {
+              ...buildScoreFleetDoc(response.fleet, fechaYmd, fechaTs),
+              polled_en: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        fleetEscrita = true;
+        totalEscritos++;
+      }
+
+      // Persistir scores por vehículo en batch.
+      const vehicles = Array.isArray(response.vehicles) ? response.vehicles : [];
+      if (vehicles.length > 0) {
+        const batch = db.batch();
+        let escritosEstePage = 0;
+        for (const v of vehicles) {
+          const vin = (v.vin ?? "").toString().trim().toUpperCase();
+          if (!vin) continue;
+          const patente = vinToPatente.get(vin) || vin;
+          const docId = `${patente}_${fechaYmd}`;
+          const ref = db.collection("VOLVO_SCORES_DIARIOS").doc(docId);
+          batch.set(
+            ref,
+            {
+              ...buildScoreVehicleDoc(v, patente, fechaYmd, fechaTs),
+              polled_en: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+          escritosEstePage++;
+        }
+        if (escritosEstePage > 0) {
+          await batch.commit();
+          totalEscritos += escritosEstePage;
+        }
+      }
+
+      const moreData = response.moreDataAvailable === true;
+      const moreLink = response.moreDataAvailableLink;
+      if (!moreData || !moreLink) break;
+      url = `${VOLVO_BASE}${moreLink}`;
+    }
+
+    logger.info("[volvoScoresPoller] OK", {
+      fecha: fechaYmd,
+      paginas: pages,
+      escritos: totalEscritos,
+      fleetEscrita,
+    });
+  }
+);
+
+/**
+ * Devuelve la fecha "ayer" en TZ Argentina como YYYY-MM-DD.
+ * Independiente del runtime (Cloud Functions corre en UTC).
+ */
+function _ayerYmdArg(): string {
+  const ahora = new Date();
+  const ymdHoy = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(ahora);
+  // Construimos hoy ART y restamos 1 día.
+  const hoyArg = new Date(`${ymdHoy}T00:00:00-03:00`);
+  const ayer = new Date(hoyArg.getTime() - 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(ayer);
+}
+
+function _inicioDelDiaArg(ymd: string): Date {
+  return new Date(`${ymd}T00:00:00-03:00`);
+}
+
+function buildScoreVehicleDoc(
+  v: ScoresApiVehicleScore,
+  patente: string,
+  fechaYmd: string,
+  fechaTs: Timestamp
+): Record<string, unknown> {
+  return {
+    vin: (v.vin ?? "").toString().trim().toUpperCase(),
+    patente,
+    fecha: fechaYmd,
+    fecha_ts: fechaTs,
+    scores: v.scores ?? {},
+    totalTime: v.totalTime ?? null,
+    avgSpeedDriving: v.avgSpeedDriving ?? null,
+    totalDistance: v.totalDistance ?? null,
+    avgFuelConsumption: v.avgFuelConsumption ?? null,
+    avgFuelConsumptionGaseous: v.avgFuelConsumptionGaseous ?? null,
+    avgElectricEnergyConsumption: v.avgElectricEnergyConsumption ?? null,
+    vehicleUtilization: v.vehicleUtilization ?? null,
+    co2Emissions: v.co2Emissions ?? null,
+    co2Saved: v.co2Saved ?? null,
+  };
+}
+
+function buildScoreFleetDoc(
+  f: ScoresApiFleetScore,
+  fechaYmd: string,
+  fechaTs: Timestamp
+): Record<string, unknown> {
+  return {
+    es_fleet: true,
+    fecha: fechaYmd,
+    fecha_ts: fechaTs,
+    scores: f.scores ?? {},
+    totalTime: f.totalTime ?? null,
+    avgSpeedDriving: f.avgSpeedDriving ?? null,
+    totalDistance: f.totalDistance ?? null,
+    avgFuelConsumption: f.avgFuelConsumption ?? null,
+    avgFuelConsumptionGaseous: f.avgFuelConsumptionGaseous ?? null,
+    avgElectricEnergyConsumption: f.avgElectricEnergyConsumption ?? null,
+    vehicleUtilization: f.vehicleUtilization ?? null,
+    co2Emissions: f.co2Emissions ?? null,
+    co2Saved: f.co2Saved ?? null,
+  };
+}
