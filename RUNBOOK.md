@@ -326,67 +326,90 @@ No hay rollback automático para mobile/desktop builds — el usuario tiene que 
 
 Hay dos backups críticos: **Firestore** (datos del negocio) y **`.wwebjs_auth/`** (sesión WhatsApp del bot). Los scripts ya están en el repo; falta programarlos.
 
-### Backup Firestore (`scripts/backup_firestore.ps1`)
+### Backup Firestore — automático cloud-side (`backupFirestoreScheduled`)
 
-**Setup one-time** (hacé esto solo una vez):
+Desde 2026-05-03 el backup corre **en la nube**, sin depender de ninguna PC. Es la Cloud Function `backupFirestoreScheduled` (en `functions/src/index.ts`) con trigger `onSchedule` semanal:
+
+- **Frecuencia**: domingos 06:00 ART (poco tráfico).
+- **Output**: `gs://coopertrans-movil-backups/auto-{YYYY-MM-DD}_{HHMM}/` con todas las colecciones operativas (16 colecciones — ver lista en el código).
+- **Retención**: 30 días, gestionada por Object Lifecycle del bucket (sin código).
+
+**Setup operativo (one-time — hacé esto la primera vez)**:
 
 ```powershell
-# 1. Instalar gcloud CLI si no lo tenés:
-#    https://cloud.google.com/sdk/docs/install
-
-# 2. Login y proyecto activo:
+# 1. gcloud CLI logueado y proyecto activo:
 gcloud auth login
 gcloud config set project coopertrans-movil
 
-# 3. Crear el bucket de backups (region SA = menor latencia desde AR):
+# 2. Crear bucket si no existe (región SA = menor latencia desde AR):
 gcloud storage buckets create gs://coopertrans-movil-backups `
   --project=coopertrans-movil `
   --location=southamerica-east1 `
   --uniform-bucket-level-access
 
-# 4. Probar el script una vez manual:
-.\scripts\backup_firestore.ps1
-# Si OK, debería decir "Backup OK: gs://coopertrans-movil-backups/2026-..."
+# 3. IAM grants para la SA de Cloud Functions Gen2 (compute SA del proyecto):
+gcloud projects add-iam-policy-binding coopertrans-movil `
+  --member="serviceAccount:808925655961-compute@developer.gserviceaccount.com" `
+  --role="roles/datastore.importExportAdmin"
+
+gcloud storage buckets add-iam-policy-binding gs://coopertrans-movil-backups `
+  --member="serviceAccount:808925655961-compute@developer.gserviceaccount.com" `
+  --role="roles/storage.objectAdmin"
+
+# 4. Lifecycle de retención 30 días (gestionado por GCP, gratis):
+'{"lifecycle":{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}}' | Out-File -Encoding ascii lc.json
+gcloud storage buckets update gs://coopertrans-movil-backups --lifecycle-file=lc.json
+Remove-Item lc.json
+
+# 5. Deploy de la function:
+firebase deploy --only functions:backupFirestoreScheduled
 ```
 
-**Programar** (recomendado: Cloud Scheduler en GCP — corre aunque la PC esté apagada):
+**Verificar que el primer run anduvo** (se ejecuta el primer domingo después del deploy, o lo podés disparar manualmente):
 
 ```powershell
-# Crear job de Cloud Scheduler que invoque el export diariamente a las 03:00 ART:
-gcloud scheduler jobs create http firestore-backup-diario `
-  --location=southamerica-east1 `
-  --schedule="0 3 * * *" `
-  --time-zone="America/Argentina/Buenos_Aires" `
-  --uri="https://firestore.googleapis.com/v1/projects/coopertrans-movil/databases/(default):exportDocuments" `
-  --http-method=POST `
-  --oauth-service-account-email=<service-account-email> `
-  --message-body='{"outputUriPrefix":"gs://coopertrans-movil-backups"}'
+# Disparar manualmente (en lugar de esperar al domingo):
+gcloud scheduler jobs run firebase-schedule-backupFirestoreScheduled-southamerica-east1 `
+  --location=southamerica-east1
+
+# Ver el log de la function:
+firebase functions:log --only backupFirestoreScheduled --lines 30
+
+# Ver exports en el bucket (debería aparecer la carpeta auto-YYYY-MM-DD_HHMM):
+gcloud storage ls gs://coopertrans-movil-backups
 ```
 
-(El `<service-account-email>` lo sacás de Firebase Console → Project Settings → Service accounts. Permisos requeridos: `Cloud Datastore Import Export Admin`.)
-
-**Alternativa más simple** si Cloud Scheduler te complica: programar el `.ps1` con Task Scheduler de Windows en la PC casa (ver siguiente sección, mismo patrón).
+**Fallback manual**: el script viejo `scripts/backup_firestore.ps1` sigue en el repo como respaldo si querés disparar un export adicional desde tu PC (ej. antes de un cambio riesgoso). NO lo programes con Task Scheduler — la function cloud ya cubre el backup periódico.
 
 **Costo**: ~3 centavos USD/mes para una flota chica. El export en sí es gratis; solo paga storage en GCS.
 
-#### Retención automática del bucket (lifecycle policy)
+### Restaurar Firestore desde backup (disaster recovery)
 
-Sin lifecycle, los exports se acumulan para siempre. La regla en `scripts/lifecycle_backups.json` borra automáticamente exports con más de **30 días**, excluyendo el snapshot `pre-migration-2026-05-01_2259/` (salvaguarda histórica que NO debe borrarse).
+Si pasa lo peor (un admin borra docs por error, una migración corrompe data, ataque, etc.):
 
-Aplicar la policy (idempotente — se puede correr varias veces):
-
-```powershell
-gcloud storage buckets update gs://coopertrans-movil-backups `
-  --lifecycle-file=scripts/lifecycle_backups.json
-```
-
-Verificar:
+**Paso 1 — Identificar qué export usar**:
 
 ```powershell
-gcloud storage buckets describe gs://coopertrans-movil-backups --format="value(lifecycle)"
+gcloud storage ls gs://coopertrans-movil-backups
+# Ver carpetas tipo `auto-YYYY-MM-DD_HHMM` (semanales) y
+# `pre-migration-2026-05-01_2259` (snapshot histórico).
+# Elegí el más reciente ANTES del incidente.
 ```
 
-Si en el futuro querés cambiar la retención, editás `scripts/lifecycle_backups.json` (campo `condition.age`) y volvés a aplicar el mismo comando — sobrescribe la policy actual.
+**Paso 2 — Restaurar UNA colección específica** (recomendado — minimiza blast radius):
+
+```powershell
+# Ejemplo: restaurar solo EMPLEADOS desde el backup del 5-mayo.
+# El import SOBRESCRIBE los docs existentes con el mismo ID — ojo
+# con perder cambios hechos después del backup.
+gcloud firestore import gs://coopertrans-movil-backups/auto-2026-05-05_0600 `
+  --collection-ids=EMPLEADOS `
+  --project=coopertrans-movil
+```
+
+**Paso 3 — Verificar en Firestore Console** que la colección quedó como esperabas. Solo después de eso seguir con otras colecciones si hace falta.
+
+> **Nunca restaurar TODAS las colecciones a la vez sin pensarlo dos veces** — eso te lleva al estado del backup completo, perdiendo cualquier cambio operativo posterior. Restaurar siempre la colección mínima necesaria.
 
 ### Backup `.wwebjs_auth/` (`whatsapp-bot/scripts/backup_wwebjs_auth.ps1`)
 

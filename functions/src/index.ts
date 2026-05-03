@@ -29,6 +29,7 @@ import {
   Firestore,
   Transaction,
 } from "firebase-admin/firestore";
+import { v1 as firestoreAdminV1 } from "@google-cloud/firestore";
 import * as bcrypt from "bcryptjs";
 import * as crypto from "crypto";
 
@@ -2450,6 +2451,121 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
       });
       // No re-throw: si el encolado falla, queda registro en log y la
       // alerta sigue visible en el tablero "Alertas Volvo" del admin.
+    }
+  }
+);
+
+// ============================================================================
+// backupFirestoreScheduled — backup automático semanal de Firestore
+// ============================================================================
+//
+// Reemplazo cloud-side del script `scripts/backup_firestore.ps1` que era
+// PC-bound (requería que Santiago ejecutara desde su Windows). Esta
+// function corre en GCP, así que NO depende de ninguna PC encendida —
+// mitiga el bus factor (riesgo #1 del proyecto).
+//
+// Schedule: domingos 06:00 ART (poco tráfico operativo). Frecuencia
+// semanal alcanza para el tipo de uso de Vecchi (la flota se opera de
+// L-V; los vencimientos cambian poco entre semanas). Si en el futuro se
+// quiere diario, cambiar `schedule` por "0 6 * * *".
+//
+// Output: cada run crea un export en
+// `gs://coopertrans-movil-backups/auto-{YYYY-MM-DD}_{HHMM}/` con todas
+// las colecciones operativas (mismas que el script ps1 + VOLVO_SCORES_DIARIOS
+// que se sumó después).
+//
+// Retención: NO se gestiona desde código — se setea Object Lifecycle del
+// bucket vía gcloud (ver RUNBOOK sección "Backup automático"). Borra
+// automáticamente exports > 30 días, gestionado por GCP, gratis.
+//
+// Setup operativo (one-time, vos lo corrés):
+//   1. Crear bucket si no existe:
+//      gcloud storage buckets create gs://coopertrans-movil-backups \
+//        --project=coopertrans-movil --location=southamerica-east1 \
+//        --uniform-bucket-level-access
+//   2. IAM grants para la SA de Functions Gen2 (compute SA del proyecto):
+//      gcloud projects add-iam-policy-binding coopertrans-movil \
+//        --member="serviceAccount:808925655961-compute@developer.gserviceaccount.com" \
+//        --role="roles/datastore.importExportAdmin"
+//      gcloud storage buckets add-iam-policy-binding gs://coopertrans-movil-backups \
+//        --member="serviceAccount:808925655961-compute@developer.gserviceaccount.com" \
+//        --role="roles/storage.objectAdmin"
+//   3. Lifecycle de retención (30 días) — ver comando completo en RUNBOOK
+//      sección "Backup automático Firestore".
+//   4. Deploy: firebase deploy --only functions:backupFirestoreScheduled
+//
+// Restauración (cuando un day pasa lo peor): ver RUNBOOK sección
+// "Disaster recovery — restaurar Firestore desde backup".
+export const backupFirestoreScheduled = onSchedule(
+  {
+    schedule: "0 6 * * 0",
+    timeZone: "America/Argentina/Buenos_Aires",
+    timeoutSeconds: 540,
+    memory: "256MiB",
+  },
+  async () => {
+    const projectId = process.env.GCLOUD_PROJECT || "coopertrans-movil";
+    const bucketName = "coopertrans-movil-backups";
+
+    // YYYY-MM-DD_HHMM en UTC (el folder name es para humanos — la TZ
+    // exacta no importa, lo que importa es que sea ordenable y único).
+    const now = new Date();
+    const fechaTag = now.toISOString().slice(0, 16).replace("T", "_").replace(":", "");
+    const outputUriPrefix = `gs://${bucketName}/auto-${fechaTag}`;
+
+    // Mismas colecciones que scripts/backup_firestore.ps1 + VOLVO_SCORES_DIARIOS
+    // que se sumó después de ese script. Si se agrega una colección nueva
+    // operativa, sumarla acá Y al script ps1 (legacy de respaldo manual).
+    const collectionIds = [
+      "EMPLEADOS",
+      "VEHICULOS",
+      "REVISIONES",
+      "CHECKLISTS",
+      "COLA_WHATSAPP",
+      "AVISOS_AUTOMATICOS_HISTORICO",
+      "RESPUESTAS_BOT_AMBIGUAS",
+      "AUDITORIA_ACCIONES",
+      "TELEMETRIA_HISTORICO",
+      "MANTENIMIENTOS_AVISADOS",
+      "BOT_HEALTH",
+      "BOT_CONTROL",
+      "LOGIN_ATTEMPTS",
+      "ASIGNACIONES_VEHICULO",
+      "VOLVO_ALERTAS",
+      "VOLVO_SCORES_DIARIOS",
+      "META",
+    ];
+
+    logger.info("[backupFirestoreScheduled] inicio", {
+      outputUriPrefix,
+      collectionIds,
+    });
+
+    const adminClient = new firestoreAdminV1.FirestoreAdminClient();
+    const databaseName = adminClient.databasePath(projectId, "(default)");
+
+    try {
+      const [operation] = await adminClient.exportDocuments({
+        name: databaseName,
+        outputUriPrefix,
+        collectionIds,
+      });
+      // exportDocuments devuelve una long-running operation: el export
+      // real corre en background en GCP. La function termina apenas se
+      // recibe el handle (no esperamos a que termine — sería tirar plata
+      // de Cloud Functions). El estado final queda visible en:
+      //   gcloud firestore operations list --project=coopertrans-movil
+      logger.info("[backupFirestoreScheduled] export iniciado en background", {
+        operationName: operation.name,
+      });
+    } catch (err) {
+      logger.error("[backupFirestoreScheduled] export FALLÓ", {
+        error: (err as Error).message,
+        stack: (err as Error).stack,
+      });
+      // Re-throw para que GCP marque el run como FAILED. Cloud Monitoring
+      // lo ve como error rate up, podés enganchar una alerta si querés.
+      throw err;
     }
   }
 );
