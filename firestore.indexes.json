@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "VOLVO_SCORES_DIARIOS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "es_fleet", "order": "ASCENDING" },
+        { "fieldPath": "fecha_ts", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "VOLVO_SCORES_DIARIOS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "patente", "order": "ASCENDING" },
+        { "fieldPath": "fecha_ts", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
