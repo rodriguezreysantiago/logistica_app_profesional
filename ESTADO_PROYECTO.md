@@ -634,6 +634,205 @@ Confusión de Santiago al ver "958 km en un mes" en el reporte: el cron `telemet
 | `504274e` | ux(reportes/consumo/ranking): columna 'MARCA / MODELO' → 'MODELO' (sin marca) |
 | `85e0d55` | feat(reportes): rediseño completo de Flota + Checklist + util compartido |
 
+### 6.14 Sesión 2-mayo 2026 (madrugada) — Roadmap Volvo Alerts COMPLETO + 3 capas de upgrades + DR + filtros de roles
+
+Sesión maratónica de cierre del roadmap Volvo Alerts (Fases 3, 4 y 5) + features estructurales + upgrade integral del stack + disaster recovery automatizado. Cuando arrancó el día solo estaban Fases 1-2 vivas; al final, las 8 sub-fases en producción + UI completa.
+
+#### 6.14.1 Sistema histórico chofer↔vehículo (commit `9a74621`)
+
+Nueva colección `ASIGNACIONES_VEHICULO` con timeline inmutable de quién manejó qué patente cuándo. Resuelve casos de uso reales:
+- Multas tardías (llega multa de hace 6 meses → se sabe quién manejaba ese día).
+- Atribución de eventos Volvo del pasado (no atribuir a "chofer actual").
+- Disputas (sin log, palabra contra palabra).
+- Base para módulo de planeamiento de viajes futuro.
+
+Implementación:
+- Modelo `AsignacionVehiculo` (`lib/features/asignaciones/models/`).
+- Servicio centralizado `AsignacionVehiculoService` con `cambiarAsignacion()` transactional + `obtenerChoferEnFecha(vehiculoId, fecha)` + streams para UI.
+- Reglas Firestore: read admin/supervisor, create/update validados, delete prohibido (append-only).
+- 9 unit tests del modelo (parsing + esActiva + diasDuracion).
+- Reemplazos: `EmpleadoActions.unidad()` (ficha personal) y `RevisionService.finalizarRevision()` (aprobación de cambio de unidad) ahora pasan por el servicio.
+- Pantalla "Historial de asignaciones" en la ficha del vehículo.
+- **`volvoAlertasPoller` actualizado**: cuando crea un doc en `VOLVO_ALERTAS`, hace lookup contra el log y snapshotea `chofer_dni` + `chofer_nombre` en el evento. Eso da atribución inmutable al chofer del momento, sin necesidad de tarjeta del tachógrafo.
+- Migración inicial one-shot `scripts/migrar_asignaciones_iniciales.js` → 54 docs sembrados desde `EMPLEADOS.VEHICULO`.
+- Bonus: arreglado un mini-bug pre-existente donde dos choferes podían apuntar a la misma patente.
+
+#### 6.14.2 "Solo CHOFER cuenta como conductor" (commit `a52948d`)
+
+Regla operativa nueva: admins/supervisores/planta NO manejan, NO deben aparecer en cálculos de manejo, reportes de flota, rankings, ni notificaciones automáticas. Defensa en 3 capas:
+
+1. **PREVENTIVO** — `AsignacionVehiculoService` rechaza con `StateError` si el empleado destino no es `ROL == CHOFER`. Lee `EMPLEADOS` antes de la transaction. Desvincular siempre se permite (para limpiar datos sucios anteriores).
+2. **DEFENSIVO Flutter** (filtros in-memory por `AppRoles.tieneVehiculo`):
+   - `admin_panel_screen.dart`: KPIs "choferes activos" y "vencimientos próximos" ignoran no-choferes (antes contaba 57, ahora 54).
+   - `admin_vencimientos_choferes_screen.dart` y `admin_vencimientos_calendario_screen.dart`: filtran no-choferes.
+3. **DEFENSIVO Bot Node** (filtros en `whatsapp-bot/src/`):
+   - `cron.js`: el cron de vencimientos ya no carga admins en `empleadosByDni` ni los mapea como dueños de patentes. Resultado: cero WhatsApps a no-choferes.
+   - `message_handler.js`: cache de `_resolverChofer` (matching teléfono → empleado) ahora solo guarda choferes. Si un admin escribe al bot, no se "asocia" como respuesta de chofer.
+
+Auditoría completa de queries a `EMPLEADOS` con agente paralelo. Los hits restantes son legítimos (ficha individual, perfil propio, gestión administrativa que SÍ debe ver TODOS).
+
+Script de limpieza `scripts/limpiar_admins_del_log.js`: para cada empleado con `ROL != CHOFER` y `VEHICULO != '-'`, borra sus docs de `ASIGNACIONES_VEHICULO`, setea `EMPLEADOS.VEHICULO = '-'` y libera `VEHICULOS.ESTADO`. Ya corrido en producción — limpió la asignación de SANTIAGO→AI162YT que la migración inicial había sembrado por error.
+
+#### 6.14.3 Cleanup post-migración (commit `d42eb6f`)
+
+Cierre de tareas pendientes desde la migración del proyecto a `coopertrans-movil`:
+- `scripts/backup_firestore.ps1`: actualizado a `--project=coopertrans-movil` + `gs://coopertrans-movil-backups`. Sumadas 4 colecciones nuevas al export (ASIGNACIONES_VEHICULO, VOLVO_ALERTAS, META, CHECKLISTS) → 16 colecciones totales.
+- `RUNBOOK.md`: 8 menciones a `logisticaapp-e539a` reemplazadas.
+- `ESTADO_PROYECTO.md` y `scripts/migrar_roles.js`: idem.
+- Sweep final: cero referencias a `logisticaapp-e539a` / `logisticaapp-backups` en *.md, *.ps1, *.dart, *.ts, *.js, *.json del repo.
+
+#### 6.14.4 Capa 1 — `firebase-functions 7` + `@typescript-eslint 8` (commit `9ad0c66`)
+
+Silencia los 2 warnings que aparecían en cada `firebase deploy`:
+1. "package.json indicates an outdated version of firebase-functions"
+2. "WARNING: TypeScript 5.9.3 not officially supported by @typescript-eslint"
+
+Bumps:
+- `firebase-functions` ^6.0.1 → ^7.2.5 (mayor)
+- `@typescript-eslint/parser` ^7.0.0 → ^8.59.1
+- `@typescript-eslint/eslint-plugin` ^7.0.0 → ^8.59.1
+
+**Cero líneas de código modificadas** — la API pública de v7 es retrocompat con v6 en todo lo que usamos (`defineSecret`, `onSchedule`, `onDocumentCreated`, `onCall`, `HttpsError`, `logger`, `setGlobalOptions`).
+
+#### 6.14.5 Backup automático Firestore — Cloud Scheduler diario + lifecycle (commit `3897239`)
+
+Mejora estructural del bus factor:
+- **Cloud Scheduler** `firestore-backup-diario` ya estaba activo (descubierto durante la sesión) — corre todos los días a las 03:00 ART, llama al endpoint REST de Firestore export hacia `gs://coopertrans-movil-backups`. Independiente de qué PC esté prendida.
+- **Lifecycle policy nueva** del bucket: borra exports >30 días automáticamente. `matchesPrefix` con años (2026-, 2027-, ...) excluye el snapshot `pre-migration-2026-05-01_2259/` (salvaguarda histórica).
+- Archivo versionado en repo: `scripts/lifecycle_backups.json`.
+- Documentación en `RUNBOOK.md` sección "Backup Firestore → Retención automática".
+- Costo: ~3 centavos USD/mes.
+
+#### 6.14.6 Capa 2 — Flutter ecosystem completo (commits `c46dacd` + `649a7e5` + `59e4704`)
+
+Upgrade ordenado en 3 etapas validadas con analyzer + tests entre cada una.
+
+**Etapa 🟢 patches** (cero código tocado): `cupertino_icons` 1.0.8→1.0.9, `image_picker` 1.1.2→1.2.2, `google_mlkit_text_recognition` 0.13.1→0.15.1.
+
+**Etapa 🟡 Firebase ecosystem** (cero código tocado, API retrocompat): `firebase_core` 3→4, `cloud_firestore` 5→6, `firebase_auth` 5→6, `firebase_storage` 12→13, `firebase_crashlytics` 4→5.
+
+**Etapa 🔴 UI plugins** (con breaking changes que requirieron fixes):
+- `file_picker` 8→11: `FilePicker.platform.pickFiles(...)` → `FilePicker.pickFiles(...)`. 5 sitios fixeados.
+- `share_plus` 7→12 (NO 13 por conflicto win32): `Share.shareXFiles(...)` → `SharePlus.instance.share(ShareParams(...))`. 3 sitios.
+- `flutter_local_notifications` 17→21: TODA la API pasó a named params (initialize, show, zonedSchedule). Removido `uiLocalNotificationDateInterpretation`. 1 archivo (`notification_service.dart`).
+- `flutter_secure_storage` 9→10: el flag `encryptedSharedPreferences` está deprecado (Jetpack Security en sunset). Constructor sin parámetros — el plugin migra automático.
+- `timezone` 0.9→0.11.
+
+Bonus side effects positivos: el package `js` (discontinued upstream) ya no aparece como dep, `flutter_secure_storage_macos` sale del lock.
+
+**Hotfix 1** (commit `649a7e5`): `firebase_storage 13.1.0+` rompe el build Windows con `error C2039: "UseEmulator"`. PR flutterfire #18030 introdujo una llamada a un método del firebase-cpp-sdk que SOLO existe en main, no en releases publicadas. Versiones rotas: 13.1.0, 13.2.0, 13.3.0. Pin EXACT a `13.0.4` (sin caret) — última versión Windows-safe, compatible con `firebase_core 4.5.0`. Trade-off: perdemos `useStorageEmulator()` en Windows (que tampoco funciona en 13.1+, es no-op real). Memoria nueva `feedback_firebase_storage_windows_pin.md` para no caer de nuevo.
+
+**Hotfix 2** (commit `59e4704`): `flutter_local_notifications 21` ahora EXIGE `WindowsInitializationSettings` cuando target incluye Windows desktop. Sin él, `initialize()` tira `Invalid argument(s): Windows settings must be set when targeting Windows platform` y la app crashea silenciosamente en release mode (subsystem windowed se traga la excepción). Configurado: appName "Coopertrans Móvil", appUserModelId "Coopertrans.Movil.Logistica", guid estable.
+
+#### 6.14.7 Capa 3 — Bot WhatsApp deps (commits `52534c5` + `f79c8a5`)
+
+Resultó mucho más liviana de lo previsto: las deps realmente delicadas (`whatsapp-web.js 1.34.7` + `puppeteer 24.38.0`) ya estaban al día. Solo bumps de SDK estables:
+- `dotenv` ^16.4.5 → ^17.4.2
+- `firebase-admin` ^12.6.0 → ^13.8.0
+
+Cero código tocado, 54/54 tests pass.
+
+Después: silenciado el splash de dotenv 17 con `{ quiet: true }` en los 4 lugares donde se carga (`whatsapp-bot/src/index.js` + 3 scripts one-shot) — eliminado el ruido `◇ injected env (15) from .env...` de los logs operativos.
+
+#### 6.14.8 Volvo Scores API: probe + Fase 3 (Eco-Driving + Descargas) (commits `8c0a0f7`, `364755d`, `06a32f4`, `71a71f0`)
+
+**Probe** (`scripts/probar_volvo_scores_api.js`): one-shot que confirmó HTTP 200 sobre `/score/scores` — Vecchi tiene activado el pack Scores en su contrato Volvo Connect. Datos reales del 1° de mayo (feriado, 28 vehículos operaron):
+```
+total                : 77.17    decente
+anticipation         : 61.71    ⚠️ DÉBIL — choferes no leen el tráfico
+braking              : 95.96    fuerte (artefacto operativo)
+coasting             : 50       mediocre
+engineAndGearUtil.   : 89.7
+idling               : 32.57    🔴 MAL — plata tirada
+overspeed            : 71.82
+cruiseControl        : 94.55    fuerte
+```
+Operación acumulada flota: 124 mil km, 32.9 L/100km, 88.7 ton CO2, **utilización 23.34%** (valida el case del módulo de planeamiento de viajes futuro — mucha capacidad ociosa).
+
+**Fase 3a — Backend** `volvoScoresPoller`: Cloud Function programada `0 4 * * *` ART. Llama a `/score/scores?starttime=ayer&stoptime=ayer&contentFilter=FLEET,VEHICLES`. Persiste en `VOLVO_SCORES_DIARIOS` con docId composite `{patente}_{YYYY-MM-DD}` y `_FLEET_{YYYY-MM-DD}`. Idempotente, reusa secrets `VOLVO_USERNAME/PASSWORD`. Constante `AppCollections.volvoScoresDiarios`. Reglas Firestore: read admin/supervisor, write false.
+
+**Fase 3b — UI Eco-Driving**: feature `lib/features/eco_driving/`:
+- Modelo `VolvoScoreDiario` con helpers de unidades (km, L/100km, horas).
+- Servicio con 3 streams + `RankingVehiculo.desdeDocs()` que agrupa por patente y promedia.
+- Pantalla `AdminEcoDrivingScreen`: resumen flota + ranking por vehículo + filtro temporal popup.
+- Bottom sheet `score_drilldown_sheet.dart`: evolución diaria + sub-scores promediados + cruce con asignaciones históricas para mostrar quién manejó cada día.
+- Sidebar admin: sección "Eco-Driving" 🌿 con `Capability.verAlertasVolvo`.
+
+**Fase 3c — UI Descargas (PTO)** (`AdminDescargasPtoScreen`): lista de eventos `tipo == 'PTO'` con filtros (rango temporal + chip por patente in-memory). Cada card: patente + chofer (snapshot del log) + detalle del PTO + coords clickeables que abren Google Maps externo. Sidebar: sección "Descargas" 🚛.
+
+**Hotfix índices Firestore**: las queries combinan `where + orderBy` y necesitaban índices compuestos. `firestore.indexes.json` nuevo con 3 índices: `(es_fleet, fecha_ts)` + `(patente, fecha_ts)` para Scores + `(tipo, creado_en)` para PTO. Deploys con `firebase deploy --only firestore:indexes`.
+
+#### 6.14.9 Fase 4 — Mantenimiento predictivo (commits `8fa14ad` + `89eb5aa`)
+
+Trigger nuevo `onAlertaVolvoMantenimientoCreated`. Separado del de Fase 2 (responsabilidades distintas). Filtra por tipos:
+- `FUEL`, `CATALYST`
+- `GENERIC` con sub-tipo `TELL_TALE`, `ADBLUELEVEL_LOW`, `WITHOUT_ADBLUE`
+
+Encola WhatsApp en `COLA_WHATSAPP` al jefe de mantenimiento (DNI 35244439, hardcoded). Mensaje rico: patente + alerta legible + severidad con emoji semafórico + hora ART + chofer al volante (snapshot del log) + link a Maps con coords. Respeta horario hábil del bot — alerta del sábado 23:00 llega lunes 8 AM, antes de que el camión salga.
+
+Sin dedupe por (tipo, patente) en v1: con ~7 eventos de mantenimiento en 13 días reales, el volumen es muy bajo. Si aparece spam, agregar dedupe.
+
+**Test E2E validado** con `scripts/probar_alerta_mantenimiento.js`: crea doc dummy en `VOLVO_ALERTAS`, espera 8s al trigger, verifica que se encoló en `COLA_WHATSAPP`. Confirmado: trigger dispara correctamente, mensaje se forma bien.
+
+#### 6.14.10 Fase 5 — Mapa de eventos georreferenciados (commit `71207c9`)
+
+Pantalla `AdminMapaVolvoScreen` con OpenStreetMap (vía `flutter_map: ^8.3.0` + `latlong2: ^0.9.1` — pin a 0.9 porque flutter_map 8 lo requiere). Tiles públicos de OSM, sin API key, atribución incluida (TOS).
+
+Diseño:
+- Centro inicial Bahía Blanca, zoom 8.
+- Pins coloreados por severidad: rojo HIGH, amarillo MEDIUM, verde LOW, gris atendidas.
+- Filtros chips horizontales: tipo + patente (combinados in-memory).
+- Sin GPS válido → evento se descarta del mapa (cuenta en header como "X sin GPS").
+- Tap en pin → bottom sheet `EventoVolvoDetalleSheet` con detalle + botón "Marcar atendida" (mismo flow que el tablero, audit log con `origen: 'mapa'`).
+
+Sidebar admin: sección "Mapa" 🗺️ con misma capability.
+
+#### 6.14.11 Operaciones de producción ejecutadas
+
+- Rotación VOLVO_PASSWORD (versión 1 destruida en Secret Manager, 3 funciones tomaron versión 2 automático).
+- 5 deploys de Cloud Functions sin warnings.
+- Bucket `gs://coopertrans-movil-backups` + Cloud Scheduler diario 03:00 ART + lifecycle 30d.
+- 4 índices compuestos Firestore creados y `READY`.
+- Bot WhatsApp reiniciado 3 veces sin perder sesión QR.
+- App Flutter buildeada en Windows release + smoke test exitoso (login + reportes Excel + carga archivos + nuevas pantallas Eco-Driving / Descargas / Mapa).
+- Migración inicial `ASIGNACIONES_VEHICULO`: 54 docs sembrados.
+- Limpieza admins del log: borrada la asignación SANTIAGO→AI162YT (1 doc).
+- Test E2E del trigger de mantenimiento: doc dummy creado, encolado verificado, dummy borrado.
+
+#### 6.14.12 Commits del día (tercera tanda)
+| Commit | Resumen |
+|---|---|
+| `9a74621` | feat(asignaciones): log temporal chofer↔vehículo + integración con Volvo Alerts |
+| `a52948d` | feat(roles): solo CHOFER cuenta como conductor — preventivo + defensivo |
+| `d42eb6f` | chore(post-migration): completar rebrand coopertrans-movil en docs y scripts |
+| `9ad0c66` | chore(functions): upgrade firebase-functions 6→7 + @typescript-eslint 7→8 |
+| `3897239` | chore(backups): lifecycle policy del bucket — retención 30 días automática |
+| `c46dacd` | chore(deps): Capa 2 — Flutter ecosystem upgrade |
+| `649a7e5` | fix(deps): pin firebase_storage a 13.0.4 (workaround bug Windows) |
+| `59e4704` | fix(notifications): WindowsInitializationSettings requerido por flutter_local_notifications 21 |
+| `52534c5` | chore(bot): upgrade dotenv 16→17 + firebase-admin 12→13 |
+| `f79c8a5` | chore(bot): silenciar splash de dotenv 17 con quiet:true |
+| `8c0a0f7` | chore(scripts): probe one-shot Volvo Scores API |
+| `364755d` | feat(eco-driving): Fase 3 — Scores API + Eco-Driving + Descargas PTO |
+| `06a32f4` | fix(firestore): índices compuestos para queries de Eco-Driving |
+| `71a71f0` | fix(firestore): índice (tipo, creado_en) para pantalla Descargas PTO |
+| `8fa14ad` | feat(volvo): Fase 4 — onAlertaVolvoMantenimientoCreated |
+| `89eb5aa` | chore(scripts): probe end-to-end del trigger mantenimiento |
+| `71207c9` | feat(volvo): Fase 5 — Mapa de eventos georreferenciados (OpenStreetMap) |
+
+#### 6.14.13 Estado del roadmap Volvo Alerts al cierre
+
+| Fase | Implementación | Estado |
+|---|---|---|
+| 1a — Backend poller alertas (cada 5 min) | `volvoAlertasPoller` | ✅ live |
+| 1b — Tablero "Alertas" del admin | `AdminVolvoAlertasScreen` | ✅ live |
+| 2 — Notif WhatsApp HIGH al chofer | `onAlertaVolvoCreated` | ✅ live |
+| 3a — Backend Scores diario | `volvoScoresPoller` | ✅ live |
+| 3b — Pantalla Eco-Driving (resumen + ranking + drilldown) | `AdminEcoDrivingScreen` | ✅ live |
+| 3c — Pantalla Descargas (PTO) | `AdminDescargasPtoScreen` | ✅ live |
+| 4 — Mantenimiento predictivo (WhatsApp al jefe) | `onAlertaVolvoMantenimientoCreated` | ✅ live + E2E test |
+| 5 — Mapa de eventos georreferenciados | `AdminMapaVolvoScreen` | ✅ live |
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
