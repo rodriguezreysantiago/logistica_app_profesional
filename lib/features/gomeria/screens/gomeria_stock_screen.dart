@@ -81,10 +81,22 @@ class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
   }
 
   Future<void> _abrirAlta(BuildContext context) async {
-    await showDialog(
+    final messenger = ScaffoldMessenger.of(context);
+    final codigoCreado = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => _AltaCubiertaDialog(service: _service),
     );
+    // Confirmación visible cuando el alta efectivamente sucede — antes
+    // el usuario no tenía forma de saber si la creación funcionó si la
+    // lista no se actualizaba inmediatamente.
+    if (codigoCreado != null) {
+      messenger.showSnackBar(SnackBar(
+        content: Text('✓ Cubierta $codigoCreado creada.'),
+        backgroundColor: AppColors.accentGreen,
+        duration: const Duration(seconds: 3),
+      ));
+    }
   }
 }
 
@@ -231,6 +243,10 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
   CubiertaModelo? _modeloSel;
   final _obsCtrl = TextEditingController();
   bool _guardando = false;
+  // Mensaje de error visible DENTRO del dialog. Antes mostrábamos
+  // SnackBar pero quedaba tapado por el dialog y el usuario no veía
+  // qué pasaba.
+  String? _error;
 
   @override
   void dispose() {
@@ -302,6 +318,22 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
                 'El código (CUB-XXXX) se asigna automáticamente.',
                 style: TextStyle(color: Colors.white60, fontSize: 11),
               ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentRed.withValues(alpha: 0.15),
+                    border: Border.all(color: AppColors.accentRed),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(
+                        color: AppColors.accentRed, fontSize: 12),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -325,25 +357,34 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
   Future<void> _guardar() async {
     final modelo = _modeloSel;
     if (modelo == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Seleccioná un modelo.')),
-      );
+      setState(() => _error = 'Seleccioná un modelo del dropdown.');
       return;
     }
-    setState(() => _guardando = true);
+    setState(() {
+      _guardando = true;
+      _error = null;
+    });
     try {
-      await widget.service.crearCubierta(
+      final cubiertaId = await widget.service.crearCubierta(
         modeloId: modelo.id,
         supervisorDni: PrefsService.dni,
         supervisorNombre: PrefsService.nombre,
         observaciones: _obsCtrl.text.trim().isEmpty ? null : _obsCtrl.text,
       );
-      if (mounted) Navigator.pop(context);
+      // Releer la cubierta para obtener el código generado y devolverlo
+      // al caller, que muestra snackbar de confirmación.
+      final snap = await FirebaseFirestore.instance
+          .collection(AppCollections.cubiertas)
+          .doc(cubiertaId)
+          .get();
+      final codigo = snap.data()?['codigo']?.toString() ?? cubiertaId;
+      if (mounted) Navigator.pop(context, codigo);
     } catch (e) {
-      setState(() => _guardando = false);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        setState(() {
+          _guardando = false;
+          _error = 'Error al guardar: $e';
+        });
       }
     }
   }
