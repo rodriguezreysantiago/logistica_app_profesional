@@ -1,12 +1,25 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/constants/app_colors.dart';
+
 class AppTheme {
   // ===========================================================================
   // PALETA DE COLORES CENTRALIZADA (Design Tokens)
   // ===========================================================================
-  static const Color _bgColor = Color(0xFF09141F);
-  static const Color _surfaceColor = Color(0xFF132538);
-  static const Color _primaryColor = Colors.greenAccent;
+  // _bgColor / _surfaceColor coinciden con AppColors.background/surface — se
+  // dejan como aliases locales para no romper el resto del archivo.
+  static const Color _bgColor = AppColors.background;
+  static const Color _surfaceColor = AppColors.surface;
+
+  // _primaryColor migrado de `Colors.greenAccent` (default Flutter accent que
+  // sobrevivía del prototipo) al brand cobalto del rebrand 2026-05-03. Sin
+  // este cambio, todo lo que usaba `Theme.of(context).colorScheme.primary`
+  // (botones, FAB, focused borders, iconTheme del AppBar, etc.) seguía
+  // pintando verde — el rebrand quedaba a medias.
+  static const Color _primaryColor = AppColors.brand;
+
+  // _secondaryColor / _errorColor son semánticos (warnings, errores), NO
+  // brand. Se mantienen para que la jerarquía visual no se rompa.
   static const Color _secondaryColor = Colors.orangeAccent;
   static const Color _errorColor = Colors.redAccent;
   static const Color _textPrimary = Colors.white;
@@ -82,10 +95,13 @@ class AppTheme {
     ),
 
     // --- BOTONES ---
+    // foregroundColor blanco (no negro como tenía el theme verde anterior) —
+    // sobre el cobalto #0EA5E9 contrasta mejor y queda alineado con
+    // `_BotonIngresar` del login que ya usa blanco desde el rebrand.
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: _primaryColor,
-        foregroundColor: Colors.black, 
+        foregroundColor: Colors.white,
         elevation: 6,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
@@ -134,7 +150,7 @@ class AppTheme {
     // --- FLOATING ACTION BUTTON (Botón flotante) ---
     floatingActionButtonTheme: const FloatingActionButtonThemeData(
       backgroundColor: _primaryColor,
-      foregroundColor: Colors.black,
+      foregroundColor: Colors.white,
       elevation: 6,
     ),
   );
