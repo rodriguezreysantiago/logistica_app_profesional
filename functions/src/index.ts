@@ -1981,15 +1981,34 @@ export const onAlertaVolvoCreated = onDocumentCreated(
     const fechaTxt = _formatFechaArg(creadoMs);
     const etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
 
+    // Variantes random del mensaje — anti-baneo de WhatsApp. Mandar el
+    // MISMO texto a múltiples destinatarios en poco tiempo es señal
+    // típica de spam y dispara bandera. Rotamos entre 3 variantes con
+    // mismo contenido informativo pero distinta redacción.
     const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
-    const mensaje =
+    const variantes = [
       `${saludo},\n\n` +
-      `Se detectó un evento de manejo en el TRACTOR ${patente} ` +
-      `el ${fechaTxt} a las ${horaTxt}:\n\n` +
-      `⚠️ ${etiqueta}\n\n` +
-      "Te pedimos ajustar tu manejo. Si hubo una situación particular, " +
-      "avisanos a la oficina.\n\n" +
-      "_Coopertrans Móvil — Mensaje automático._";
+        `Se detectó un evento de manejo en el TRACTOR ${patente} ` +
+        `el ${fechaTxt} a las ${horaTxt}:\n\n` +
+        `⚠️ ${etiqueta}\n\n` +
+        "Te pedimos ajustar tu manejo. Si hubo una situación particular, " +
+        "avisanos a la oficina.\n\n" +
+        "_Coopertrans Móvil — Mensaje automático._",
+      `${saludo}.\n\n` +
+        `Aviso desde la oficina: el ${fechaTxt} a las ${horaTxt} se ` +
+        `registró un evento en el tractor ${patente}.\n\n` +
+        `⚠️ ${etiqueta}\n\n` +
+        "Si hubo algo particular contanos en la oficina; si no, te " +
+        "pedimos prestar atención al manejo.\n\n" +
+        "_Coopertrans Móvil — Mensaje automático._",
+      `${saludo}, te escribo desde la oficina.\n\n` +
+        `Volvo registró un evento en el tractor ${patente} ` +
+        `el ${fechaTxt} a las ${horaTxt}:\n\n` +
+        `⚠️ ${etiqueta}\n\n` +
+        "Cualquier comentario sobre la situación, mejor en la oficina.\n\n" +
+        "_Coopertrans Móvil — Mensaje automático._",
+    ];
+    const mensaje = variantes[Math.floor(Math.random() * variantes.length)];
 
     try {
       const colaRef = await db.collection("COLA_WHATSAPP").add({
@@ -2493,14 +2512,36 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
       severidad === "MEDIUM" ? "🟡" :
         "🟢";
 
-    const mensaje =
+    // Variantes anti-baneo (ver justificación en onAlertaVolvoCreated).
+    // El destinatario casi siempre es el mismo (jefe de mantenimiento),
+    // pero igual rotamos formato para que WhatsApp no detecte un patrón
+    // idéntico que potencialmente coincida con otros mensajes del bot.
+    const patenteTxt = patente || "(sin patente)";
+    const variantesMant = [
       "🔧 *Alerta de mantenimiento*\n\n" +
-      `*${patente || "(sin patente)"}* — ${etiqueta}\n` +
-      `${sevEmoji} Severidad: ${severidad || "—"}\n` +
-      `🕐 ${fechaTxt} ${horaTxt}` +
-      choferTxt +
-      linkMaps +
-      "\n\n_Sistema Coopertrans Móvil — Aviso automático._";
+        `*${patenteTxt}* — ${etiqueta}\n` +
+        `${sevEmoji} Severidad: ${severidad || "—"}\n` +
+        `🕐 ${fechaTxt} ${horaTxt}` +
+        choferTxt +
+        linkMaps +
+        "\n\n_Sistema Coopertrans Móvil — Aviso automático._",
+      "🔧 *Mantenimiento — aviso automático*\n\n" +
+        `Tractor: *${patenteTxt}*\n` +
+        `Detalle: ${etiqueta}\n` +
+        `Severidad: ${sevEmoji} ${severidad || "—"}\n` +
+        `Cuándo: ${fechaTxt} ${horaTxt}` +
+        choferTxt +
+        linkMaps +
+        "\n\n_Sistema Coopertrans Móvil._",
+      "🔧 *Aviso de la flota Volvo*\n\n" +
+        `${patenteTxt} (${fechaTxt} ${horaTxt}):\n` +
+        `${etiqueta}\n` +
+        `${sevEmoji} ${severidad || "—"}` +
+        choferTxt +
+        linkMaps +
+        "\n\n_Sistema Coopertrans Móvil — Aviso automático._",
+    ];
+    const mensaje = variantesMant[Math.floor(Math.random() * variantesMant.length)];
 
     try {
       const colaRef = await db.collection("COLA_WHATSAPP").add({
@@ -2668,5 +2709,134 @@ export const backupFirestoreScheduled = onSchedule(
       // lo ve como error rate up, podés enganchar una alerta si querés.
       throw err;
     }
+  }
+);
+
+// ============================================================================
+// botHealthWatchdog — alerta a Santiago si el bot dejó de latir
+// ============================================================================
+//
+// El bot Node.js corre en la PC de Santiago y escribe heartbeat a
+// `BOT_HEALTH/main.ultimoHeartbeat` cada 60s. La pantalla "Estado del Bot"
+// del admin lo muestra, pero requiere que Santiago entre a esa pantalla
+// para enterarse — riesgo: el bot puede llevar horas/días caído sin que
+// nadie lo note (PC apagada por reinicio de Windows, NSSM crasheado,
+// etc.) y los choferes dejan de recibir avisos críticos.
+//
+// Esta function corre cada 15 min y compara `ultimoHeartbeat` con ahora.
+// Si la diferencia es > UMBRAL_STALE_MIN, encola un WhatsApp a
+// MANTENIMIENTO_DESTINATARIO_DNI (Santiago) con el aviso. Idempotencia:
+// solo notifica cuando el bot pasa de "vivo" a "stale" — guarda flag
+// `BOT_HEALTH/main.notificadoCaida` para no spamear avisos cada 15 min.
+//
+// Cuando el bot vuelve y manda heartbeat fresco, el siguiente run del
+// watchdog limpia la flag y registra log informativo.
+
+const BOT_HEALTH_STALE_UMBRAL_MIN = 10;
+
+export const botHealthWatchdog = onSchedule(
+  {
+    schedule: "*/15 * * * *",
+    timeZone: "America/Argentina/Buenos_Aires",
+    timeoutSeconds: 60,
+    memory: "256MiB",
+  },
+  async () => {
+    const ref = db.collection("BOT_HEALTH").doc("main");
+    const snap = await ref.get();
+    if (!snap.exists) {
+      logger.info("[botHealthWatchdog] BOT_HEALTH/main no existe (primer run), skip");
+      return;
+    }
+    const data = snap.data() ?? {};
+    const ultimoHb = data.ultimoHeartbeat as Timestamp | undefined;
+    if (!ultimoHb) {
+      logger.info("[botHealthWatchdog] sin ultimoHeartbeat aún, skip");
+      return;
+    }
+
+    const minDesdeHb = (Date.now() - ultimoHb.toMillis()) / 60000;
+    const yaNotificado = data.notificadoCaida === true;
+
+    if (minDesdeHb <= BOT_HEALTH_STALE_UMBRAL_MIN) {
+      // Bot vivo. Si había flag de caída anterior, limpiarla y loguear.
+      if (yaNotificado) {
+        await ref.update({ notificadoCaida: false, recuperadoEn: FieldValue.serverTimestamp() });
+        logger.info("[botHealthWatchdog] bot recuperado", {
+          minDesdeUltimoHb: minDesdeHb.toFixed(1),
+        });
+      }
+      return;
+    }
+
+    // Bot stale.
+    if (yaNotificado) {
+      // Ya avisamos antes — no spamear.
+      logger.info("[botHealthWatchdog] bot sigue caído, ya notificado", {
+        minDesdeUltimoHb: minDesdeHb.toFixed(1),
+      });
+      return;
+    }
+
+    // Primera detección de caída — notificar al admin.
+    const adminDni = MANTENIMIENTO_DESTINATARIO_DNI;
+    const empSnap = await db.collection("EMPLEADOS").doc(adminDni).get();
+    const tel = empSnap.exists ?
+      (empSnap.data()?.TELEFONO ?? "").toString().trim() :
+      "";
+    if (!tel) {
+      logger.error("[botHealthWatchdog] admin sin TELEFONO, no se puede notificar caída del bot", {
+        adminDni,
+      });
+      return;
+    }
+
+    const minRedondeo = Math.round(minDesdeHb);
+    const fechaTxt = _formatFechaArg(ultimoHb.toMillis());
+    const horaTxt = _formatHoraArg(ultimoHb.toMillis());
+    const pcId = (data.pcId ?? "desconocida").toString();
+    const mensaje =
+      "🚨 *Bot WhatsApp caído*\n\n" +
+      `Sin heartbeat desde ${fechaTxt} ${horaTxt} ` +
+      `(hace ${minRedondeo} min) en PC \`${pcId}\`.\n\n` +
+      "Los avisos de vencimientos y alertas Volvo están en cola pero " +
+      "no se están enviando. Revisá la PC del bot o reiniciá el servicio.\n\n" +
+      "_Aviso automático del watchdog. Solo se envía 1 vez por caída._";
+
+    await db.collection("COLA_WHATSAPP").add({
+      telefono: tel,
+      mensaje,
+      estado: "PENDIENTE",
+      encolado_en: FieldValue.serverTimestamp(),
+      enviado_en: null,
+      error: null,
+      intentos: 0,
+      origen: "bot_watchdog",
+      destinatario_coleccion: "EMPLEADOS",
+      destinatario_id: adminDni,
+      campo_base: "BOT_WATCHDOG",
+      admin_dni: "BOT",
+      admin_nombre: "Bot watchdog",
+    });
+
+    await ref.update({
+      notificadoCaida: true,
+      notificadoCaidaEn: FieldValue.serverTimestamp(),
+    });
+
+    // Paradoja del watchdog: el aviso queda en COLA_WHATSAPP, pero el
+    // bot que tiene que enviarlo ESTÁ CAÍDO. ¿Cómo le llega a Santiago?
+    // - Cuando el bot vuelva (al reiniciar manualmente o auto), procesa
+    //   la cola y le manda el WhatsApp con el mensaje "estuviste caído".
+    //   Útil como confirmación post-mortem.
+    // - Para alerting REAL en tiempo real (sin depender del bot caído),
+    //   lo correcto sería usar Firebase Cloud Messaging push directo a
+    //   Santiago (notificación nativa del cliente Flutter), o un email
+    //   via Gmail SMTP. Pendiente para futura iteración.
+    logger.warn("[botHealthWatchdog] bot caído — aviso encolado para admin", {
+      adminDni,
+      minDesdeUltimoHb: minRedondeo,
+      pcId,
+    });
   }
 );
