@@ -11,6 +11,142 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/services/storage_service.dart';
 import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 
+/// Plan de acciones a aplicar cuando una solicitud REVISIONES se aprueba.
+///
+/// Es el resultado de `planificarAprobacion(datos)` — una función pura
+/// que NO toca Firestore. El caller ([RevisionService.finalizarRevision])
+/// traduce este plan a operaciones reales (batch update / cambio de
+/// asignación / etc.).
+///
+/// Separar el "qué hacer" del "cómo hacerlo" hace que la lógica de
+/// negocio (calcular qué actualizar según el tipo de solicitud) sea
+/// testeable sin mockear FirebaseFirestore + Storage + Auth.
+class RevisionAprobadaPlan {
+  /// Colección de destino del cambio (típicamente `EMPLEADOS`).
+  final String colDestino;
+
+  /// ID del doc en [colDestino] (típicamente DNI del chofer).
+  final String idDoc;
+
+  /// Campo original que se pidió actualizar (`VENCIMIENTO_*`,
+  /// `SOLICITUD_VEHICULO`, `SOLICITUD_ENGANCHE`, etc.).
+  final String campoAct;
+
+  /// Campos a actualizar en `colDestino/idDoc`. Si está vacío, no se
+  /// hace ningún update sobre el doc destino (caso típico:
+  /// `SOLICITUD_VEHICULO` que delega todo a `AsignacionVehiculoService`).
+  final Map<String, dynamic> camposDestino;
+
+  /// Updates adicionales a hacer en VEHICULOS (campo `ESTADO`). Lista en
+  /// lugar de Map para soportar 0, 1 o 2 vehículos — caso enganche
+  /// puede tener nueva unidad → `OCUPADO` y vieja unidad → `LIBRE`.
+  final List<({String patente, String estado})> vehiculosUpdates;
+
+  /// Si no es `null`, hay que llamar a `AsignacionVehiculoService.
+  /// cambiarAsignacion` con estos datos ANTES del batch (el servicio
+  /// corre su propia transaction).
+  final ({String choferDni, String nuevaPatente, String motivo})?
+      asignacionRequest;
+
+  const RevisionAprobadaPlan({
+    required this.colDestino,
+    required this.idDoc,
+    required this.campoAct,
+    this.camposDestino = const {},
+    this.vehiculosUpdates = const [],
+    this.asignacionRequest,
+  });
+}
+
+/// Función pura: planifica las acciones cuando una solicitud REVISIONES
+/// se aprueba. **No toca Firestore.**
+///
+/// Throws [StateError] si los datos están incompletos (falta
+/// `coleccion_destino`, `dni` o `campo` — los 3 son obligatorios para
+/// construir el path del doc destino y Firestore reventaría con
+/// `document path must be a non-empty string`).
+///
+/// Reglas según el campo de la solicitud:
+/// - `VENCIMIENTO_*` → actualiza la fecha + el campo `ARCHIVO_*` espejo
+///   + `ultima_auditoria` con `serverTimestamp()`.
+/// - `SOLICITUD_VEHICULO` → delega a `AsignacionVehiculoService` (no
+///   modifica el doc destino directo, devuelve `asignacionRequest`).
+/// - `SOLICITUD_ENGANCHE` → setea `EMPLEADOS.ENGANCHE = nueva` +
+///   actualiza `VEHICULOS.{nueva}.ESTADO = OCUPADO` y
+///   `VEHICULOS.{anterior}.ESTADO = LIBRE` (skip si "-" o "SIN ASIGNAR").
+/// - Cualquier otro campo → actualiza con `fecha_vencimiento`.
+RevisionAprobadaPlan planificarAprobacion(Map<String, dynamic> datos) {
+  final colDestino = (datos['coleccion_destino'] ?? '').toString().trim();
+  final idDoc = (datos['dni'] ?? '').toString().trim();
+  final campoAct = (datos['campo'] ?? '').toString().trim();
+
+  if (colDestino.isEmpty || idDoc.isEmpty || campoAct.isEmpty) {
+    throw StateError(
+      'La solicitud está incompleta (faltan datos de destino o '
+      'campo a actualizar). Se eliminó del listado.',
+    );
+  }
+
+  if (campoAct.startsWith('VENCIMIENTO_')) {
+    final campoArchivo = campoAct.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
+    return RevisionAprobadaPlan(
+      colDestino: colDestino,
+      idDoc: idDoc,
+      campoAct: campoAct,
+      camposDestino: {
+        campoAct: datos['fecha_vencimiento'],
+        campoArchivo: datos['url_archivo'],
+        'ultima_auditoria': FieldValue.serverTimestamp(),
+      },
+    );
+  }
+
+  if (campoAct == 'SOLICITUD_VEHICULO') {
+    final nuevaUnidad = (datos['patente'] ?? '').toString().trim();
+    return RevisionAprobadaPlan(
+      colDestino: colDestino,
+      idDoc: idDoc,
+      campoAct: campoAct,
+      asignacionRequest: (
+        choferDni: idDoc,
+        nuevaPatente: nuevaUnidad,
+        motivo: 'Aprobado desde REVISIONES',
+      ),
+    );
+  }
+
+  if (campoAct == 'SOLICITUD_ENGANCHE') {
+    final nuevaUnidad = (datos['patente'] ?? '').toString().trim();
+    final unidadActual = (datos['unidad_actual'] ?? '').toString().trim();
+    final vehiculosUpdates = <({String patente, String estado})>[];
+    if (nuevaUnidad.isNotEmpty && nuevaUnidad != '-') {
+      vehiculosUpdates.add((patente: nuevaUnidad, estado: 'OCUPADO'));
+    }
+    if (unidadActual.isNotEmpty &&
+        unidadActual != '-' &&
+        unidadActual.toUpperCase() != 'SIN ASIGNAR') {
+      vehiculosUpdates.add((patente: unidadActual, estado: 'LIBRE'));
+    }
+    return RevisionAprobadaPlan(
+      colDestino: colDestino,
+      idDoc: idDoc,
+      campoAct: campoAct,
+      camposDestino: {'ENGANCHE': nuevaUnidad},
+      vehiculosUpdates: vehiculosUpdates,
+    );
+  }
+
+  // Caso fallback: cualquier otro campo se trata como vencimiento puro
+  // (legacy / migraciones viejas). Solo updateamos el campo con
+  // `fecha_vencimiento`, sin tocar archivo ni timestamp.
+  return RevisionAprobadaPlan(
+    colDestino: colDestino,
+    idDoc: idDoc,
+    campoAct: campoAct,
+    camposDestino: {campoAct: datos['fecha_vencimiento']},
+  );
+}
+
 /// Servicio del feature de revisiones.
 ///
 /// Centraliza:
@@ -127,74 +263,52 @@ class RevisionService {
       final batch = _db.batch();
 
       if (aprobado && datos != null) {
-        final colDestino = (datos['coleccion_destino'] ?? '').toString().trim();
-        final idDoc = (datos['dni'] ?? '').toString().trim();
-        final campoAct = (datos['campo'] ?? '').toString().trim();
-
-        // Cualquier campo path-relevante vacío ⇒ Firestore revienta.
-        if (colDestino.isEmpty || idDoc.isEmpty || campoAct.isEmpty) {
-          // Limpiamos la solicitud inválida y devolvemos un error útil.
-          await _db.collection(AppCollections.revisiones).doc(idSolicitud).delete();
-          throw StateError(
-            'La solicitud está incompleta (faltan datos de destino o '
-            'campo a actualizar). Se eliminó del listado.',
-          );
+        // Toda la lógica de "qué actualizar según el tipo de solicitud"
+        // vive en `planificarAprobacion`, que es función pura testeable.
+        // Acá solo traducimos el plan a ops Firestore.
+        RevisionAprobadaPlan plan;
+        try {
+          plan = planificarAprobacion(datos);
+        } on StateError {
+          // Datos incompletos: limpiamos la solicitud inválida y
+          // re-lanzamos el StateError con el mensaje del planificador.
+          await _db
+              .collection(AppCollections.revisiones)
+              .doc(idSolicitud)
+              .delete();
+          rethrow;
         }
 
-        final destinoRef = _db.collection(colDestino).doc(idDoc);
-        final camposAActualizar = <String, dynamic>{};
-
-        if (campoAct.startsWith('VENCIMIENTO_')) {
-          final campoArchivo =
-              campoAct.replaceAll('VENCIMIENTO_', 'ARCHIVO_');
-          camposAActualizar[campoAct] = datos['fecha_vencimiento'];
-          camposAActualizar[campoArchivo] = datos['url_archivo'];
-          camposAActualizar['ultima_auditoria'] =
-              FieldValue.serverTimestamp();
-        } else if (campoAct == 'SOLICITUD_VEHICULO') {
-          // Cambio de tractor: el servicio centralizado se encarga de
-          // ASIGNACIONES_VEHICULO + EMPLEADOS.VEHICULO + VEHICULOS.ESTADO
-          // + audit log. Se hace antes del batch porque corre su propia
-          // transaction. La pequeña pérdida de atomicidad con el delete
-          // de REVISIONES de abajo es aceptable: si falla en el medio,
-          // re-aprobar es un no-op idempotente.
-          final nuevaUnidad = (datos['patente'] ?? '').toString().trim();
+        // Cambio de tractor: el servicio centralizado escribe
+        // ASIGNACIONES_VEHICULO + EMPLEADOS.VEHICULO + VEHICULOS.ESTADO
+        // + audit log en su propia transaction. Corre ANTES del batch
+        // porque está fuera de él. La pequeña pérdida de atomicidad con
+        // el delete de REVISIONES es aceptable: si falla en el medio,
+        // re-aprobar es no-op idempotente.
+        if (plan.asignacionRequest != null) {
           final adminUid = FirebaseAuth.instance.currentUser?.uid ?? '';
           await AsignacionVehiculoService().cambiarAsignacion(
-            choferDni: idDoc,
-            nuevaPatente: nuevaUnidad,
+            choferDni: plan.asignacionRequest!.choferDni,
+            nuevaPatente: plan.asignacionRequest!.nuevaPatente,
             asignadoPorDni: adminUid,
-            motivo: 'Aprobado desde REVISIONES',
+            motivo: plan.asignacionRequest!.motivo,
           );
-          // No agregamos nada al batch: el servicio ya escribió todo.
-        } else if (campoAct == 'SOLICITUD_ENGANCHE') {
-          // Enganche: por ahora mantenemos el flujo viejo con batch
-          // directo (no hay todavía historial de enganches).
-          final nuevaUnidad = (datos['patente'] ?? '').toString().trim();
-          final unidadActual = (datos['unidad_actual'] ?? '').toString().trim();
-
-          camposAActualizar['ENGANCHE'] = nuevaUnidad;
-
-          if (nuevaUnidad.isNotEmpty && nuevaUnidad != '-') {
-            batch.update(
-              _db.collection(AppCollections.vehiculos).doc(nuevaUnidad),
-              {'ESTADO': 'OCUPADO'},
-            );
-          }
-          if (unidadActual.isNotEmpty &&
-              unidadActual != '-' &&
-              unidadActual.toUpperCase() != 'SIN ASIGNAR') {
-            batch.update(
-              _db.collection(AppCollections.vehiculos).doc(unidadActual),
-              {'ESTADO': 'LIBRE'},
-            );
-          }
-        } else {
-          camposAActualizar[campoAct] = datos['fecha_vencimiento'];
         }
 
-        if (camposAActualizar.isNotEmpty) {
-          batch.update(destinoRef, camposAActualizar);
+        // Updates de ESTADO en VEHICULOS (caso enganche).
+        for (final v in plan.vehiculosUpdates) {
+          batch.update(
+            _db.collection(AppCollections.vehiculos).doc(v.patente),
+            {'ESTADO': v.estado},
+          );
+        }
+
+        // Update al doc destino (típicamente EMPLEADOS/{dni}).
+        if (plan.camposDestino.isNotEmpty) {
+          batch.update(
+            _db.collection(plan.colDestino).doc(plan.idDoc),
+            plan.camposDestino,
+          );
         }
       }
 
