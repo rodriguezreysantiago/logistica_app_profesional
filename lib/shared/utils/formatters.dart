@@ -129,13 +129,31 @@ class AppFormatters {
   // --- FORMATEAR FECHA (DD/MM/YYYY) ---
   static String formatearFecha(dynamic fecha) {
     final DateTime? parsed = _parseUniversalDate(fecha);
-    
+
     if (parsed != null) {
       return "${parsed.day.toString().padLeft(2, '0')}/${parsed.month.toString().padLeft(2, '0')}/${parsed.year}";
     }
-    
+
     // Si no pudo parsear, devuelve lo que ingresó por defecto
     return fecha?.toString() ?? "Sin datos";
+  }
+
+  /// Formatea un DateTime como `DD/MM/YYYY HH:mm:ss` en hora local.
+  ///
+  /// Reemplazo seguro de `.toIso8601String()` para cualquier display que
+  /// le llegue al usuario (logs en pantalla, debug snapshots, etc.). ISO
+  /// expone formato técnico (`2026-05-03T23:45:32.123`) que en AR no se
+  /// reconoce y obliga al usuario a calcular TZ mentalmente.
+  ///
+  /// Si el DateTime es UTC, lo convierte a local antes de formatear.
+  /// Acepta `null` y devuelve "—" como placeholder consistente con la
+  /// UI del resto de la app.
+  static String formatearFechaHora(DateTime? fecha) {
+    if (fecha == null) return '—';
+    final l = fecha.isUtc ? fecha.toLocal() : fecha;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(l.day)}/${two(l.month)}/${l.year} '
+        '${two(l.hour)}:${two(l.minute)}:${two(l.second)}';
   }
 
   // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---

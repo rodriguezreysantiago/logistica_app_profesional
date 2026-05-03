@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../../../shared/utils/formatters.dart';
+
 /// Tipo de evento por unidad. Se usa para colorear/filtrar la lista de
 /// actividad reciente.
 enum SyncEventTipo {
@@ -306,7 +308,7 @@ class SyncDashboardProvider extends ChangeNotifier {
       "activeSyncs": _activeSyncs,
       "successRate": successRate,
       "avgLatencyMs": avgLatencyMs,
-      "lastSyncAt": _lastSyncAt?.toIso8601String(),
+      "lastSyncAt": AppFormatters.formatearFechaHora(_lastSyncAt),
       "eventosRecientes": _eventos.length,
       "ciclosEnHistorial": _historicoCiclos.length,
     };
