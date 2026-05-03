@@ -15,6 +15,14 @@
         { "fieldPath": "patente", "order": "ASCENDING" },
         { "fieldPath": "fecha_ts", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "VOLVO_ALERTAS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tipo", "order": "ASCENDING" },
+        { "fieldPath": "creado_en", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
