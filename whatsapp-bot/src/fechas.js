@@ -120,6 +120,37 @@ function aLocalDateTime(fecha) {
 }
 
 /**
+ * Formatea cualquier representacion de fecha a 'HH:MM' usando
+ * componentes LOCALES (TZ forzada en index.js a ART). Devuelve '-' si
+ * no se pudo parsear.
+ *
+ * Para mostrar SOLO la hora — para fecha + hora completa usar
+ * `aLocalDateTime`. Reemplaza el patron `_formatHora` privado que vivia
+ * duplicado en builders de mensajes.
+ */
+function aLocalTime(fecha) {
+  if (fecha === null || fecha === undefined || fecha === '') return '-';
+
+  let d;
+  if (fecha instanceof Date) {
+    d = fecha;
+  } else if (fecha && typeof fecha.toDate === 'function') {
+    d = fecha.toDate();
+  } else if (typeof fecha === 'string') {
+    d = new Date(fecha);
+  } else if (fecha && typeof fecha === 'object') {
+    const secs = fecha._seconds ?? fecha.seconds;
+    if (typeof secs === 'number') d = new Date(secs * 1000);
+  }
+
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
+
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mi}`;
+}
+
+/**
  * Helper interno: convierte un Date a YYYY-MM-DD eligiendo entre
  * componentes UTC (cuando es fecha calendario, hora UTC = 00:00:00.000)
  * o componentes locales (cuando es momento real con hora). Ver el
@@ -153,6 +184,7 @@ module.exports = {
   aIsoLocal,
   aDdMmYyyyLocal,
   aLocalDateTime,
+  aLocalTime,
   // Exportado para tests / debugging.
   _dateToIsoSafe,
 };

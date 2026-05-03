@@ -11,6 +11,8 @@
 // "todo OK" — para alertas de manejo el silencio significa "nada que
 // reportar" y mandar un mensaje vacio seria ruido).
 
+const { aDdMmYyyyLocal, aLocalTime } = require('./fechas');
+
 const FIRMA =
   '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
   '_Detalle completo en la app → Alertas._';
@@ -108,7 +110,7 @@ function buildResumenDiario({ destinatarioNombre, eventos }) {
 
     const lineas = [...porTipo.entries()].map(([tipo, evs]) => {
       const etiqueta = ETIQUETAS_TIPO[tipo] || tipo;
-      const horas = evs.map((e) => _formatHora(e.fechaHora)).join(' / ');
+      const horas = evs.map((e) => aLocalTime(e.fechaHora)).join(' / ');
       const prefijo = evs.length > 1 ? `${evs.length}x ` : '';
       return `   • ${prefijo}${etiqueta} (${horas})`;
     });
@@ -122,7 +124,7 @@ function buildResumenDiario({ destinatarioNombre, eventos }) {
       ? '1 evento crítico en las últimas 24h:'
       : `${cantidad} eventos críticos en las últimas 24h:`;
 
-  const fecha = _formatFecha(new Date());
+  const fecha = aDdMmYyyyLocal(new Date());
   return (
     `${saludo}.\n\n` +
     `📊 Resumen diario — Alertas HIGH (${fecha})\n\n` +
@@ -130,21 +132,6 @@ function buildResumenDiario({ destinatarioNombre, eventos }) {
     `${bloques.join('\n\n')}\n\n` +
     `${FIRMA}`
   );
-}
-
-/** "HH:MM" en TZ del proceso. */
-function _formatHora(d) {
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
-/** "DD/MM/AAAA" en TZ del proceso. */
-function _formatFecha(d) {
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
 }
 
 module.exports = {
