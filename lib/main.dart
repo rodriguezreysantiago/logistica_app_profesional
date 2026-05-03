@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -41,31 +42,32 @@ void main() async {
     );
     AppLogger.log('Firebase conectado correctamente');
 
-    // Lock-in de Firestore settings INMEDIATAMENTE post-init.
+    // Bug conocido en Windows desktop con firebase_core 4 +
+    // cloud_firestore 6 + firebase_auth 6: si Firestore tiene
+    // persistencia ON (default) y el SDK detecta el cache local
+    // corrupto/inconsistente entre runs, llama internamente a
+    // `settings =` después de haber arrancado Firestore para
+    // intentar reconfigurar — y eso aborta el proceso con
+    // "Firestore instance has already been started".
     //
-    // En Windows desktop con firebase_core 4 + cloud_firestore 6, hay
-    // una race entre listeners internos del plugin de Auth (que tocan
-    // Firestore para refrescar credenciales en cuanto cambia el ID
-    // token) y el primer acceso de nuestro código a Firestore. Si la
-    // segunda llamada termina intentando setear `settings`, el SDK
-    // C++ aborta el proceso con "Firestore instance has already been
-    // started and its settings can no longer be changed" — no es una
-    // excepción Dart catcheable, abort() crashea la .exe entera.
-    //
-    // Setear settings acá mismo "reserva" la configuración antes de
-    // que nadie más pueda tocarla. Cualquier intento posterior es
-    // no-op porque el SDK detecta que el valor ya está fijado al
-    // mismo objeto.
-    try {
-      FirebaseFirestore.instance.settings = const Settings(
-        persistenceEnabled: true,
-        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-      );
-    } catch (e) {
-      // Si Firestore ya estaba iniciado por otro path, este set tira
-      // el mismo error pero acá lo capturamos. Igual loggeo para
-      // entender la frecuencia.
-      AppLogger.log('Firestore.settings lock-in skipped: $e');
+    // Workaround: deshabilitar persistencia explícitamente en Windows
+    // antes de cualquier acceso a Firestore. Pierde el cache offline
+    // (la app necesita conexión activa) pero evita el abort. En
+    // Android/iOS dejamos los defaults — funcionan bien.
+    if (!kIsWeb) {
+      try {
+        // ignore: deprecated_member_use
+        // Targeting Windows; en otros platforms este branch no aplica
+        // pero como TargetPlatform requiere context, chequeo por nombre.
+        if (defaultTargetPlatform == TargetPlatform.windows) {
+          FirebaseFirestore.instance.settings = const Settings(
+            persistenceEnabled: false,
+          );
+          AppLogger.log('Firestore: persistencia OFF (workaround Windows)');
+        }
+      } catch (e) {
+        AppLogger.log('Firestore.settings no se pudo configurar: $e');
+      }
     }
   } catch (e, st) {
     AppLogger.recordError(e, st, reason: 'Firebase.initializeApp falló');
