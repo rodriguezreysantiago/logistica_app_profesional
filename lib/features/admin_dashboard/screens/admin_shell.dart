@@ -14,6 +14,7 @@ import '../../reports/screens/admin_reports_screen.dart';
 import '../../revisions/screens/admin_revisiones_screen.dart';
 import '../../eco_driving/screens/admin_descargas_pto_screen.dart';
 import '../../eco_driving/screens/admin_eco_driving_screen.dart';
+import '../../eco_driving/screens/admin_mapa_volvo_screen.dart';
 import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
 import '../../vehicles/screens/admin_mantenimiento_screen.dart';
 import '../../vehicles/screens/admin_vehiculos_lista_screen.dart';
@@ -119,6 +120,13 @@ class _AdminShellState extends State<AdminShell> {
       iconActive: Icons.local_shipping,
       requiredCapability: Capability.verAlertasVolvo,
       build: () => const AdminDescargasPtoScreen(),
+    ),
+    _ShellSection(
+      label: 'Mapa',
+      icon: Icons.map_outlined,
+      iconActive: Icons.map,
+      requiredCapability: Capability.verAlertasVolvo,
+      build: () => const AdminMapaVolvoScreen(),
     ),
     _ShellSection(
       label: 'Personal',

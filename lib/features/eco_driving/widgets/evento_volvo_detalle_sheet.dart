@@ -1,0 +1,346 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../../core/constants/app_constants.dart';
+import '../../../core/services/audit_log_service.dart';
+import '../../../core/services/prefs_service.dart';
+import '../../../shared/utils/app_feedback.dart';
+
+/// Bottom sheet con el detalle de UN evento de VOLVO_ALERTAS.
+///
+/// Se muestra al tappear un marker en `AdminMapaVolvoScreen`. Permite
+/// revisar la info del evento y marcarlo como atendido (mismo flujo que
+/// el tablero "Alertas").
+class EventoVolvoDetalleSheet extends StatelessWidget {
+  final String alertId;
+  final Map<String, dynamic> data;
+
+  const EventoVolvoDetalleSheet({
+    super.key,
+    required this.alertId,
+    required this.data,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tipo = (data['tipo'] ?? '').toString().toUpperCase();
+    final severidad = (data['severidad'] ?? '').toString().toUpperCase();
+    final patente = (data['patente'] ?? '—').toString();
+    final atendida = data['atendida'] == true;
+    final atendidaPor = (data['atendida_por'] ?? '').toString();
+    final creado = (data['creado_en'] as Timestamp?)?.toDate();
+    final fmt = DateFormat('dd/MM/yyyy HH:mm');
+    final choferNombre = (data['chofer_nombre'] ?? '').toString().trim();
+    final choferDni = (data['chofer_dni'] ?? '').toString().trim();
+    final chofer = choferNombre.isNotEmpty
+        ? choferNombre
+        : choferDni.isNotEmpty
+            ? 'DNI $choferDni'
+            : '—';
+    final gps = data['posicion_gps'] as Map<String, dynamic>?;
+    final lat = (gps?['lat'] as num?)?.toDouble();
+    final lng = (gps?['lng'] as num?)?.toDouble();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.all(color: _colorSeveridad(severidad).withAlpha(60)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      patente,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _etiquetaTipo(tipo),
+                      style: TextStyle(
+                        color: _colorSeveridad(severidad),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _SeveridadBadge(severidad: severidad, atendida: atendida),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _Linea(
+            label: 'Cuándo',
+            valor: creado == null ? '—' : fmt.format(creado),
+          ),
+          _Linea(label: 'Chofer', valor: chofer),
+          if (lat != null && lng != null)
+            _LineaConAccion(
+              label: 'Ubicación',
+              valor: '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+              icono: Icons.open_in_new,
+              onTap: () => _abrirMaps(lat, lng),
+            ),
+          if (atendida) ...[
+            const SizedBox(height: 8),
+            _Linea(
+              label: 'Atendida por',
+              valor: atendidaPor.isEmpty ? '—' : atendidaPor,
+            ),
+          ],
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white54,
+                    side: BorderSide(color: Colors.white.withAlpha(40)),
+                  ),
+                  child: const Text('Cerrar'),
+                ),
+              ),
+              if (!atendida) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _marcarAtendida(context),
+                    icon: const Icon(Icons.check, size: 16),
+                    label: const Text('Marcar atendida'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.greenAccent.withAlpha(180),
+                      foregroundColor: Colors.black,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _abrirMaps(double lat, double lng) async {
+    final uri = Uri.parse('https://www.google.com/maps?q=$lat,$lng');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _marcarAtendida(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final dni = PrefsService.dni;
+    if (dni.isEmpty) {
+      AppFeedback.errorOn(messenger, 'Sin sesión activa.');
+      return;
+    }
+    try {
+      await FirebaseFirestore.instance
+          .collection(AppCollections.volvoAlertas)
+          .doc(alertId)
+          .update({
+        'atendida': true,
+        'atendida_por': dni,
+        'atendida_en': FieldValue.serverTimestamp(),
+      });
+      // Bitácora server-side. Fire-and-forget.
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.marcarAlertaVolvoAtendida,
+        entidad: 'VOLVO_ALERTAS',
+        entidadId: alertId,
+        detalles: {
+          'tipo': (data['tipo'] ?? '').toString(),
+          'severidad': (data['severidad'] ?? '').toString(),
+          'patente': (data['patente'] ?? '').toString(),
+          'origen': 'mapa',
+        },
+      ));
+      if (context.mounted) Navigator.of(context).pop();
+      AppFeedback.successOn(messenger, 'Alerta marcada como atendida.');
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al marcar atendida: $e');
+    }
+  }
+}
+
+class _Linea extends StatelessWidget {
+  final String label;
+  final String valor;
+  const _Linea({required this.label, required this.valor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 90,
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              valor,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LineaConAccion extends StatelessWidget {
+  final String label;
+  final String valor;
+  final IconData icono;
+  final VoidCallback onTap;
+
+  const _LineaConAccion({
+    required this.label,
+    required this.valor,
+    required this.icono,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 90,
+              child: Text(
+                label,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                valor,
+                style: const TextStyle(color: Colors.blueAccent, fontSize: 13),
+              ),
+            ),
+            Icon(icono, color: Colors.blueAccent, size: 14),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SeveridadBadge extends StatelessWidget {
+  final String severidad;
+  final bool atendida;
+
+  const _SeveridadBadge({required this.severidad, required this.atendida});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = atendida ? Colors.white38 : _colorSeveridad(severidad);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(30),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withAlpha(120)),
+      ),
+      child: Text(
+        atendida ? 'ATENDIDA' : severidad,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1,
+        ),
+      ),
+    );
+  }
+}
+
+Color _colorSeveridad(String severidad) {
+  switch (severidad) {
+    case 'HIGH':
+      return Colors.redAccent;
+    case 'MEDIUM':
+      return Colors.orangeAccent;
+    case 'LOW':
+      return Colors.greenAccent;
+    default:
+      return Colors.white54;
+  }
+}
+
+String _etiquetaTipo(String tipo) {
+  // Mismo mapa que admin_volvo_alertas_screen.dart. Si Volvo agrega un
+  // tipo nuevo, cae al código crudo. Mantener sincronizado con el otro
+  // archivo si se agregan entradas (idealmente extraer a un módulo
+  // compartido en una próxima limpieza).
+  const mapa = <String, String>{
+    'DISTANCE_ALERT': 'Cerca del vehículo de adelante',
+    'IDLING': 'Motor en ralentí',
+    'OVERSPEED': 'Exceso de velocidad',
+    'PTO': 'Toma de fuerza activada',
+    'HARSH': 'Aceleración / frenada brusca',
+    'GENERIC': 'Evento genérico',
+    'TELL_TALE': 'Luz de tablero encendida',
+    'FUEL': 'Cambio anormal de combustible',
+    'CATALYST': 'Cambio de nivel AdBlue',
+    'ALARM': 'Alarma anti-robo',
+    'GEOFENCE': 'Entrada/salida de geocerca',
+    'SAFETY_ZONE': 'Zona de velocidad reducida',
+    'TPM': 'Presión de neumático',
+    'TTM': 'Temperatura de neumático',
+    'AEBS': 'Frenado automático de emergencia',
+    'ESP': 'Control de estabilidad',
+    'DAS': 'Alerta de cansancio',
+    'LKS': 'Asistente de carril',
+    'LCS': 'Asistente de cambio de carril',
+    'UNSAFE_LANE_CHANGE': 'Cambio de carril inseguro',
+    'TACHO_OUT_OF_SCOPE_MODE_CHANGE': 'Tacógrafo fuera de servicio',
+    'CARGO': 'Cambio en carga (puerta / temp)',
+    'ADBLUELEVEL_LOW': 'AdBlue bajo',
+    'WITHOUT_ADBLUE': 'Sin AdBlue',
+    'DRIVING_WITHOUT_BEING_LOGGED_IN': 'Conducción sin chofer identificado',
+  };
+  return mapa[tipo] ?? tipo;
+}

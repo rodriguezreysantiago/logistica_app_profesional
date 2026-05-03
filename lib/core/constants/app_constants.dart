@@ -21,6 +21,7 @@ class AppRoutes {
   static const String adminVolvoAlertas = '/admin_volvo_alertas';
   static const String adminEcoDriving = '/admin_eco_driving';
   static const String adminDescargasPto = '/admin_descargas_pto';
+  static const String adminMapaVolvo = '/admin_mapa_volvo';
   static const String syncDashboard = '/sync_dashboard';
   static const String adminEstadoBot = '/admin_estado_bot';
 

@@ -97,6 +97,12 @@ dependencies:
 
   # ================= UI EXTRAS =================
   table_calendar: ^3.1.2  # Vista calendario mensual para auditoría de vencimientos
+  # Mapa interactivo para la pantalla "Mapa Volvo" — muestra eventos
+  # georreferenciados de VOLVO_ALERTAS sobre OpenStreetMap. Es puro Dart
+  # (tiles vía HTTP), sin código nativo Windows-específico. NO requiere
+  # API key — usa OSM público.
+  flutter_map: ^8.3.0
+  latlong2: ^0.9.1    # Tipos LatLng. Pin a 0.9 porque flutter_map 8.3 limita a esa rama
 
   # ================= OCR =================
   # Reconocimiento de texto on-device (sin envío a servidores).

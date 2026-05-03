@@ -20,6 +20,7 @@ import '../features/admin_dashboard/screens/admin_estado_bot_screen.dart';
 import '../features/admin_dashboard/screens/admin_volvo_alertas_screen.dart';
 import '../features/eco_driving/screens/admin_descargas_pto_screen.dart';
 import '../features/eco_driving/screens/admin_eco_driving_screen.dart';
+import '../features/eco_driving/screens/admin_mapa_volvo_screen.dart';
 import '../features/employees/screens/admin_personal_lista_screen.dart';
 import '../features/vehicles/screens/admin_vehiculos_lista_screen.dart';
 import '../features/vehicles/screens/admin_mantenimiento_screen.dart';
@@ -232,6 +233,17 @@ class AppRouter {
       case AppRoutes.adminDescargasPto:
         return _buildRoute(
           _protegerAdmin(const AdminDescargasPtoScreen()),
+          settings,
+        );
+
+      // ================= MAPA VOLVO =================
+      // Visualización geográfica de TODOS los eventos del Vehicle Alerts
+      // API sobre OpenStreetMap. Para detectar patrones geográficos:
+      // tramos donde se concentran OVERSPEED, accesos a clientes con
+      // DISTANCE_ALERT recurrentes, descargas PTO en lugares raros.
+      case AppRoutes.adminMapaVolvo:
+        return _buildRoute(
+          _protegerAdmin(const AdminMapaVolvoScreen()),
           settings,
         );
 
