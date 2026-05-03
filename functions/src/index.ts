@@ -2265,3 +2265,191 @@ function buildScoreFleetDoc(
     co2Saved: f.co2Saved ?? null,
   };
 }
+
+// ============================================================================
+// onAlertaVolvoMantenimientoCreated — alerta de mantenimiento al jefe
+// ============================================================================
+// Trigger Firestore distinto y complementario a `onAlertaVolvoCreated`
+// (que notifica al CHOFER cuando hay HIGH severity de manejo). Este
+// notifica al JEFE DE MANTENIMIENTO cuando aparece una alerta que
+// indica problema mecánico/operativo del vehículo (independiente de
+// severity).
+//
+// Tipos cubiertos:
+//   - FUEL    → cambio anormal de combustible (posible robo, fuga,
+//               medidor mal calibrado).
+//   - CATALYST → problema con sistema SCR / filtro AdBlue.
+//   - GENERIC con sub-tipo:
+//       * TELL_TALE        → testigo del tablero encendido (check
+//                            engine, presión aceite, etc).
+//       * ADBLUELEVEL_LOW  → AdBlue por debajo del umbral.
+//       * WITHOUT_ADBLUE   → sin AdBlue (riesgo de derate).
+//
+// Filtramos a tipos que indican "el camión te está avisando algo" antes
+// que el chofer llame del medio de la ruta. La idea: pasar de modo
+// reactivo (apagar incendios) a modo predictivo (turno de taller listo).
+//
+// Destinatario: hardcoded al DNI 35244439 (Santiago, jefe de
+// mantenimiento Vecchi 2026). Si Vecchi suma a otra persona en el
+// futuro, refactorizar a una colección META o env var.
+//
+// Bot: encolado en COLA_WHATSAPP — respeta el horario hábil del bot
+// (8-19 lunes a viernes, sin feriados). Una alerta del sábado 23:00
+// se entrega el lunes 8:00 AM. Para mantenimiento NO crítico esto está
+// bien (el chofer ya llamó si era urgente). El sistema es predictivo.
+//
+// Idempotencia: trigger `onCreate` se dispara una sola vez por docId.
+// El docId composite del poller (`{vin}_{createdMs}_{tipo}`) garantiza
+// que mismo evento Volvo no genera dos triggers.
+//
+// Sin dedupe por tipo+patente en este v1: con ~7 eventos de
+// mantenimiento en 13 días reales (TELL_TALE + FUEL + CATALYST), el
+// volumen es muy bajo para preocuparse por spam. Si se materializa
+// (ej: testigo intermitente que dispara 50 veces por hora), agregar
+// dedupe simple por (alert_tipo, alert_patente) en últimas N horas.
+
+const MANTENIMIENTO_DESTINATARIO_DNI = "35244439";
+
+const TIPOS_MANTENIMIENTO_DIRECTOS = new Set(["FUEL", "CATALYST"]);
+
+const SUBTIPOS_GENERIC_MANTENIMIENTO = new Set([
+  "TELL_TALE",
+  "ADBLUELEVEL_LOW",
+  "WITHOUT_ADBLUE",
+]);
+
+function _esAlertaMantenimiento(
+  tipo: string,
+  data: Record<string, unknown>
+): boolean {
+  if (TIPOS_MANTENIMIENTO_DIRECTOS.has(tipo)) return true;
+  if (tipo !== "GENERIC") return false;
+  const detalleGeneric = data.detalle_generic as
+    | Record<string, unknown>
+    | undefined;
+  const subType = (detalleGeneric?.type ?? "").toString().toUpperCase();
+  return SUBTIPOS_GENERIC_MANTENIMIENTO.has(subType);
+}
+
+export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
+  {
+    document: "VOLVO_ALERTAS/{alertId}",
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) {
+      logger.warn("[onAlertaVolvoMantenimientoCreated] event.data vacío, skip");
+      return;
+    }
+
+    const data = snap.data() ?? {};
+    const tipo = (data.tipo ?? "").toString().toUpperCase();
+
+    if (!_esAlertaMantenimiento(tipo, data)) {
+      return; // No es del tipo que notificamos.
+    }
+
+    const patente = (data.patente ?? "").toString().trim().toUpperCase();
+    const severidad = (data.severidad ?? "").toString().toUpperCase();
+
+    // Destinatario: el doc de EMPLEADOS del jefe de mantenimiento.
+    const destinatarioSnap = await db
+      .collection("EMPLEADOS")
+      .doc(MANTENIMIENTO_DESTINATARIO_DNI)
+      .get();
+    if (!destinatarioSnap.exists) {
+      logger.warn(
+        "[onAlertaVolvoMantenimientoCreated] destinatario no existe en EMPLEADOS",
+        { dni: MANTENIMIENTO_DESTINATARIO_DNI, alertId: event.params.alertId }
+      );
+      return;
+    }
+    const destData = destinatarioSnap.data() ?? {};
+    const telefono = (destData.TELEFONO ?? "").toString().trim();
+    if (!telefono || telefono === "-") {
+      logger.warn(
+        "[onAlertaVolvoMantenimientoCreated] destinatario sin TELEFONO",
+        { dni: MANTENIMIENTO_DESTINATARIO_DNI, alertId: event.params.alertId }
+      );
+      return;
+    }
+
+    // Etiqueta legible. Para tipo GENERIC vamos al sub-tipo (TELL_TALE,
+    // ADBLUELEVEL_LOW, etc). Para FUEL/CATALYST usamos el tipo top-level.
+    let etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
+    if (tipo === "GENERIC") {
+      const detalleGeneric = data.detalle_generic as
+        | Record<string, unknown>
+        | undefined;
+      const subType = (detalleGeneric?.type ?? "").toString().toUpperCase();
+      etiqueta = ETIQUETAS_TIPO_ALERTA[subType] ?? subType ?? "Evento genérico";
+    }
+
+    const creadoMs =
+      (data.creado_en as Timestamp | undefined)?.toMillis() ?? Date.now();
+    const horaTxt = _formatHoraArg(creadoMs);
+
+    // Snapshot del chofer al volante en el momento del evento (lo dejó
+    // el poller cruzando con el log temporal ASIGNACIONES_VEHICULO).
+    const choferNombre = (data.chofer_nombre ?? "").toString().trim();
+    const choferTxt = choferNombre ? `\n👤 Chofer: ${choferNombre}` : "";
+
+    // Coords si están disponibles (link clickeable a Google Maps).
+    const gps = data.posicion_gps as Record<string, unknown> | undefined;
+    const lat = (gps?.lat as number | undefined);
+    const lng = (gps?.lng as number | undefined);
+    const linkMaps = lat != null && lng != null ?
+      `\n📍 https://www.google.com/maps?q=${lat},${lng}` :
+      "";
+
+    const sevEmoji = severidad === "HIGH" ? "🔴" :
+      severidad === "MEDIUM" ? "🟡" :
+        "🟢";
+
+    const mensaje =
+      "🔧 *Alerta de mantenimiento*\n\n" +
+      `*${patente || "(sin patente)"}* — ${etiqueta}\n` +
+      `${sevEmoji} Severidad: ${severidad || "—"}\n` +
+      `🕐 ${horaTxt}` +
+      choferTxt +
+      linkMaps +
+      "\n\n_Sistema Coopertrans Móvil — Aviso automático._";
+
+    try {
+      const colaRef = await db.collection("COLA_WHATSAPP").add({
+        telefono,
+        mensaje,
+        estado: "PENDIENTE",
+        encolado_en: FieldValue.serverTimestamp(),
+        enviado_en: null,
+        error: null,
+        intentos: 0,
+        origen: "volvo_alert_mantenimiento",
+        destinatario_coleccion: "EMPLEADOS",
+        destinatario_id: MANTENIMIENTO_DESTINATARIO_DNI,
+        campo_base: "VOLVO_ALERT_MANTENIMIENTO",
+        admin_dni: "BOT",
+        admin_nombre: "Bot automatico",
+        alert_id: event.params.alertId,
+        alert_tipo: tipo,
+        alert_patente: patente,
+      });
+      logger.info("[onAlertaVolvoMantenimientoCreated] OK encolado", {
+        alertId: event.params.alertId,
+        patente,
+        tipo,
+        destinatarioDni: MANTENIMIENTO_DESTINATARIO_DNI,
+        colaDocId: colaRef.id,
+      });
+    } catch (e) {
+      logger.error("[onAlertaVolvoMantenimientoCreated] no se pudo encolar", {
+        alertId: event.params.alertId,
+        error: (e as Error).message,
+      });
+      // No re-throw: si el encolado falla, queda registro en log y la
+      // alerta sigue visible en el tablero "Alertas Volvo" del admin.
+    }
+  }
+);
