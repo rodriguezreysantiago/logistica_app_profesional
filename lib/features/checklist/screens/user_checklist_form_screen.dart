@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../data/checklist_data.dart';
@@ -190,21 +191,21 @@ class _HeaderInfo extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.greenAccent.withAlpha(15),
+        color: AppColors.accentGreen.withAlpha(15),
         border: Border(
-          bottom: BorderSide(color: Colors.greenAccent.withAlpha(40)),
+          bottom: BorderSide(color: AppColors.accentGreen.withAlpha(40)),
         ),
       ),
       child: Row(
         children: [
-          const Icon(Icons.tag, color: Colors.greenAccent, size: 18),
+          const Icon(Icons.tag, color: AppColors.accentGreen, size: 18),
           const SizedBox(width: 8),
           const Text('UNIDAD: ',
               style: TextStyle(color: Colors.white60, fontSize: 12)),
           Text(
             patente,
             style: const TextStyle(
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               fontWeight: FontWeight.bold,
               fontSize: 14,
               letterSpacing: 1.5,
@@ -228,14 +229,14 @@ class _AvisoObligatorio extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.orangeAccent.withAlpha(20),
+        color: AppColors.accentOrange.withAlpha(20),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.orangeAccent.withAlpha(50)),
+        border: Border.all(color: AppColors.accentOrange.withAlpha(50)),
       ),
       child: const Row(
         children: [
           Icon(Icons.info_outline,
-              color: Colors.orangeAccent, size: 20),
+              color: AppColors.accentOrange, size: 20),
           SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -344,11 +345,11 @@ class _ItemPregunta extends StatelessWidget {
   Color _colorEstado(String estado) {
     switch (estado) {
       case 'BUE':
-        return Colors.greenAccent;
+        return AppColors.accentGreen;
       case 'REG':
-        return Colors.orangeAccent;
+        return AppColors.accentOrange;
       case 'MAL':
-        return Colors.redAccent;
+        return AppColors.accentRed;
       default:
         return Colors.white24;
     }
@@ -368,14 +369,14 @@ class _ItemPregunta extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: tieneError
-              ? Colors.redAccent
+              ? AppColors.accentRed
               : Colors.white.withAlpha(15),
           width: tieneError ? 2 : 1,
         ),
         boxShadow: tieneError
             ? [
                 BoxShadow(
-                  color: Colors.redAccent.withAlpha(50),
+                  color: AppColors.accentRed.withAlpha(50),
                   blurRadius: 8,
                   spreadRadius: 1,
                 )

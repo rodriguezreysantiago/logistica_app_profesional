@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../shared/constants/app_colors.dart';
 import '../../asignaciones/models/asignacion_vehiculo.dart';
 import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 import '../models/volvo_score_diario.dart';
@@ -39,7 +40,7 @@ class ScoreDrilldownSheet extends StatelessWidget {
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border.all(color: Colors.greenAccent.withAlpha(40)),
+          border: Border.all(color: AppColors.accentGreen.withAlpha(40)),
         ),
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
         child: StreamBuilder<List<VolvoScoreDiario>>(
@@ -51,7 +52,7 @@ class ScoreDrilldownSheet extends StatelessWidget {
           builder: (ctx, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(
-                child: CircularProgressIndicator(color: Colors.greenAccent),
+                child: CircularProgressIndicator(color: AppColors.accentGreen),
               );
             }
             final docs = snap.data ?? const <VolvoScoreDiario>[];
@@ -237,10 +238,10 @@ class _Header extends StatelessWidget {
     final color = s == null
         ? Colors.white38
         : s < 60
-            ? Colors.redAccent
+            ? AppColors.accentRed
             : s < 80
-                ? Colors.orangeAccent
-                : Colors.greenAccent;
+                ? AppColors.accentOrange
+                : AppColors.accentGreen;
     return Row(
       children: [
         Expanded(
@@ -328,10 +329,10 @@ class _FilaDia extends StatelessWidget {
     final color = s == null
         ? Colors.white38
         : s < 60
-            ? Colors.redAccent
+            ? AppColors.accentRed
             : s < 80
-                ? Colors.orangeAccent
-                : Colors.greenAccent;
+                ? AppColors.accentOrange
+                : AppColors.accentGreen;
     final chofer = asignacion?.choferNombre?.isNotEmpty == true
         ? asignacion!.choferNombre!
         : asignacion != null
@@ -401,10 +402,10 @@ class _BarraSubscore extends StatelessWidget {
     final color = s == null
         ? Colors.white24
         : s < 60
-            ? Colors.redAccent
+            ? AppColors.accentRed
             : s < 80
-                ? Colors.orangeAccent
-                : Colors.greenAccent;
+                ? AppColors.accentOrange
+                : AppColors.accentGreen;
     final pct = (s ?? 0) / 100;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),

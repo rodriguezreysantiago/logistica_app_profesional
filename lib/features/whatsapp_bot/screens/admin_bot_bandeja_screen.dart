@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
@@ -90,7 +91,7 @@ class AdminBotBandejaScreen extends StatelessWidget {
               child: Text(
                 '¿A QUÉ PAPEL CORRESPONDE?',
                 style: TextStyle(
-                  color: Colors.greenAccent,
+                  color: AppColors.accentGreen,
                   fontWeight: FontWeight.bold,
                   fontSize: 11,
                   letterSpacing: 1.2,
@@ -101,7 +102,7 @@ class AdminBotBandejaScreen extends StatelessWidget {
               final cMap = c as Map<String, dynamic>;
               return ListTile(
                 leading: const Icon(Icons.event_note,
-                    color: Colors.greenAccent),
+                    color: AppColors.accentGreen),
                 title: Text(
                   (cMap['campo_base'] ?? 'Documento').toString(),
                   style: const TextStyle(color: Colors.white),
@@ -248,7 +249,7 @@ class _ItemAmbiguo extends StatelessWidget {
         (data['candidatos'] as List<dynamic>? ?? const []).length;
 
     return AppCard(
-      borderColor: Colors.orangeAccent.withAlpha(80),
+      borderColor: AppColors.accentOrange.withAlpha(80),
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -256,7 +257,7 @@ class _ItemAmbiguo extends StatelessWidget {
           Row(
             children: [
               const Icon(Icons.smart_toy_outlined,
-                  size: 18, color: Colors.orangeAccent),
+                  size: 18, color: AppColors.accentOrange),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -318,12 +319,12 @@ class _ItemAmbiguo extends StatelessWidget {
             children: [
               if (fechaDet.isNotEmpty) ...[
                 const Icon(Icons.event_note,
-                    size: 12, color: Colors.greenAccent),
+                    size: 12, color: AppColors.accentGreen),
                 const SizedBox(width: 4),
                 Text(
                   'Fecha detectada: $fechaDet',
                   style: const TextStyle(
-                    color: Colors.greenAccent,
+                    color: AppColors.accentGreen,
                     fontSize: 11,
                   ),
                 ),
@@ -378,14 +379,14 @@ class _BadgeRazon extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.orangeAccent.withAlpha(20),
+        color: AppColors.accentOrange.withAlpha(20),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.orangeAccent.withAlpha(80)),
+        border: Border.all(color: AppColors.accentOrange.withAlpha(80)),
       ),
       child: Text(
         etiqueta.toUpperCase(),
         style: const TextStyle(
-          color: Colors.orangeAccent,
+          color: AppColors.accentOrange,
           fontSize: 9,
           fontWeight: FontWeight.bold,
           letterSpacing: 0.6,

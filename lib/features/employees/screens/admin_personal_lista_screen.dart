@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/capabilities.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/phone_formatter.dart';

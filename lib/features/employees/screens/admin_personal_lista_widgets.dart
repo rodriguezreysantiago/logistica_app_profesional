@@ -69,7 +69,7 @@ class _EmpleadoCard extends StatelessWidget {
                               TextSpan(
                                 text: '  ($apodo)',
                                 style: const TextStyle(
-                                  color: Colors.greenAccent,
+                                  color: AppColors.accentGreen,
                                   fontWeight: FontWeight.w500,
                                   fontSize: 12,
                                 ),
@@ -140,9 +140,9 @@ class _RolBadge extends StatelessWidget {
   Color _color() {
     switch (rol) {
       case AppRoles.admin:
-        return Colors.redAccent;
+        return AppColors.accentRed;
       case AppRoles.supervisor:
-        return Colors.orangeAccent;
+        return AppColors.accentOrange;
       case AppRoles.planta:
         return Colors.lightBlueAccent;
     }
@@ -450,7 +450,7 @@ class _HeaderDetalle extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: const BoxDecoration(
-                    color: Colors.greenAccent,
+                    color: AppColors.accentGreen,
                     shape: BoxShape.circle,
                   ),
                   child:
@@ -489,12 +489,12 @@ class _SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.only(top: 16, bottom: 10),
       child: Row(
         children: [
-          Icon(icon, color: Colors.greenAccent, size: 16),
+          Icon(icon, color: AppColors.accentGreen, size: 16),
           const SizedBox(width: 8),
           Text(
             label.toUpperCase(),
             style: const TextStyle(
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               fontSize: 11,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
@@ -544,7 +544,7 @@ class _DatoEditableTexto extends StatelessWidget {
         ),
       ),
       trailing:
-          const Icon(Icons.edit_note, size: 22, color: Colors.greenAccent),
+          const Icon(Icons.edit_note, size: 22, color: AppColors.accentGreen),
       onTap: () => _mostrarDialogo(context),
     );
   }
@@ -640,7 +640,7 @@ class _DatoEditableEmpresa extends StatelessWidget {
         style: const TextStyle(fontSize: 12, color: Colors.white),
       ),
       trailing: const Icon(Icons.business_center,
-          size: 20, color: Colors.greenAccent),
+          size: 20, color: AppColors.accentGreen),
       onTap: () => _mostrarSelector(context),
     );
   }
@@ -716,7 +716,7 @@ class _DatoEditableEnum extends StatelessWidget {
         size: 20,
         // Atenuamos el icono cuando no es editable para que se note
         // visualmente que el dato es solo-lectura.
-        color: editable ? Colors.greenAccent : Colors.white24,
+        color: editable ? AppColors.accentGreen : Colors.white24,
       ),
       onTap: editable ? () => _mostrarSelector(context) : null,
     );
@@ -735,7 +735,7 @@ class _DatoEditableEnum extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               leading: Icon(
                 esActual ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: esActual ? Colors.greenAccent : Colors.white38,
+                color: esActual ? AppColors.accentGreen : Colors.white38,
                 size: 18,
               ),
               title: Text(
@@ -850,12 +850,12 @@ class _AsignacionUnidad extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       leading: Icon(
         campo == 'VEHICULO' ? Icons.local_shipping : Icons.link,
-        color: tieneAsignacion ? Colors.greenAccent : Colors.white24,
+        color: tieneAsignacion ? AppColors.accentGreen : Colors.white24,
       ),
       title: Text('$label: ${tieneAsignacion ? actual : "—"}',
           style: const TextStyle(color: Colors.white, fontSize: 14)),
       trailing:
-          const Icon(Icons.sync_alt, size: 20, color: Colors.greenAccent),
+          const Icon(Icons.sync_alt, size: 20, color: AppColors.accentGreen),
       onTap: () => EmpleadoActions.unidad(context, dni, campo, actual),
     );
   }

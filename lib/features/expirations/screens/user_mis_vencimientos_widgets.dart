@@ -22,7 +22,7 @@ class _SectionHeader extends StatelessWidget {
         style: const TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.bold,
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           letterSpacing: 2,
         ),
       ),
@@ -65,7 +65,7 @@ class _CardVencimientoUser extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: 4),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           highlighted: enRevision,
-          borderColor: enRevision ? Colors.orangeAccent.withAlpha(150) : null,
+          borderColor: enRevision ? AppColors.accentOrange.withAlpha(150) : null,
           child: Row(
             children: [
               AppFileThumbnail(
@@ -93,7 +93,7 @@ class _CardVencimientoUser extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         color: enRevision
-                            ? Colors.orangeAccent
+                            ? AppColors.accentOrange
                             : Colors.white60,
                         fontWeight: enRevision
                             ? FontWeight.bold
@@ -110,7 +110,7 @@ class _CardVencimientoUser extends StatelessWidget {
                 _BotonUpload(onTap: onUpload),
               ] else
                 const Icon(Icons.hourglass_top,
-                    color: Colors.orangeAccent, size: 20),
+                    color: AppColors.accentOrange, size: 20),
             ],
           ),
         );
@@ -215,7 +215,7 @@ class _DetalleEquipo extends StatelessWidget {
                 child: Text(
                   '$tipo: $patente',
                   style: const TextStyle(
-                    color: Colors.greenAccent,
+                    color: AppColors.accentGreen,
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1.5,
@@ -287,7 +287,7 @@ class _AccesoChecklist extends StatelessWidget {
         IconData icono;
 
         if (completado) {
-          color = Colors.greenAccent;
+          color = AppColors.accentGreen;
           // .toLocal() defensivo: Timestamp.toDate() en Dart suele
           // devolver local pero no esta garantizado en todos los runtimes.
           // Sin esto, format en zonas UTC podria mostrar dia anterior.
@@ -297,11 +297,11 @@ class _AccesoChecklist extends StatelessWidget {
               'Control realizado (${DateFormat('dd/MM').format(fechaDoc)})';
           icono = Icons.check_circle;
         } else if (dia > 15) {
-          color = Colors.redAccent;
+          color = AppColors.accentRed;
           mensaje = 'VENCIDO: realizar control YA';
           icono = Icons.warning_amber_rounded;
         } else if (dia > 10) {
-          color = Colors.orangeAccent;
+          color = AppColors.accentOrange;
           mensaje = 'Pendiente (vence el día 15)';
           icono = Icons.fact_check_outlined;
         } else {
@@ -420,12 +420,12 @@ class _BotonDetectarFechaState extends State<_BotonDetectarFecha> {
       child: TextButton.icon(
         onPressed: _procesando ? null : _capturar,
         style: TextButton.styleFrom(
-          backgroundColor: Colors.greenAccent.withAlpha(20),
-          foregroundColor: Colors.greenAccent,
+          backgroundColor: AppColors.accentGreen.withAlpha(20),
+          foregroundColor: AppColors.accentGreen,
           padding: const EdgeInsets.symmetric(vertical: 10),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.greenAccent.withAlpha(80)),
+            side: BorderSide(color: AppColors.accentGreen.withAlpha(80)),
           ),
         ),
         icon: _procesando
@@ -434,7 +434,7 @@ class _BotonDetectarFechaState extends State<_BotonDetectarFecha> {
                 height: 14,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Colors.greenAccent,
+                  color: AppColors.accentGreen,
                 ),
               )
             : const Icon(Icons.document_scanner_outlined, size: 18),
