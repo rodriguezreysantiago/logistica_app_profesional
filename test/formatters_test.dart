@@ -154,4 +154,78 @@ void main() {
       expect(AppFormatters.formatearDNI(''), '');
     });
   });
+
+  // ===========================================================================
+  // FORMATEO DE NÚMEROS GRANDES (formato AR: 123.456.789 / 123.456.789,00)
+  // ===========================================================================
+  group('AppFormatters.formatearMiles', () {
+    test('enteros chicos sin separador (< 1000)', () {
+      expect(AppFormatters.formatearMiles(0), '0');
+      expect(AppFormatters.formatearMiles(1), '1');
+      expect(AppFormatters.formatearMiles(999), '999');
+    });
+
+    test('enteros con separador AR (.)', () {
+      expect(AppFormatters.formatearMiles(1000), '1.000');
+      expect(AppFormatters.formatearMiles(45000), '45.000');
+      expect(AppFormatters.formatearMiles(200000), '200.000');
+      expect(AppFormatters.formatearMiles(123456789), '123.456.789');
+    });
+
+    test('negativos', () {
+      expect(AppFormatters.formatearMiles(-1500), '-1.500');
+    });
+
+    test('decimales se truncan por defecto (sin parámetro)', () {
+      expect(AppFormatters.formatearMiles(1234.99), '1.234');
+    });
+
+    test('con decimales: usa coma AR', () {
+      expect(AppFormatters.formatearMiles(45000, decimales: 2), '45.000,00');
+      expect(AppFormatters.formatearMiles(45000.5, decimales: 2), '45.000,50');
+      expect(AppFormatters.formatearMiles(123456789.99, decimales: 2),
+          '123.456.789,99');
+    });
+
+    test('null devuelve placeholder', () {
+      expect(AppFormatters.formatearMiles(null), '—');
+    });
+  });
+
+  group('AppFormatters.formatearMonto', () {
+    test('formato AR completo con ,00 forzado', () {
+      expect(AppFormatters.formatearMonto(45000), '45.000,00');
+      expect(AppFormatters.formatearMonto(0), '0,00');
+      expect(AppFormatters.formatearMonto(123456789.5), '123.456.789,50');
+    });
+
+    test('null devuelve placeholder', () {
+      expect(AppFormatters.formatearMonto(null), '—');
+    });
+  });
+
+  group('AppFormatters.parsearMiles', () {
+    test('parsea string formateado AR', () {
+      expect(AppFormatters.parsearMiles('200.000'), 200000);
+      expect(AppFormatters.parsearMiles('123.456.789'), 123456789);
+    });
+
+    test('parsea string crudo sin separadores', () {
+      expect(AppFormatters.parsearMiles('200000'), 200000);
+    });
+
+    test('null o vacío devuelve null', () {
+      expect(AppFormatters.parsearMiles(null), isNull);
+      expect(AppFormatters.parsearMiles(''), isNull);
+      expect(AppFormatters.parsearMiles('   '), isNull);
+    });
+
+    test('roundtrip formatear → parsear preserva valor', () {
+      for (final v in [0, 1, 999, 1000, 45000, 200000, 123456789]) {
+        final str = AppFormatters.formatearMiles(v);
+        expect(AppFormatters.parsearMiles(str), v,
+            reason: 'roundtrip de $v');
+      }
+    });
+  });
 }

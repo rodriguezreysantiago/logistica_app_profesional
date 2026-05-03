@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../constants/posiciones.dart';
 import '../models/cubierta.dart';
@@ -384,8 +385,10 @@ class _CerrarRecapadoDialogState extends State<_CerrarRecapadoDialog> {
                 controller: _costoCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Costo (\$, opcional)',
+                  hintText: 'Ej. 45.000',
                 ),
                 keyboardType: TextInputType.number,
+                inputFormatters: [AppFormatters.inputMiles],
               ),
               const SizedBox(height: 12),
               TextField(
@@ -423,7 +426,9 @@ class _CerrarRecapadoDialogState extends State<_CerrarRecapadoDialog> {
         resultado: _resultado,
         supervisorDni: PrefsService.dni,
         supervisorNombre: PrefsService.nombre,
-        costo: double.tryParse(_costoCtrl.text.trim()),
+        // El usuario tipea con `.` de miles (formato AR). El parser
+        // los descarta antes de convertir a int → double.
+        costo: AppFormatters.parsearMiles(_costoCtrl.text)?.toDouble(),
         notas: _notasCtrl.text.trim().isEmpty ? null : _notasCtrl.text,
       );
       if (mounted) Navigator.pop(context);

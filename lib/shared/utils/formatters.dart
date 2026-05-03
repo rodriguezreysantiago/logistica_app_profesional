@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+
 class AppFormatters {
   // ✅ MEJORA PRO: Constructor privado para evitar instanciaciones innecesarias
   AppFormatters._();
@@ -23,6 +25,67 @@ class AppFormatters {
     } catch (e) {
       return "0,0";
     }
+  }
+
+  /// Formatea un número con `.` como separador de miles, formato AR:
+  /// - `formatearMiles(123456789)` → `"123.456.789"` (entero, sin decimales).
+  /// - `formatearMiles(123456789.5, decimales: 2)` → `"123.456.789,50"`.
+  /// - `formatearMonto(45000)` → `"45.000,00"` (siempre 2 decimales, plata).
+  ///
+  /// Usar para km, contadores, lecturas de odómetro — cualquier entero
+  /// ≥ 1000 que el operador tenga que leer rápido. Para plata, preferir
+  /// `formatearMonto` que fuerza `,00` para consistencia visual.
+  ///
+  /// Aceptamos `num?` para que el caller no tenga que castear. Null → `"—"`.
+  static String formatearMiles(num? valor, {int decimales = 0}) {
+    if (valor == null) return '—';
+    final negativo = valor < 0;
+    final abs = valor.abs();
+    final entero = abs.truncate();
+    final s = entero.toString();
+    final reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+    final parteEntera = s.replaceAllMapped(reg, (m) => '${m[1]}.');
+    String resultado;
+    if (decimales > 0) {
+      // toStringAsFixed redondea correctamente y siempre rellena con 0.
+      final decStr = abs.toStringAsFixed(decimales).split('.').last;
+      resultado = '$parteEntera,$decStr';
+    } else {
+      resultado = parteEntera;
+    }
+    return negativo ? '-$resultado' : resultado;
+  }
+
+  /// Formato AR para montos en pesos: siempre 2 decimales con `,` y
+  /// miles con `.` (`123456.5 → "123.456,50"`, `45000 → "45.000,00"`).
+  /// No agrega símbolo `$` — el caller lo prepende si lo necesita
+  /// (algunas pantallas usan label "Costo ($)" en vez del símbolo en
+  /// el valor).
+  static String formatearMonto(num? valor) =>
+      formatearMiles(valor, decimales: 2);
+
+  /// `TextInputFormatter` que reformatea el input en vivo a estilo AR
+  /// con `.` como separador de miles: el usuario tipea `200000` y ve
+  /// `200.000`; sigue escribiendo y ve `2.000.000`. Solo acepta
+  /// dígitos — todo otro caracter se descarta.
+  ///
+  /// Para leer el valor numérico del controller, usar
+  /// `parsearMiles(controller.text)` (acepta el string formateado o
+  /// uno crudo sin puntos).
+  ///
+  /// Limitación: no soporta decimales — pensado para enteros (km,
+  /// pesos enteros). Si hace falta decimal, agregar variante separada
+  /// para no complicar el cursor handling.
+  static final TextInputFormatter inputMiles = _MilesInputFormatter();
+
+  /// Parsea un string formateado con `.` (ej. "200.000") a `int`. Si
+  /// el string viene sin separadores (ej. "200000") también funciona.
+  /// Devuelve `null` si está vacío o no es numérico.
+  static int? parsearMiles(String? texto) {
+    if (texto == null) return null;
+    final limpio = texto.replaceAll('.', '').trim();
+    if (limpio.isEmpty) return null;
+    return int.tryParse(limpio);
   }
 
   // --- FORMATEAR DNI (XX.XXX.XXX) ---
@@ -188,5 +251,52 @@ class AppFormatters {
     final ahora = DateTime.now();
     final hoyNormalizado = DateTime(ahora.year, ahora.month, ahora.day);
     return vtoNormalizado.difference(hoyNormalizado).inDays;
+  }
+}
+
+/// Implementación interna del input formatter expuesto como
+/// `AppFormatters.inputMiles`. Mantengo la clase privada al archivo —
+/// el caller siempre pasa por el helper estático.
+///
+/// Estrategia para preservar la posición del cursor: contamos cuántos
+/// dígitos había antes del cursor en el texto crudo, reformateamos, y
+/// reposicionamos el cursor para que quede después del mismo número
+/// de dígitos. Si no se hiciera esto, el cursor "salta" al final cada
+/// vez que se inserta un punto.
+class _MilesInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // Solo dígitos.
+    final soloDigitos = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (soloDigitos.isEmpty) {
+      return const TextEditingValue(text: '');
+    }
+    // Cuántos dígitos hay antes de la posición del cursor en el nuevo
+    // texto (ignorando los puntos que quedaron a la izquierda).
+    final cursorRaw = newValue.selection.baseOffset.clamp(0, newValue.text.length);
+    final digitosAntesCursor = newValue.text
+        .substring(0, cursorRaw)
+        .replaceAll(RegExp(r'\D'), '')
+        .length;
+
+    final reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+    final formateado = soloDigitos.replaceAllMapped(reg, (m) => '${m[1]}.');
+
+    // Reposicionar el cursor: avanzar por `formateado` saltando puntos
+    // hasta haber pasado `digitosAntesCursor` dígitos.
+    var nuevoCursor = 0;
+    var contador = 0;
+    while (contador < digitosAntesCursor && nuevoCursor < formateado.length) {
+      if (formateado[nuevoCursor] != '.') contador++;
+      nuevoCursor++;
+    }
+
+    return TextEditingValue(
+      text: formateado,
+      selection: TextSelection.collapsed(offset: nuevoCursor),
+    );
   }
 }

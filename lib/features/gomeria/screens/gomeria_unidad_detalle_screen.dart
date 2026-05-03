@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../constants/posiciones.dart';
 import '../models/cubierta.dart';
@@ -577,7 +578,7 @@ class _PosicionOcupadaDialogState extends State<_PosicionOcupadaDialog> {
                 style: const TextStyle(color: Colors.white70, fontSize: 12)),
             if (i.kmUnidadAlInstalar != null)
               Text(
-                'Km del tractor al instalar: ${i.kmUnidadAlInstalar!.toStringAsFixed(0)}',
+                'Km del tractor al instalar: ${AppFormatters.formatearMiles(i.kmUnidadAlInstalar)}',
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             const SizedBox(height: 12),

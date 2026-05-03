@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../constants/posiciones.dart';
 import '../models/cubierta_marca.dart';
@@ -268,7 +269,7 @@ class _ModelosTab extends StatelessWidget {
 
   String _kmStr(int? km) {
     if (km == null) return '—';
-    return '${(km / 1000).toStringAsFixed(0)}k km';
+    return '${AppFormatters.formatearMiles(km)} km';
   }
 
   Future<void> _abrirAltaModelo(BuildContext context) async {
@@ -384,18 +385,20 @@ class _AltaModeloDialogState extends State<_AltaModeloDialog> {
               controller: _kmNuevaCtrl,
               decoration: const InputDecoration(
                 labelText: 'Vida estimada (nueva), km',
-                hintText: 'Ej. 120000',
+                hintText: 'Ej. 120.000',
               ),
               keyboardType: TextInputType.number,
+              inputFormatters: [AppFormatters.inputMiles],
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _kmRecapadaCtrl,
               decoration: const InputDecoration(
                 labelText: 'Vida estimada (recapada), km',
-                hintText: 'Ej. 60000 (vacío si no recapa)',
+                hintText: 'Ej. 60.000 (vacío si no recapa)',
               ),
               keyboardType: TextInputType.number,
+              inputFormatters: [AppFormatters.inputMiles],
             ),
             const SizedBox(height: 12),
             SwitchListTile(
@@ -445,8 +448,8 @@ class _AltaModeloDialogState extends State<_AltaModeloDialog> {
       modelo: modelo,
       medida: medida,
       tipoUso: _tipoUso,
-      kmVidaEstimadaNueva: int.tryParse(_kmNuevaCtrl.text.trim()),
-      kmVidaEstimadaRecapada: int.tryParse(_kmRecapadaCtrl.text.trim()),
+      kmVidaEstimadaNueva: AppFormatters.parsearMiles(_kmNuevaCtrl.text),
+      kmVidaEstimadaRecapada: AppFormatters.parsearMiles(_kmRecapadaCtrl.text),
       recapable: _recapable,
       activo: true,
     );

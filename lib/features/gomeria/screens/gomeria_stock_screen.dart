@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../constants/posiciones.dart';
 import '../models/cubierta.dart';
@@ -199,7 +200,7 @@ class _CubiertaTile extends StatelessWidget {
                     ),
                     if (c.kmAcumulados > 0)
                       Text(
-                        '${(c.kmAcumulados / 1000).toStringAsFixed(0)}k km totales',
+                        '${AppFormatters.formatearMiles(c.kmAcumulados)} km totales',
                         style: const TextStyle(
                             color: Colors.white60, fontSize: 11),
                       ),
