@@ -128,6 +128,13 @@ class AppCollections {
   /// DESCARTADA_POR_PROVEEDOR), notas}`.
   static const String cubiertasRecapados = 'CUBIERTAS_RECAPADOS';
 
+  /// Colección de configs / cursores internos del backend (Volvo poller
+  /// cursor, contadores como `cubiertas_counter`, etc.). Acceso
+  /// restringido — la mayoría de docs solo los toca el server vía Admin
+  /// SDK; algunos (como `cubiertas_counter`) los actualiza el cliente
+  /// dentro de transactions de servicios específicos.
+  static const String meta = 'META';
+
   /// Scores diarios de eco-driving (Volvo Group Scores API v2.0.2).
   /// La popula la scheduled function `volvoScoresPoller` (1x por día
   /// a las 04:00 ART). DocId: `{patente}_{YYYY-MM-DD}` para vehículos,

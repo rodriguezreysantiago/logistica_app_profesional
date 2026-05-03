@@ -134,11 +134,13 @@ service cloud.firestore {
     // ========================================================================
 
     match /AUDITORIA_ACCIONES/{doc} {
-      // Solo admin la lee. La escritura va EXCLUSIVAMENTE por la Cloud
-      // Function callable `auditLogWrite` (que valida server-side el
-      // rol ADMIN del JWT y toma `admin_dni` y `admin_nombre` del token,
-      // no del cliente). Eso evita que un admin con la consola abierta
-      // forje entradas falsas de bitácora.
+      // Solo admin la lee (auditoría sensible). La escritura va
+      // EXCLUSIVAMENTE por la Cloud Function callable `auditLogWrite`,
+      // que valida server-side el rol (ADMIN universal, SUPERVISOR
+      // restringido a una whitelist reducida de acciones — asignaciones
+      // y gomería) y toma `admin_dni` (== actor real, sea ADMIN o
+      // SUPERVISOR) del token, no del cliente. Eso evita que un actor
+      // con la consola abierta forje entradas falsas de bitácora.
       allow read: if isAdmin();
       allow write: if false;
     }
@@ -470,6 +472,17 @@ service cloud.firestore {
     // Subcolección de docs internos del server (cursor del poller Volvo
     // Alerts, futuros cursors de otros pollers). Ningún cliente debe leer
     // ni escribir — todo pasa por Admin SDK.
+    //
+    // EXCEPCIÓN: `META/cubiertas_counter` lo INCREMENTA `GomeriaService`
+    // desde el cliente dentro de la transaction de `crearCubierta` (para
+    // generar el código `CUB-XXXX` zero-padded sin un round-trip extra a
+    // una Cloud Function). Es un contador int monotónico — el peor caso
+    // si un atacante lo manipula es que se "salten" números de código,
+    // sin afectar integridad de datos.
+
+    match /META/cubiertas_counter {
+      allow read, write: if isAdminOrSupervisor();
+    }
 
     match /META/{doc=**} {
       allow read, write: if false;

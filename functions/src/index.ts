@@ -1129,6 +1129,34 @@ const AUDIT_ACCIONES_PERMITIDAS = new Set<string>([
   "RECHAZAR_REVISION",
   // Alertas Volvo
   "MARCAR_ALERTA_VOLVO_ATENDIDA",
+  // Gomería
+  "CREAR_CUBIERTA",
+  "INSTALAR_CUBIERTA",
+  "RETIRAR_CUBIERTA",
+  "DESCARTAR_CUBIERTA",
+  "ENVIAR_CUBIERTA_A_RECAPAR",
+  "RECIBIR_CUBIERTA_DE_RECAPADO",
+]);
+
+/// Acciones que SUPERVISOR puede registrar (además de ADMIN).
+///
+/// Los flujos de gomería son operados por supervisor + AREA=GOMERIA.
+/// Los de asignaciones (chofer↔tractor, tractor↔enganche) los puede
+/// disparar tanto el ADMIN como un SUPERVISOR (el callsite de
+/// AsignacionVehiculoService / AsignacionEngancheService no distingue).
+/// Sin esta lista, el callable rechazaría con permission-denied y la
+/// bitácora se quedaría sin entradas para esos flujos críticos.
+const AUDIT_ACCIONES_SUPERVISOR_PERMITIDAS = new Set<string>([
+  // Asignaciones — supervisor puede cambiar quién maneja qué.
+  "ASIGNAR_EQUIPO",
+  "DESVINCULAR_EQUIPO",
+  // Gomería — el supervisor de gomería opera todo el flujo.
+  "CREAR_CUBIERTA",
+  "INSTALAR_CUBIERTA",
+  "RETIRAR_CUBIERTA",
+  "DESCARTAR_CUBIERTA",
+  "ENVIAR_CUBIERTA_A_RECAPAR",
+  "RECIBIR_CUBIERTA_DE_RECAPADO",
 ]);
 
 const AUDIT_ENTIDADES_PERMITIDAS = new Set<string>([
@@ -1136,6 +1164,7 @@ const AUDIT_ENTIDADES_PERMITIDAS = new Set<string>([
   "VEHICULOS",
   "REVISIONES",
   "VOLVO_ALERTAS",
+  "CUBIERTAS",
 ]);
 
 const AUDIT_MAX_DETALLES_BYTES = 10 * 1024; // 10KB
@@ -1150,16 +1179,20 @@ export const auditLogWrite = onCall(
     enforceAppCheck: false, // todavía no está activado App Check
   },
   async (request): Promise<AuditLogResult> => {
-    // ─── Auth: solo admin logueado ─────────────────────────────────
+    // ─── Auth: ADMIN o SUPERVISOR ──────────────────────────────────
+    // ADMIN puede registrar cualquier acción de la whitelist.
+    // SUPERVISOR puede registrar SOLO las acciones de
+    // AUDIT_ACCIONES_SUPERVISOR_PERMITIDAS (asignaciones + gomería).
+    // El check fino se hace después de validar el campo accion.
     const rol = request.auth?.token?.rol;
-    if (!request.auth || rol !== "ADMIN") {
-      logger.warn("[auditLog] llamada sin auth ADMIN", {
+    if (!request.auth || (rol !== "ADMIN" && rol !== "SUPERVISOR")) {
+      logger.warn("[auditLog] llamada sin auth ADMIN/SUPERVISOR", {
         uid: request.auth?.uid ?? "no-uid",
         rol: rol ?? "no-rol",
       });
       throw new HttpsError(
         "permission-denied",
-        "Solo administradores pueden escribir bitácora."
+        "Solo admin o supervisor pueden escribir bitácora."
       );
     }
 
@@ -1174,6 +1207,19 @@ export const auditLogWrite = onCall(
       throw new HttpsError(
         "invalid-argument",
         `Acción '${accion}' no está en la whitelist.`
+      );
+    }
+
+    // SUPERVISOR solo puede registrar acciones de su scope reducido.
+    if (rol === "SUPERVISOR" &&
+        !AUDIT_ACCIONES_SUPERVISOR_PERMITIDAS.has(accion)) {
+      logger.warn("[auditLog] supervisor intentó acción fuera de scope", {
+        uid: request.auth.uid,
+        accion,
+      });
+      throw new HttpsError(
+        "permission-denied",
+        `Acción '${accion}' está reservada para ADMIN.`
       );
     }
 
