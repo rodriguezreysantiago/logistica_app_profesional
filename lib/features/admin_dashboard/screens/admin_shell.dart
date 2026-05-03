@@ -64,8 +64,15 @@ class _AdminShellState extends State<AdminShell> {
       icon: Icons.fact_check_outlined,
       iconActive: Icons.fact_check,
       requiredCapability: Capability.verRevisiones,
+      // .limit(100) en TODOS los badge streams: el badge solo necesita el
+      // count para mostrar `count` o `99+` (ver _buildIconWithBadge). Sin
+      // limit, cada reconexión del StreamBuilder lee TODA la colección —
+      // potencialmente cientos de docs cuando crece el histórico. Con
+      // limit(100), si el stream trae 100 docs sé que hay >=100 → muestro
+      // "99+". Cap el costo Firestore en O(100) lecturas/sesión.
       badgeStream: FirebaseFirestore.instance
           .collection('REVISIONES')
+          .limit(100)
           .snapshots(),
       build: () => const AdminRevisionesScreen(),
     ),
@@ -88,6 +95,7 @@ class _AdminShellState extends State<AdminShell> {
       badgeStream: FirebaseFirestore.instance
           .collection('MANTENIMIENTOS_AVISADOS')
           .where('ultimo_estado', isEqualTo: 'VENCIDO')
+          .limit(100)
           .snapshots(),
       build: () => const AdminMantenimientoScreen(),
     ),
@@ -102,6 +110,7 @@ class _AdminShellState extends State<AdminShell> {
       badgeStream: FirebaseFirestore.instance
           .collection('VOLVO_ALERTAS')
           .where('atendida', isEqualTo: false)
+          .limit(100)
           .snapshots(),
       build: () => const AdminVolvoAlertasScreen(),
     ),
