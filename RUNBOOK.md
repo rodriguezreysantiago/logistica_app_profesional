@@ -482,6 +482,73 @@ Corré la app y hacé que tire un error a propósito (ej. login con password mal
 
 ---
 
+## Decommission del proyecto legacy `logisticaapp-e539a`
+
+El 2026-05-02 migramos del proyecto Firebase original `logisticaapp-e539a` al nuevo `coopertrans-movil`. El proyecto viejo quedó **frozen** (sin tráfico activo) como red de seguridad mientras validamos que el nuevo se banca todo. Esta sección documenta cómo bajarlo de forma definitiva una vez cumplida la ventana de validación.
+
+### ¿Cuándo es seguro proceder?
+
+Tres condiciones — TODAS tienen que cumplirse:
+
+1. **≥ 30 días desde la migración**, o sea **≥ 2026-06-02**.
+2. **Operación normal validada** durante esa ventana en `coopertrans-movil`:
+   - App Flutter levantando OK (login + reportes + carga archivos + nuevas pantallas).
+   - Bot WhatsApp despachando notificaciones (vencimientos, alertas Volvo HIGH, mantenimiento).
+   - Cloud Functions corriendo sin errores (`firebase functions:log --project=coopertrans-movil --lines 50`).
+   - Backup automático Firestore generándose (ver bucket `gs://coopertrans-movil-backups`).
+   - Volvo Alerts entrando cada 5 min (`firebase functions:log --only volvoAlertasPoller`).
+   - Volvo Scores entrando cada día a las 04:00 ART.
+3. **Cero referencias residuales** al proyecto viejo en el código. Validar con:
+   ```powershell
+   .\scripts\auditar_referencias_proyecto_viejo.ps1
+   ```
+   Tiene que terminar con `OK: solo hay referencias en archivos historicos esperados.` y exit code 0. Si aparece "WARN" / "código activo", revisar cada hit y migrarlo (o sumarlo al whitelist `$historicalFiles` del script si es histórico legítimo).
+
+### Checklist pre-decommission (línea por línea)
+
+Marcá ✅ a cada uno antes de avanzar al delete final.
+
+- [ ] Pasaron ≥30 días desde la migración (≥ 2026-06-02).
+- [ ] Script de auditoría sale con exit 0 y cero hits en código activo.
+- [ ] App Flutter validada manualmente: login + reporte Excel + carga archivo en últimas 48h.
+- [ ] Bot WhatsApp validado: revisar `Get-Service CoopertransMovilBot` → `Running`.
+- [ ] Cloud Functions sin errores: `firebase functions:log --project=coopertrans-movil --lines 100` no muestra `ERROR` ni `WARN` repetidos.
+- [ ] Cloud Scheduler ENABLED: `gcloud scheduler jobs list --project=coopertrans-movil --location=southamerica-east1` muestra todos los jobs en `ENABLED`.
+- [ ] Backup más reciente del proyecto NUEVO existe: `gcloud storage ls gs://coopertrans-movil-backups | Sort-Object | Select-Object -Last 3` muestra exports de los últimos 3 días.
+- [ ] Backup final del proyecto VIEJO (por las dudas, antes de bajar):
+  ```powershell
+  gcloud firestore export gs://logisticaapp-backups/PRE_DECOMMISSION_$(Get-Date -Format 'yyyy-MM-dd') `
+    --project=logisticaapp-e539a
+  ```
+- [ ] Documentar el delete en `ESTADO_PROYECTO.md` (sección 6.X de la sesión donde se hace).
+
+### Comando final de delete (NO correr antes del checklist)
+
+Hay 2 caminos. **Elegir uno**:
+
+**Opción A — Bajar a Spark plan** (más conservador, gratis pero limitado):
+- Firebase Console → `logisticaapp-e539a` → Settings → Usage and billing → Modify plan → Spark.
+- El proyecto sigue existiendo pero sin Cloud Functions/Tasks/etc activos. Si en el futuro hace falta consultar la DB vieja, está accesible en read-only.
+- No hay comando CLI para esto — desde la consola web.
+
+**Opción B — Borrar el proyecto entero** (definitivo, no hay vuelta atrás):
+```powershell
+# Esto BORRA el proyecto y TODO su contenido (DB, Storage, Auth, Functions, etc.)
+# Hay un grace period de 30 días donde se puede restaurar desde Console,
+# pero después de eso es irrecuperable.
+gcloud projects delete logisticaapp-e539a
+```
+
+**Recomendación**: Opción A (Spark) primero. Da otro mes de gracia "por las dudas" sin costo. Si después de 60 días totales (30 frozen + 30 en Spark) nadie tocó nada del proyecto viejo, ahí sí Opción B.
+
+### Después del decommission
+
+- Actualizar `RUNBOOK.md` (esta sección): marcar "DECOMMISSIONED" con fecha.
+- Actualizar `project_pendientes_post_migracion.md` (memoria) para sacar el ítem.
+- Si Opción A (Spark): el bucket `gs://logisticaapp-backups` se mantiene mientras dure el plan. Si Opción B: el bucket se borra automáticamente con el proyecto.
+
+---
+
 ## Otros gotchas operativos (Windows)
 
 ### `start_bot.ps1` aborta por package-lock "modificado" pero `git diff` está vacío
