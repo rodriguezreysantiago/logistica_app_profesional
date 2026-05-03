@@ -58,6 +58,7 @@ const cron = require('./cron');
 const health = require('./health');
 const control = require('./control');
 const messageHandler = require('./message_handler');
+const agrupador = require('./agrupador');
 
 // Identificador de esta PC. Configurable via env var BOT_PC_ID
 // (recomendado: "casa", "oficina", "server-prod"). Si no se setea,
@@ -279,12 +280,54 @@ async function procesarSiguiente() {
       log.debug(`${docId}: otro proceso lo tomó primero, salto.`);
       return;
     }
+
+    // Agrupación al envío (consumer-side). Si este doc es de un origen
+    // agrupable (volvo_alert_high / volvo_alert_mantenimiento) y hay
+    // otros pendientes para el mismo destinatario, los combinamos en
+    // UN solo mensaje. El cron interno del bot ya tiene agrupación al
+    // ENCOLAR (cron_aviso_agrupado) — este flow cubre lo que viene de
+    // Cloud Functions y no pasa por el cron.
+    let mensajeFinal = data.mensaje;
+    let docsAgrupados = [];
+    try {
+      const plan = await agrupador.planificarEnvioAgrupado(db, snap);
+      if (plan) {
+        mensajeFinal = plan.mensajeCombinado;
+        docsAgrupados = plan.otrosDocsAgrupados;
+        log.info(
+          `${docId}: agrupando con ${docsAgrupados.length} otro(s) ` +
+          `pendiente(s) del mismo destinatario.`
+        );
+      }
+    } catch (e) {
+      // Si el agrupador falla (Firestore down, query rota, lo que sea),
+      // mejor mandar el mensaje individual que romper el envío entero.
+      log.warn(`${docId}: agrupador falló (envío individual): ${e.message}`);
+    }
+
     const delay = delayAleatorioMs();
     log.info(`→ Enviando ${docId} a ${data.telefono} en ${Math.round(delay / 1000)}s...`);
     await sleep(delay);
 
-    const waMessageId = await wa.enviarMensaje(wid, data.mensaje);
+    const waMessageId = await wa.enviarMensaje(wid, mensajeFinal);
     await fs.marcarEnviado(docRef, { waMessageId });
+
+    // Marcar los docs agrupados como ENVIADO con `agrupado_en` apuntando
+    // al doc principal — sin reenviar, queda traza para auditoría.
+    if (docsAgrupados.length > 0) {
+      const batch = db.batch();
+      for (const otro of docsAgrupados) {
+        batch.update(otro.ref, {
+          estado: fs.ESTADO.enviado,
+          enviado_en: admin.firestore.FieldValue.serverTimestamp(),
+          agrupado_en: docId,
+          wa_message_id: waMessageId || null,
+        });
+      }
+      await batch.commit();
+      log.info(`  ${docsAgrupados.length} doc(s) marcados como agrupados en ${docId}`);
+    }
+
     health.registrarEnvio();
     log.info(`✓ Enviado ${docId} (wa_id: ${waMessageId || '?'})`);
   } catch (e) {
