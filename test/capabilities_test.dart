@@ -1,0 +1,221 @@
+// Tests para Capabilities (RBAC del cliente Flutter).
+//
+// Esta matriz define qué pantallas y acciones puede ver/hacer cada rol.
+// Si un cambio acá rompe la herencia ADMIN ⊃ SUPERVISOR sin que nos
+// enteremos, podríamos terminar con choferes que ven pantallas admin
+// (UX rota — la rule de Firestore igual los rechazaría, pero es feo).
+//
+// Estos tests cubren:
+//   - Defaults conservadores (rol unknown / null / empty → CHOFER, sin caps).
+//   - Normalización de roles legacy (USUARIO → CHOFER).
+//   - Que la herencia ADMIN ⊃ SUPERVISOR se respete.
+//   - Capabilities exclusivas de ADMIN no estén en SUPERVISOR.
+//   - canAny / canAll / ofRol con casos edge.
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:logistica_app_profesional/core/constants/app_constants.dart';
+import 'package:logistica_app_profesional/core/services/capabilities.dart';
+
+void main() {
+  group('Capabilities.can — fallback conservador (rol desconocido)', () {
+    test('rol null → set vacío (sin acceso a nada admin)', () {
+      expect(Capabilities.can(null, Capability.verPanelAdmin), isFalse);
+      expect(Capabilities.can(null, Capability.verListaPersonal), isFalse);
+      expect(Capabilities.can(null, Capability.verAuditoria), isFalse);
+    });
+
+    test('rol vacío → AppRoles.normalizar lo trata como CHOFER', () {
+      expect(Capabilities.can('', Capability.verPanelAdmin), isFalse);
+      expect(Capabilities.can('', Capability.crearEmpleado), isFalse);
+    });
+
+    test('rol desconocido (typo en Firestore) → trato como CHOFER', () {
+      expect(Capabilities.can('SUPERADMIN_TIPO', Capability.verAuditoria),
+          isFalse);
+      expect(Capabilities.can('xxx', Capability.verPanelAdmin), isFalse);
+    });
+  });
+
+  group('Capabilities.can — CHOFER y PLANTA (sin acceso admin)', () {
+    test('CHOFER no entra al panel admin', () {
+      expect(Capabilities.can(AppRoles.chofer, Capability.verPanelAdmin),
+          isFalse);
+      expect(Capabilities.can(AppRoles.chofer, Capability.verListaPersonal),
+          isFalse);
+      expect(Capabilities.can(AppRoles.chofer, Capability.verAlertasVolvo),
+          isFalse);
+    });
+
+    test('PLANTA tampoco entra al panel admin', () {
+      expect(Capabilities.can(AppRoles.planta, Capability.verPanelAdmin),
+          isFalse);
+      expect(Capabilities.can(AppRoles.planta, Capability.crearEmpleado),
+          isFalse);
+    });
+
+    test('rol legacy USUARIO se normaliza a CHOFER (sin acceso)', () {
+      expect(Capabilities.can(AppRoles.usuarioLegacy, Capability.verPanelAdmin),
+          isFalse);
+    });
+  });
+
+  group('Capabilities.can — SUPERVISOR', () {
+    test('SUPERVISOR ve todas las pantallas admin operativas', () {
+      const expectedTrue = [
+        Capability.verPanelAdmin,
+        Capability.verListaPersonal,
+        Capability.verListaFlota,
+        Capability.verVencimientos,
+        Capability.verRevisiones,
+        Capability.verReportes,
+        Capability.verMantenimiento,
+        Capability.verEstadoBot,
+        Capability.verAlertasVolvo,
+      ];
+      for (final cap in expectedTrue) {
+        expect(
+          Capabilities.can(AppRoles.supervisor, cap),
+          isTrue,
+          reason: 'SUPERVISOR debe poder $cap',
+        );
+      }
+    });
+
+    test('SUPERVISOR puede gestionar personal y flota (excepto borrar)', () {
+      expect(Capabilities.can(AppRoles.supervisor, Capability.crearEmpleado),
+          isTrue);
+      expect(Capabilities.can(AppRoles.supervisor, Capability.editarEmpleado),
+          isTrue);
+      expect(Capabilities.can(AppRoles.supervisor, Capability.crearVehiculo),
+          isTrue);
+      expect(Capabilities.can(AppRoles.supervisor, Capability.editarVehiculo),
+          isTrue);
+    });
+
+    test('SUPERVISOR NO puede borrar personal/vehículos (solo ADMIN)', () {
+      expect(Capabilities.can(AppRoles.supervisor, Capability.eliminarEmpleado),
+          isFalse);
+      expect(Capabilities.can(AppRoles.supervisor, Capability.eliminarVehiculo),
+          isFalse);
+    });
+
+    test('SUPERVISOR NO puede asignar rol ADMIN ni cambiar roles', () {
+      expect(Capabilities.can(AppRoles.supervisor, Capability.asignarRolAdmin),
+          isFalse);
+      expect(
+          Capabilities.can(AppRoles.supervisor, Capability.cambiarRolEmpleado),
+          isFalse);
+    });
+
+    test('SUPERVISOR NO ve auditoría ni sync dashboard (solo ADMIN)', () {
+      expect(Capabilities.can(AppRoles.supervisor, Capability.verAuditoria),
+          isFalse);
+      expect(Capabilities.can(AppRoles.supervisor, Capability.verSyncDashboard),
+          isFalse);
+    });
+  });
+
+  group('Capabilities.can — ADMIN (herencia + exclusivas)', () {
+    test('ADMIN tiene TODO lo de SUPERVISOR (herencia)', () {
+      // Tomamos el set de SUPERVISOR y verificamos que TODO está en ADMIN.
+      final supSet = Capabilities.ofRol(AppRoles.supervisor);
+      for (final cap in supSet) {
+        expect(
+          Capabilities.can(AppRoles.admin, cap),
+          isTrue,
+          reason: 'ADMIN debe heredar $cap de SUPERVISOR',
+        );
+      }
+    });
+
+    test('ADMIN tiene las capabilities exclusivas', () {
+      const exclusivasAdmin = [
+        Capability.eliminarEmpleado,
+        Capability.eliminarVehiculo,
+        Capability.asignarRolAdmin,
+        Capability.cambiarRolEmpleado,
+        Capability.verAuditoria,
+        Capability.verSyncDashboard,
+      ];
+      for (final cap in exclusivasAdmin) {
+        expect(
+          Capabilities.can(AppRoles.admin, cap),
+          isTrue,
+          reason: 'ADMIN debe poder $cap (exclusiva)',
+        );
+      }
+    });
+
+    test('REGRESSION: si se rompe la herencia, ADMIN debería seguir teniendo TODAS', () {
+      // Sanity check: ADMIN tiene exactamente |SUPERVISOR| + 6 exclusivas.
+      // Si alguien agrega una capability nueva en SUPERVISOR sin actualizar
+      // adminExtra y _resolverHerencia funciona mal, este test lo detecta.
+      final supSize = Capabilities.ofRol(AppRoles.supervisor).length;
+      final adminSize = Capabilities.ofRol(AppRoles.admin).length;
+      expect(adminSize, equals(supSize + 6),
+          reason:
+              'ADMIN debería tener |SUPERVISOR| + 6 exclusivas. Si esto rompe, revisar adminExtra en _resolverHerencia.');
+    });
+  });
+
+  group('Capabilities.canAny / canAll', () {
+    test('canAny: SUPERVISOR tiene alguna entre [verAuditoria, verRevisiones]', () {
+      expect(
+        Capabilities.canAny(AppRoles.supervisor,
+            [Capability.verAuditoria, Capability.verRevisiones]),
+        isTrue,
+        reason: 'tiene verRevisiones aunque no verAuditoria',
+      );
+    });
+
+    test('canAny: CHOFER NO tiene ninguna admin', () {
+      expect(
+        Capabilities.canAny(AppRoles.chofer,
+            [Capability.verAuditoria, Capability.verPanelAdmin]),
+        isFalse,
+      );
+    });
+
+    test('canAll: ADMIN tiene todas las exclusivas', () {
+      expect(
+        Capabilities.canAll(AppRoles.admin, [
+          Capability.eliminarEmpleado,
+          Capability.asignarRolAdmin,
+          Capability.verAuditoria,
+        ]),
+        isTrue,
+      );
+    });
+
+    test('canAll: SUPERVISOR NO tiene TODAS si una es exclusiva ADMIN', () {
+      expect(
+        Capabilities.canAll(AppRoles.supervisor, [
+          Capability.crearEmpleado, // sí
+          Capability.eliminarEmpleado, // no (ADMIN-only)
+        ]),
+        isFalse,
+      );
+    });
+
+    test('canAny / canAll con lista vacía', () {
+      // Caso edge: si no hay caps que chequear, canAny=false (no hay
+      // ninguna que cumpla) y canAll=true (vacuously true).
+      expect(Capabilities.canAny(AppRoles.admin, const []), isFalse);
+      expect(Capabilities.canAll(AppRoles.admin, const []), isTrue);
+    });
+  });
+
+  group('Capabilities.ofRol', () {
+    test('ADMIN tiene set no vacío', () {
+      expect(Capabilities.ofRol(AppRoles.admin), isNotEmpty);
+    });
+
+    test('CHOFER tiene set vacío (sin acceso a nada gateado)', () {
+      expect(Capabilities.ofRol(AppRoles.chofer), isEmpty);
+    });
+
+    test('rol unknown → set vacío (mismo fallback que CHOFER)', () {
+      expect(Capabilities.ofRol('NO_EXISTE'), isEmpty);
+    });
+  });
+}
