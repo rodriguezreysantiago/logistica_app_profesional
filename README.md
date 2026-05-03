@@ -1,8 +1,10 @@
-# S.M.A.R.T. Logística
+# Coopertrans Móvil
 
 [![CI](https://github.com/rodriguezreysantiago/logistica_app_profesional/actions/workflows/ci.yml/badge.svg)](https://github.com/rodriguezreysantiago/logistica_app_profesional/actions/workflows/ci.yml)
 
-Sistema de gestión de flota para la empresa de transporte **Vecchi / Sucesión Vecchi** (Bahía Blanca). Maneja personal, flota, vencimientos de papeles, checklists, revisiones, integración con Volvo Connect y un bot de WhatsApp para avisos automáticos.
+Sistema de gestión de flota para la empresa de transporte **Vecchi / Sucesión Vecchi** (Bahía Blanca). Maneja personal, flota, vencimientos de papeles, checklists, revisiones, integración con Volvo Connect (telemetría + Vehicle Alerts API + Scores API) y un bot de WhatsApp para avisos automáticos.
+
+> Producto comercializado como **Coopertrans Móvil** (rebrand 2026-05-02). El nombre interno del paquete Dart sigue siendo `logistica_app_profesional` por costo de refactor — sin impacto al usuario final.
 
 ## Stack
 

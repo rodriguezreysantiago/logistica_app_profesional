@@ -482,6 +482,58 @@ Corré la app y hacé que tire un error a propósito (ej. login con password mal
 
 ---
 
+## CI/CD — GitHub Actions
+
+Workflow en `.github/workflows/ci.yml` que corre **3 jobs en paralelo** en cada push a `main` (y a ramas `claude/**` que es donde Claude Code commitea), y en cada PR hacia `main`. Si alguno falla, GitHub marca el commit con ✗ rojo. Si pasan los tres, ✓ verde.
+
+| Job | Qué hace |
+|---|---|
+| **Flutter** | `flutter pub get` → `flutter analyze` → `flutter test` (67 tests) → check anti-regresión: falla si alguien introduce nuevos `Colors.<accent>` hardcoded en `lib/` (deben usar `AppColors.accent*`). |
+| **WhatsApp Bot** | `npm ci` → `npm test` (54 tests) → `node --check` para validar sintaxis de cada módulo. Skip de descarga de Chromium con `PUPPETEER_SKIP_DOWNLOAD=true` para velocidad (~30s vs ~3min). |
+| **Cloud Functions** | `npm ci` → `npm run build` (tsc) → `npm run lint` (ESLint) → `npm test` (helpers puros bcrypt/sha256). |
+
+**El CI NO deploya nada** — solo valida que el repo está sano. Deploy sigue siendo manual (`firebase deploy --only ...`) por decisión consciente: minimiza el blast radius si algo se cuela.
+
+### Activar branch protection (one-time, requiere ser owner del repo)
+
+Sin protection, los ✗ rojos del CI son **informativos** — se pueden mergear igual. Para hacerlos **bloqueantes**:
+
+1. Ir a: https://github.com/rodriguezreysantiago/logistica_app_profesional/settings/branches
+2. Click en **"Add branch ruleset"** (o "Add rule" si está en la UI vieja).
+3. **Branch name pattern**: `main`.
+4. Activar:
+   - ✅ **Require status checks to pass before merging**
+   - ✅ **Require branches to be up to date before merging** (recomendado)
+   - En "Status checks that are required" buscar y agregar:
+     - `Flutter (analyze + test)`
+     - `WhatsApp Bot (npm test)`
+     - `Cloud Functions (build + lint)`
+5. (Opcional pero recomendado):
+   - ✅ **Require a pull request before merging** — bloquea push directo a main, fuerza pasar por PR.
+   - ✅ **Require linear history** — evita merge commits, mantiene historia limpia.
+   - ❌ NO marcar "Require approvals" (sos único dev — te bloquearías a vos mismo).
+6. **Save**.
+
+A partir de ahí, si Flutter analyze rompe, GitHub bloquea el merge hasta que el commit esté en verde.
+
+### Cómo interpretar fails del CI
+
+| Job que falla | Qué revisar primero |
+|---|---|
+| Flutter — `analyze` | Tirar `flutter analyze` local. Suele ser warning nuevo de un upgrade reciente o variable no usada. |
+| Flutter — `test` | `flutter test` local. Test roto por cambio reciente o snapshot obsoleto. |
+| Flutter — "No nuevos colors hardcoded" | Reemplazar `Colors.greenAccent` (etc) por `AppColors.accentGreen` (etc) en las líneas que el log marca con `+`. |
+| Bot — `npm test` | `cd whatsapp-bot && npm test` local. Suele ser test de feriados que necesita actualizarse en cada cambio de año. |
+| Bot — `node --check` | Sintaxis JS rota en algún módulo de `whatsapp-bot/src/`. Suele ser typo de paréntesis. |
+| Functions — `npm run build` | `cd functions && npm run build` local. TypeScript no compila. |
+| Functions — `npm run lint` | `cd functions && npm run lint -- --fix` autoarreglar; lo que queda es lo manual. |
+
+### Status badge
+
+Visible en el README — muestra el estado del último run del CI sobre `main`. Click en el badge → lleva a la página de Actions.
+
+---
+
 ## Decommission del proyecto legacy `logisticaapp-e539a`
 
 El 2026-05-02 migramos del proyecto Firebase original `logisticaapp-e539a` al nuevo `coopertrans-movil`. El proyecto viejo quedó **frozen** (sin tráfico activo) como red de seguridad mientras validamos que el nuevo se banca todo. Esta sección documenta cómo bajarlo de forma definitiva una vez cumplida la ventana de validación.
@@ -590,8 +642,8 @@ Get-Content whatsapp-bot\logs\bot-out.log -Tail 50 -Wait   # Logs en vivo
 Get-Content whatsapp-bot\logs\bot-err.log -Tail 50         # Errores
 
 # === Tests (deben pasar antes de cada deploy) ===
-flutter test                                    # 58/58 tests cliente
-cd whatsapp-bot ; npm test                      # 48/48 tests bot
+flutter test                                    # 67/67 tests cliente
+cd whatsapp-bot ; npm test                      # 54/54 tests bot
 cd functions ; npm run build                    # tsc limpio
 
 # === Firebase ===
