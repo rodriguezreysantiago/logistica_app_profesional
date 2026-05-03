@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Pantalla "Descargas por unidad" — lista de eventos PTO (toma de fuerza)
@@ -68,7 +69,7 @@ class _AdminDescargasPtoScreenState extends State<AdminDescargasPtoScreen> {
         builder: (ctx, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(color: Colors.greenAccent),
+              child: CircularProgressIndicator(color: AppColors.accentGreen),
             );
           }
           if (snap.hasError) {
@@ -199,7 +200,7 @@ class _ChipFiltro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? Colors.greenAccent : Colors.white38;
+    final color = selected ? AppColors.accentGreen : Colors.white38;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
@@ -207,7 +208,7 @@ class _ChipFiltro extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: selected
-              ? Colors.greenAccent.withAlpha(25)
+              ? AppColors.accentGreen.withAlpha(25)
               : Colors.white.withAlpha(8),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: color.withAlpha(80)),
@@ -252,7 +253,7 @@ class _EventoPtoCard extends StatelessWidget {
     final detalle = data['detalle_pto'] as Map<String, dynamic>?;
 
     return AppCard(
-      borderColor: Colors.greenAccent.withAlpha(40),
+      borderColor: AppColors.accentGreen.withAlpha(40),
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -260,7 +261,7 @@ class _EventoPtoCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.local_shipping, color: Colors.greenAccent, size: 18),
+              const Icon(Icons.local_shipping, color: AppColors.accentGreen, size: 18),
               const SizedBox(width: 8),
               Text(
                 patente,
@@ -300,25 +301,25 @@ class _EventoPtoCard extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.blueAccent.withAlpha(20),
+                  color: AppColors.accentBlue.withAlpha(20),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.blueAccent.withAlpha(60)),
+                  border: Border.all(color: AppColors.accentBlue.withAlpha(60)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.place, color: Colors.blueAccent, size: 14),
+                    const Icon(Icons.place, color: AppColors.accentBlue, size: 14),
                     const SizedBox(width: 6),
                     Text(
                       '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
                       style: const TextStyle(
-                        color: Colors.blueAccent,
+                        color: AppColors.accentBlue,
                         fontSize: 11,
                       ),
                     ),
                     const SizedBox(width: 6),
                     const Icon(Icons.open_in_new,
-                        color: Colors.blueAccent, size: 12),
+                        color: AppColors.accentBlue, size: 12),
                   ],
                 ),
               ),

@@ -4,6 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../widgets/vencimiento_editor_sheet.dart';
@@ -147,9 +148,9 @@ class _AdminVencimientosCalendarioScreenState
       // que filtramos defensivamente.
       if (d != null && d < minDias) minDias = d;
     }
-    if (minDias <= 7) return Colors.redAccent;
-    if (minDias <= 30) return Colors.orangeAccent;
-    return Colors.greenAccent;
+    if (minDias <= 7) return AppColors.accentRed;
+    if (minDias <= 30) return AppColors.accentOrange;
+    return AppColors.accentGreen;
   }
 
   @override
@@ -224,15 +225,15 @@ class _AdminVencimientosCalendarioScreenState
               weekendTextStyle:
                   const TextStyle(color: Colors.white54),
               todayDecoration: BoxDecoration(
-                color: Colors.greenAccent.withAlpha(60),
+                color: AppColors.accentGreen.withAlpha(60),
                 shape: BoxShape.circle,
               ),
               todayTextStyle: const TextStyle(
-                color: Colors.greenAccent,
+                color: AppColors.accentGreen,
                 fontWeight: FontWeight.bold,
               ),
               selectedDecoration: const BoxDecoration(
-                color: Colors.greenAccent,
+                color: AppColors.accentGreen,
                 shape: BoxShape.circle,
               ),
               selectedTextStyle: const TextStyle(
@@ -249,13 +250,13 @@ class _AdminVencimientosCalendarioScreenState
                 fontWeight: FontWeight.bold,
               ),
               leftChevronIcon:
-                  Icon(Icons.chevron_left, color: Colors.greenAccent),
+                  Icon(Icons.chevron_left, color: AppColors.accentGreen),
               rightChevronIcon:
-                  Icon(Icons.chevron_right, color: Colors.greenAccent),
+                  Icon(Icons.chevron_right, color: AppColors.accentGreen),
             ),
             daysOfWeekStyle: const DaysOfWeekStyle(
               weekdayStyle: TextStyle(
-                color: Colors.greenAccent,
+                color: AppColors.accentGreen,
                 fontWeight: FontWeight.bold,
                 fontSize: 11,
               ),

@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import 'excel_utils.dart' as xu;
 
@@ -751,7 +752,7 @@ class _LabelSeccion extends StatelessWidget {
       child: Text(
         texto.toUpperCase(),
         style: const TextStyle(
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           fontSize: 10,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.3,
@@ -806,16 +807,16 @@ class _BotonRangoFecha extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
-          color: Colors.greenAccent.withAlpha(20),
+          color: AppColors.accentGreen.withAlpha(20),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-              color: Colors.greenAccent.withAlpha(120), width: 1.5),
+              color: AppColors.accentGreen.withAlpha(120), width: 1.5),
         ),
         child: Row(
           children: [
             const Icon(
               Icons.date_range,
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               size: 26,
             ),
             const SizedBox(width: 12),
@@ -836,7 +837,7 @@ class _BotonRangoFecha extends StatelessWidget {
                   Text(
                     '${fmt.format(desde)}  a  ${fmt.format(hasta)}',
                     style: const TextStyle(
-                      color: Colors.greenAccent,
+                      color: AppColors.accentGreen,
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
                     ),
@@ -891,15 +892,15 @@ class _WarningHistoricoLimitado extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.orangeAccent.withAlpha(30),
+              color: AppColors.accentOrange.withAlpha(30),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orangeAccent.withAlpha(120)),
+              border: Border.all(color: AppColors.accentOrange.withAlpha(120)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Icon(Icons.info_outline,
-                    color: Colors.orangeAccent, size: 18),
+                    color: AppColors.accentOrange, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -907,7 +908,7 @@ class _WarningHistoricoLimitado extends StatelessWidget {
                     'Los días anteriores al ${fmt.format(fechaMin)} no van a tener '
                     'data en el reporte (se reportan como "(acum.)" o vacíos).',
                     style: const TextStyle(
-                      color: Colors.orangeAccent,
+                      color: AppColors.accentOrange,
                       fontSize: 11,
                       height: 1.4,
                     ),

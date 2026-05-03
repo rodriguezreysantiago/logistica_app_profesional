@@ -168,7 +168,7 @@ class _TractorCard extends StatelessWidget {
                   const Text(
                     'Cargá el último service desde la ficha para ver KM al próximo',
                     style: TextStyle(
-                      color: Colors.amberAccent,
+                      color: AppColors.accentAmber,
                       fontSize: 10,
                       fontStyle: FontStyle.italic,
                     ),
@@ -217,21 +217,21 @@ class _TractorCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.greenAccent.withAlpha(20),
+                    color: AppColors.accentGreen.withAlpha(20),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                        color: Colors.greenAccent.withAlpha(60)),
+                        color: AppColors.accentGreen.withAlpha(60)),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.check_circle_outline,
-                          size: 12, color: Colors.greenAccent),
+                          size: 12, color: AppColors.accentGreen),
                       SizedBox(width: 4),
                       Text(
                         'Service hecho',
                         style: TextStyle(
-                          color: Colors.greenAccent,
+                          color: AppColors.accentGreen,
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                         ),
@@ -325,7 +325,7 @@ class _TractorCard extends StatelessWidget {
                   child: Row(
                     children: [
                       const Icon(Icons.event,
-                          color: Colors.greenAccent, size: 18),
+                          color: AppColors.accentGreen, size: 18),
                       const SizedBox(width: 10),
                       Text(
                         'Fecha: ${AppFormatters.formatearFecha(fechaElegida)}',
@@ -540,7 +540,7 @@ class _BarraResumen extends StatelessWidget {
           _Chip(
             label: 'Vencidos',
             count: resumen.vencidos,
-            color: Colors.redAccent,
+            color: AppColors.accentRed,
             estado: MantenimientoEstado.vencido,
             activo: filtroActivo == MantenimientoEstado.vencido,
             onTap: onSeleccionar,
@@ -548,7 +548,7 @@ class _BarraResumen extends StatelessWidget {
           _Chip(
             label: 'Urgentes',
             count: resumen.urgentes,
-            color: Colors.orangeAccent,
+            color: AppColors.accentOrange,
             estado: MantenimientoEstado.urgente,
             activo: filtroActivo == MantenimientoEstado.urgente,
             onTap: onSeleccionar,
@@ -556,7 +556,7 @@ class _BarraResumen extends StatelessWidget {
           _Chip(
             label: 'Programar',
             count: resumen.programar,
-            color: Colors.amberAccent,
+            color: AppColors.accentAmber,
             estado: MantenimientoEstado.programar,
             activo: filtroActivo == MantenimientoEstado.programar,
             onTap: onSeleccionar,
@@ -572,7 +572,7 @@ class _BarraResumen extends StatelessWidget {
           _Chip(
             label: 'OK',
             count: resumen.ok,
-            color: Colors.greenAccent,
+            color: AppColors.accentGreen,
             estado: MantenimientoEstado.ok,
             activo: filtroActivo == MantenimientoEstado.ok,
             onTap: onSeleccionar,

@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/services/storage_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
@@ -149,7 +150,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(25)),
         border: const Border(
-          top: BorderSide(color: Colors.greenAccent, width: 2),
+          top: BorderSide(color: AppColors.accentGreen, width: 2),
         ),
       ),
       child: Column(
@@ -178,7 +179,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
           Text(
             widget.item.titulo,
             style: const TextStyle(
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -200,7 +201,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
               ),
             ),
             trailing: const Icon(Icons.event_note,
-                color: Colors.greenAccent, size: 28),
+                color: AppColors.accentGreen, size: 28),
             onTap: _seleccionarFecha,
           ),
 
@@ -218,7 +219,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                 border: Border.all(
                   color: _archivoBytes == null
                       ? Colors.white10
-                      : Colors.greenAccent,
+                      : AppColors.accentGreen,
                 ),
               ),
               child: Row(
@@ -229,7 +230,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                         : Icons.check_circle,
                     color: _archivoBytes == null
                         ? Colors.white38
-                        : Colors.greenAccent,
+                        : AppColors.accentGreen,
                     size: 28,
                   ),
                   const SizedBox(width: 15),
@@ -241,7 +242,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                       style: TextStyle(
                         color: _archivoBytes == null
                             ? Colors.white54
-                            : Colors.greenAccent,
+                            : AppColors.accentGreen,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
@@ -249,7 +250,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
                   ),
                   if (_archivoBytes == null)
                     const Icon(Icons.add_a_photo_outlined,
-                        color: Colors.greenAccent, size: 20),
+                        color: AppColors.accentGreen, size: 20),
                 ],
               ),
             ),
@@ -261,7 +262,7 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
           if (_subiendo)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 14),
-              child: CircularProgressIndicator(color: Colors.greenAccent),
+              child: CircularProgressIndicator(color: AppColors.accentGreen),
             )
           else
             Row(
