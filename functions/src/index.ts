@@ -1888,6 +1888,38 @@ export const onAlertaVolvoCreated = onDocumentCreated(
       return;
     }
 
+    // Filtro de subtipos GENERIC ruidosos (incidente 2026-05-03):
+    // Volvo emite varios eventos GENERIC con severidad HIGH que NO son
+    // urgencias del manejo y que generaban spam masivo al chofer:
+    //
+    // - TELL_TALE: testigo del tablero (ABS, freno de mano, AdBlue, etc.).
+    //   Es problema de mantenimiento — ya va al jefe de mantenimiento via
+    //   `onAlertaVolvoMantenimientoCreated`. Mandárselo TAMBIÉN al chofer
+    //   no aporta (el chofer no puede arreglar un sensor del tablero) y
+    //   un testigo intermitente puede generar 10-15 eventos por día.
+    //
+    // - DRIVING_WITHOUT_BEING_LOGGED_IN: chofer sin loguearse al tachógrafo.
+    //   Decisión de Vecchi (memoria del proyecto): NO se enforcea
+    //   identificación de chofer en tachógrafo. Evento de baja relevancia.
+    //
+    // Estos eventos siguen visibles en el tablero "Alertas Volvo" del
+    // admin y se acumulan en el resumen diario (aviso_alertas_volvo_builder)
+    // que se manda 1x/día al admin. Nada se pierde — solo no spameamos.
+    if (tipo === "GENERIC") {
+      const triggerType = (
+        (data.detalle_generic as Record<string, unknown> | undefined)
+          ?.triggerType ?? ""
+      ).toString().toUpperCase();
+      const subtiposRuidosos = ["TELL_TALE", "DRIVING_WITHOUT_BEING_LOGGED_IN"];
+      if (subtiposRuidosos.includes(triggerType)) {
+        logger.info(
+          "[onAlertaVolvoCreated] GENERIC subtipo ruidoso, skip al chofer (sigue en tablero)",
+          { alertId: event.params.alertId, patente, triggerType }
+        );
+        return;
+      }
+    }
+
     // Lookup chofer: priorizamos el `chofer_dni` snapshoteado por
     // `volvoAlertasPoller` al crear la alerta (atribución del chofer del
     // MOMENTO del evento, no el chofer actual asignado). Esto es crítico
@@ -1942,13 +1974,18 @@ export const onAlertaVolvoCreated = onDocumentCreated(
     const creadoMs =
       (data.creado_en as Timestamp | undefined)?.toMillis() ?? Date.now();
     const horaTxt = _formatHoraArg(creadoMs);
+    // Fecha explícita DD/MM en lugar de "hoy a las". El bot tiene horario
+    // hábil L-V 8-20 y skip fin de semana — un evento del sábado se manda
+    // el lunes y "hoy" sería mentira. Con la fecha explícita el chofer
+    // siempre sabe a qué momento se refiere el aviso.
+    const fechaTxt = _formatFechaArg(creadoMs);
     const etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
 
     const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
     const mensaje =
       `${saludo},\n\n` +
       `Se detectó un evento de manejo en el TRACTOR ${patente} ` +
-      `hoy a las ${horaTxt}:\n\n` +
+      `el ${fechaTxt} a las ${horaTxt}:\n\n` +
       `⚠️ ${etiqueta}\n\n` +
       "Te pedimos ajustar tu manejo. Si hubo una situación particular, " +
       "avisanos a la oficina.\n\n" +
@@ -1973,6 +2010,10 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         alert_id: event.params.alertId,
         alert_tipo: tipo,
         alert_patente: patente,
+        // Timestamp del evento real (no del encolado) — usado por el
+        // agrupador del bot para armar el mensaje combinado con horas
+        // correctas si el chofer recibe varios eventos juntos.
+        alert_creado_en: Timestamp.fromMillis(creadoMs),
       });
       logger.info("[onAlertaVolvoCreated] OK encolado para chofer", {
         alertId: event.params.alertId,
@@ -2017,6 +2058,21 @@ function _formatHoraArg(millis: number): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+  });
+  return fmt.format(new Date(millis));
+}
+
+/**
+ * Formatea DD/MM en TZ Argentina a partir de millis UTC. Usado en los
+ * mensajes al chofer para que la fecha del evento sea explícita
+ * (no "hoy" — el bot puede demorar el envío al lunes si el evento ocurrió
+ * el fin de semana).
+ */
+function _formatFechaArg(millis: number): string {
+  const fmt = new Intl.DateTimeFormat("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    day: "2-digit",
+    month: "2-digit",
   });
   return fmt.format(new Date(millis));
 }
@@ -2418,6 +2474,7 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
     const creadoMs =
       (data.creado_en as Timestamp | undefined)?.toMillis() ?? Date.now();
     const horaTxt = _formatHoraArg(creadoMs);
+    const fechaTxt = _formatFechaArg(creadoMs);
 
     // Snapshot del chofer al volante en el momento del evento (lo dejó
     // el poller cruzando con el log temporal ASIGNACIONES_VEHICULO).
@@ -2440,7 +2497,7 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
       "🔧 *Alerta de mantenimiento*\n\n" +
       `*${patente || "(sin patente)"}* — ${etiqueta}\n` +
       `${sevEmoji} Severidad: ${severidad || "—"}\n` +
-      `🕐 ${horaTxt}` +
+      `🕐 ${fechaTxt} ${horaTxt}` +
       choferTxt +
       linkMaps +
       "\n\n_Sistema Coopertrans Móvil — Aviso automático._";
@@ -2463,6 +2520,8 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
         alert_id: event.params.alertId,
         alert_tipo: tipo,
         alert_patente: patente,
+        // Para que el agrupador del bot tenga la fecha real del evento.
+        alert_creado_en: Timestamp.fromMillis(creadoMs),
       });
       logger.info("[onAlertaVolvoMantenimientoCreated] OK encolado", {
         alertId: event.params.alertId,
