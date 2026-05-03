@@ -22,14 +22,19 @@ Sistema de gestión de flota para la empresa de transporte **Vecchi / Sucesión 
 git clone https://github.com/rodriguezreysantiago/logistica_app_profesional.git
 cd logistica_app_profesional
 
-# Recrear archivos sensibles (NO están en git):
-#   - secrets.json            (credenciales Volvo Connect)
-#   - serviceAccountKey.json  (solo para scripts de admin)
-# Copiarlos desde Bitwarden / Drive privado.
-
 flutter pub get
-flutter run -d windows --dart-define-from-file=secrets.json
-# (en VS Code F5 ya tiene el flag configurado en .vscode/launch.json)
+flutter run -d windows
+# (en VS Code F5 ya tiene la config lista en .vscode/launch.json)
+
+# Las credenciales Volvo Connect viven en Secret Manager (Firebase
+# Functions) desde 2026-04-29 y el cliente las consume vía la Cloud
+# Function `volvoProxy`. Por eso ya NO hay que pasar `secrets.json`
+# ni `--dart-define-from-file` al arrancar.
+#
+# `serviceAccountKey.json` SÍ sigue siendo necesario para correr
+# scripts de admin (`scripts/*.js` y `scripts/*.py`) y para el bot
+# de WhatsApp. NO está en git — copiarlo desde Bitwarden, o regenerar
+# desde Firebase Console → Project Settings → Service accounts.
 ```
 
 ### Bot WhatsApp

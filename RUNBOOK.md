@@ -417,12 +417,11 @@ Para llevar los zips a la nube: el `BOT_BACKUP_DIR` apunta a una subcarpeta dent
 
 Logs del backup: `whatsapp-bot/logs/backup.log`.
 
-### `serviceAccountKey.json` y `secrets.json`
+### `serviceAccountKey.json`
 
-Están en **Bitwarden** (vault personal de Santiago). Si Santiago no está disponible, hay que regenerar:
+Está en **Bitwarden** (vault personal de Santiago). Si Santiago no está disponible: Firebase Console → Project Settings → Service accounts → Generate new private key. La key vieja seguirá funcionando hasta que se revoque manualmente.
 
-- `serviceAccountKey.json`: Firebase Console → Project Settings → Service accounts → Generate new private key. La key vieja seguirá funcionando hasta que se revoque manualmente.
-- `secrets.json`: contenido reconstruible desde el portal Volvo Connect (admin de la cuenta Volvo del cliente).
+> Las credenciales Volvo Connect (`VOLVO_USERNAME`/`VOLVO_PASSWORD`) ya NO se cargan vía `secrets.json` desde 2026-04-29: viven en Secret Manager de GCP del proyecto `coopertrans-movil` y el cliente Flutter las consume vía la Cloud Function `volvoProxy`. Para rotarlas: actualizar en Secret Manager + redeploy de `volvoProxy`.
 
 ---
 
@@ -687,7 +686,6 @@ git status -uno                                 # cambios sin .claude/
 |---|---|
 | `VOLVO_USERNAME` / `VOLVO_PASSWORD` | Secret Manager de GCP del proyecto coopertrans-movil. La copia maestra está acá. La copia de Bitwarden es para acceso humano (al portal Volvo). Rotación: ver `RUNBOOK.md` sección Sentry / Secrets (mismo flujo). |
 | `serviceAccountKey.json` | Generar en Firebase Console → Project Settings → Service accounts → Generate new private key. NO commit. Copia local en cada PC con bot/scripts admin (no la del usuario común). |
-| `secrets.json` (cliente Flutter) | Plantilla en `secrets.example.json`. Contenido en Bitwarden. Cargado vía `--dart-define-from-file=secrets.json` al `flutter run`. |
 
 ---
 

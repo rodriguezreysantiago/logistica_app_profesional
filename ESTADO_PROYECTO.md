@@ -102,9 +102,7 @@ logistica_app_profesional/
 ├── firestore.rules                         # Reglas de seguridad Firestore
 ├── storage.rules                           # Reglas de seguridad Storage
 ├── firebase.json
-├── secrets.json                            # NO en git — credenciales Volvo
-├── secrets.example.json
-├── serviceAccountKey.json                  # NO en git — admin SDK
+├── serviceAccountKey.json                  # NO en git — admin SDK (scripts y bot)
 ├── pubspec.yaml
 ├── ESTADO_PROYECTO.md                      # ESTE archivo
 └── AUDITORIA_2026-04-28.md
@@ -916,10 +914,10 @@ Resultado: a partir del 2026-06-02 Santiago tiene todo el pensamiento hecho — 
 git clone <url-del-repo> logistica_app_profesional
 cd logistica_app_profesional
 
-# 2. Recrear archivos sensibles (NO están en git)
-#    - secrets.json            (credenciales Volvo Connect)
-#    - serviceAccountKey.json  (solo para scripts de admin)
-# Copiarlos desde Bitwarden / Drive privado
+# 2. Recrear `serviceAccountKey.json` (NO está en git) si vas a correr
+#    scripts/admin o el bot. Copiarlo desde Bitwarden / Drive privado.
+#    Las credenciales Volvo NO se cargan localmente: viven en Secret
+#    Manager y el cliente las consume vía la Cloud Function `volvoProxy`.
 
 # 3. Instalar dependencias Flutter
 flutter pub get
@@ -928,14 +926,15 @@ flutter pub get
 pip install firebase-admin
 
 # 5. Correr la app (Windows)
-flutter run -d windows --dart-define-from-file=secrets.json
-# (en VS Code F5 ya tiene el flag configurado en .vscode/launch.json)
+flutter run -d windows
+# (en VS Code F5 ya tiene la config lista en .vscode/launch.json)
 ```
 
 | Archivo | Para qué | Cómo |
 |---|---|---|
-| `secrets.json` | Credenciales Volvo Connect | Plantilla en `secrets.example.json`. Contenido en Bitwarden. |
 | `serviceAccountKey.json` | Admin SDK Firebase para scripts y bot | Generar en Firebase Console → Project Settings → Service accounts → Generate new private key. |
+
+> Las credenciales Volvo Connect (`VOLVO_USERNAME`/`VOLVO_PASSWORD`) ya **NO** se cargan vía `secrets.json` desde 2026-04-29: viven en Secret Manager de GCP y el cliente Flutter las consume vía la Cloud Function `volvoProxy`.
 
 ## 9. Cómo retomar contexto en Claude / Cowork
 
@@ -949,10 +948,10 @@ Reemplazá `<X>` con lo que quieras hacer ese día.
 
 ```powershell
 # Correr la app en debug
-flutter run -d windows --dart-define-from-file=secrets.json
+flutter run -d windows
 
 # Build de release Windows
-flutter build windows --release --dart-define-from-file=secrets.json
+flutter build windows --release
 
 # Análisis estático
 flutter analyze
@@ -984,7 +983,7 @@ git log --oneline -10
   2. **`serviceAccountKey.json` revocado** → mismo error `UNAUTHENTICATED` aunque el JSON parezca válido. La key actual del repo es de la rotación 2026-04-29 mañana. Si en alguna PC quedó una key vieja-vieja, regenerar desde Firebase Console → Project Settings → Service Accounts → Generate new private key.
   3. **Stream gRPC se cae cada ~2 min** en redes con NAT agresivo. El bot ya está hecho con polling (no `onSnapshot`) para evitarlo, pero si en el futuro alguien revierte a streams, atención.
 - **Las pantallas del bot WhatsApp no están en `app_router.dart`**: el agente sospecha que se acceden desde un menú interno del `admin_shell` o por feature flag. Si querés agregarlas al menú principal, hay que registrar las rutas y sumar tiles en `admin_panel_screen.dart`.
-- **`secrets.json` está congelado a una versión vieja de credenciales Volvo**: si Volvo rota el password en su portal, hay que actualizar `secrets.json` y rebuildear la app (no es runtime). Ver email de Volvo en Bitwarden.
+- **Si Volvo rota el password en su portal**: actualizarlo en Secret Manager (GCP del proyecto `coopertrans-movil`, secrets `VOLVO_USERNAME`/`VOLVO_PASSWORD`) y redeployar `volvoProxy` para que tome la nueva versión. La app cliente NO necesita rebuild.
 - **Si se agrega una colección Firestore nueva**: sumarla a `firestore.rules` ANTES de hacer deploy de la app. El fallback `if false` la cerraría.
 - **El primer ciclo del AutoSync corre al instante** al abrir la app (no espera 60 seg). Después cada minuto.
 - **Los choferes tienen formato `APELLIDO NOMBRE...`**: el saludo del WhatsApp toma `partes[1]`. Si un legajo viene con ord
