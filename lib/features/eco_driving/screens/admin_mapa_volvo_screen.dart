@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../widgets/evento_volvo_detalle_sheet.dart';
 
@@ -84,7 +85,7 @@ class _AdminMapaVolvoScreenState extends State<AdminMapaVolvoScreen> {
         builder: (ctx, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(color: Colors.greenAccent),
+              child: CircularProgressIndicator(color: AppColors.accentGreen),
             );
           }
           if (snap.hasError) {
@@ -278,7 +279,7 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? Colors.greenAccent : Colors.white38;
+    final color = selected ? AppColors.accentGreen : Colors.white38;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
@@ -286,7 +287,7 @@ class _Chip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: selected
-              ? Colors.greenAccent.withAlpha(25)
+              ? AppColors.accentGreen.withAlpha(25)
               : Colors.white.withAlpha(8),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: color.withAlpha(80)),
@@ -375,10 +376,10 @@ class _Mapa extends StatelessWidget {
     final color = atendida
         ? Colors.white38
         : severidad == 'HIGH'
-            ? Colors.redAccent
+            ? AppColors.accentRed
             : severidad == 'MEDIUM'
-                ? Colors.orangeAccent
-                : Colors.greenAccent;
+                ? AppColors.accentOrange
+                : AppColors.accentGreen;
 
     return Marker(
       point: LatLng(lat, lng),

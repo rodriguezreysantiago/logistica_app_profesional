@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../constants/app_colors.dart';
+
 /// Estado vacío estándar — para cuando una lista no tiene resultados.
 ///
 /// Uso:
@@ -111,7 +113,7 @@ class AppErrorState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
+            const Icon(Icons.error_outline, size: 60, color: AppColors.accentRed),
             const SizedBox(height: 16),
             Text(
               title,
@@ -128,7 +130,7 @@ class AppErrorState extends StatelessWidget {
                 subtitle!,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                  color: Colors.redAccent,
+                  color: AppColors.accentRed,
                   fontSize: 12,
                 ),
               ),

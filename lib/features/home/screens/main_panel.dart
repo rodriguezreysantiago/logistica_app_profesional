@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../auth/services/auth_service.dart';
 import '../../sync_dashboard/providers/sync_dashboard_provider.dart';
@@ -63,7 +64,7 @@ class MainPanel extends StatelessWidget {
                       _MenuButton(
                         titulo: 'MI PERFIL',
                         icono: Icons.person_pin_outlined,
-                        color: Colors.blueAccent,
+                        color: AppColors.accentBlue,
                         onTap: () => Navigator.pushNamed(
                           context,
                           '/perfil',
@@ -73,7 +74,7 @@ class MainPanel extends StatelessWidget {
                       _MenuButton(
                         titulo: 'MI UNIDAD',
                         icono: Icons.local_shipping_outlined,
-                        color: Colors.orangeAccent,
+                        color: AppColors.accentOrange,
                         onTap: () => Navigator.pushNamed(
                           context,
                           '/equipo',
@@ -83,7 +84,7 @@ class MainPanel extends StatelessWidget {
                       _MenuButton(
                         titulo: 'MIS VENCIMIENTOS',
                         icono: Icons.assignment_late_outlined,
-                        color: Colors.greenAccent,
+                        color: AppColors.accentGreen,
                         onTap: () => Navigator.pushNamed(
                           context,
                           '/mis_vencimientos',
@@ -94,7 +95,7 @@ class MainPanel extends StatelessWidget {
                         _MenuButton(
                           titulo: 'ADMINISTRACIÓN',
                           icono: Icons.admin_panel_settings_sharp,
-                          color: Colors.redAccent,
+                          color: AppColors.accentRed,
                           onTap: () => Navigator.pushNamed(
                             context,
                             '/admin_panel',
@@ -176,7 +177,7 @@ class _WelcomeHeader extends StatelessWidget {
             children: [
               const Icon(
                 Icons.account_circle,
-                color: Colors.greenAccent,
+                color: AppColors.accentGreen,
                 size: 18,
               ),
               const SizedBox(width: 8),

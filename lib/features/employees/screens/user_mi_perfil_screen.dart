@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/storage_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/password_hasher.dart';
@@ -164,7 +165,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
           borderRadius:
               const BorderRadius.vertical(top: Radius.circular(25)),
           border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
+              top: BorderSide(color: AppColors.accentGreen, width: 2)),
         ),
         child: SafeArea(
           child: Wrap(children: [
@@ -181,7 +182,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
             ),
             ListTile(
               leading:
-                  const Icon(Icons.camera_alt, color: Colors.greenAccent),
+                  const Icon(Icons.camera_alt, color: AppColors.accentGreen),
               title: const Text('Tomar foto con la cámara',
                   style: TextStyle(color: Colors.white)),
               onTap: () {
@@ -191,7 +192,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.photo_library,
-                  color: Colors.greenAccent),
+                  color: AppColors.accentGreen),
               title: const Text('Elegir de la galería',
                   style: TextStyle(color: Colors.white)),
               onTap: () {
@@ -346,7 +347,7 @@ class _Header extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.greenAccent,
+                      color: AppColors.accentGreen,
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: Theme.of(context).colorScheme.surface,
@@ -374,7 +375,7 @@ class _Header extends StatelessWidget {
         const Text(
           'CHOFER PROFESIONAL',
           style: TextStyle(
-            color: Colors.greenAccent,
+            color: AppColors.accentGreen,
             fontSize: 11,
             fontWeight: FontWeight.bold,
             letterSpacing: 2,
@@ -429,7 +430,7 @@ class _DatoEquipo extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Icon(icono, color: Colors.greenAccent, size: 30),
+        Icon(icono, color: AppColors.accentGreen, size: 30),
         const SizedBox(height: 8),
         Text(
           label,
@@ -466,7 +467,7 @@ class _SectionTitle extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         style: const TextStyle(
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           fontSize: 11,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.5,

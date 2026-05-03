@@ -7,6 +7,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/capabilities.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/password_hasher.dart';
@@ -474,7 +475,7 @@ class _RoleSelector extends StatelessWidget {
           value: r,
           child: Row(
             children: [
-              Icon(_icono(r), size: 18, color: Colors.greenAccent),
+              Icon(_icono(r), size: 18, color: AppColors.accentGreen),
               const SizedBox(width: 10),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

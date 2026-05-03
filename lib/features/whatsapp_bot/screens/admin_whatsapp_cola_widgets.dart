@@ -388,19 +388,19 @@ class _BadgeAgrupado extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.cyanAccent.withAlpha(25),
+        color: AppColors.accentCyan.withAlpha(25),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.cyanAccent.withAlpha(80)),
+        border: Border.all(color: AppColors.accentCyan.withAlpha(80)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.attach_file, size: 10, color: Colors.cyanAccent),
+          const Icon(Icons.attach_file, size: 10, color: AppColors.accentCyan),
           const SizedBox(width: 3),
           Text(
             '${cantidad}x',
             style: const TextStyle(
-              color: Colors.cyanAccent,
+              color: AppColors.accentCyan,
               fontSize: 9,
               fontWeight: FontWeight.bold,
             ),

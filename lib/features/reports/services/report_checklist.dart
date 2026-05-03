@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import 'excel_utils.dart' as xu;
 
@@ -62,7 +63,7 @@ class ReportChecklistService {
             SizedBox(height: 4),
             Text(
               'Items con estado REG o MAL en los últimos $_diasHistorico días',
-              style: TextStyle(color: Colors.orangeAccent, fontSize: 11),
+              style: TextStyle(color: AppColors.accentOrange, fontSize: 11),
             ),
           ],
         ),

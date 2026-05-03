@@ -307,7 +307,7 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
           borderRadius:
               const BorderRadius.vertical(top: Radius.circular(20)),
           border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
+              top: BorderSide(color: AppColors.accentGreen, width: 2)),
         ),
         child: SafeArea(
           child: Column(
@@ -326,14 +326,14 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
               ),
               ListTile(
                 leading:
-                    const Icon(Icons.camera_alt, color: Colors.greenAccent),
+                    const Icon(Icons.camera_alt, color: AppColors.accentGreen),
                 title: const Text('Tomar foto',
                     style: TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(ctx, _FuenteArchivo.camera),
               ),
               ListTile(
                 leading:
-                    const Icon(Icons.file_present, color: Colors.blueAccent),
+                    const Icon(Icons.file_present, color: AppColors.accentBlue),
                 title: const Text('Seleccionar archivo (PDF/imagen)',
                     style: TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(ctx, _FuenteArchivo.fileSystem),

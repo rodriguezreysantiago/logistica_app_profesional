@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../constants/app_colors.dart';
 import 'preview_screen.dart';
 
 /// Thumbnail unificado para archivos almacenados en Firebase Storage.
@@ -83,13 +84,13 @@ class AppFileThumbnail extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: Colors.redAccent.withAlpha(20),
+        color: AppColors.accentRed.withAlpha(20),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.redAccent.withAlpha(80)),
+        border: Border.all(color: AppColors.accentRed.withAlpha(80)),
       ),
       child: Icon(
         Icons.picture_as_pdf,
-        color: Colors.redAccent,
+        color: AppColors.accentRed,
         size: size * 0.55,
       ),
     );
@@ -101,7 +102,7 @@ class AppFileThumbnail extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.greenAccent.withAlpha(80)),
+        border: Border.all(color: AppColors.accentGreen.withAlpha(80)),
       ),
       clipBehavior: Clip.antiAlias,
       child: Image.network(
@@ -117,7 +118,7 @@ class AppFileThumbnail extends StatelessWidget {
                 height: size * 0.4,
                 child: const CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Colors.greenAccent,
+                  color: AppColors.accentGreen,
                 ),
               ),
             ),

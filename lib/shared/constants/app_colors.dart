@@ -93,6 +93,14 @@ class AppColors {
   /// "atención" que no llega a warning sólido.
   static const Color accentAmber = Colors.amberAccent;
 
+  /// Teal accent — categoría visual para enganches/bateas en
+  /// admin_vencimientos_menu y panel admin (diferenciar de tractores).
+  static const Color accentTeal = Colors.tealAccent;
+
+  /// Purple accent — categoría visual del bot WhatsApp / status
+  /// "diferenciador" en admin_panel.
+  static const Color accentPurple = Colors.purpleAccent;
+
   // ===========================================================================
   // BACKGROUND / SURFACE
   // ===========================================================================

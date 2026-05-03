@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../constants/app_colors.dart';
+
 /// Diálogo de confirmación reutilizable.
 ///
 /// Pensado para acciones que el usuario puede arrepentirse: desvincular
@@ -71,7 +73,7 @@ class AppConfirmDialog {
             if (icon != null) ...[
               Icon(
                 icon,
-                color: destructive ? Colors.redAccent : Colors.greenAccent,
+                color: destructive ? AppColors.accentRed : AppColors.accentGreen,
                 size: 22,
               ),
               const SizedBox(width: 10),
@@ -108,7 +110,7 @@ class AppConfirmDialog {
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor:
-                  destructive ? Colors.redAccent : Colors.green,
+                  destructive ? AppColors.accentRed : Colors.green,
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(dCtx, true),

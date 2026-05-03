@@ -359,11 +359,11 @@ class _AdminShellState extends State<AdminShell> {
       labelType: NavigationRailLabelType.all,
       backgroundColor: Colors.transparent,
       selectedIconTheme:
-          const IconThemeData(color: Colors.greenAccent, size: 26),
+          const IconThemeData(color: AppColors.accentGreen, size: 26),
       unselectedIconTheme:
           const IconThemeData(color: Colors.white54, size: 24),
       selectedLabelTextStyle: const TextStyle(
-        color: Colors.greenAccent,
+        color: AppColors.accentGreen,
         fontWeight: FontWeight.bold,
         fontSize: 11,
       ),
@@ -371,7 +371,7 @@ class _AdminShellState extends State<AdminShell> {
         color: Colors.white54,
         fontSize: 11,
       ),
-      indicatorColor: Colors.greenAccent.withAlpha(40),
+      indicatorColor: AppColors.accentGreen.withAlpha(40),
       destinations: _seccionesVisibles
           .asMap()
           .entries
@@ -460,7 +460,7 @@ class _AdminShellState extends State<AdminShell> {
                   minHeight: 18,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.redAccent,
+                  color: AppColors.accentRed,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: Theme.of(context).colorScheme.surface,

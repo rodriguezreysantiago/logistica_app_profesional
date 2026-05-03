@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 
 /// Color y etiqueta de cada estado del mantenimiento preventivo,
 /// para que cualquier pantalla que muestre un tractor con su distancia
@@ -11,17 +12,17 @@ extension MantenimientoEstadoX on MantenimientoEstado {
   Color get color {
     switch (this) {
       case MantenimientoEstado.vencido:
-        return Colors.redAccent;
+        return AppColors.accentRed;
       case MantenimientoEstado.urgente:
-        return Colors.orangeAccent;
+        return AppColors.accentOrange;
       case MantenimientoEstado.programar:
-        return Colors.amberAccent;
+        return AppColors.accentAmber;
       case MantenimientoEstado.atencion:
         // Lima/limón — más claro que amber, indica "todavía hay margen
         // pero conviene tenerlo en el radar".
         return const Color(0xFFC6FF00);
       case MantenimientoEstado.ok:
-        return Colors.greenAccent;
+        return AppColors.accentGreen;
       case MantenimientoEstado.sinDato:
         return Colors.white24;
     }

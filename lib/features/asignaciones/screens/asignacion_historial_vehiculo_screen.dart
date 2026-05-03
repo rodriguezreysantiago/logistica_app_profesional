@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/asignacion_vehiculo.dart';
 import '../services/asignacion_vehiculo_service.dart';
@@ -30,7 +31,7 @@ class AsignacionHistorialVehiculoScreen extends StatelessWidget {
         builder: (ctx, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(color: Colors.greenAccent),
+              child: CircularProgressIndicator(color: AppColors.accentGreen),
             );
           }
           if (snap.hasError) {
@@ -38,7 +39,7 @@ class AsignacionHistorialVehiculoScreen extends StatelessWidget {
               child: Text(
                 'Error al cargar el historial:\n${snap.error}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.redAccent),
+                style: const TextStyle(color: AppColors.accentRed),
               ),
             );
           }
@@ -79,7 +80,7 @@ class _AsignacionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final activa = asignacion.esActiva;
-    final color = activa ? Colors.greenAccent : Colors.white38;
+    final color = activa ? AppColors.accentGreen : Colors.white38;
     final dias = asignacion.diasDuracion();
 
     return AppCard(
@@ -114,15 +115,15 @@ class _AsignacionCard extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.greenAccent.withAlpha(30),
+                    color: AppColors.accentGreen.withAlpha(30),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                        color: Colors.greenAccent.withAlpha(80)),
+                        color: AppColors.accentGreen.withAlpha(80)),
                   ),
                   child: const Text(
                     'ACTUAL',
                     style: TextStyle(
-                      color: Colors.greenAccent,
+                      color: AppColors.accentGreen,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1,

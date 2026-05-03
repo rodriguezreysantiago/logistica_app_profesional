@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../constants/app_colors.dart';
 import '../utils/fecha_input_formatter.dart';
 
 /// Diálogo de selección de fecha por **input directo** (`DD/MM/YYYY`),
@@ -164,7 +165,7 @@ class _FechaDialogState extends State<_FechaDialog> {
             keyboardType: TextInputType.number,
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               fontWeight: FontWeight.bold,
               fontSize: 26,
               letterSpacing: 3,

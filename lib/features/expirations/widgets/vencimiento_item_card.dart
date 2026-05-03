@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import 'vencimiento_item.dart';
@@ -35,9 +36,9 @@ class VencimientoItemCard extends StatelessWidget {
       onTap: onTap,
       highlighted: esInvalida || esCritica,
       borderColor: esInvalida || esVencida
-          ? Colors.redAccent.withAlpha(120)
+          ? AppColors.accentRed.withAlpha(120)
           : esCritica
-              ? Colors.orangeAccent.withAlpha(120)
+              ? AppColors.accentOrange.withAlpha(120)
               : null,
       child: Row(
         children: [

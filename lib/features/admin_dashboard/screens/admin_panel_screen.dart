@@ -102,7 +102,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               titulo: 'REVISIONES',
               subtitulo: 'Aprobar/rechazar trámites cargados por choferes',
               icono: Icons.fact_check_outlined,
-              color: Colors.tealAccent,
+              color: AppColors.accentTeal,
               ruta: '/admin_revisiones',
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verListaFlota))
@@ -110,7 +110,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               titulo: 'FLOTA',
               subtitulo: 'Control de camiones y acoplados',
               icono: Icons.local_shipping_outlined,
-              color: Colors.purpleAccent,
+              color: AppColors.accentPurple,
               ruta: '/admin_vehiculos_lista',
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verMantenimiento))
@@ -150,7 +150,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               titulo: 'REPORTES',
               subtitulo: 'Exportar Excel y analítica de flota',
               icono: Icons.analytics_outlined,
-              color: Colors.amberAccent,
+              color: AppColors.accentAmber,
               ruta: '/admin_reportes',
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verSyncDashboard))
@@ -158,7 +158,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               titulo: 'SYNC',
               subtitulo: 'Monitoreo en tiempo real de sincronización',
               icono: Icons.monitor_heart_outlined,
-              color: Colors.cyanAccent,
+              color: AppColors.accentCyan,
               ruta: AppRoutes.syncDashboard,
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verEstadoBot))
@@ -456,7 +456,7 @@ class _GridKPIs extends StatelessWidget {
             ? null
             : '${stats.unidadesAsignadas} asignadas',
         icon: Icons.local_shipping,
-        color: Colors.purpleAccent,
+        color: AppColors.accentPurple,
         ruta: '/admin_vehiculos_lista',
       ),
       _KpiCard(
@@ -496,7 +496,7 @@ class _GridKPIs extends StatelessWidget {
         label: 'Vencen ≤ 30 días',
         valor: stats.cargando ? '…' : '${stats.proximos30}',
         icon: Icons.event_note,
-        color: Colors.tealAccent,
+        color: AppColors.accentTeal,
         ruta: '/vencimientos_calendario',
       ),
     ];

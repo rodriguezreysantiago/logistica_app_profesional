@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../constants/app_colors.dart';
 import '../utils/formatters.dart';
 
 /// Estados posibles de un vencimiento, según los días restantes.
@@ -16,17 +17,17 @@ extension VencimientoEstadoX on VencimientoEstado {
   Color get color {
     switch (this) {
       case VencimientoEstado.vencido:
-        return Colors.redAccent;
+        return AppColors.accentRed;
       case VencimientoEstado.critico:
-        return Colors.orangeAccent;
+        return AppColors.accentOrange;
       case VencimientoEstado.proximo:
-        return Colors.amberAccent;
+        return AppColors.accentAmber;
       case VencimientoEstado.ok:
-        return Colors.greenAccent;
+        return AppColors.accentGreen;
       case VencimientoEstado.sinFecha:
         return Colors.white24;
       case VencimientoEstado.invalida:
-        return Colors.redAccent;
+        return AppColors.accentRed;
     }
   }
 }

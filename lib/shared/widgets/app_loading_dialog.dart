@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../constants/app_colors.dart';
+
 /// Diálogo modal de "cargando..." reutilizable.
 ///
 /// Encapsula el patrón:
@@ -57,7 +59,7 @@ class AppLoadingDialog {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const CircularProgressIndicator(color: Colors.greenAccent),
+                const CircularProgressIndicator(color: AppColors.accentGreen),
                 if (mensaje != null) ...[
                   const SizedBox(height: 16),
                   Text(

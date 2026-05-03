@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../vehicles/services/volvo_api_service.dart';
@@ -133,7 +134,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                 child: Text(
                   'INFORMES ESTRATÉGICOS',
                   style: TextStyle(
-                    color: Colors.greenAccent,
+                    color: AppColors.accentGreen,
                     fontWeight: FontWeight.bold,
                     fontSize: 11,
                     letterSpacing: 2,
@@ -145,7 +146,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                 descripcion:
                     'Reporte de novedades y roturas cargadas por choferes.',
                 icono: Icons.fact_check_rounded,
-                color: Colors.greenAccent,
+                color: AppColors.accentGreen,
                 onTap: _generando ? null : _ejecutarReporteChecklist,
               ),
               const SizedBox(height: 12),
@@ -154,7 +155,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                 descripcion:
                     'Sincroniza consumo, KMs y posición con Volvo Connect.',
                 icono: Icons.cloud_sync_rounded,
-                color: Colors.blueAccent,
+                color: AppColors.accentBlue,
                 onTap: _generando ? null : _ejecutarReporteFlota,
               ),
               const SizedBox(height: 12),
@@ -163,7 +164,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                 descripcion:
                     'Litros, KM y promedio L/100km por unidad, con ranking visual de top consumidores.',
                 icono: Icons.local_gas_station_rounded,
-                color: Colors.orangeAccent,
+                color: AppColors.accentOrange,
                 onTap: _generando ? null : _ejecutarReporteConsumo,
               ),
             ],
@@ -269,17 +270,17 @@ class _CargandoOverlay extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.blueAccent.withAlpha(50)),
+                border: Border.all(color: AppColors.accentBlue.withAlpha(50)),
               ),
               child: const Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(color: Colors.blueAccent),
+                  CircularProgressIndicator(color: AppColors.accentBlue),
                   SizedBox(height: 25),
                   Text(
                     'CONECTANDO CON VOLVO',
                     style: TextStyle(
-                      color: Colors.blueAccent,
+                      color: AppColors.accentBlue,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1,
                     ),

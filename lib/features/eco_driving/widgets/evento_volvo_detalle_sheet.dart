@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../utils/etiquetas_alerta_volvo.dart';
 
@@ -139,7 +140,7 @@ class EventoVolvoDetalleSheet extends StatelessWidget {
                     icon: const Icon(Icons.check, size: 16),
                     label: const Text('Marcar atendida'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.greenAccent.withAlpha(180),
+                      backgroundColor: AppColors.accentGreen.withAlpha(180),
                       foregroundColor: Colors.black,
                     ),
                   ),
@@ -258,10 +259,10 @@ class _LineaConAccion extends StatelessWidget {
             Expanded(
               child: Text(
                 valor,
-                style: const TextStyle(color: Colors.blueAccent, fontSize: 13),
+                style: const TextStyle(color: AppColors.accentBlue, fontSize: 13),
               ),
             ),
-            Icon(icono, color: Colors.blueAccent, size: 14),
+            Icon(icono, color: AppColors.accentBlue, size: 14),
           ],
         ),
       ),
@@ -301,11 +302,11 @@ class _SeveridadBadge extends StatelessWidget {
 Color _colorSeveridad(String severidad) {
   switch (severidad) {
     case 'HIGH':
-      return Colors.redAccent;
+      return AppColors.accentRed;
     case 'MEDIUM':
-      return Colors.orangeAccent;
+      return AppColors.accentOrange;
     case 'LOW':
-      return Colors.greenAccent;
+      return AppColors.accentGreen;
     default:
       return Colors.white54;
   }

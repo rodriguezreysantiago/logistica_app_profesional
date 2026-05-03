@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../core/services/audit_log_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -469,9 +470,9 @@ class _BotonGuardar extends StatelessWidget {
           ),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.greenAccent,
+          backgroundColor: AppColors.accentGreen,
           foregroundColor: Colors.black,
-          disabledBackgroundColor: Colors.greenAccent.withAlpha(100),
+          disabledBackgroundColor: AppColors.accentGreen.withAlpha(100),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),

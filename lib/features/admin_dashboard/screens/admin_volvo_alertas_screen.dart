@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../eco_driving/utils/etiquetas_alerta_volvo.dart';
@@ -184,8 +185,8 @@ class _AlertaCard extends StatelessWidget {
                   icon: const Icon(Icons.check, size: 16),
                   label: const Text('Marcar atendida'),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.greenAccent,
-                    side: const BorderSide(color: Colors.greenAccent),
+                    foregroundColor: AppColors.accentGreen,
+                    side: const BorderSide(color: AppColors.accentGreen),
                   ),
                 ),
               ),

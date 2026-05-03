@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Menú principal de auditoría de vencimientos.
@@ -24,7 +25,7 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: Colors.greenAccent,
+                    color: AppColors.accentGreen,
                     letterSpacing: 1.5,
                   ),
                 ),
@@ -41,28 +42,28 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
             titulo: 'CALENDARIO MENSUAL',
             subtitulo: 'Vista global con todos los vencimientos por día',
             icono: Icons.event_note,
-            colorIcono: Colors.greenAccent,
+            colorIcono: AppColors.accentGreen,
             ruta: '/vencimientos_calendario',
           ),
           _MenuTile(
             titulo: 'VENCIMIENTOS DE PERSONAL',
             subtitulo: 'Seguimiento de carnets, preocupacional y ART',
             icono: Icons.person_search,
-            colorIcono: Colors.blueAccent,
+            colorIcono: AppColors.accentBlue,
             ruta: '/vencimientos_choferes',
           ),
           _MenuTile(
             titulo: 'VENCIMIENTOS DE TRACTORES',
             subtitulo: 'Control de RTO y seguros de camiones',
             icono: Icons.local_shipping,
-            colorIcono: Colors.orangeAccent,
+            colorIcono: AppColors.accentOrange,
             ruta: '/vencimientos_chasis',
           ),
           _MenuTile(
             titulo: 'VENCIMIENTOS DE ENGANCHES',
             subtitulo: 'Auditoría de bateas, tolvas, bivuelcos y tanques',
             icono: Icons.grid_view,
-            colorIcono: Colors.tealAccent,
+            colorIcono: AppColors.accentTeal,
             ruta: '/vencimientos_acoplados',
           ),
           Padding(
