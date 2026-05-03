@@ -17,6 +17,7 @@ import '../../revisions/screens/admin_revisiones_screen.dart';
 import '../../eco_driving/screens/admin_descargas_pto_screen.dart';
 import '../../eco_driving/screens/admin_eco_driving_screen.dart';
 import '../../eco_driving/screens/admin_mapa_volvo_screen.dart';
+import '../../gomeria/screens/gomeria_hub_screen.dart';
 import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
 import '../../vehicles/screens/admin_mantenimiento_screen.dart';
 import '../../vehicles/screens/admin_vehiculos_lista_screen.dart';
@@ -114,6 +115,15 @@ class _AdminShellState extends State<AdminShell> {
           .limit(100)
           .snapshots(),
       build: () => const AdminVolvoAlertasScreen(),
+    ),
+    _ShellSection(
+      label: 'Gomería',
+      icon: Icons.tire_repair_outlined,
+      iconActive: Icons.tire_repair,
+      // Mismo orden que en el listado del panel Inicio: tras Alertas
+      // y antes del cluster Eco/Descargas/Mapa.
+      requiredCapability: Capability.verGomeria,
+      build: () => const GomeriaHubScreen(),
     ),
     _ShellSection(
       label: 'Eco-Driving',
