@@ -40,6 +40,13 @@ enum Capability {
   /// IDLING, OVERSPEED, DISTANCE_ALERT, PTO, TELL_TALE, etc.). Tanto admin
   /// como supervisor pueden verlas y marcarlas como atendidas.
   verAlertasVolvo,
+  /// Módulo Gomería — gestión de stock de cubiertas, instalación/retiro
+  /// por posición de tractor o enganche, recapados. Operado típicamente
+  /// desde una tablet pegada en la pared del taller. Tanto ADMIN como
+  /// SUPERVISOR pueden entrar (la idea es que el supervisor de gomería,
+  /// con AREA=GOMERIA, sea el operador habitual). El gating fino por
+  /// AREA lo decidirá Vecchi si más adelante quieren restringir.
+  verGomeria,
 
   // ─── Acciones sobre personal ───
   crearEmpleado,
@@ -89,6 +96,7 @@ class Capabilities {
       Capability.verMantenimiento,
       Capability.verEstadoBot,
       Capability.verAlertasVolvo,
+      Capability.verGomeria,
       // Editar y crear personal/vehículos: sí. Pero NO puede asignar
       // rol ADMIN ni cambiar rol de admins existentes.
       Capability.crearEmpleado,

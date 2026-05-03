@@ -129,6 +129,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               color: AppColors.accentRed,
               ruta: AppRoutes.adminVolvoAlertas,
             ),
+          if (Capabilities.can(PrefsService.rol, Capability.verGomeria))
+            const _AdminTile(
+              titulo: 'GOMERÍA',
+              subtitulo: 'Stock, instalación y recapados de cubiertas',
+              icono: Icons.tire_repair,
+              color: AppColors.accentOrange,
+              ruta: AppRoutes.adminGomeriaHub,
+            ),
           if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
             const _AdminTile(
               titulo: 'PERSONAL',

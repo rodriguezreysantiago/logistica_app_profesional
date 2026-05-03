@@ -18,6 +18,13 @@ import '../features/expirations/screens/user_mis_vencimientos_screen.dart';
 import '../features/admin_dashboard/screens/admin_shell.dart';
 import '../features/admin_dashboard/screens/admin_estado_bot_screen.dart';
 import '../features/admin_dashboard/screens/admin_volvo_alertas_screen.dart';
+import '../features/gomeria/constants/posiciones.dart';
+import '../features/gomeria/screens/admin_gomeria_marcas_modelos_screen.dart';
+import '../features/gomeria/screens/gomeria_hub_screen.dart';
+import '../features/gomeria/screens/gomeria_recapados_screen.dart';
+import '../features/gomeria/screens/gomeria_stock_screen.dart';
+import '../features/gomeria/screens/gomeria_unidad_detalle_screen.dart';
+import '../features/gomeria/screens/gomeria_unidades_lista_screen.dart';
 import '../features/eco_driving/screens/admin_descargas_pto_screen.dart';
 import '../features/eco_driving/screens/admin_eco_driving_screen.dart';
 import '../features/eco_driving/screens/admin_mapa_volvo_screen.dart';
@@ -253,6 +260,54 @@ class AppRouter {
       case AppRoutes.adminEstadoBot:
         return _buildRoute(
           _protegerAdmin(const AdminEstadoBotScreen()),
+          settings,
+        );
+
+      // ================= GOMERÍA =================
+      // Hub + sub-pantallas del módulo Gomería. Tablet pegada en pared
+      // del taller; ADMIN o SUPERVISOR (típicamente con AREA=GOMERIA).
+      // Capability: verGomeria. Las reglas Firestore restringen además
+      // qué colecciones puede tocar cada rol (CUBIERTAS_MARCAS solo
+      // ADMIN, CUBIERTAS y CUBIERTAS_INSTALADAS supervisor también, etc).
+      case AppRoutes.adminGomeriaHub:
+        return _buildRoute(
+          _protegerAdmin(const GomeriaHubScreen()),
+          settings,
+        );
+      case AppRoutes.adminGomeriaUnidades:
+        return _buildRoute(
+          _protegerAdmin(const GomeriaUnidadesListaScreen()),
+          settings,
+        );
+      case AppRoutes.adminGomeriaUnidad:
+        final args = settings.arguments as Map<String, dynamic>?;
+        final unidadId = (args?['unidadId'] ?? '').toString();
+        final unidadTipo = args?['unidadTipo'] as TipoUnidadCubierta? ??
+            TipoUnidadCubierta.tractor;
+        final tipoVehiculo = (args?['tipoVehiculo'] ?? '').toString();
+        final modelo = (args?['modelo'] ?? '').toString();
+        return _buildRoute(
+          _protegerAdmin(GomeriaUnidadDetalleScreen(
+            unidadId: unidadId,
+            unidadTipo: unidadTipo,
+            tipoVehiculo: tipoVehiculo,
+            modelo: modelo,
+          )),
+          settings,
+        );
+      case AppRoutes.adminGomeriaStock:
+        return _buildRoute(
+          _protegerAdmin(const GomeriaStockScreen()),
+          settings,
+        );
+      case AppRoutes.adminGomeriaRecapados:
+        return _buildRoute(
+          _protegerAdmin(const GomeriaRecapadosScreen()),
+          settings,
+        );
+      case AppRoutes.adminGomeriaMarcasModelos:
+        return _buildRoute(
+          _protegerSoloAdmin(const AdminGomeriaMarcasModelosScreen()),
           settings,
         );
 

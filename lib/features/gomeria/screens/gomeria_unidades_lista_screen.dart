@@ -1,0 +1,183 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+
+import '../../../core/constants/app_constants.dart';
+import '../../../shared/constants/app_colors.dart';
+import '../../../shared/widgets/app_widgets.dart';
+import '../constants/posiciones.dart';
+
+/// Lista de unidades (tractores + enganches). Tap → vista detalle de
+/// la unidad con grid de posiciones para cambiar cubiertas.
+///
+/// Filtro arriba: TODOS / TRACTORES / ENGANCHES. Por defecto TODOS para
+/// que el supervisor encuentre rápido sin pensar.
+class GomeriaUnidadesListaScreen extends StatefulWidget {
+  const GomeriaUnidadesListaScreen({super.key});
+
+  @override
+  State<GomeriaUnidadesListaScreen> createState() =>
+      _GomeriaUnidadesListaScreenState();
+}
+
+class _GomeriaUnidadesListaScreenState
+    extends State<GomeriaUnidadesListaScreen> {
+  /// `null` = todos. `'TRACTOR'` = solo tractores. `'ENGANCHE'` = solo
+  /// los tipos de enganche (BATEA, TOLVA, BIVUELCO, TANQUE, ACOPLADO).
+  String? _filtro;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppScaffold(
+      title: 'Unidades',
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                _Chip(
+                  label: 'TODAS',
+                  seleccionado: _filtro == null,
+                  onTap: () => setState(() => _filtro = null),
+                ),
+                _Chip(
+                  label: 'TRACTORES',
+                  seleccionado: _filtro == 'TRACTOR',
+                  onTap: () => setState(() => _filtro = 'TRACTOR'),
+                ),
+                _Chip(
+                  label: 'ENGANCHES',
+                  seleccionado: _filtro == 'ENGANCHE',
+                  onTap: () => setState(() => _filtro = 'ENGANCHE'),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection(AppCollections.vehiculos)
+                  .snapshots(),
+              builder: (ctx, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final docs = snap.data?.docs ?? const [];
+                final filtrados = docs.where((d) {
+                  final tipo =
+                      (d.data()['TIPO'] ?? '').toString().toUpperCase();
+                  if (_filtro == null) return true;
+                  if (_filtro == 'TRACTOR') return tipo == 'TRACTOR';
+                  return AppTiposVehiculo.enganches.contains(tipo);
+                }).toList()
+                  ..sort((a, b) => a.id.compareTo(b.id));
+                if (filtrados.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'No hay unidades para este filtro.',
+                      style: TextStyle(color: Colors.white60),
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                  itemCount: filtrados.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) {
+                    final doc = filtrados[i];
+                    final data = doc.data();
+                    final tipo =
+                        (data['TIPO'] ?? '').toString().toUpperCase();
+                    final esTractor = tipo == 'TRACTOR';
+                    final modelo = (data['MODELO'] ?? '').toString();
+                    return AppCard(
+                      onTap: () => Navigator.pushNamed(
+                        context,
+                        AppRoutes.adminGomeriaUnidad,
+                        arguments: {
+                          'unidadId': doc.id,
+                          'unidadTipo': esTractor
+                              ? TipoUnidadCubierta.tractor
+                              : TipoUnidadCubierta.enganche,
+                          'tipoVehiculo': tipo,
+                          'modelo': modelo,
+                        },
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 14),
+                      child: Row(
+                        children: [
+                          Icon(
+                            esTractor
+                                ? Icons.local_shipping_outlined
+                                : Icons.rv_hookup_outlined,
+                            color: esTractor
+                                ? AppColors.accentOrange
+                                : AppColors.accentTeal,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  doc.id,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$tipo${modelo.isNotEmpty ? " · $modelo" : ""}',
+                                  style: const TextStyle(
+                                      color: Colors.white60, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              color: Colors.white38),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String label;
+  final bool seleccionado;
+  final VoidCallback onTap;
+
+  const _Chip({
+    required this.label,
+    required this.seleccionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: seleccionado,
+      onSelected: (_) => onTap(),
+      selectedColor: AppColors.accentOrange,
+      labelStyle: TextStyle(
+        color: seleccionado ? Colors.black : Colors.white,
+        fontWeight: FontWeight.bold,
+        fontSize: 11,
+      ),
+      backgroundColor: AppColors.background,
+    );
+  }
+}

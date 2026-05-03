@@ -30,6 +30,14 @@ class AppRoutes {
   static const String syncDashboard = '/sync_dashboard';
   static const String adminEstadoBot = '/admin_estado_bot';
 
+  // Gomería
+  static const String adminGomeriaHub = '/admin_gomeria';
+  static const String adminGomeriaUnidades = '/admin_gomeria_unidades';
+  static const String adminGomeriaUnidad = '/admin_gomeria_unidad';
+  static const String adminGomeriaStock = '/admin_gomeria_stock';
+  static const String adminGomeriaRecapados = '/admin_gomeria_recapados';
+  static const String adminGomeriaMarcasModelos = '/admin_gomeria_marcas_modelos';
+
 
   // Auditorías
   static const String vencimientosChoferes = '/vencimientos_choferes';
