@@ -316,17 +316,22 @@ class _AltaModeloDialogState extends State<_AltaModeloDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Marca (dropdown desde Firestore)
+            // Marca (dropdown desde Firestore).
+            // NOTA: filtramos `activo` + ordenamos client-side a
+            // propósito. La combinación `where('activo') + orderBy('nombre')`
+            // exigiría un índice compuesto en Firestore — sin él la query
+            // falla silenciosa y el dropdown queda vacío. Como hay
+            // típicamente < 50 marcas, el costo es nulo.
             StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
                   .collection(AppCollections.cubiertasMarcas)
-                  .where('activo', isEqualTo: true)
-                  .orderBy('nombre')
                   .snapshots(),
               builder: (ctx, snap) {
                 final marcas = (snap.data?.docs ?? const [])
                     .map(CubiertaMarca.fromDoc)
-                    .toList();
+                    .where((m) => m.activo)
+                    .toList()
+                  ..sort((a, b) => a.nombre.compareTo(b.nombre));
                 if (marcas.isEmpty) {
                   return const Text(
                     'Cargá primero al menos una marca activa.',

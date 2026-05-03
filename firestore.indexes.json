@@ -23,6 +23,39 @@
         { "fieldPath": "tipo", "order": "ASCENDING" },
         { "fieldPath": "creado_en", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "CUBIERTAS_INSTALADAS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "unidad_id", "order": "ASCENDING" },
+        { "fieldPath": "hasta", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "CUBIERTAS_INSTALADAS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cubierta_id", "order": "ASCENDING" },
+        { "fieldPath": "desde", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "CUBIERTAS_INSTALADAS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "unidad_id", "order": "ASCENDING" },
+        { "fieldPath": "posicion", "order": "ASCENDING" },
+        { "fieldPath": "hasta", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "CUBIERTAS_RECAPADOS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fecha_retorno", "order": "ASCENDING" },
+        { "fieldPath": "fecha_envio", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

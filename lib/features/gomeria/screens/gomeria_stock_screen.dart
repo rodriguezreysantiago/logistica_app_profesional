@@ -249,16 +249,20 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Filtramos `activo` + ordenamos client-side para evitar
+              // exigir un índice compuesto en Firestore (where + orderBy
+              // en campos distintos). Hay < 100 modelos típicamente.
               StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: FirebaseFirestore.instance
                     .collection(AppCollections.cubiertasModelos)
-                    .where('activo', isEqualTo: true)
-                    .orderBy('marca_nombre')
                     .snapshots(),
                 builder: (ctx, snap) {
                   final modelos = (snap.data?.docs ?? const [])
                       .map(CubiertaModelo.fromDoc)
-                      .toList();
+                      .where((m) => m.activo)
+                      .toList()
+                    ..sort((a, b) =>
+                        a.marcaNombre.compareTo(b.marcaNombre));
                   if (modelos.isEmpty) {
                     return const Text(
                       'No hay modelos cargados.\n'
