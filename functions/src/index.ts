@@ -1138,14 +1138,16 @@ const AUDIT_ACCIONES_PERMITIDAS = new Set<string>([
   "RECIBIR_CUBIERTA_DE_RECAPADO",
 ]);
 
-/// Acciones que SUPERVISOR puede registrar (además de ADMIN).
-///
-/// Los flujos de gomería son operados por supervisor + AREA=GOMERIA.
-/// Los de asignaciones (chofer↔tractor, tractor↔enganche) los puede
-/// disparar tanto el ADMIN como un SUPERVISOR (el callsite de
-/// AsignacionVehiculoService / AsignacionEngancheService no distingue).
-/// Sin esta lista, el callable rechazaría con permission-denied y la
-/// bitácora se quedaría sin entradas para esos flujos críticos.
+/**
+ * Acciones que SUPERVISOR puede registrar (además de ADMIN).
+ *
+ * Los flujos de gomería son operados por supervisor + AREA=GOMERIA.
+ * Los de asignaciones (chofer↔tractor, tractor↔enganche) los puede
+ * disparar tanto el ADMIN como un SUPERVISOR (el callsite de
+ * AsignacionVehiculoService / AsignacionEngancheService no distingue).
+ * Sin esta lista, el callable rechazaría con permission-denied y la
+ * bitácora se quedaría sin entradas para esos flujos críticos.
+ */
 const AUDIT_ACCIONES_SUPERVISOR_PERMITIDAS = new Set<string>([
   // Asignaciones — supervisor puede cambiar quién maneja qué.
   "ASIGNAR_EQUIPO",
