@@ -116,8 +116,8 @@ void main() {
   });
 
   group('Capabilities.can — ADMIN (herencia + exclusivas)', () {
-    test('ADMIN tiene TODO lo de SUPERVISOR (herencia)', () {
-      // Tomamos el set de SUPERVISOR y verificamos que TODO está en ADMIN.
+    test('ADMIN tiene todas las capabilities de SUPERVISOR (herencia)', () {
+      // Iteramos el set de SUPERVISOR y verificamos que cada cap esté en ADMIN.
       final supSet = Capabilities.ofRol(AppRoles.supervisor);
       for (final cap in supSet) {
         expect(
