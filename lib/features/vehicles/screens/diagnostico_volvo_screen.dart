@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../services/volvo_api_service.dart';
@@ -97,7 +98,7 @@ class _Header extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       child: Row(
         children: [
-          const Icon(Icons.bug_report, color: Colors.orangeAccent, size: 28),
+          const Icon(Icons.bug_report, color: AppColors.accentOrange, size: 28),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -139,10 +140,10 @@ class _ResumenRequest extends StatelessWidget {
   const _ResumenRequest({required this.diag});
 
   Color get _statusColor {
-    if (diag.errorMessage != null) return Colors.redAccent;
+    if (diag.errorMessage != null) return AppColors.accentRed;
     final s = diag.statusCode ?? 0;
-    if (s >= 200 && s < 300) return Colors.greenAccent;
-    if (s >= 400) return Colors.orangeAccent;
+    if (s >= 200 && s < 300) return AppColors.accentGreen;
+    if (s >= 400) return AppColors.accentOrange;
     return Colors.white54;
   }
 
@@ -157,7 +158,7 @@ class _ResumenRequest extends StatelessWidget {
           const Text(
             'REQUEST',
             style: TextStyle(
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               fontSize: 10,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.5,
@@ -187,14 +188,14 @@ class _ResumenRequest extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.redAccent.withAlpha(20),
+                color: AppColors.accentRed.withAlpha(20),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.redAccent.withAlpha(60)),
+                border: Border.all(color: AppColors.accentRed.withAlpha(60)),
               ),
               child: Text(
                 diag.errorMessage!,
                 style: const TextStyle(
-                  color: Colors.redAccent,
+                  color: AppColors.accentRed,
                   fontSize: 12,
                   fontFamily: 'monospace',
                 ),
@@ -406,7 +407,7 @@ class _AnalisisCampos extends StatelessWidget {
           const Text(
             'CAMPOS CRÍTICOS',
             style: TextStyle(
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               fontSize: 10,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.5,
@@ -441,7 +442,7 @@ class _CheckTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color =
-        check.encontrado ? Colors.greenAccent : Colors.orangeAccent;
+        check.encontrado ? AppColors.accentGreen : AppColors.accentOrange;
     final icon =
         check.encontrado ? Icons.check_circle : Icons.cancel_outlined;
 
@@ -547,7 +548,7 @@ class _JsonViewerState extends State<_JsonViewer> {
               const Text(
                 'JSON CRUDO',
                 style: TextStyle(
-                  color: Colors.greenAccent,
+                  color: AppColors.accentGreen,
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.5,
@@ -556,7 +557,7 @@ class _JsonViewerState extends State<_JsonViewer> {
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.copy,
-                    color: Colors.greenAccent, size: 18),
+                    color: AppColors.accentGreen, size: 18),
                 tooltip: 'Copiar al portapapeles',
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: json));
@@ -615,17 +616,17 @@ class _BotonReintentar extends StatelessWidget {
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: onPressed,
-        icon: const Icon(Icons.refresh, color: Colors.greenAccent),
+        icon: const Icon(Icons.refresh, color: AppColors.accentGreen),
         label: const Text(
           'REINTENTAR',
           style: TextStyle(
-            color: Colors.greenAccent,
+            color: AppColors.accentGreen,
             fontWeight: FontWeight.bold,
             letterSpacing: 1.2,
           ),
         ),
         style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: Colors.greenAccent),
+          side: const BorderSide(color: AppColors.accentGreen),
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),

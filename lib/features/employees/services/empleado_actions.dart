@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/storage_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
@@ -184,7 +185,7 @@ class EmpleadoActions {
           borderRadius:
               const BorderRadius.vertical(top: Radius.circular(25)),
           border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
+              top: BorderSide(color: AppColors.accentGreen, width: 2)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -199,7 +200,7 @@ class EmpleadoActions {
             ),
             const SizedBox(height: 15),
             ListTile(
-              leading: const Icon(Icons.visibility, color: Colors.blueAccent),
+              leading: const Icon(Icons.visibility, color: AppColors.accentBlue),
               title: const Text('Ver foto actual',
                   style: TextStyle(color: Colors.white)),
               enabled: urlActual != null &&
@@ -220,7 +221,7 @@ class EmpleadoActions {
             ),
             ListTile(
               leading: const Icon(Icons.photo_library,
-                  color: Colors.greenAccent),
+                  color: AppColors.accentGreen),
               title: const Text('Subir nueva desde galería',
                   style: TextStyle(color: Colors.white)),
               onTap: () async {
@@ -302,7 +303,7 @@ class EmpleadoActions {
           borderRadius:
               const BorderRadius.vertical(top: Radius.circular(25)),
           border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
+              top: BorderSide(color: AppColors.accentGreen, width: 2)),
         ),
         child: SafeArea(
           child: Column(
@@ -313,7 +314,7 @@ class EmpleadoActions {
                 child: Text(
                   etiqueta,
                   style: const TextStyle(
-                    color: Colors.greenAccent,
+                    color: AppColors.accentGreen,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                     letterSpacing: 1.2,
@@ -322,7 +323,7 @@ class EmpleadoActions {
               ),
               ListTile(
                 leading:
-                    const Icon(Icons.camera_alt, color: Colors.greenAccent),
+                    const Icon(Icons.camera_alt, color: AppColors.accentGreen),
                 title: const Text('Tomar foto con la cámara',
                     style: TextStyle(color: Colors.white)),
                 onTap: () =>
@@ -330,7 +331,7 @@ class EmpleadoActions {
               ),
               ListTile(
                 leading:
-                    const Icon(Icons.photo_library, color: Colors.blueAccent),
+                    const Icon(Icons.photo_library, color: AppColors.accentBlue),
                 title: const Text('Foto desde la galería',
                     style: TextStyle(color: Colors.white)),
                 onTap: () =>
@@ -338,7 +339,7 @@ class EmpleadoActions {
               ),
               ListTile(
                 leading: const Icon(Icons.picture_as_pdf,
-                    color: Colors.redAccent),
+                    color: AppColors.accentRed),
                 title: const Text('PDF / archivo del dispositivo',
                     style: TextStyle(color: Colors.white)),
                 onTap: () =>
@@ -418,7 +419,7 @@ class EmpleadoActions {
           borderRadius:
               const BorderRadius.vertical(top: Radius.circular(25)),
           border: const Border(
-              top: BorderSide(color: Colors.greenAccent, width: 2)),
+              top: BorderSide(color: AppColors.accentGreen, width: 2)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -434,7 +435,7 @@ class EmpleadoActions {
             const SizedBox(height: 15),
             ListTile(
               leading:
-                  const Icon(Icons.event_note, color: Colors.blueAccent),
+                  const Icon(Icons.event_note, color: AppColors.accentBlue),
               title: const Text('Editar fecha de vencimiento',
                   style: TextStyle(color: Colors.white)),
               onTap: () {
@@ -443,7 +444,7 @@ class EmpleadoActions {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.visibility, color: Colors.greenAccent),
+              leading: const Icon(Icons.visibility, color: AppColors.accentGreen),
               title: const Text('Ver documento digital',
                   style: TextStyle(color: Colors.white)),
               enabled: urlActual != null &&
@@ -464,7 +465,7 @@ class EmpleadoActions {
             ),
             ListTile(
               leading: const Icon(Icons.upload_file,
-                  color: Colors.orangeAccent),
+                  color: AppColors.accentOrange),
               title: Text(
                 urlActual != null &&
                         urlActual.isNotEmpty &&
@@ -544,7 +545,7 @@ class EmpleadoActions {
               if (!snap.hasData) {
                 return const Center(
                   child: CircularProgressIndicator(
-                      color: Colors.greenAccent),
+                      color: AppColors.accentGreen),
                 );
               }
 
@@ -643,11 +644,11 @@ class EmpleadoActions {
                   if (idx == 0) {
                     return ListTile(
                       leading:
-                          const Icon(Icons.link_off, color: Colors.redAccent),
+                          const Icon(Icons.link_off, color: AppColors.accentRed),
                       title: const Text(
                         'DESVINCULAR',
                         style: TextStyle(
-                          color: Colors.redAccent,
+                          color: AppColors.accentRed,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -690,7 +691,7 @@ class EmpleadoActions {
                     ),
                     trailing: patente == patenteActual.trim()
                         ? const Icon(Icons.check_circle,
-                            color: Colors.greenAccent)
+                            color: AppColors.accentGreen)
                         : null,
                     onTap: () => procesarCambio(patente),
                   );

@@ -53,7 +53,7 @@ class _SeccionUnidad extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  color: Colors.greenAccent,
+                  color: AppColors.accentGreen,
                   letterSpacing: 2,
                 ),
               ),
@@ -67,11 +67,11 @@ class _SeccionUnidad extends StatelessWidget {
                     dni: dni,
                   ),
                   icon: const Icon(Icons.swap_horiz,
-                      size: 16, color: Colors.orangeAccent),
+                      size: 16, color: AppColors.accentOrange),
                   label: const Text(
                     'SOLICITAR CAMBIO',
                     style: TextStyle(
-                      color: Colors.orangeAccent,
+                      color: AppColors.accentOrange,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),
@@ -110,11 +110,11 @@ class _CardEnRevision extends StatelessWidget {
 
     return AppCard(
       highlighted: true,
-      borderColor: Colors.orangeAccent.withAlpha(150),
+      borderColor: AppColors.accentOrange.withAlpha(150),
       child: Row(
         children: [
           const Icon(Icons.history_toggle_off,
-              color: Colors.orangeAccent, size: 30),
+              color: AppColors.accentOrange, size: 30),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -132,7 +132,7 @@ class _CardEnRevision extends StatelessWidget {
                 const Text(
                   'VALIDACIÓN PENDIENTE...',
                   style: TextStyle(
-                    color: Colors.orangeAccent,
+                    color: AppColors.accentOrange,
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1,
@@ -219,7 +219,7 @@ class _CardUnidad extends StatelessWidget {
                               const Text(
                                 'MARCA: ',
                                 style: TextStyle(
-                                  color: Colors.greenAccent,
+                                  color: AppColors.accentGreen,
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -235,7 +235,7 @@ class _CardUnidad extends StatelessWidget {
                               const Text(
                                 'MODELO: ',
                                 style: TextStyle(
-                                  color: Colors.greenAccent,
+                                  color: AppColors.accentGreen,
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -347,7 +347,7 @@ class _BloqueTelemetria extends StatelessWidget {
             Expanded(
               child: _DatoTelemetria(
                 icono: Icons.route,
-                color: Colors.cyanAccent,
+                color: AppColors.accentCyan,
                 valor: '${auton.toStringAsFixed(0)} km',
                 etiqueta: 'AUTONOMÍA',
               ),
@@ -408,9 +408,9 @@ class _DatoCombustible extends StatelessWidget {
   const _DatoCombustible({required this.porcentaje});
 
   Color get _color {
-    if (porcentaje >= 50) return Colors.greenAccent;
-    if (porcentaje >= 20) return Colors.orangeAccent;
-    return Colors.redAccent;
+    if (porcentaje >= 50) return AppColors.accentGreen;
+    if (porcentaje >= 20) return AppColors.accentOrange;
+    return AppColors.accentRed;
   }
 
   @override
@@ -572,7 +572,7 @@ class _ListaUnidadesLibres extends StatelessWidget {
           padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           child: Text(
             'Solo se muestran unidades disponibles (LIBRE)',
-            style: TextStyle(color: Colors.greenAccent, fontSize: 11),
+            style: TextStyle(color: AppColors.accentGreen, fontSize: 11),
           ),
         ),
         const Divider(color: Colors.white10, height: 1),
@@ -616,7 +616,7 @@ class _ListaUnidadesLibres extends StatelessWidget {
                           color: Colors.white54, fontSize: 12),
                     ),
                     trailing: const Icon(Icons.add_circle,
-                        color: Colors.orangeAccent),
+                        color: AppColors.accentOrange),
                     onTap: () {
                       Navigator.pop(context);
                       _enviarSolicitud(

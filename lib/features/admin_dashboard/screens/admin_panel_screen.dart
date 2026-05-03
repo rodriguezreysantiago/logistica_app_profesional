@@ -5,6 +5,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../core/services/capabilities.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
@@ -125,7 +126,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               titulo: 'ALERTAS',
               subtitulo: 'Eventos en vivo de la flota Volvo (IDLING, OVERSPEED, ...)',
               icono: Icons.notifications_active_outlined,
-              color: Colors.redAccent,
+              color: AppColors.accentRed,
               ruta: AppRoutes.adminVolvoAlertas,
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
@@ -133,7 +134,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               titulo: 'PERSONAL',
               subtitulo: 'Lista de legajos y choferes',
               icono: Icons.badge_outlined,
-              color: Colors.blueAccent,
+              color: AppColors.accentBlue,
               ruta: '/admin_personal_lista',
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verVencimientos))
@@ -141,7 +142,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               titulo: 'VENCIMIENTOS',
               subtitulo: 'Calendario y listas por categoría',
               icono: Icons.event_note,
-              color: Colors.greenAccent,
+              color: AppColors.accentGreen,
               ruta: '/admin_vencimientos_menu',
             ),
           if (Capabilities.can(PrefsService.rol, Capability.verReportes))
@@ -303,7 +304,7 @@ class _SeccionLabel extends StatelessWidget {
       child: Text(
         texto.toUpperCase(),
         style: const TextStyle(
-          color: Colors.greenAccent,
+          color: AppColors.accentGreen,
           fontSize: 11,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.5,
@@ -445,7 +446,7 @@ class _GridKPIs extends StatelessWidget {
         label: 'Choferes activos',
         valor: stats.cargando ? '…' : '${stats.choferesActivos}',
         icon: Icons.badge,
-        color: Colors.blueAccent,
+        color: AppColors.accentBlue,
         ruta: '/admin_personal_lista',
       ),
       _KpiCard(
@@ -465,8 +466,8 @@ class _GridKPIs extends StatelessWidget {
         icon: Icons.fact_check_outlined,
         // Naranja si hay pendientes — no es error, pero requiere atención.
         color: stats.revisionesPendientes > 0
-            ? Colors.orangeAccent
-            : Colors.greenAccent,
+            ? AppColors.accentOrange
+            : AppColors.accentGreen,
         urgente: stats.revisionesPendientes > 0,
         ruta: '/admin_revisiones',
       ),
@@ -477,7 +478,7 @@ class _GridKPIs extends StatelessWidget {
         icon: Icons.error_outline,
         // Rojo si hay vencidos — esto sí es crítico.
         color:
-            stats.vencidos > 0 ? Colors.redAccent : Colors.greenAccent,
+            stats.vencidos > 0 ? AppColors.accentRed : AppColors.accentGreen,
         urgente: stats.vencidos > 0,
         ruta: '/vencimientos_calendario',
       ),
@@ -486,8 +487,8 @@ class _GridKPIs extends StatelessWidget {
         valor: stats.cargando ? '…' : '${stats.proximos7}',
         icon: Icons.warning_amber_rounded,
         color: stats.proximos7 > 0
-            ? Colors.orangeAccent
-            : Colors.greenAccent,
+            ? AppColors.accentOrange
+            : AppColors.accentGreen,
         urgente: stats.proximos7 > 0,
         ruta: '/vencimientos_calendario',
       ),
