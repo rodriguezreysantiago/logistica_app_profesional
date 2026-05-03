@@ -22,6 +22,7 @@ import 'features/vehicles/services/volvo_api_service.dart';
 
 // Pantalla inicial
 import 'features/auth/screens/login_screen.dart';
+import 'features/auth/screens/splash_screen.dart';
 
 // Clave global
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -220,19 +221,20 @@ class _LogisticaAppState extends State<LogisticaApp> {
 
       theme: AppTheme.darkTheme,
 
-      // Siempre arrancamos en /home. El AuthGuard (vía
-      // AppRouter.generateRoute) usa un StreamBuilder con
-      // authStateChanges() para esperar que Firebase Auth termine
-      // de restorear la sesión persistida en disco antes de decidir
-      // si mostrar la pantalla o redirigir a login. Esto es crítico
-      // en Windows desktop, donde el restore del C++ SDK es async y
-      // un check síncrono al startup (como teníamos antes, mirando
-      // solo `PrefsService.isLoggedIn`) podía bouncearte al login
-      // aunque el token estuviera vivo.
-      initialRoute: AppRoutes.home,
+      // Arrancamos en /splash (logo ~1.5s) y de ahí saltamos a /home.
+      // El AuthGuard de /home (vía AppRouter.generateRoute) usa un
+      // StreamBuilder con authStateChanges() para esperar que Firebase
+      // Auth termine de restorear la sesión persistida en disco antes
+      // de decidir si mostrar la pantalla o redirigir a login. Esto es
+      // crítico en Windows desktop, donde el restore del C++ SDK es
+      // async y un check síncrono al startup (como teníamos antes,
+      // mirando solo `PrefsService.isLoggedIn`) podía bouncearte al
+      // login aunque el token estuviera vivo.
+      initialRoute: AppRoutes.splash,
 
       routes: {
         AppRoutes.login: (_) => const LoginScreen(),
+        AppRoutes.splash: (_) => const SplashScreen(),
       },
 
       onGenerateRoute: AppRouter.generateRoute,

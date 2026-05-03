@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Menú principal de auditoría de vencimientos.
@@ -70,7 +71,7 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
           ),
           Center(
             child: Text(
-              'S.M.A.R.T. — Gestión de Flota',
+              '${AppTexts.appName} — Gestión de Flota',
               style: TextStyle(
                 color: Colors.white24,
                 fontSize: 10,

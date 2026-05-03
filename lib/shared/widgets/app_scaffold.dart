@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_shell_context.dart';
+import 'coopertrans_logo.dart';
 
 /// Scaffold unificado con fondo de imagen + overlay oscuro.
 /// Reemplaza el patrón repetido de Stack con Positioned.fill + Image.asset.
@@ -80,17 +81,38 @@ class AppScaffold extends StatelessWidget {
       extendBodyBehindAppBar: showBackground,
       appBar: AppBar(
         title: title != null
-            ? Text(
-                title!,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.2,
-                ),
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CoopertransLogo(size: CoopertransLogoSize.s),
+                  const SizedBox(width: 10),
+                  Container(
+                    width: 1,
+                    height: 14,
+                    color: Colors.white24,
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      title!,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ],
               )
             : null,
         leading: leading,
         actions: actions,
-        centerTitle: centerTitle,
+        // El logo + separador + título es ancho variable; lo dejamos
+        // alineado a la izquierda (después del back button si existe)
+        // en lugar de centrado para que no quede flotando en el medio.
+        centerTitle: title != null ? false : centerTitle,
+        titleSpacing: 12,
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.white,

@@ -60,7 +60,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      title: 'S.M.A.R.T. Logística',
+      title: AppTexts.appName,
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [

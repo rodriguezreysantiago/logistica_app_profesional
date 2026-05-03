@@ -5,6 +5,11 @@ class AppRoutes {
   static const String login = '/';
   static const String home = '/home';
 
+  /// Splash inicial — primer frame visible al abrir la app. Solo cosmético:
+  /// muestra el logo + indicator durante ~1.5s y redirige a [home] (donde
+  /// el AuthGuard decide login vs MainPanel).
+  static const String splash = '/splash';
+
   // Usuario
   static const String perfil = '/perfil';
   static const String equipo = '/equipo';
@@ -36,10 +41,18 @@ class AppRoutes {
 class AppTexts {
   AppTexts._();
 
-  static const String appName = 'S.M.A.R.T. Logística';
+  /// Nombre comercial de la app — visible al usuario en AppBars,
+  /// splash, login, dialogs. Si Vecchi cambia el branding, este es
+  /// el único string a tocar para todo el cliente Flutter (los strings
+  /// duplicados en UI específica deberían referirse a `AppTexts.appName`).
+  static const String appName = 'Coopertrans Móvil';
+
+  /// Subtítulo bajo el logo en login/splash.
+  static const String tagline = 'GESTIÓN DE FLOTA · COOPERTRANS';
+
   static const String rutaNoEncontrada = 'Ruta no encontrada';
   // Podés mantener un registro visual de tu versión acá
-  static const String appVersion = 'v 1.0.7'; 
+  static const String appVersion = 'v 1.0.7';
 }
 
 // ===========================================================================

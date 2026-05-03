@@ -20,5 +20,6 @@ export 'app_list_page.dart';
 export 'app_scaffold.dart';
 export 'app_states.dart';
 export 'command_palette.dart';
+export 'coopertrans_logo.dart';
 export 'preview_screen.dart';
 export 'vencimiento_badge.dart';

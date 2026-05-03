@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../auth/services/auth_service.dart';
 import '../../sync_dashboard/providers/sync_dashboard_provider.dart';
@@ -33,7 +34,7 @@ class MainPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      title: 'S.M.A.R.T. Logística',
+      title: AppTexts.appName,
       actions: [
         IconButton(
           icon: const Icon(Icons.logout_outlined),

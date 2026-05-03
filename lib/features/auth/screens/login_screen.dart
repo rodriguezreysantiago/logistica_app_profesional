@@ -3,8 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/services/prefs_service.dart';
+import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/widgets/coopertrans_logo.dart';
 import '../services/auth_service.dart';
 
 /// Pantalla de login.
@@ -113,18 +116,23 @@ class _LoginScreenState extends State<LoginScreen> {
         resizeToAvoidBottomInset: true,
         body: Stack(
           children: [
-            // Mismo fondo que el resto de la app
+            // Gradient brand → fondo oscuro. Reemplaza la foto histórica
+            // por algo más limpio y consistente con el splash.
             Positioned.fill(
-              child: Image.asset(
-                'assets/images/fondo_login.jpg',
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Theme.of(context).scaffoldBackgroundColor,
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      AppColors.brandDark,
+                      AppColors.background,
+                      AppColors.background,
+                    ],
+                    stops: [0.0, 0.55, 1.0],
+                  ),
                 ),
               ),
-            ),
-            Positioned.fill(
-              child: Container(color: Colors.black.withAlpha(180)),
             ),
 
             // Card central con el formulario
@@ -189,14 +197,13 @@ class _LoginCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
     return Container(
       width: 420,
       padding: const EdgeInsets.all(35),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(25),
-        border: Border.all(color: primary.withAlpha(30)),
+        border: Border.all(color: AppColors.brand.withAlpha(40)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withAlpha(150),
@@ -215,25 +222,20 @@ class _LogoYTitulo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Column(
+    return const Column(
       children: [
-        Text(
-          'S.M.A.R.T.',
-          style: TextStyle(
-            fontSize: 38,
-            fontWeight: FontWeight.bold,
-            color: primary,
-            letterSpacing: 6,
-          ),
+        CoopertransLogo(
+          size: CoopertransLogoSize.xl,
+          centered: true,
         ),
-        const Text(
-          'CONTROL DE LOGÍSTICA PROFESIONAL',
+        SizedBox(height: 8),
+        Text(
+          AppTexts.tagline,
           style: TextStyle(
             color: Colors.white54,
             fontWeight: FontWeight.bold,
             fontSize: 10,
-            letterSpacing: 1.2,
+            letterSpacing: 1.5,
           ),
         ),
       ],
@@ -330,15 +332,14 @@ class _BotonIngresar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
     if (isLoading) {
-      return CircularProgressIndicator(color: primary);
+      return const CircularProgressIndicator(color: AppColors.brand);
     }
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
         minimumSize: const Size(double.infinity, 60),
-        backgroundColor: primary,
-        foregroundColor: Colors.black,
+        backgroundColor: AppColors.brand,
+        foregroundColor: Colors.white,
         elevation: 8,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(15),

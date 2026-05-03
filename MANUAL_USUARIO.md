@@ -1,4 +1,4 @@
-# Manual de usuario — S.M.A.R.T. Logística
+# Manual de usuario — Coopertrans Móvil
 
 Guía para los usuarios finales de la app. Está dividida por **rol** porque cada uno ve y puede hacer cosas distintas.
 
@@ -8,7 +8,7 @@ Guía para los usuarios finales de la app. Está dividida por **rol** porque cad
 
 ## ¿Qué hace la app?
 
-S.M.A.R.T. Logística centraliza la gestión operativa de una empresa de transporte:
+Coopertrans Móvil centraliza la gestión operativa de una empresa de transporte:
 
 - **Personal**: legajos de choferes y administrativos, papeles personales con vencimientos (licencia, preocupacional, ART, etc.).
 - **Flota**: tractores y enganches (bateas, tolvas, etc.), vencimientos del vehículo (RTO, seguro, extintores).

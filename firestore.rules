@@ -1,4 +1,4 @@
-// Firestore Security Rules — S.M.A.R.T. Logística
+// Firestore Security Rules — Coopertrans Móvil
 //
 // Modelo de auth:
 //   La app usa Firebase Auth con custom tokens emitidos por la

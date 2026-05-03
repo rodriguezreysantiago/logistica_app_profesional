@@ -74,7 +74,7 @@ commit_msg*.txt
 # debería trackearse.
 .sentry-native/
 
-# Entorno y Seguridad S.M.A.R.T. Logística
+# Entorno y Seguridad Coopertrans Móvil
 serviceAccountKey.json
 *.jks
 *.p12

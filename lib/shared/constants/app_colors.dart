@@ -49,6 +49,26 @@ class AppColors {
   static const Color info = Color(0xFF1565C0); // blue 800
 
   // ===========================================================================
+  // BRAND (Coopertrans Móvil — rebrand 2026-05-02)
+  // ===========================================================================
+  /// Color principal de marca — azul cobalto. Tono moderno que diferencia
+  /// la app del verde-accent default de Flutter. Usar en: logo grande,
+  /// splash, botones primarios, énfasis principal.
+  ///
+  /// Coopertrans no tiene paleta de marca histórica — esta paleta es
+  /// definición nueva del rebrand. Si el cliente decide otro color,
+  /// se cambia acá y propaga a toda la app.
+  static const Color brand = Color(0xFF0EA5E9); // sky-500 / cobalto
+
+  /// Variante suave del brand para fondos, hover states, badges.
+  /// Mismo hue, menos saturación — útil cuando el [brand] sería muy fuerte.
+  static const Color brandSoft = Color(0xFF38BDF8); // sky-400
+
+  /// Variante oscura del brand para gradients (login, splash).
+  /// Acompaña al [brand] en transiciones hacia el [background].
+  static const Color brandDark = Color(0xFF075985); // sky-800
+
+  // ===========================================================================
   // ACCENT (los que se usan dispersos en el código actual)
   // ===========================================================================
   /// Verde accent — color primario de la marca. Es el mismo que el

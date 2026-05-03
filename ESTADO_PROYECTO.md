@@ -1,4 +1,4 @@
-# Estado del proyecto — S.M.A.R.T. Logística
+# Estado del proyecto — Coopertrans Móvil
 
 Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-05-01** (sesión grande post-30-abril: imports bulk Excel → Firestore, fix UI extintores en ficha admin, chips clickeables en mantenimiento, unificación menus admin, auditoría profunda con dos agentes paralelos, y plan de acción de 4 fases ejecutado completo: RBAC + rate limit + idempotencia bot + rules + AppDocsEmpleado + tryParseFecha + AppColors + perf + .gitattributes).
 

@@ -1,5 +1,5 @@
 /**
- * Cloud Functions de S.M.A.R.T. Logística.
+ * Cloud Functions de Coopertrans Móvil.
  *
  * Endpoints expuestos:
  *   - `loginConDni`: emite custom token de Firebase Auth a partir de
@@ -1924,7 +1924,7 @@ export const onAlertaVolvoCreated = onDocumentCreated(
       `⚠️ ${etiqueta}\n\n` +
       "Te pedimos ajustar tu manejo. Si hubo una situación particular, " +
       "avisanos a la oficina.\n\n" +
-      "_Sistema S.M.A.R.T. Logística — Mensaje automático._";
+      "_Coopertrans Móvil — Mensaje automático._";
 
     try {
       const colaRef = await db.collection("COLA_WHATSAPP").add({

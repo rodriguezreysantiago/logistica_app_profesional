@@ -1,6 +1,6 @@
 {
   "name": "functions",
-  "description": "Cloud Functions for S.M.A.R.T. Logística (Vecchi)",
+  "description": "Cloud Functions for Coopertrans Móvil (Vecchi)",
   "scripts": {
     "lint": "eslint --ext .js,.ts .",
     "build": "tsc",

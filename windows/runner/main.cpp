@@ -32,8 +32,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   
-  // Cambié el título a algo más profesional para tu empresa
-  if (!window.Create(L"SMART", origin, size)) {
+  if (!window.Create(L"Coopertrans Móvil", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

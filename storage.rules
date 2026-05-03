@@ -1,4 +1,4 @@
-// Firebase Storage Security Rules — S.M.A.R.T. Logística
+// Firebase Storage Security Rules — Coopertrans Móvil
 //
 // Mismo modelo de auth que firestore.rules: Firebase Auth con custom
 // tokens, UID = DNI, rol en custom claim `request.auth.token.rol`.

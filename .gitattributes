@@ -1,4 +1,4 @@
-# Normalización de line endings — S.M.A.R.T. Logística
+# Normalización de line endings — Coopertrans Móvil
 #
 # Antes de este archivo el repo tenía drift LF/CRLF: archivos editados
 # en Windows quedaban con CRLF, los del sandbox/CI con LF. Cuando alguien

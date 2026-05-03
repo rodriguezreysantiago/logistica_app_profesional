@@ -1,4 +1,4 @@
-# RUNBOOK — S.M.A.R.T. Logística
+# RUNBOOK — Coopertrans Móvil
 
 Documento operativo para resolver incidentes en producción. Pensado para que **alguien que no sea Santiago** pueda mantener el sistema funcionando si Santiago no está disponible.
 

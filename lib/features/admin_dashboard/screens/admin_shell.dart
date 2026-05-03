@@ -230,15 +230,28 @@ class _AdminShellState extends State<AdminShell> {
       // El shell tiene su propio AppBar y fondo
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text(
-          section.label.toUpperCase(),
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.2,
-            fontSize: 16,
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CoopertransLogo(size: CoopertransLogoSize.s),
+            const SizedBox(width: 10),
+            Container(width: 1, height: 14, color: Colors.white24),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                section.label.toUpperCase(),
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ],
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 12,
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.white,
