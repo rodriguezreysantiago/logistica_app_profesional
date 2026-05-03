@@ -238,6 +238,60 @@ async function _crearRevision(db, { chofer, avisoData, urlArchivo, pathStorage, 
 }
 
 /**
+ * Acuse automático cuando un chofer registrado responde al bot. UX
+ * básica para que el chofer no sienta que está hablándole a un agujero
+ * negro. Cap diario: 1 acuse por chofer por día (idempotencia con doc
+ * `BOT_ACUSES/{dni}_{YYYY-MM-DD}`).
+ *
+ * Si la creación del doc falla por race (otro mensaje del mismo chofer
+ * llegó simultáneo y ya creó el doc), simplemente no enviamos —
+ * `create()` tira ALREADY_EXISTS, lo capturamos y skipiamos.
+ */
+async function _enviarAcuseSiCorresponde(db, wa, msg, chofer) {
+  const hoy = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  })();
+  const acuseRef = db.collection('BOT_ACUSES').doc(`${chofer.dni}_${hoy}`);
+
+  // Marcar antes de enviar — `create()` falla con ALREADY_EXISTS si
+  // otro mensaje ya pasó por acá hoy. Eso garantiza atomicidad sin tx.
+  try {
+    await acuseRef.create({
+      dni: chofer.dni,
+      fecha: hoy,
+      enviado_en: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    // ALREADY_EXISTS o cualquier error → no enviamos acuse hoy.
+    log.debug(`Acuse a ${chofer.dni} skipeado (ya enviado hoy o race).`);
+    return;
+  }
+
+  // Variantes anti-baneo (si dos choferes responden seguido, los
+  // mensajes salen distintos).
+  const variantes = [
+    'Recibí tu mensaje. Soy un sistema automático — para cualquier ' +
+      'gestión o consulta, comunicate con la oficina.',
+    'Hola, te aviso que soy un mensaje automático del sistema. Si ' +
+      'necesitás algo, comunicate directo con la oficina.',
+    'Recibido. Este es un canal automático — para gestiones ' +
+      'comunicate con la oficina.',
+  ];
+  const texto = variantes[Math.floor(Math.random() * variantes.length)];
+
+  try {
+    await wa.responder(msg, texto);
+    log.info(`→ Acuse automático enviado a ${chofer.dni}`);
+  } catch (e) {
+    log.warn(`No se pudo enviar acuse a ${chofer.dni}: ${e.message}`);
+  }
+}
+
+/**
  * Cuando no podemos asociar la respuesta con confianza, va a una
  * bandeja para que el admin la procese manualmente. La pantalla
  * `AdminBotBandejaScreen` la lee y permite convertirla en revisión
@@ -298,19 +352,24 @@ function crearHandler(fs, wa) {
       });
       if (eraComando) return;
 
-      // ─── Gating de Fase 3 (respuestas de choferes con foto) ───
-      // Si AUTO_RESPUESTAS_ENABLED=false, no procesamos como Fase 3.
-      // El handler igual se registró para que los comandos admin
-      // funcionen — pero las respuestas de choferes se ignoran.
-      const respuestasHabilitado =
-        String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() === 'true';
-      if (!respuestasHabilitado) return;
-
-      // ─── Identificar al chofer ───
+      // ─── Identificar al chofer (necesario para ACUSE y para Fase 3) ───
       const fromNumber = msg.from.replace('@c.us', '');
       const chofer = await _resolverChofer(db, fromNumber);
       if (!chofer) {
         log.debug(`Mensaje de número no registrado ${fromNumber}, ignoro.`);
+        return;
+      }
+
+      // ─── Acuse automático ───
+      // Aunque la Fase 3 esté apagada, si un chofer registrado responde
+      // al bot, queremos contestarle algo (UX: si no respondemos, queda
+      // como agujero negro y el chofer puede sentirse ignorado).
+      // Cap: 1 acuse por chofer por día — si responde 10 veces el mismo
+      // día, no lo spameamos. Doc en `BOT_ACUSES/{dni}_{YYYY-MM-DD}`.
+      const respuestasHabilitado =
+        String(process.env.AUTO_RESPUESTAS_ENABLED || 'false').toLowerCase() === 'true';
+      if (!respuestasHabilitado) {
+        await _enviarAcuseSiCorresponde(db, wa, msg, chofer);
         return;
       }
 
