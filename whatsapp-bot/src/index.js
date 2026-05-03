@@ -157,24 +157,34 @@ function encolar(doc) {
 }
 
 // ─── Reintentos automáticos con backoff ──────────────────────────────
-const _PATRONES_TRANSITORIOS = [
-  /timeout/i,
-  /timed out/i,
-  /network/i,
-  /econn(reset|refused|aborted)/i,
-  /etimedout/i,
-  /socket hang up/i,
-  /cliente no inicializado/i,
-  /session closed/i,
-  /protocol error/i,
-  /target closed/i,
-  /execution context was destroyed/i,
-  /evaluate failed/i,
+//
+// Lista INVERTIDA (allowlist de errores definitivos): todo lo que no
+// está acá se trata como TRANSITORIO y se reintenta. Esto cubre el caso
+// de errores nuevos de WhatsApp (ej. "rate limit exceeded", "phone
+// temporarily unavailable") que antes caían como definitivos por no
+// matchear la lista cerrada de transitorios — y se perdían mensajes
+// que sí podrían enviarse después.
+//
+// Para sumar un patrón definitivo nuevo: agregarlo acá con un comment
+// que justifique por qué NO se debe reintentar.
+const _PATRONES_DEFINITIVOS = [
+  // Teléfono mal formado / sin WhatsApp registrado — NO reintentar,
+  // hace falta que el admin corrija el TELEFONO en EMPLEADOS.
+  /numero invalido/i,
+  /no tiene whatsapp/i,
+  /phone number is invalid/i,
+  /wid not found/i,
+  /no registered/i,
+  // Mensaje rechazado por contenido / política de WhatsApp — reintentar
+  // no va a cambiar nada.
+  /message blocked/i,
+  /content rejected/i,
 ];
 
 function _esErrorTransitorio(error) {
   const msg = (error && error.message) || String(error || '');
-  return _PATRONES_TRANSITORIOS.some((re) => re.test(msg));
+  // Default-retry: si NO matchea ningún patrón definitivo, es transitorio.
+  return !_PATRONES_DEFINITIVOS.some((re) => re.test(msg));
 }
 
 function _backoffSegundos(intento) {
@@ -188,6 +198,31 @@ function _backoffSegundos(intento) {
   return arr[idx];
 }
 
+/**
+ * Si la fecha cae fuera de horario hábil, la desplaza al próximo slot
+ * hábil (próximo día L-V dentro del horario, o lunes si es viernes/finde).
+ * Esto evita que un reintento programado para 19:45 + 30min termine como
+ * "next attempt 20:15" (fuera de horario, queda flotando hasta el lunes).
+ *
+ * Heurística simple: si `cuando` no está en horario hábil, lo seteamos al
+ * próximo bucket de horario hábil (8:05 AM del próximo día hábil para
+ * dar margen vs el `enHorarioHabil` exacto). Si SÍ está en horario, lo
+ * dejamos como vino.
+ */
+function _ajustarAHorarioHabil(cuando) {
+  if (enHorarioHabil(cuando)) return cuando;
+  // Iterar día a día hasta encontrar uno hábil.
+  const c = new Date(cuando);
+  for (let i = 0; i < 7; i++) {
+    c.setDate(c.getDate() + (i === 0 ? 0 : 1));
+    c.setHours(8, 5, 0, 0);
+    if (enHorarioHabil(c)) return c;
+  }
+  // Defensa improbable: si en 7 días no encontramos uno hábil, devolvemos
+  // el cuando original (mejor reintentar fuera de horario que perderlo).
+  return cuando;
+}
+
 async function _despacharFalloEnvio(docRef, error) {
   const maxRetries = parseInt(process.env.MAX_RETRIES || '3', 10);
   const transitorio = _esErrorTransitorio(error);
@@ -196,11 +231,17 @@ async function _despacharFalloEnvio(docRef, error) {
 
   if (transitorio && intentos < maxRetries) {
     const backoffSeg = _backoffSegundos(intentos);
-    const cuando = new Date(Date.now() + backoffSeg * 1000);
+    const cuandoRaw = new Date(Date.now() + backoffSeg * 1000);
+    // Si el reintento cae fuera de horario hábil, lo desplazamos al
+    // próximo slot hábil para que el log no mienta y el doc no quede
+    // flotando hasta el lunes con un proximoIntentoEn falso.
+    const cuando = _ajustarAHorarioHabil(cuandoRaw);
     await fs.marcarReintento(docRef, error.message, cuando);
+    const ajustado = cuando.getTime() !== cuandoRaw.getTime();
     log.info(
-      `↻ Reintento ${intentos}/${maxRetries} de ${docRef.id} en ${backoffSeg}s ` +
-        `(${aLocalDateTime(cuando)})`
+      `↻ Reintento ${intentos}/${maxRetries} de ${docRef.id} ` +
+        `(${ajustado ? 'desplazado a horario hábil' : `en ${backoffSeg}s`}) ` +
+        `→ ${aLocalDateTime(cuando)}`
     );
     return;
   }
@@ -269,6 +310,27 @@ async function procesarSiguiente() {
     if (!existe) {
       log.warn(`${docId}: ${wid} no tiene WhatsApp.`);
       await fs.marcarError(docRef, 'El número no tiene WhatsApp registrado.');
+      return;
+    }
+
+    // Rate limit por hora (anti-baneo). MAX_MESSAGES_PER_HOUR del .env
+    // (default 30). Si ya enviamos ese cap en los últimos 60 min, NO
+    // tomamos el lock — dejamos el doc PENDIENTE y reagendamos para
+    // cuando se libere un slot. El polling lo va a respetar gracias al
+    // proximoIntentoEn que setea marcarReintento.
+    const maxPorHora = parseInt(process.env.MAX_MESSAGES_PER_HOUR || '30', 10);
+    const msHastaSlot = health.msHastaSlotLibre(maxPorHora);
+    if (msHastaSlot > 0) {
+      const cuando = new Date(Date.now() + msHastaSlot + 5000); // +5s margen
+      await fs.marcarReintento(
+        docRef,
+        `Rate limit ${maxPorHora}/hora alcanzado`,
+        cuando
+      );
+      log.info(
+        `⏳ Rate limit (${health.enviadosUltimaHora()}/${maxPorHora} en última h). ` +
+        `${docId} reagendado para ${aLocalDateTime(cuando)}.`
+      );
       return;
     }
 

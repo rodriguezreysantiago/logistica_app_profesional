@@ -51,6 +51,11 @@ const _state = {
   mensajesEnviadosHoy: 0,
   fechaContadorHoy: _hoyIso(), // YYYY-MM-DD en TZ del server
   erroresRecientes: [], // [{ en: Date, contexto, mensaje }]
+  // Timestamps (en ms) de los últimos envíos de la última hora — usados
+  // para enforcear MAX_MESSAGES_PER_HOUR. Buffer rotativo: cada vez que
+  // se llama enviadosUltimaHora() se descartan los > 1h. Cap defensivo
+  // de 200 entries por si hay un bug y se llena.
+  timestampsUltimaHora: [],
 };
 
 function _hoyIso() {
@@ -90,7 +95,47 @@ function registrarEnvio() {
     _state.fechaContadorHoy = hoy;
   }
   _state.mensajesEnviadosHoy++;
-  _state.ultimoMensajeEnviado = new Date();
+  const ahora = new Date();
+  _state.ultimoMensajeEnviado = ahora;
+  _state.timestampsUltimaHora.push(ahora.getTime());
+  // Cap defensivo (no debería llegar acá si MAX_MESSAGES_PER_HOUR funciona)
+  if (_state.timestampsUltimaHora.length > 200) {
+    _state.timestampsUltimaHora.splice(0, _state.timestampsUltimaHora.length - 200);
+  }
+}
+
+/**
+ * Cuántos envíos hubo en los últimos 60 minutos (rolling window).
+ * Cleanup oportunista: descarta timestamps viejos en cada llamada.
+ *
+ * Usado por el flow de envío para enforcear MAX_MESSAGES_PER_HOUR del
+ * .env (anti-baneo: WhatsApp típicamente flaggea >40 mensajes/hora con
+ * patrón uniforme).
+ */
+function enviadosUltimaHora() {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  // Filtrar in-place para evitar GC innecesario.
+  let i = 0;
+  while (i < _state.timestampsUltimaHora.length &&
+         _state.timestampsUltimaHora[i] < cutoff) {
+    i++;
+  }
+  if (i > 0) _state.timestampsUltimaHora.splice(0, i);
+  return _state.timestampsUltimaHora.length;
+}
+
+/**
+ * Si hay rate limit activo, cuánto hay que esperar (en ms) hasta que
+ * un slot se libere. Devuelve 0 si no hay limit. El slot se libera
+ * cuando el envío más viejo de la ventana cumple 60 min.
+ */
+function msHastaSlotLibre(maxPorHora) {
+  const enviados = enviadosUltimaHora();
+  if (enviados < maxPorHora) return 0;
+  const ahora = Date.now();
+  const masViejo = _state.timestampsUltimaHora[0];
+  const liberaEn = masViejo + 60 * 60 * 1000;
+  return Math.max(0, liberaEn - ahora);
 }
 
 /**
@@ -344,6 +389,8 @@ module.exports = {
   registrarEnvio,
   registrarError,
   registrarCicloCron,
+  enviadosUltimaHora,
+  msHastaSlotLibre,
   // Para tests / debugging:
   _state,
   escribirHeartbeat,
