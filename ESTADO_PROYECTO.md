@@ -819,6 +819,8 @@ Sidebar admin: sección "Mapa" 🗺️ con misma capability.
 | `8fa14ad` | feat(volvo): Fase 4 — onAlertaVolvoMantenimientoCreated |
 | `89eb5aa` | chore(scripts): probe end-to-end del trigger mantenimiento |
 | `71207c9` | feat(volvo): Fase 5 — Mapa de eventos georreferenciados (OpenStreetMap) |
+| `a66d78f` | docs(estado-proyecto): sección 6.14 — sesión completa 2-mayo madrugada |
+| `b372e40` | chore(decommission): script de auditoría + checklist en RUNBOOK para bajar logisticaapp-e539a |
 
 #### 6.14.13 Estado del roadmap Volvo Alerts al cierre
 
@@ -832,6 +834,31 @@ Sidebar admin: sección "Mapa" 🗺️ con misma capability.
 | 3c — Pantalla Descargas (PTO) | `AdminDescargasPtoScreen` | ✅ live |
 | 4 — Mantenimiento predictivo (WhatsApp al jefe) | `onAlertaVolvoMantenimientoCreated` | ✅ live + E2E test |
 | 5 — Mapa de eventos georreferenciados | `AdminMapaVolvoScreen` | ✅ live |
+
+#### 6.14.14 Preparación del decommission del proyecto legacy (commit `b372e40`)
+
+Cierre operativo del día con la PREPARACIÓN para bajar `logisticaapp-e539a` cuando se cumpla la ventana de validación (≥ 30 días desde la migración = ≥ 2026-06-02).
+
+**Script de auditoría** `scripts/auditar_referencias_proyecto_viejo.ps1`:
+- Sweep grep recursivo del repo buscando 6 patrones que indicarían código apuntando al proyecto viejo: `logisticaapp-e539a`, `gs://logisticaapp-backups`, `logisticaapp.firebasestorage.app`, `logisticaapp.appspot.com`, `us-central1-logisticaapp`, `southamerica-east1-logisticaapp`.
+- Excluye carpetas auto-generadas (`node_modules`, `.git`, `.dart_tool`, `build`, `.claude`, `.firebase`, etc.) operando sobre rutas RELATIVAS al CWD (no full paths) — gotcha resuelto: cuando se corre desde un worktree dentro de `.claude/worktrees/`, una exclusión de `.claude\` aplicada a full path se autoexcluye y descarta TODO el repo.
+- Distingue hits "histórico OK" (en `ESTADO_PROYECTO.md`, `RUNBOOK.md` y el propio script — donde son referencias documentadas, no código activo) de hits "código activo" (todo lo demás).
+- Exit 0 si solo hay hits históricos → seguro proceder. Exit 1 si hay hits activos → revisar primero.
+- **Validado en producción**: 18 matches encontrados (12 en logisticaapp-e539a, 4 en gs://logisticaapp-backups, 2 en URLs), **TODOS en archivos históricos esperados, 0 en código activo**.
+
+**Sección nueva en RUNBOOK.md** "Decommission del proyecto legacy" con:
+- 3 condiciones para proceder (tiempo + validación operativa + script limpio).
+- Checklist de 8 ítems pre-decommission, incluido un backup final "por las dudas" del proyecto viejo antes de bajarlo.
+- Comando final con 2 opciones:
+   - **A) Bajar a Spark plan** (recomendado primero): conservador, gratis pero limitado, mantiene la DB accesible read-only por las dudas. Solo desde Console web.
+   - **B) Borrar el proyecto entero**: `gcloud projects delete logisticaapp-e539a`. Definitivo, pero hay grace period de 30 días desde Console.
+- Recomendación: A primero, después de otros 30 días sin actividad → B.
+
+**Cuándo usar el script**:
+- Antes del decommission real (≥ 2026-06-02).
+- Cuando un cambio reciente pueda haber introducido referencias residuales sin querer.
+
+Resultado: a partir del 2026-06-02 Santiago tiene todo el pensamiento hecho — solo ejecutar el checklist.
 
 ## 7. Pendientes / roadmap
 
