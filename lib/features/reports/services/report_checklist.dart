@@ -1,17 +1,15 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as ex;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import 'excel_utils.dart' as xu;
+import 'report_save_helper.dart';
 
 /// Reporte de Novedades (admin) — exporta solo respuestas REG y MAL
 /// de los CHECKLISTS de los últimos 45 días.
@@ -195,26 +193,16 @@ class ReportChecklistService {
 
       xu.autoFitColumnas(hoja, titulos.length, currentRow);
 
-      final fileName =
-          'Novedades_${DateFormat('yyyy_MM_dd').format(DateTime.now())}.xlsx';
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/$fileName';
-
       final fileBytes = excel.save();
       if (fileBytes != null) {
         final patched = xu.aplicarAutoFilterAlXlsx(fileBytes);
-        File(path).writeAsBytesSync(patched);
-        if (Platform.isWindows) {
-          await Process.run('cmd', ['/c', 'start', '', path]);
-        } else {
-          await SharePlus.instance.share(
-            ShareParams(
-              files: [XFile(path)],
-              text: '📋 Reporte de Novedades — Coopertrans Móvil\n'
-                  'Generado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}',
-            ),
-          );
-        }
+        await ReportSaveHelper.guardarYAbrir(
+          bytes: patched,
+          nombreDefault: ReportSaveHelper.nombreUnico('Novedades'),
+          messenger: messenger,
+          textoCompartir: '📋 Reporte de Novedades — Coopertrans Móvil\n'
+              'Generado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}',
+        );
       }
     } catch (e) {
       debugPrint('❌ Error reporte checklist: $e');
