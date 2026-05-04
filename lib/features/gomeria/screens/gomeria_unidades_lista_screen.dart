@@ -25,6 +25,15 @@ class _GomeriaUnidadesListaScreenState
   /// los tipos de enganche (BATEA, TOLVA, BIVUELCO, TANQUE, ACOPLADO).
   String? _filtro;
 
+  /// Lista de TIPOs a pasar a `where('TIPO', whereIn: ...)` según el
+  /// chip seleccionado. Para "TODAS" devuelve TRACTOR + todos los
+  /// enganches (excluye choferes u otros TIPO no-vehículo si los hubiera).
+  List<String> _tiposParaQuery() {
+    if (_filtro == 'TRACTOR') return const ['TRACTOR'];
+    if (_filtro == 'ENGANCHE') return AppTiposVehiculo.enganches;
+    return ['TRACTOR', ...AppTiposVehiculo.enganches];
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
@@ -56,21 +65,21 @@ class _GomeriaUnidadesListaScreenState
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              // Filtro server-side: en lugar de bajar TODA la colección
+              // VEHICULOS y filtrar en cliente (que con flotas grandes
+              // consume datos y bandwith), `whereIn` baja solo los tipos
+              // relevantes. Soporta hasta 30 valores — TRACTOR + 5
+              // enganches caben de sobra.
               stream: FirebaseFirestore.instance
                   .collection(AppCollections.vehiculos)
+                  .where('TIPO', whereIn: _tiposParaQuery())
                   .snapshots(),
               builder: (ctx, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final docs = snap.data?.docs ?? const [];
-                final filtrados = docs.where((d) {
-                  final tipo =
-                      (d.data()['TIPO'] ?? '').toString().toUpperCase();
-                  if (_filtro == null) return true;
-                  if (_filtro == 'TRACTOR') return tipo == 'TRACTOR';
-                  return AppTiposVehiculo.enganches.contains(tipo);
-                }).toList()
+                final filtrados = docs.toList()
                   ..sort((a, b) => a.id.compareTo(b.id));
                 if (filtrados.isEmpty) {
                   return const Center(

@@ -20,6 +20,7 @@ import '../features/admin_dashboard/screens/admin_estado_bot_screen.dart';
 import '../features/admin_dashboard/screens/admin_volvo_alertas_screen.dart';
 import '../features/gomeria/constants/posiciones.dart';
 import '../features/gomeria/screens/admin_gomeria_marcas_modelos_screen.dart';
+import '../features/gomeria/screens/gomeria_cubierta_detalle_screen.dart';
 import '../features/gomeria/screens/gomeria_hub_screen.dart';
 import '../features/gomeria/screens/gomeria_recapados_screen.dart';
 import '../features/gomeria/screens/gomeria_stock_screen.dart';
@@ -303,6 +304,13 @@ class AppRouter {
       case AppRoutes.adminGomeriaRecapados:
         return _buildRoute(
           _protegerAdmin(const GomeriaRecapadosScreen()),
+          settings,
+        );
+      case AppRoutes.adminGomeriaCubierta:
+        final args = settings.arguments as Map<String, dynamic>?;
+        final cubiertaId = (args?['cubiertaId'] ?? '').toString();
+        return _buildRoute(
+          _protegerAdmin(GomeriaCubiertaDetalleScreen(cubiertaId: cubiertaId)),
           settings,
         );
       case AppRoutes.adminGomeriaMarcasModelos:

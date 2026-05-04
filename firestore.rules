@@ -369,8 +369,13 @@ service cloud.firestore {
 
     match /CUBIERTAS/{doc} {
       allow read: if isAdminOrSupervisor();
-      // Escritura: admin/supervisor (supervisor de gomería opera acá).
-      allow write: if isAdminOrSupervisor();
+      // Crear: el alta debe atribuirse a quien escribe (no falsificable).
+      allow create: if isAdminOrSupervisor()
+        && request.resource.data.creado_por_dni == request.auth.uid;
+      // Update / delete: admin/supervisor sin restricción de keys —
+      // todas las mutaciones del ciclo de vida pasan por `GomeriaService`
+      // de forma transaccional y ya valida estructura.
+      allow update, delete: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -399,18 +404,67 @@ service cloud.firestore {
         && request.resource.data.desde is timestamp
         && request.resource.data.hasta == null;
 
-      // Actualizar: solo se permite cerrar (setear `hasta`, los km_*_retirar
-      // y km_recorridos, y los campos de auditoría del retiro). El log es
-      // inmutable para los demás campos.
+      // Actualizar: dos flujos válidos sobre la instalación activa:
+      // (a) cerrar la instalación (setear `hasta`, km_*_retirar,
+      //     km_recorridos, los campos de auditoría del retiro y motivo).
+      // (b) registrar una lectura de control (presión / profundidad de
+      //     banda) sin cerrar — `hasta` queda en null.
+      // Cualquier otro cambio se rechaza para mantener el log inmutable.
       allow update: if isAdminOrSupervisor()
         && resource.data.hasta == null
-        && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['hasta', 'km_unidad_al_retirar', 'km_recorridos',
-                      'retirado_por_dni', 'retirado_por_nombre'])
-        && request.resource.data.hasta is timestamp;
+        && (
+          (request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['hasta', 'km_unidad_al_retirar', 'km_recorridos',
+                        'retirado_por_dni', 'retirado_por_nombre',
+                        'motivo_retiro'])
+            && request.resource.data.hasta is timestamp)
+          ||
+          (request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['ultima_presion_psi', 'ultima_profundidad_banda_mm',
+                        'ultima_lectura_en', 'ultima_lectura_por_dni',
+                        'ultima_lectura_por_nombre'])
+            && request.resource.data.hasta == null)
+        );
 
       // Borrar: nunca. Si hubo error, se cierra y se registra una corrección.
       allow delete: if false;
+    }
+
+    // ========================================================================
+    // CUBIERTAS_POSICIONES_ACTIVAS / CUBIERTAS_ACTIVAS — locks de unicidad
+    // ========================================================================
+    // Docs de control transaccional para garantizar que una posición
+    // de unidad no tenga 2 cubiertas instaladas al mismo tiempo y que
+    // una cubierta no figure activa en 2 lugares (ver
+    // `GomeriaService.instalar` para el flujo completo). El cliente
+    // los crea/borra dentro de la transaction de instalar/retirar.
+
+    match /CUBIERTAS_POSICIONES_ACTIVAS/{doc} {
+      allow read: if isAdminOrSupervisor();
+      allow create, delete: if isAdminOrSupervisor();
+      // No update: si la posición cambia de cubierta hay que borrar
+      // y recrear (la dos operaciones son del flujo retirar+instalar
+      // o del flujo "rotar").
+      allow update: if false;
+    }
+
+    match /CUBIERTAS_ACTIVAS/{doc} {
+      allow read: if isAdminOrSupervisor();
+      allow create, delete: if isAdminOrSupervisor();
+      allow update: if false;
+    }
+
+    // ========================================================================
+    // CUBIERTAS_PROVEEDORES — catálogo de proveedores de recapado
+    // ========================================================================
+    // Mismo patrón que CUBIERTAS_MARCAS pero ABM disponible para
+    // supervisor también — el supervisor puede agregar un proveedor
+    // nuevo on-the-fly cuando manda una cubierta a un taller que aún no
+    // está en la lista. Soft-delete con `activo`.
+
+    match /CUBIERTAS_PROVEEDORES/{doc} {
+      allow read: if isAdminOrSupervisor();
+      allow write: if isAdminOrSupervisor();
     }
 
     // ========================================================================
@@ -481,7 +535,15 @@ service cloud.firestore {
     // sin afectar integridad de datos.
 
     match /META/cubiertas_counter {
-      allow read, write: if isAdminOrSupervisor();
+      allow read: if isAdminOrSupervisor();
+      // Create: solo si el contador arranca en 1 (primer alta del sistema).
+      allow create: if isAdminOrSupervisor()
+        && request.resource.data.proximo == 1;
+      // Update: solo +1 monotónico. No permite saltos ni decrementos —
+      // un bug del cliente o un set manual no puede romper la secuencia.
+      allow update: if isAdminOrSupervisor()
+        && request.resource.data.proximo == resource.data.proximo + 1;
+      allow delete: if false;
     }
 
     match /META/{doc=**} {

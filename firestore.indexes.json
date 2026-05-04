@@ -56,6 +56,21 @@
         { "fieldPath": "fecha_retorno", "order": "ASCENDING" },
         { "fieldPath": "fecha_envio", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "CUBIERTAS_RECAPADOS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "cubierta_id", "order": "ASCENDING" },
+        { "fieldPath": "fecha_envio", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "CUBIERTAS_RECAPADOS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fecha_retorno", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

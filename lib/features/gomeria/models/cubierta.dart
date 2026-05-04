@@ -44,6 +44,11 @@ class Cubierta {
   /// "comprada en oferta de mayo 2026").
   final String? observaciones;
 
+  /// Precio de compra de la cubierta nueva en pesos. Opcional — se
+  /// captura al alta. Habilita el cálculo de costo por km
+  /// (`precioCompra + Σ recapados.costo) / kmAcumulados`).
+  final double? precioCompra;
+
   /// Cuándo se cargó la cubierta al sistema.
   final DateTime? creadoEn;
 
@@ -57,14 +62,16 @@ class Cubierta {
     required this.vidas,
     required this.kmAcumulados,
     required this.observaciones,
+    required this.precioCompra,
     required this.creadoEn,
   });
 
-  /// `true` si esta cubierta es de marca y aún tiene vidas para recapar.
-  /// El service consulta también CUBIERTAS_MODELOS.recapable antes de
-  /// permitir mandar a recapar.
-  bool get puedeRecaparse =>
-      estado == EstadoCubierta.enDeposito || estado == EstadoCubierta.instalada;
+  /// `true` si esta cubierta puede mandarse a recapar AHORA. Solo
+  /// EN_DEPOSITO porque el service rechaza cualquier otro estado — antes
+  /// retornaba `true` también para INSTALADA y la UI ofrecía opciones
+  /// que después fallaban al guardar. El service además valida
+  /// `CUBIERTAS_MODELOS.recapable` antes de permitir el envío.
+  bool get puedeRecaparse => estado == EstadoCubierta.enDeposito;
 
   factory Cubierta.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) =>
       Cubierta.fromMap(doc.id, doc.data());
@@ -92,6 +99,7 @@ class Cubierta {
       vidas: (d['vidas'] as num?)?.toInt() ?? 1,
       kmAcumulados: (d['km_acumulados'] as num?)?.toDouble() ?? 0,
       observaciones: d['observaciones']?.toString(),
+      precioCompra: (d['precio_compra'] as num?)?.toDouble(),
       creadoEn: (d['creado_en'] as Timestamp?)?.toDate(),
     );
   }

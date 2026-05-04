@@ -11,9 +11,20 @@ import '../models/cubierta.dart';
 import '../models/cubierta_modelo.dart';
 import '../services/gomeria_service.dart';
 
-/// Stock de cubiertas — lista de las que están EN_DEPOSITO + alta de
-/// nuevas. Filtros simples por tipo_uso (Dirección / Tracción) para el
-/// caso típico "necesito una cubierta de dirección, ¿qué tengo?".
+/// Stock de cubiertas — la pantalla central de gestión del inventario.
+///
+/// Presenta TODAS las cubiertas (no solo EN_DEPOSITO). Filtros:
+/// - **Estado**: chips arriba (TODAS, DEPÓSITO, INSTALADA, EN_RECAPADO,
+///   DESCARTADA). Por default arranca en DEPÓSITO porque es el flujo
+///   más común ("¿qué tengo para instalar?"), pero el operador puede
+///   ver el universo completo.
+/// - **Tipo de uso**: chips abajo (TODAS, DIRECCIÓN, TRACCIÓN).
+/// - **Búsqueda**: caja de texto en la AppBar. Filtra por código
+///   (CUB-XXXX) o por etiqueta del modelo (marca/medida). Útil cuando
+///   un operador busca una cubierta puntual ("¿dónde está la 0042?").
+///
+/// Tap en un tile → pantalla de detalle de la cubierta (historial
+/// completo de instalaciones y recapados).
 class GomeriaStockScreen extends StatefulWidget {
   const GomeriaStockScreen({super.key});
 
@@ -23,7 +34,19 @@ class GomeriaStockScreen extends StatefulWidget {
 
 class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
   final _service = GomeriaService();
-  TipoUsoCubierta? _filtro;
+
+  /// Default arranca en EN_DEPOSITO (caso de uso más frecuente). El
+  /// operador puede sacar el filtro tappeando "TODAS".
+  EstadoCubierta? _estado = EstadoCubierta.enDeposito;
+  TipoUsoCubierta? _tipoUso;
+  final _busquedaCtrl = TextEditingController();
+  String _busqueda = '';
+
+  @override
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,40 +54,58 @@ class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
       title: 'Stock de cubiertas',
       body: Column(
         children: [
-          _Filtros(
-            seleccionado: _filtro,
-            onChanged: (v) => setState(() => _filtro = v),
+          _BarraBusqueda(
+            controller: _busquedaCtrl,
+            onChanged: (v) =>
+                setState(() => _busqueda = v.trim().toUpperCase()),
+          ),
+          _FiltrosEstado(
+            seleccionado: _estado,
+            onChanged: (v) => setState(() => _estado = v),
+          ),
+          _FiltrosTipoUso(
+            seleccionado: _tipoUso,
+            onChanged: (v) => setState(() => _tipoUso = v),
           ),
           Expanded(
             child: StreamBuilder<List<Cubierta>>(
-              stream: _service.streamCubiertasEnDeposito(tipoUso: _filtro),
+              stream: _service.streamCubiertasFiltradas(
+                estado: _estado,
+                tipoUso: _tipoUso,
+              ),
               builder: (ctx, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final cubiertas = snap.data ?? const <Cubierta>[];
+                final cubiertas = (snap.data ?? const <Cubierta>[]).where(_matchBusqueda).toList()
+                  ..sort((a, b) => a.codigo.compareTo(b.codigo));
                 if (cubiertas.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Padding(
-                      padding: EdgeInsets.all(40),
+                      padding: const EdgeInsets.all(40),
                       child: Text(
-                        'No hay cubiertas en depósito.\nTocá + para agregar la primera.',
+                        _busqueda.isEmpty
+                            ? 'No hay cubiertas para este filtro.\nTocá + para agregar una.'
+                            : 'No se encontró "$_busqueda".',
                         textAlign: TextAlign.center,
-                        style:
-                            TextStyle(color: Colors.white60, fontSize: 14),
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 14),
                       ),
                     ),
                   );
                 }
-                // Ordenamos client-side por código (CUB-XXXX). Para listas
-                // grandes habría que indexar y orderBy server-side, pero
-                // < 200 cubiertas es trivial.
-                cubiertas.sort((a, b) => a.codigo.compareTo(b.codigo));
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
                   itemCount: cubiertas.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) => _CubiertaTile(c: cubiertas[i]),
+                  itemBuilder: (_, i) => _CubiertaTile(
+                    c: cubiertas[i],
+                    onTap: () => Navigator.pushNamed(
+                      context,
+                      AppRoutes.adminGomeriaCubierta,
+                      arguments: {'cubiertaId': cubiertas[i].id},
+                    ),
+                  ),
                 );
               },
             ),
@@ -80,6 +121,12 @@ class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
     );
   }
 
+  bool _matchBusqueda(Cubierta c) {
+    if (_busqueda.isEmpty) return true;
+    return c.codigo.toUpperCase().contains(_busqueda) ||
+        c.modeloEtiqueta.toUpperCase().contains(_busqueda);
+  }
+
   Future<void> _abrirAlta(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final codigoCreado = await showDialog<String>(
@@ -87,9 +134,6 @@ class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
       barrierDismissible: false,
       builder: (ctx) => _AltaCubiertaDialog(service: _service),
     );
-    // Confirmación visible cuando el alta efectivamente sucede — antes
-    // el usuario no tenía forma de saber si la creación funcionó si la
-    // lista no se actualizaba inmediatamente.
     if (codigoCreado != null) {
       messenger.showSnackBar(SnackBar(
         content: Text('✓ Cubierta $codigoCreado creada.'),
@@ -101,30 +145,135 @@ class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
 }
 
 // =============================================================================
+// FILTROS / BÚSQUEDA
+// =============================================================================
 
-class _Filtros extends StatelessWidget {
-  final TipoUsoCubierta? seleccionado;
-  final ValueChanged<TipoUsoCubierta?> onChanged;
+class _BarraBusqueda extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
 
-  const _Filtros({required this.seleccionado, required this.onChanged});
+  const _BarraBusqueda({required this.controller, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        textCapitalization: TextCapitalization.characters,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          isDense: true,
+          prefixIcon:
+              const Icon(Icons.search, color: Colors.white60, size: 20),
+          hintText: 'Buscar por código (CUB-XXXX) o modelo…',
+          hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+          suffixIcon: controller.text.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.clear,
+                      color: Colors.white60, size: 18),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                ),
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.04),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+      ),
+    );
+  }
+}
+
+class _FiltrosEstado extends StatelessWidget {
+  final EstadoCubierta? seleccionado;
+  final ValueChanged<EstadoCubierta?> onChanged;
+  const _FiltrosEstado({required this.seleccionado, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: SizedBox(
+        height: 32,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: [
+            _ChipFiltro(
+              label: 'TODAS',
+              seleccionado: seleccionado == null,
+              onTap: () => onChanged(null),
+              color: AppColors.accentPurple,
+            ),
+            const SizedBox(width: 6),
+            _ChipFiltro(
+              label: 'DEPÓSITO',
+              seleccionado: seleccionado == EstadoCubierta.enDeposito,
+              onTap: () => onChanged(EstadoCubierta.enDeposito),
+              color: AppColors.accentBlue,
+            ),
+            const SizedBox(width: 6),
+            _ChipFiltro(
+              label: 'INSTALADAS',
+              seleccionado: seleccionado == EstadoCubierta.instalada,
+              onTap: () => onChanged(EstadoCubierta.instalada),
+              color: AppColors.accentGreen,
+            ),
+            const SizedBox(width: 6),
+            _ChipFiltro(
+              label: 'EN RECAPADO',
+              seleccionado: seleccionado == EstadoCubierta.enRecapado,
+              onTap: () => onChanged(EstadoCubierta.enRecapado),
+              color: AppColors.accentTeal,
+            ),
+            const SizedBox(width: 6),
+            _ChipFiltro(
+              label: 'DESCARTADAS',
+              seleccionado: seleccionado == EstadoCubierta.descartada,
+              onTap: () => onChanged(EstadoCubierta.descartada),
+              color: AppColors.accentRed,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FiltrosTipoUso extends StatelessWidget {
+  final TipoUsoCubierta? seleccionado;
+  final ValueChanged<TipoUsoCubierta?> onChanged;
+  const _FiltrosTipoUso({required this.seleccionado, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
       child: Wrap(
-        spacing: 8,
+        spacing: 6,
         children: [
           _ChipFiltro(
-            label: 'TODAS',
+            label: 'TIPO: TODOS',
             seleccionado: seleccionado == null,
             onTap: () => onChanged(null),
+            color: AppColors.accentBlue,
           ),
           for (final t in TipoUsoCubierta.values)
             _ChipFiltro(
               label: t.etiqueta.toUpperCase(),
               seleccionado: seleccionado == t,
               onTap: () => onChanged(t),
+              color: t == TipoUsoCubierta.direccion
+                  ? AppColors.accentOrange
+                  : AppColors.accentBlue,
             ),
         ],
       ),
@@ -136,11 +285,13 @@ class _ChipFiltro extends StatelessWidget {
   final String label;
   final bool seleccionado;
   final VoidCallback onTap;
+  final Color color;
 
   const _ChipFiltro({
     required this.label,
     required this.seleccionado,
     required this.onTap,
+    required this.color,
   });
 
   @override
@@ -149,20 +300,26 @@ class _ChipFiltro extends StatelessWidget {
       label: Text(label),
       selected: seleccionado,
       onSelected: (_) => onTap(),
-      selectedColor: AppColors.accentBlue,
+      selectedColor: color,
       labelStyle: TextStyle(
         color: seleccionado ? Colors.black : Colors.white,
         fontWeight: FontWeight.bold,
         fontSize: 11,
       ),
       backgroundColor: AppColors.background,
+      visualDensity: VisualDensity.compact,
     );
   }
 }
 
+// =============================================================================
+// TILE
+// =============================================================================
+
 class _CubiertaTile extends StatelessWidget {
   final Cubierta c;
-  const _CubiertaTile({required this.c});
+  final VoidCallback onTap;
+  const _CubiertaTile({required this.c, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +327,7 @@ class _CubiertaTile extends StatelessWidget {
         ? AppColors.accentOrange
         : AppColors.accentBlue;
     return AppCard(
+      onTap: onTap,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
         children: [
@@ -189,18 +347,43 @@ class _CubiertaTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  c.codigo,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      c.codigo,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: _colorEstado(c.estado).withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(3),
+                        border: Border.all(
+                            color: _colorEstado(c.estado), width: 0.7),
+                      ),
+                      child: Text(
+                        c.estado.codigo,
+                        style: TextStyle(
+                          color: _colorEstado(c.estado),
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
                   c.modeloEtiqueta,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style:
+                      const TextStyle(color: Colors.white70, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Wrap(
@@ -221,9 +404,23 @@ class _CubiertaTile extends StatelessWidget {
               ],
             ),
           ),
+          const Icon(Icons.chevron_right, color: Colors.white38),
         ],
       ),
     );
+  }
+
+  static Color _colorEstado(EstadoCubierta e) {
+    switch (e) {
+      case EstadoCubierta.enDeposito:
+        return AppColors.accentBlue;
+      case EstadoCubierta.instalada:
+        return AppColors.accentGreen;
+      case EstadoCubierta.enRecapado:
+        return AppColors.accentTeal;
+      case EstadoCubierta.descartada:
+        return AppColors.accentRed;
+    }
   }
 }
 
@@ -242,15 +439,14 @@ class _AltaCubiertaDialog extends StatefulWidget {
 class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
   CubiertaModelo? _modeloSel;
   final _obsCtrl = TextEditingController();
+  final _precioCtrl = TextEditingController();
   bool _guardando = false;
-  // Mensaje de error visible DENTRO del dialog. Antes mostrábamos
-  // SnackBar pero quedaba tapado por el dialog y el usuario no veía
-  // qué pasaba.
   String? _error;
 
   @override
   void dispose() {
     _obsCtrl.dispose();
+    _precioCtrl.dispose();
     super.dispose();
   }
 
@@ -266,9 +462,6 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Filtramos `activo` + ordenamos client-side para evitar
-              // exigir un índice compuesto en Firestore (where + orderBy
-              // en campos distintos). Hay < 100 modelos típicamente.
               StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: FirebaseFirestore.instance
                     .collection(AppCollections.cubiertasModelos)
@@ -278,8 +471,10 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
                       .map(CubiertaModelo.fromDoc)
                       .where((m) => m.activo)
                       .toList()
-                    ..sort((a, b) =>
-                        a.marcaNombre.compareTo(b.marcaNombre));
+                    ..sort((a, b) {
+                      final byMarca = a.marcaNombre.compareTo(b.marcaNombre);
+                      return byMarca != 0 ? byMarca : a.modelo.compareTo(b.modelo);
+                    });
                   if (modelos.isEmpty) {
                     return const Text(
                       'No hay modelos cargados.\n'
@@ -303,6 +498,17 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
                     onChanged: (v) => setState(() => _modeloSel = v),
                   );
                 },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _precioCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Precio de compra (\$, opcional)',
+                  hintText: 'Ej. 850.000',
+                  helperText: 'Habilita el cálculo de costo por km.',
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [AppFormatters.inputMiles],
               ),
               const SizedBox(height: 12),
               TextField(
@@ -370,9 +576,9 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
         supervisorDni: PrefsService.dni,
         supervisorNombre: PrefsService.nombre,
         observaciones: _obsCtrl.text.trim().isEmpty ? null : _obsCtrl.text,
+        precioCompra:
+            AppFormatters.parsearMiles(_precioCtrl.text)?.toDouble(),
       );
-      // Releer la cubierta para obtener el código generado y devolverlo
-      // al caller, que muestra snackbar de confirmación.
       final snap = await FirebaseFirestore.instance
           .collection(AppCollections.cubiertas)
           .doc(cubiertaId)

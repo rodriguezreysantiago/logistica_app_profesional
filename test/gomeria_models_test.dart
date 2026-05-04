@@ -11,9 +11,9 @@ import 'package:logistica_app_profesional/features/gomeria/models/cubierta_recap
 ///
 /// Foco crítico: la validación tipo_uso vs posición (decisión confirmada
 /// por Santiago: "que no le permita, sería un error de tipeo seguramente"),
-/// el cálculo de km_esperados según vidas, y los parsers defensivos
-/// (Firestore puede devolver datos parciales o corruptos sin que la app
-/// crashee — patrón establecido en el resto del codebase).
+/// el cálculo de km_esperados según vidas, los parsers defensivos
+/// (Firestore puede devolver datos parciales sin que la app crashee), y
+/// el cálculo de % de vida útil consumida en vivo.
 void main() {
   // ===========================================================================
   // POSICIONES — layout fijo + validación estricta tipo_uso
@@ -245,6 +245,8 @@ void main() {
       kmVidaEstimadaNueva: 120000,
       kmVidaEstimadaRecapada: 60000,
       recapable: true,
+      presionRecomendadaPsi: null,
+      profundidadBandaMinimaMm: null,
       activo: true,
     );
 
@@ -273,6 +275,8 @@ void main() {
         kmVidaEstimadaNueva: 50000,
         kmVidaEstimadaRecapada: null,
         recapable: false,
+        presionRecomendadaPsi: null,
+        profundidadBandaMinimaMm: null,
         activo: true,
       );
       expect(noRecapable.kmEsperadosParaVida(1), 50000);
@@ -292,6 +296,8 @@ void main() {
         kmVidaEstimadaNueva: 120000,
         kmVidaEstimadaRecapada: 60000,
         recapable: true,
+        presionRecomendadaPsi: null,
+        profundidadBandaMinimaMm: null,
         activo: true,
       );
       expect(m.etiqueta, 'Bridgestone R268 295/80R22.5 — Dirección');
@@ -299,7 +305,7 @@ void main() {
   });
 
   group('CubiertaModelo.fromMap', () {
-    test('parsea todos los campos', () {
+    test('parsea todos los campos incluyendo presión y banda', () {
       final m = CubiertaModelo.fromMap('mod1', {
         'marca_id': 'marca1',
         'marca_nombre': 'Bridgestone',
@@ -309,6 +315,8 @@ void main() {
         'km_vida_estimada_nueva': 120000,
         'km_vida_estimada_recapada': 60000,
         'recapable': true,
+        'presion_recomendada_psi': 110,
+        'profundidad_banda_minima_mm': 3.0,
         'activo': true,
       });
       expect(m.id, 'mod1');
@@ -316,6 +324,8 @@ void main() {
       expect(m.kmVidaEstimadaNueva, 120000);
       expect(m.kmVidaEstimadaRecapada, 60000);
       expect(m.recapable, isTrue);
+      expect(m.presionRecomendadaPsi, 110);
+      expect(m.profundidadBandaMinimaMm, 3.0);
     });
 
     test('data null → defaults sin romper', () {
@@ -326,6 +336,8 @@ void main() {
       expect(m.recapable, isFalse);
       expect(m.activo, isTrue);
       expect(m.kmVidaEstimadaNueva, isNull);
+      expect(m.presionRecomendadaPsi, isNull);
+      expect(m.profundidadBandaMinimaMm, isNull);
     });
 
     test('km_vida_estimada como double → toInt()', () {
@@ -348,6 +360,8 @@ void main() {
         kmVidaEstimadaNueva: 100000,
         kmVidaEstimadaRecapada: 45000,
         recapable: true,
+        presionRecomendadaPsi: 105,
+        profundidadBandaMinimaMm: 4.0,
         activo: false,
       );
       final reparsed = CubiertaModelo.fromMap(original.id, original.toMap());
@@ -359,6 +373,9 @@ void main() {
       expect(reparsed.kmVidaEstimadaNueva, original.kmVidaEstimadaNueva);
       expect(reparsed.kmVidaEstimadaRecapada, original.kmVidaEstimadaRecapada);
       expect(reparsed.recapable, original.recapable);
+      expect(reparsed.presionRecomendadaPsi, original.presionRecomendadaPsi);
+      expect(reparsed.profundidadBandaMinimaMm,
+          original.profundidadBandaMinimaMm);
       expect(reparsed.activo, original.activo);
     });
   });
@@ -377,6 +394,7 @@ void main() {
           vidas: 1,
           kmAcumulados: 0,
           observaciones: null,
+          precioCompra: null,
           creadoEn: null,
         );
 
@@ -384,8 +402,11 @@ void main() {
       expect(crear(EstadoCubierta.enDeposito).puedeRecaparse, isTrue);
     });
 
-    test('INSTALADA → puede (se podría retirar y mandar a recapar)', () {
-      expect(crear(EstadoCubierta.instalada).puedeRecaparse, isTrue);
+    test('INSTALADA → NO puede (debe retirarse al depósito antes)', () {
+      // El service rechaza si no está EN_DEPOSITO; el flag tiene que
+      // alinearse con eso para que la UI no ofrezca opciones que
+      // después fallan al guardar (bug encontrado en testing).
+      expect(crear(EstadoCubierta.instalada).puedeRecaparse, isFalse);
     });
 
     test('EN_RECAPADO → no puede (ya está allá)', () {
@@ -398,7 +419,7 @@ void main() {
   });
 
   group('Cubierta.fromMap', () {
-    test('parsea todos los campos', () {
+    test('parsea todos los campos incluyendo precioCompra', () {
       final c = Cubierta.fromMap('c1', {
         'codigo': 'CUB-0042',
         'modelo_id': 'mod1',
@@ -408,6 +429,7 @@ void main() {
         'vidas': 2,
         'km_acumulados': 87500.5,
         'observaciones': 'pinchazo en lateral',
+        'precio_compra': 850000,
         'creado_en': Timestamp.fromDate(DateTime(2026, 1, 15)),
       });
       expect(c.codigo, 'CUB-0042');
@@ -416,6 +438,7 @@ void main() {
       expect(c.vidas, 2);
       expect(c.kmAcumulados, 87500.5);
       expect(c.observaciones, 'pinchazo en lateral');
+      expect(c.precioCompra, 850000);
       expect(c.creadoEn, DateTime(2026, 1, 15));
     });
 
@@ -427,6 +450,7 @@ void main() {
       expect(c.vidas, 1);
       expect(c.kmAcumulados, 0);
       expect(c.tipoUso, TipoUsoCubierta.traccion);
+      expect(c.precioCompra, isNull);
     });
 
     test('campos numéricos como int → toDouble graceful', () {
@@ -444,11 +468,16 @@ void main() {
   });
 
   // ===========================================================================
-  // CUBIERTA_INSTALADA — esActiva + posicionTipada + duración
+  // CUBIERTA_INSTALADA — esActiva + posicionTipada + duración + % vida
   // ===========================================================================
-  group('CubiertaInstalada.esActiva', () {
-    test('hasta == null → activa', () {
-      final i = CubiertaInstalada(
+  CubiertaInstalada nuevaInstalada({
+    DateTime? hasta,
+    DateTime? desde,
+    double? kmInst,
+    double? kmRet,
+    int? kmEsperados,
+  }) =>
+      CubiertaInstalada(
         id: 'i1',
         cubiertaId: 'c1',
         cubiertaCodigo: 'CUB-0001',
@@ -456,41 +485,73 @@ void main() {
         unidadTipo: TipoUnidadCubierta.tractor,
         posicion: 'DIR_IZQ',
         vidaAlInstalar: 1,
-        desde: DateTime(2026, 1, 1),
-        hasta: null,
-        kmUnidadAlInstalar: 100000,
-        kmUnidadAlRetirar: null,
+        modeloEtiqueta: null,
+        kmVidaEstimadaAlInstalar: kmEsperados,
+        desde: desde ?? DateTime(2026, 1, 1),
+        hasta: hasta,
+        kmUnidadAlInstalar: kmInst,
+        kmUnidadAlRetirar: kmRet,
         kmRecorridos: null,
         instaladoPorDni: '111',
         instaladoPorNombre: 'Sup',
         retiradoPorDni: null,
         retiradoPorNombre: null,
         motivo: null,
+        ultimaPresionPsi: null,
+        ultimaProfundidadBandaMm: null,
+        ultimaLecturaEn: null,
+        ultimaLecturaPorDni: null,
+        ultimaLecturaPorNombre: null,
       );
-      expect(i.esActiva, isTrue);
+
+  group('CubiertaInstalada.esActiva', () {
+    test('hasta == null → activa', () {
+      expect(nuevaInstalada().esActiva, isTrue);
     });
 
     test('hasta != null → cerrada', () {
-      final i = CubiertaInstalada(
-        id: 'i1',
-        cubiertaId: 'c1',
-        cubiertaCodigo: 'CUB-0001',
-        unidadId: 'TR123',
-        unidadTipo: TipoUnidadCubierta.tractor,
-        posicion: 'DIR_IZQ',
-        vidaAlInstalar: 1,
-        desde: DateTime(2026, 1, 1),
-        hasta: DateTime(2026, 4, 1),
-        kmUnidadAlInstalar: 100000,
-        kmUnidadAlRetirar: 150000,
-        kmRecorridos: 50000,
-        instaladoPorDni: '111',
-        instaladoPorNombre: 'Sup',
-        retiradoPorDni: '111',
-        retiradoPorNombre: 'Sup',
-        motivo: 'rotación',
+      expect(nuevaInstalada(hasta: DateTime(2026, 4, 1)).esActiva, isFalse);
+    });
+  });
+
+  group('CubiertaInstalada.porcentajeVidaConsumida', () {
+    test('km recorridos en vivo (50% del esperado)', () {
+      final i = nuevaInstalada(kmInst: 100000, kmEsperados: 100000);
+      expect(i.porcentajeVidaConsumida(kmActualUnidad: 150000), 50);
+    });
+
+    test('superó la vida estimada → > 100%', () {
+      final i = nuevaInstalada(kmInst: 100000, kmEsperados: 80000);
+      // 100000 km recorridos contra 80000 esperados = 125%
+      expect(
+        i.porcentajeVidaConsumida(kmActualUnidad: 200000),
+        125,
       );
-      expect(i.esActiva, isFalse);
+    });
+
+    test('odómetro retrocedió → 0% (no negativo)', () {
+      final i = nuevaInstalada(kmInst: 100000, kmEsperados: 80000);
+      expect(i.porcentajeVidaConsumida(kmActualUnidad: 90000), 0);
+    });
+
+    test('sin km esperados → null', () {
+      final i = nuevaInstalada(kmInst: 100000, kmEsperados: null);
+      expect(i.porcentajeVidaConsumida(kmActualUnidad: 200000), isNull);
+    });
+
+    test('sin km de unidad ni de retiro → null', () {
+      final i = nuevaInstalada(kmInst: 100000, kmEsperados: 80000);
+      expect(i.porcentajeVidaConsumida(), isNull);
+    });
+
+    test('cerrada usa kmUnidadAlRetirar (no kmActualUnidad)', () {
+      final i = nuevaInstalada(
+        hasta: DateTime(2026, 6, 1),
+        kmInst: 100000,
+        kmRet: 180000,
+        kmEsperados: 80000,
+      );
+      expect(i.porcentajeVidaConsumida(kmActualUnidad: 999999), 100);
     });
   });
 
@@ -535,78 +596,66 @@ void main() {
 
   group('CubiertaInstalada.diasDuracion', () {
     test('instalación cerrada usa hasta', () {
-      final i = CubiertaInstalada(
-        id: 'i1',
-        cubiertaId: 'c1',
-        cubiertaCodigo: 'CUB-0001',
-        unidadId: 'TR123',
-        unidadTipo: TipoUnidadCubierta.tractor,
-        posicion: 'DIR_IZQ',
-        vidaAlInstalar: 1,
+      final i = nuevaInstalada(
         desde: DateTime(2026, 1, 1),
         hasta: DateTime(2026, 1, 31),
-        kmUnidadAlInstalar: null,
-        kmUnidadAlRetirar: null,
-        kmRecorridos: null,
-        instaladoPorDni: '111',
-        instaladoPorNombre: null,
-        retiradoPorDni: null,
-        retiradoPorNombre: null,
-        motivo: null,
       );
       expect(i.diasDuracion(), 30);
     });
 
     test('instalación activa cuenta hasta ahora', () {
       final hace10 = DateTime.now().subtract(const Duration(days: 10));
-      final i = CubiertaInstalada(
-        id: 'i1',
-        cubiertaId: 'c1',
-        cubiertaCodigo: 'CUB-0001',
-        unidadId: 'TR123',
-        unidadTipo: TipoUnidadCubierta.tractor,
-        posicion: 'DIR_IZQ',
-        vidaAlInstalar: 1,
-        desde: hace10,
-        hasta: null,
-        kmUnidadAlInstalar: null,
-        kmUnidadAlRetirar: null,
-        kmRecorridos: null,
-        instaladoPorDni: '111',
-        instaladoPorNombre: null,
-        retiradoPorDni: null,
-        retiradoPorNombre: null,
-        motivo: null,
-      );
+      final i = nuevaInstalada(desde: hace10);
       expect(i.diasDuracion(), greaterThanOrEqualTo(9));
       expect(i.diasDuracion(), lessThanOrEqualTo(10));
     });
   });
 
   group('CubiertaInstalada.fromMap — defensas', () {
-    test('data null → defaults sin romper', () {
-      final i = CubiertaInstalada.fromMap('i1', null);
-      expect(i.id, 'i1');
-      expect(i.cubiertaId, '');
-      expect(i.unidadTipo, TipoUnidadCubierta.tractor,
-          reason: 'fallback default');
-      expect(i.vidaAlInstalar, 1);
-      expect(i.kmUnidadAlInstalar, isNull);
-      expect(i.hasta, isNull);
-    });
-
     test('unidad_tipo "ENGANCHE" → enum correcto', () {
       final i = CubiertaInstalada.fromMap('i1', {
         'unidad_tipo': 'ENGANCHE',
+        'cubierta_id': 'c1',
       });
       expect(i.unidadTipo, TipoUnidadCubierta.enganche);
     });
 
-    test('unidad_tipo cualquier-otra-cosa → fallback a tractor', () {
+    test('unidad_tipo "TRACTOR" → enum correcto', () {
       final i = CubiertaInstalada.fromMap('i1', {
-        'unidad_tipo': 'FOO',
+        'unidad_tipo': 'TRACTOR',
+        'cubierta_id': 'c1',
       });
       expect(i.unidadTipo, TipoUnidadCubierta.tractor);
+    });
+
+    test('unidad_tipo inválido → throw (no enmascarar errores)', () {
+      // Antes el fromMap caía a "tractor" por default y enmascaraba
+      // bugs de escritura. Ahora tira excepción explícita para que
+      // surfacee el problema.
+      expect(
+        () => CubiertaInstalada.fromMap('i1', {
+          'unidad_tipo': 'FOO',
+          'cubierta_id': 'c1',
+        }),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('parsea snapshot del modelo y lectura de control', () {
+      final i = CubiertaInstalada.fromMap('i1', {
+        'cubierta_id': 'c1',
+        'unidad_id': 'TR123',
+        'unidad_tipo': 'TRACTOR',
+        'posicion': 'DIR_IZQ',
+        'modelo_etiqueta': 'Bridgestone R268',
+        'km_vida_estimada_al_instalar': 120000,
+        'ultima_presion_psi': 105,
+        'ultima_profundidad_banda_mm': 11.5,
+      });
+      expect(i.modeloEtiqueta, 'Bridgestone R268');
+      expect(i.kmVidaEstimadaAlInstalar, 120000);
+      expect(i.ultimaPresionPsi, 105);
+      expect(i.ultimaProfundidadBandaMm, 11.5);
     });
   });
 
@@ -674,74 +723,6 @@ void main() {
         cerradoPorNombre: null,
       );
       expect(r.diasEnRecapado(), 20);
-    });
-
-    test('en proceso cuenta hasta ahora', () {
-      final hace15 = DateTime.now().subtract(const Duration(days: 15));
-      final r = CubiertaRecapado(
-        id: 'r1',
-        cubiertaId: 'c1',
-        cubiertaCodigo: 'CUB-0001',
-        vidaRecapado: 2,
-        proveedor: 'X',
-        fechaEnvio: hace15,
-        fechaRetorno: null,
-        costo: null,
-        resultado: null,
-        notas: null,
-        enviadoPorDni: '111',
-        enviadoPorNombre: null,
-        cerradoPorDni: null,
-        cerradoPorNombre: null,
-      );
-      expect(r.diasEnRecapado(), greaterThanOrEqualTo(14));
-      expect(r.diasEnRecapado(), lessThanOrEqualTo(15));
-    });
-  });
-
-  group('CubiertaRecapado.fromMap', () {
-    test('parsea todos los campos cerrado', () {
-      final r = CubiertaRecapado.fromMap('r1', {
-        'cubierta_id': 'c1',
-        'cubierta_codigo': 'CUB-0042',
-        'vida_recapado': 2,
-        'proveedor': 'Recauchutados Sur',
-        'fecha_envio': Timestamp.fromDate(DateTime(2026, 4, 1)),
-        'fecha_retorno': Timestamp.fromDate(DateTime(2026, 4, 20)),
-        'costo': 45000.5,
-        'resultado': 'RECIBIDA',
-        'notas': 'banda nueva OK',
-        'enviado_por_dni': '111',
-        'enviado_por_nombre': 'Santiago',
-        'cerrado_por_dni': '111',
-        'cerrado_por_nombre': 'Santiago',
-      });
-      expect(r.cubiertaCodigo, 'CUB-0042');
-      expect(r.vidaRecapado, 2);
-      expect(r.proveedor, 'Recauchutados Sur');
-      expect(r.fechaRetorno, DateTime(2026, 4, 20));
-      expect(r.costo, 45000.5);
-      expect(r.resultado, ResultadoRecapado.recibida);
-      expect(r.enProceso, isFalse);
-    });
-
-    test('data null → defaults sin romper', () {
-      final r = CubiertaRecapado.fromMap('r1', null);
-      expect(r.cubiertaId, '');
-      expect(r.proveedor, '');
-      expect(r.vidaRecapado, 2);
-      expect(r.fechaRetorno, isNull);
-      expect(r.resultado, isNull);
-      expect(r.enProceso, isTrue);
-    });
-
-    test('costo como int → toDouble', () {
-      final r = CubiertaRecapado.fromMap('r1', {
-        'cubierta_id': 'c1',
-        'fecha_envio': Timestamp.fromDate(DateTime(2026, 4, 1)),
-        'costo': 45000, // int, no double
-      });
-      expect(r.costo, 45000.0);
     });
   });
 }

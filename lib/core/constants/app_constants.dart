@@ -36,6 +36,7 @@ class AppRoutes {
   static const String adminGomeriaUnidad = '/admin_gomeria_unidad';
   static const String adminGomeriaStock = '/admin_gomeria_stock';
   static const String adminGomeriaRecapados = '/admin_gomeria_recapados';
+  static const String adminGomeriaCubierta = '/admin_gomeria_cubierta';
   static const String adminGomeriaMarcasModelos = '/admin_gomeria_marcas_modelos';
 
 
@@ -135,6 +136,34 @@ class AppCollections {
   /// fecha_envio, fecha_retorno, costo, resultado (RECIBIDA |
   /// DESCARTADA_POR_PROVEEDOR), notas}`.
   static const String cubiertasRecapados = 'CUBIERTAS_RECAPADOS';
+
+  /// Docs de control transaccional para garantizar unicidad de
+  /// instalación. DocId: `{patente}__{POSICION}` (ej.
+  /// `AB123CD__DIR_IZQ`). El doc EXISTE si y solo si esa posición está
+  /// ocupada.
+  ///
+  /// Existe porque las queries `where().get()` dentro de una transaction
+  /// del client SDK NO son transaccionales (solo `tx.get(DocRef)` lo
+  /// es). Con 2 supervisores instalando en simultáneo en la misma
+  /// posición las queries no detectaban la colisión y Firestore
+  /// permitía crear 2 instalaciones activas. Este doc se lee con
+  /// `tx.get` antes de crear → garantiza atomicidad.
+  static const String cubiertasPosicionesActivas =
+      'CUBIERTAS_POSICIONES_ACTIVAS';
+
+  /// Espejo del anterior pero indexado por cubierta — garantiza que
+  /// una misma cubierta no figure activa en 2 posiciones distintas.
+  /// DocId: `{cubierta_id}`. Existe si y solo si la cubierta está
+  /// instalada actualmente.
+  static const String cubiertasActivas = 'CUBIERTAS_ACTIVAS';
+
+  /// Catálogo de proveedores de recapado. Doc: `{nombre, activo}`.
+  /// Existe para evitar typos en `CUBIERTAS_RECAPADOS.proveedor` que
+  /// rompen reportes ("Recauchutados Sur" vs "RECAUCHUTADOS SUR" vs
+  /// "Rec. Sur"). Soft-delete con `activo` para mantener proveedores
+  /// históricos visibles en reportes viejos sin que aparezcan al
+  /// elegir uno nuevo.
+  static const String cubiertasProveedores = 'CUBIERTAS_PROVEEDORES';
 
   /// Colección de configs / cursores internos del backend (Volvo poller
   /// cursor, contadores como `cubiertas_counter`, etc.). Acceso

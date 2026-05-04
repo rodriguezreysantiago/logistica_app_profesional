@@ -48,6 +48,16 @@ class CubiertaModelo {
   /// de marcas chinas baratas que no rinden recapado).
   final bool recapable;
 
+  /// Presión inflado recomendada en PSI. Opcional — referencia para
+  /// el control diario en la gomería ("inflar a 100 PSI"). El módulo no
+  /// alerta automáticamente si no se cumple, solo lo muestra.
+  final int? presionRecomendadaPsi;
+
+  /// Profundidad mínima de banda de rodamiento en mm. Por debajo de
+  /// este valor la cubierta tiene que cambiarse (regulación + seguridad).
+  /// La app no fuerza nada — es info al supervisor.
+  final double? profundidadBandaMinimaMm;
+
   final bool activo;
 
   const CubiertaModelo({
@@ -60,6 +70,8 @@ class CubiertaModelo {
     required this.kmVidaEstimadaNueva,
     required this.kmVidaEstimadaRecapada,
     required this.recapable,
+    required this.presionRecomendadaPsi,
+    required this.profundidadBandaMinimaMm,
     required this.activo,
   });
 
@@ -92,6 +104,9 @@ class CubiertaModelo {
       kmVidaEstimadaRecapada:
           (d['km_vida_estimada_recapada'] as num?)?.toInt(),
       recapable: d['recapable'] is bool ? d['recapable'] as bool : false,
+      presionRecomendadaPsi: (d['presion_recomendada_psi'] as num?)?.toInt(),
+      profundidadBandaMinimaMm:
+          (d['profundidad_banda_minima_mm'] as num?)?.toDouble(),
       activo: d['activo'] is bool ? d['activo'] as bool : true,
     );
   }
@@ -105,6 +120,8 @@ class CubiertaModelo {
         'km_vida_estimada_nueva': kmVidaEstimadaNueva,
         'km_vida_estimada_recapada': kmVidaEstimadaRecapada,
         'recapable': recapable,
+        'presion_recomendada_psi': presionRecomendadaPsi,
+        'profundidad_banda_minima_mm': profundidadBandaMinimaMm,
         'activo': activo,
       };
 

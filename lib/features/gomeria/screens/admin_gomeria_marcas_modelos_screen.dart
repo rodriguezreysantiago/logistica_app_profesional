@@ -194,6 +194,7 @@ class _ModelosTab extends StatelessWidget {
               itemBuilder: (_, i) {
                 final m = modelos[i];
                 return AppCard(
+                  onTap: () => _abrirEdicion(context, m),
                   padding: const EdgeInsets.symmetric(
                       horizontal: 14, vertical: 12),
                   child: Column(
@@ -243,6 +244,11 @@ class _ModelosTab extends StatelessWidget {
                                 ? AppColors.accentTeal
                                 : Colors.grey,
                           ),
+                          if (m.presionRecomendadaPsi != null)
+                            _Chip('${m.presionRecomendadaPsi} PSI'),
+                          if (m.profundidadBandaMinimaMm != null)
+                            _Chip(
+                                'Banda mín ${m.profundidadBandaMinimaMm} mm'),
                         ],
                       ),
                     ],
@@ -278,7 +284,326 @@ class _ModelosTab extends StatelessWidget {
       builder: (ctx) => const _AltaModeloDialog(),
     );
   }
+
+  Future<void> _abrirEdicion(BuildContext context, CubiertaModelo m) async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      builder: (ctx) => _EditarModeloSheet(modelo: m),
+    );
+  }
 }
+
+// =============================================================================
+// EDICIÓN INLINE DE MODELO — bottom sheet con campos tappeables
+// =============================================================================
+
+/// Bottom sheet de edición de un `CubiertaModelo`. Pattern inline-edit
+/// (cada ListTile abre un dialog que persiste un solo campo) — alineado
+/// al pattern de Personal/Flota.
+class _EditarModeloSheet extends StatelessWidget {
+  final CubiertaModelo modelo;
+  const _EditarModeloSheet({required this.modelo});
+
+  @override
+  Widget build(BuildContext context) {
+    final ref = FirebaseFirestore.instance
+        .collection(AppCollections.cubiertasModelos)
+        .doc(modelo.id);
+    Future<void> setCampo(String campo, dynamic valor) async {
+      await ref.update({campo: valor});
+    }
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.7,
+      maxChildSize: 0.95,
+      minChildSize: 0.4,
+      builder: (ctx, controller) => Column(
+        children: [
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.tire_repair,
+                    color: AppColors.accentPurple),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    modelo.etiqueta,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              controller: controller,
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+              children: [
+                _campoTexto(
+                  context,
+                  etiqueta: 'Modelo',
+                  valor: modelo.modelo,
+                  onSave: (v) => setCampo('modelo', v),
+                ),
+                _campoTexto(
+                  context,
+                  etiqueta: 'Medida',
+                  valor: modelo.medida,
+                  onSave: (v) => setCampo('medida', v),
+                ),
+                _campoEnum(
+                  context,
+                  etiqueta: 'Tipo de uso',
+                  valorActual: modelo.tipoUso.codigo,
+                  opciones: {
+                    for (final t in TipoUsoCubierta.values)
+                      t.codigo: t.etiqueta,
+                  },
+                  onSave: (v) => setCampo('tipo_uso', v),
+                ),
+                _campoMiles(
+                  context,
+                  etiqueta: 'Vida estimada (nueva)',
+                  valor: modelo.kmVidaEstimadaNueva,
+                  sufijo: 'km',
+                  onSave: (v) => setCampo('km_vida_estimada_nueva', v),
+                ),
+                _campoMiles(
+                  context,
+                  etiqueta: 'Vida estimada (recapada)',
+                  valor: modelo.kmVidaEstimadaRecapada,
+                  sufijo: 'km',
+                  onSave: (v) => setCampo('km_vida_estimada_recapada', v),
+                ),
+                _campoMiles(
+                  context,
+                  etiqueta: 'Presión recomendada',
+                  valor: modelo.presionRecomendadaPsi,
+                  sufijo: 'PSI',
+                  onSave: (v) => setCampo('presion_recomendada_psi', v),
+                ),
+                _campoDecimal(
+                  context,
+                  etiqueta: 'Profundidad mínima de banda',
+                  valor: modelo.profundidadBandaMinimaMm,
+                  sufijo: 'mm',
+                  onSave: (v) =>
+                      setCampo('profundidad_banda_minima_mm', v),
+                ),
+                SwitchListTile(
+                  value: modelo.recapable,
+                  title: const Text('Recapable',
+                      style: TextStyle(color: Colors.white)),
+                  onChanged: (v) => setCampo('recapable', v),
+                  activeTrackColor: AppColors.accentPurple,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  ListTile _campoTexto(BuildContext context,
+      {required String etiqueta,
+      required String valor,
+      required Future<void> Function(String) onSave}) {
+    return ListTile(
+      title: Text(etiqueta,
+          style: const TextStyle(color: Colors.white60, fontSize: 12)),
+      subtitle: Text(valor.isEmpty ? '—' : valor,
+          style: const TextStyle(color: Colors.white, fontSize: 14)),
+      trailing: const Icon(Icons.edit, color: Colors.white38, size: 18),
+      onTap: () async {
+        final ctrl = TextEditingController(text: valor);
+        final res = await showDialog<String>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.background,
+            title: Text(etiqueta),
+            content: TextField(controller: ctrl, autofocus: true),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCELAR'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('GUARDAR'),
+              ),
+            ],
+          ),
+        );
+        if (res != null && res != valor) await onSave(res);
+      },
+    );
+  }
+
+  ListTile _campoMiles(BuildContext context,
+      {required String etiqueta,
+      required int? valor,
+      required String sufijo,
+      required Future<void> Function(int?) onSave}) {
+    return ListTile(
+      title: Text(etiqueta,
+          style: const TextStyle(color: Colors.white60, fontSize: 12)),
+      subtitle: Text(
+          valor == null ? '—' : '${AppFormatters.formatearMiles(valor)} $sufijo',
+          style: const TextStyle(color: Colors.white, fontSize: 14)),
+      trailing: const Icon(Icons.edit, color: Colors.white38, size: 18),
+      onTap: () async {
+        final ctrl = TextEditingController(
+            text: valor == null ? '' : AppFormatters.formatearMiles(valor));
+        final res = await showDialog<Object?>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.background,
+            title: Text(etiqueta),
+            content: TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [AppFormatters.inputMiles],
+              decoration: InputDecoration(suffixText: sufijo),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCELAR'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, _Sentinela.borrar),
+                child: const Text('BORRAR'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(
+                    ctx, AppFormatters.parsearMiles(ctrl.text)),
+                child: const Text('GUARDAR'),
+              ),
+            ],
+          ),
+        );
+        if (res == _Sentinela.borrar) {
+          await onSave(null);
+        } else if (res is int && res != valor) {
+          await onSave(res);
+        }
+      },
+    );
+  }
+
+  ListTile _campoDecimal(BuildContext context,
+      {required String etiqueta,
+      required double? valor,
+      required String sufijo,
+      required Future<void> Function(double?) onSave}) {
+    return ListTile(
+      title: Text(etiqueta,
+          style: const TextStyle(color: Colors.white60, fontSize: 12)),
+      subtitle: Text(valor == null ? '—' : '$valor $sufijo',
+          style: const TextStyle(color: Colors.white, fontSize: 14)),
+      trailing: const Icon(Icons.edit, color: Colors.white38, size: 18),
+      onTap: () async {
+        final ctrl = TextEditingController(
+            text: valor == null ? '' : valor.toString());
+        final res = await showDialog<Object?>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.background,
+            title: Text(etiqueta),
+            content: TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(suffixText: sufijo),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCELAR'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, _Sentinela.borrar),
+                child: const Text('BORRAR'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(
+                    ctx,
+                    double.tryParse(
+                        ctrl.text.trim().replaceAll(',', '.'))),
+                child: const Text('GUARDAR'),
+              ),
+            ],
+          ),
+        );
+        if (res == _Sentinela.borrar) {
+          await onSave(null);
+        } else if (res is double && res != valor) {
+          await onSave(res);
+        }
+      },
+    );
+  }
+
+  ListTile _campoEnum(BuildContext context,
+      {required String etiqueta,
+      required String valorActual,
+      required Map<String, String> opciones,
+      required Future<void> Function(String) onSave}) {
+    return ListTile(
+      title: Text(etiqueta,
+          style: const TextStyle(color: Colors.white60, fontSize: 12)),
+      subtitle: Text(opciones[valorActual] ?? valorActual,
+          style: const TextStyle(color: Colors.white, fontSize: 14)),
+      trailing: const Icon(Icons.edit, color: Colors.white38, size: 18),
+      onTap: () async {
+        final res = await showDialog<String>(
+          context: context,
+          builder: (ctx) => SimpleDialog(
+            backgroundColor: AppColors.background,
+            title: Text(etiqueta),
+            children: [
+              for (final e in opciones.entries)
+                SimpleDialogOption(
+                  child: Text(e.value,
+                      style: TextStyle(
+                        color: e.key == valorActual
+                            ? AppColors.accentPurple
+                            : Colors.white,
+                      )),
+                  onPressed: () => Navigator.pop(ctx, e.key),
+                ),
+            ],
+          ),
+        );
+        if (res != null && res != valorActual) await onSave(res);
+      },
+    );
+  }
+}
+
+/// Sentinela para distinguir "borrar" vs "cancelar" vs "valor vacío" en
+/// los dialogs de edición de campos numéricos.
+enum _Sentinela { borrar }
 
 class _AltaModeloDialog extends StatefulWidget {
   const _AltaModeloDialog();
@@ -297,6 +622,8 @@ class _AltaModeloDialogState extends State<_AltaModeloDialog> {
   TipoUsoCubierta _tipoUso = TipoUsoCubierta.traccion;
   bool _recapable = true;
   bool _guardando = false;
+  final _presionCtrl = TextEditingController();
+  final _profundidadCtrl = TextEditingController();
 
   @override
   void dispose() {
@@ -304,6 +631,8 @@ class _AltaModeloDialogState extends State<_AltaModeloDialog> {
     _medidaCtrl.dispose();
     _kmNuevaCtrl.dispose();
     _kmRecapadaCtrl.dispose();
+    _presionCtrl.dispose();
+    _profundidadCtrl.dispose();
     super.dispose();
   }
 
@@ -401,6 +730,26 @@ class _AltaModeloDialogState extends State<_AltaModeloDialog> {
               inputFormatters: [AppFormatters.inputMiles],
             ),
             const SizedBox(height: 12),
+            TextField(
+              controller: _presionCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Presión recomendada (PSI, opcional)',
+                hintText: 'Ej. 110',
+              ),
+              keyboardType: TextInputType.number,
+              inputFormatters: [AppFormatters.inputMiles],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _profundidadCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Profundidad mínima de banda (mm, opcional)',
+                hintText: 'Ej. 3.0',
+              ),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+            ),
+            const SizedBox(height: 12),
             SwitchListTile(
               value: _recapable,
               title: const Text('Recapable'),
@@ -451,6 +800,10 @@ class _AltaModeloDialogState extends State<_AltaModeloDialog> {
       kmVidaEstimadaNueva: AppFormatters.parsearMiles(_kmNuevaCtrl.text),
       kmVidaEstimadaRecapada: AppFormatters.parsearMiles(_kmRecapadaCtrl.text),
       recapable: _recapable,
+      presionRecomendadaPsi:
+          AppFormatters.parsearMiles(_presionCtrl.text),
+      profundidadBandaMinimaMm:
+          double.tryParse(_profundidadCtrl.text.trim().replaceAll(',', '.')),
       activo: true,
     );
     try {
