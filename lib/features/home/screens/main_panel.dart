@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../auth/services/auth_service.dart';
@@ -35,7 +34,9 @@ class MainPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      title: AppTexts.appName,
+      // El logo a la izquierda del AppBar ya muestra "Coopertrans Móvil";
+      // poner appName acá producía "Coopertrans Móvil | Coopertrans Móvil".
+      title: 'Menú Principal',
       actions: [
         IconButton(
           icon: const Icon(Icons.logout_outlined),

@@ -32,7 +32,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   
-  if (!window.Create(L"Coopertrans Móvil", origin, size)) {
+  // Usar escape Unicode ó (= 'o' acentuada) para evitar el bug de
+  // encoding cuando MSVC interpreta el .cpp UTF-8 como Latin-1. Sin
+  // esto, "Movil" en la barra de Windows aparece como "MA(c)vil".
+  if (!window.Create(L"Coopertrans M\u00F3vil", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
