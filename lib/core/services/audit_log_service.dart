@@ -153,11 +153,15 @@ enum AuditAccion {
   editarChofer('EDITAR_CHOFER'),
   cambiarFotoPerfil('CAMBIAR_FOTO_PERFIL'),
   reemplazarPapelChofer('REEMPLAZAR_PAPEL_CHOFER'),
+  darDeBajaEmpleado('DAR_DE_BAJA_EMPLEADO'),
+  reactivarEmpleado('REACTIVAR_EMPLEADO'),
 
   // ---- Flota ----
   crearVehiculo('CREAR_VEHICULO'),
   editarVehiculo('EDITAR_VEHICULO'),
   cambiarFotoVehiculo('CAMBIAR_FOTO_VEHICULO'),
+  darDeBajaVehiculo('DAR_DE_BAJA_VEHICULO'),
+  reactivarVehiculo('REACTIVAR_VEHICULO'),
 
   // ---- Asignaciones ----
   asignarEquipo('ASIGNAR_EQUIPO'),

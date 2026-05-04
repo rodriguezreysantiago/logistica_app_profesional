@@ -410,7 +410,112 @@ class _DetalleChofer extends StatelessWidget {
         ],
 
         const SizedBox(height: 30),
+        // Acción de soft-delete al final de la ficha (siempre visible
+        // para que el admin pueda dar de baja / reactivar fácilmente).
+        _BotonBajaReactivarEmpleado(dni: dni, data: data),
+        const SizedBox(height: 30),
       ],
+    );
+  }
+}
+
+/// Botón final del sheet: muestra "Dar de baja" si el empleado está
+/// activo, o un panel "Reactivar" + nota de baja si está inactivo.
+class _BotonBajaReactivarEmpleado extends StatelessWidget {
+  final String dni;
+  final Map<String, dynamic> data;
+  const _BotonBajaReactivarEmpleado({required this.dni, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final activo = AppActivo.esActivo(data);
+    final nombre = (data['NOMBRE'] ?? dni).toString();
+    if (activo) {
+      return Center(
+        child: TextButton.icon(
+          onPressed: () => EmpleadoActions.confirmarYDarDeBaja(
+            context,
+            dni: dni,
+            nombreVisible: nombre,
+          ),
+          icon: const Icon(Icons.person_off_outlined,
+              color: AppColors.accentRed),
+          label: const Text(
+            'Dar de baja',
+            style: TextStyle(
+              color: AppColors.accentRed,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Inactivo: mostrar nota + botón reactivar.
+    final bajaEnTs = data[AppActivo.campoBajaEn];
+    final bajaEnFmt = bajaEnTs is Timestamp
+        ? AppFormatters.formatearFecha(bajaEnTs.toDate())
+        : '?';
+    final motivo = (data[AppActivo.campoBajaMotivo] ?? '').toString();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.accentOrange.withAlpha(20),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.accentOrange.withAlpha(80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.archive_outlined,
+                  color: AppColors.accentOrange, size: 18),
+              SizedBox(width: 8),
+              Text(
+                'EMPLEADO DADO DE BAJA',
+                style: TextStyle(
+                  color: AppColors.accentOrange,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Fecha: $bajaEnFmt',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          if (motivo.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Motivo: $motivo',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => EmpleadoActions.confirmarYReactivar(
+                context,
+                dni: dni,
+                nombreVisible: nombre,
+              ),
+              icon: const Icon(Icons.unarchive_outlined,
+                  color: AppColors.accentGreen),
+              label: const Text(
+                'Reactivar',
+                style: TextStyle(
+                  color: AppColors.accentGreen,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -369,6 +369,8 @@ class ReportConsumoService {
       var currentRow = filaInicioDatos;
       for (final doc in snapshot.docs) {
         final data = doc.data();
+        // Soft-delete: vehiculos dados de baja se excluyen del reporte.
+        if (!AppActivo.esActivo(data)) continue;
         final patente = doc.id;
         final vin = (data['VIN'] ?? '').toString().trim().toUpperCase();
         final volvoData = volvoMap[vin];

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 // `flutter/services` re-exporta Uint8List (dart:typed_data) — lo usa
 // `_subirArchivo` para los uploads cross-platform.
@@ -11,7 +12,9 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/constants/vencimientos_config.dart';
 import '../../../core/services/audit_log_service.dart';
+import '../../../core/services/prefs_service.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
@@ -750,5 +753,253 @@ class EmpleadoActions {
         ),
       ),
     );
+  }
+
+  // ===========================================================================
+  // SOFT-DELETE: dar de baja / reactivar
+  // ===========================================================================
+
+  /// Da de baja al empleado SIN borrar el doc:
+  ///   1. Cierra asignación activa de vehículo (vía AsignacionVehiculoService).
+  ///   2. Cierra asignación activa de enganche.
+  ///   3. Borra los archivos de Storage (ARCHIVO_*) y la foto de perfil
+  ///      (best-effort — si alguno falla, log y sigue).
+  ///   4. Vacía los campos VENCIMIENTO_* y ARCHIVO_* en el doc.
+  ///   5. Setea ACTIVO=false + metadata (BAJA_EN, BAJA_POR_DNI, BAJA_MOTIVO).
+  ///
+  /// Al reactivar más tarde con [reactivar], el empleado queda con los
+  /// vencimientos vacíos — el admin tiene que cargar todo de nuevo.
+  /// La unidad NO se restaura (asumimos que pudo haber pasado a otro chofer).
+  static Future<void> darDeBaja(
+    BuildContext context, {
+    required String dni,
+    required String? motivo,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final dniLimpio = dni.trim();
+    if (dniLimpio.isEmpty) {
+      AppFeedback.errorOn(messenger, 'DNI vacío.');
+      return;
+    }
+
+    final adminDni = PrefsService.dni;
+    final empRef = FirebaseFirestore.instance
+        .collection(AppCollections.empleados)
+        .doc(dniLimpio);
+
+    try {
+      final snap = await empRef.get();
+      if (!snap.exists) {
+        AppFeedback.errorOn(messenger, 'Empleado $dniLimpio no existe.');
+        return;
+      }
+      final data = snap.data() ?? const <String, dynamic>{};
+
+      // 1) Cerrar asignación de vehículo (si tenía).
+      try {
+        await AsignacionVehiculoService().cambiarAsignacion(
+          choferDni: dniLimpio,
+          nuevaPatente: null,
+          asignadoPorDni: adminDni,
+          motivo: 'Baja del empleado',
+        );
+      } catch (e) {
+        // ignore: avoid_print
+        print('darDeBaja empleado: cerrar asig vehículo falló: $e');
+      }
+
+      // 2) Cerrar asignación de enganche (si tenía un enganche directo).
+      final engancheActual =
+          (data['ENGANCHE'] ?? '').toString().trim();
+      if (engancheActual.isNotEmpty && engancheActual != '-') {
+        try {
+          await AsignacionEngancheService().cambiarAsignacion(
+            engancheId: engancheActual,
+            nuevoTractorId: null,
+            asignadoPorDni: adminDni,
+            motivo: 'Baja del empleado dueño del enganche',
+          );
+        } catch (e) {
+          // ignore: avoid_print
+          print('darDeBaja empleado: cerrar asig enganche falló: $e');
+        }
+      }
+
+      // 3) Borrar archivos de Storage (best-effort).
+      final urlsParaBorrar = <String>[
+        for (final sufijo in AppDocsEmpleado.etiquetas.values)
+          (data['ARCHIVO_$sufijo'] ?? '').toString(),
+        (data['ARCHIVO_FOTO_PERFIL'] ?? '').toString(),
+      ];
+      for (final url in urlsParaBorrar) {
+        if (url.isEmpty || url == '-') continue;
+        try {
+          await FirebaseStorage.instance.refFromURL(url).delete();
+        } catch (e) {
+          // ignore: avoid_print
+          print('darDeBaja empleado: no pude borrar $url: $e');
+        }
+      }
+
+      // 4 + 5) Vaciar VENCIMIENTO_*/ARCHIVO_* y marcar ACTIVO=false.
+      final updates = <String, dynamic>{
+        AppActivo.campo: false,
+        AppActivo.campoBajaEn: FieldValue.serverTimestamp(),
+        AppActivo.campoBajaPorDni: adminDni,
+        if (motivo != null && motivo.trim().isNotEmpty)
+          AppActivo.campoBajaMotivo: motivo.trim(),
+        // Limpiar reactivación previa (si alguien fue reactivado y vuelve a baja).
+        AppActivo.campoReactivadoEn: null,
+        AppActivo.campoReactivadoPorDni: null,
+        // Limpiar foto de perfil.
+        'ARCHIVO_FOTO_PERFIL': null,
+        // Garantizamos que el espejo de unidad quede limpio.
+        'VEHICULO': '-',
+        'ENGANCHE': '-',
+        'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
+      };
+      for (final sufijo in AppDocsEmpleado.etiquetas.values) {
+        updates['VENCIMIENTO_$sufijo'] = null;
+        updates['ARCHIVO_$sufijo'] = null;
+      }
+      await empRef.update(updates);
+
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.darDeBajaEmpleado,
+        entidad: 'EMPLEADOS',
+        entidadId: dniLimpio,
+        detalles: {
+          if (motivo != null && motivo.trim().isNotEmpty)
+            'motivo': motivo.trim(),
+          'archivos_borrados': urlsParaBorrar
+              .where((u) => u.isNotEmpty && u != '-')
+              .length,
+        },
+      ));
+
+      AppFeedback.successOn(messenger, 'Empleado dado de baja.');
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al dar de baja: $e');
+    }
+  }
+
+  /// Reactiva un empleado dado de baja. Setea ACTIVO=true + metadata.
+  /// Los vencimientos quedan vacíos — el admin debe cargarlos de nuevo.
+  /// La unidad NO se restaura.
+  static Future<void> reactivar(
+    BuildContext context, {
+    required String dni,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final dniLimpio = dni.trim();
+    if (dniLimpio.isEmpty) {
+      AppFeedback.errorOn(messenger, 'DNI vacío.');
+      return;
+    }
+    final adminDni = PrefsService.dni;
+    try {
+      await FirebaseFirestore.instance
+          .collection(AppCollections.empleados)
+          .doc(dniLimpio)
+          .update({
+        AppActivo.campo: true,
+        AppActivo.campoReactivadoEn: FieldValue.serverTimestamp(),
+        AppActivo.campoReactivadoPorDni: adminDni,
+        'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
+      });
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.reactivarEmpleado,
+        entidad: 'EMPLEADOS',
+        entidadId: dniLimpio,
+        detalles: const {},
+      ));
+      AppFeedback.successOn(
+          messenger, 'Empleado reactivado. Cargá los vencimientos.');
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al reactivar: $e');
+    }
+  }
+
+  /// Confirm dialog antes de dar de baja. Pide motivo opcional.
+  /// Si confirma, llama a [darDeBaja]. Pensado para el bottom sheet de
+  /// detalle del empleado.
+  static Future<void> confirmarYDarDeBaja(
+    BuildContext context, {
+    required String dni,
+    required String nombreVisible,
+  }) async {
+    final motivoCtrl = TextEditingController();
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
+        title: const Text('Dar de baja al empleado',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$nombreVisible quedará INACTIVO.\n\n'
+              'Se cerrarán sus asignaciones de vehículo y enganche, y '
+              'se borrarán todos sus vencimientos y archivos cargados.\n\n'
+              'Al reactivarlo más adelante, los vencimientos quedan vacíos '
+              'y hay que volver a cargar todo.',
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: motivoCtrl,
+              maxLength: 200,
+              maxLines: 2,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Motivo (opcional)',
+                hintText: 'Ej. renuncia, vacaciones largas, etc.',
+                labelStyle: TextStyle(color: Colors.white54),
+                hintStyle: TextStyle(color: Colors.white24),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('DAR DE BAJA',
+                style: TextStyle(
+                  color: AppColors.accentRed,
+                  fontWeight: FontWeight.bold,
+                )),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true) return;
+    if (!context.mounted) return;
+    await darDeBaja(context, dni: dni, motivo: motivoCtrl.text);
+  }
+
+  /// Confirm dialog para reactivar.
+  static Future<void> confirmarYReactivar(
+    BuildContext context, {
+    required String dni,
+    required String nombreVisible,
+  }) async {
+    final ok = await AppConfirmDialog.show(
+      context,
+      title: 'Reactivar empleado',
+      message:
+          '$nombreVisible va a volver a estar ACTIVO. Los vencimientos quedan '
+          'vacíos hasta que los cargues. La unidad NO se restaura.',
+      confirmLabel: 'REACTIVAR',
+    );
+    if (ok != true) return;
+    if (!context.mounted) return;
+    await reactivar(context, dni: dni);
   }
 }

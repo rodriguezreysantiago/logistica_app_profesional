@@ -133,6 +133,8 @@ class ReportFlotaService {
       final choferPorPatente = <String, String>{};
       for (final doc in empleadosSnap.docs) {
         final data = doc.data();
+        // Soft-delete: empleados dados de baja no se mapean.
+        if (!AppActivo.esActivo(data)) continue;
         // Solo CHOFER + MANEJO tienen vehículo asignado real.
         // SUPERVISOR/ADMIN/PLANTA pueden tener el campo VEHICULO con
         // basura legacy — lo ignoramos.
@@ -151,12 +153,17 @@ class ReportFlotaService {
         }
       }
 
-      // Cargar VEHICULOS (todos los tipos).
+      // Cargar VEHICULOS (todos los tipos). Soft-delete: las unidades
+      // dadas de baja se excluyen del reporte (no aparecen ni siquiera
+      // en la sección "todas las unidades" del Excel).
       final vehiculosSnap =
           await db.collection(AppCollections.vehiculos).get();
+      final vehiculosActivos = vehiculosSnap.docs
+          .where((d) => AppActivo.esActivo(d.data()))
+          .toList();
 
       // Construir filas con la lógica de cada vehículo.
-      final filas = vehiculosSnap.docs.map((doc) {
+      final filas = vehiculosActivos.map((doc) {
         final patente = doc.id;
         final data = doc.data();
         final vin = (data['VIN'] ?? '').toString().trim().toUpperCase();

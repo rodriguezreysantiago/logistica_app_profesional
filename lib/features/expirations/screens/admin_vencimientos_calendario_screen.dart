@@ -74,6 +74,8 @@ class _AdminVencimientosCalendarioScreenState
     // ensuciar el calendario.
     for (final doc in empleados.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Soft-delete: empleados dados de baja no aparecen en calendario.
+      if (!AppActivo.esActivo(data)) continue;
       final rol = AppRoles.normalizar(data['ROL']?.toString());
       if (!AppRoles.tieneVehiculo(rol)) continue;
       final nombre = (data['NOMBRE'] ?? 'Sin nombre').toString();
@@ -105,6 +107,8 @@ class _AdminVencimientosCalendarioScreenState
     // VEHICULOS — RTO, seguros, extintores, etc. según specs
     for (final doc in vehiculos.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Soft-delete: vehiculos dados de baja no aparecen en calendario.
+      if (!AppActivo.esActivo(data)) continue;
       final tipo = (data['TIPO'] ?? '').toString();
       final patente = doc.id.toUpperCase();
       final specs = AppVencimientos.forTipo(tipo);

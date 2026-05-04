@@ -37,6 +37,8 @@ class _AdminVencimientosChoferesScreenState
     final items = <VencimientoItem>[];
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Soft-delete: empleados dados de baja se excluyen.
+      if (!AppActivo.esActivo(data)) continue;
       // Auditoría DE MANEJO: licencia, ART, psicofísico aplican solo a
       // CHOFER. Admins/supervisores/planta no tienen estos vencimientos
       // profesionales — los filtramos para no inflar la lista con

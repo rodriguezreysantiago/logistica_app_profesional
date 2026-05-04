@@ -43,6 +43,8 @@ class _AdminVencimientosAcopladosScreenState
     final items = <VencimientoItem>[];
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Soft-delete: enganches dados de baja no se auditan.
+      if (!AppActivo.esActivo(data)) continue;
       final tipo = (data['TIPO'] ?? '').toString().toUpperCase();
       // Defensivo: el where ya filtra server-side, pero igual chequeamos
       // por casing o nulls inconsistentes.

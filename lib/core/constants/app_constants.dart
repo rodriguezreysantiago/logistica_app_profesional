@@ -460,6 +460,54 @@ class AppMantenimiento {
   }
 }
 
+// =============================================================================
+// SOFT-DELETE (alta/baja de empleados y vehículos)
+// =============================================================================
+//
+// Sistema unificado para "dar de baja" sin borrar el doc de Firestore.
+// Permite reactivar el registro más tarde si fue baja por error o si
+// el chofer/vehículo vuelve. Aplica a EMPLEADOS y VEHICULOS.
+//
+// Convenciones:
+//   - Campo `ACTIVO: bool` (mayúsculas, igual que el resto de campos
+//     directos del doc). Default true: docs viejos sin el campo se
+//     consideran activos por compat.
+//   - Al dar de baja: ACTIVO=false + metadata + se desafectan todas
+//     las asignaciones (vehículo, enganche) + se vacían los campos
+//     de vencimientos y archivos (decisión Santiago 2026-05-04: el
+//     reactivar implica re-cargar desde cero, no preservar).
+//   - Al reactivar: ACTIVO=true + metadata. Los vencimientos quedan
+//     vacíos hasta que el admin los cargue. La unidad NO se restaura
+//     automáticamente — se asume que pudo haber pasado a otro chofer.
+
+class AppActivo {
+  AppActivo._();
+
+  /// Campo principal del flag de baja en EMPLEADOS y VEHICULOS.
+  static const String campo = 'ACTIVO';
+
+  /// Metadata de baja.
+  static const String campoBajaEn = 'BAJA_EN';
+  static const String campoBajaPorDni = 'BAJA_POR_DNI';
+  static const String campoBajaMotivo = 'BAJA_MOTIVO';
+
+  /// Metadata de reactivación.
+  static const String campoReactivadoEn = 'REACTIVADO_EN';
+  static const String campoReactivadoPorDni = 'REACTIVADO_POR_DNI';
+
+  /// `true` si el doc NO está dado de baja. Acepta:
+  ///   - ACTIVO=true → true (alta explícita).
+  ///   - ACTIVO=null/ausente → true (default; doc viejo pre-soft-delete).
+  ///   - ACTIVO=false → false (baja).
+  /// Aplicar a TODA query de EMPLEADOS/VEHICULOS que NO sea para gestión
+  /// específica de bajas (ej. listas, reportes, KPIs, alertas, cron del
+  /// bot, lookups del Cloud Functions).
+  static bool esActivo(Map<String, dynamic> data) {
+    final v = data[campo];
+    return v != false; // null o true → activo
+  }
+}
+
 /// Estados del mantenimiento preventivo, ordenados por severidad.
 /// El `index` se usa para sortear (menor índice = más urgente).
 enum MantenimientoEstado {

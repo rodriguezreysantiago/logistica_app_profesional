@@ -86,6 +86,8 @@ class _PaletteDialogState extends State<_PaletteDialog> {
       final items = <_PaletteItem>[];
       for (final doc in results[0].docs) {
         final data = doc.data();
+        // Soft-delete: empleados dados de baja no aparecen en Ctrl+K.
+        if (!AppActivo.esActivo(data)) continue;
         items.add(_PaletteItem(
           tipo: _PaletteTipo.chofer,
           id: doc.id,
@@ -98,6 +100,8 @@ class _PaletteDialogState extends State<_PaletteDialog> {
       }
       for (final doc in results[1].docs) {
         final data = doc.data();
+        // Soft-delete: vehiculos dados de baja no aparecen en Ctrl+K.
+        if (!AppActivo.esActivo(data)) continue;
         final marca = (data['MARCA'] ?? '').toString();
         final modelo = (data['MODELO'] ?? '').toString();
         items.add(_PaletteItem(

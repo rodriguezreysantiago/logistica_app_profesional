@@ -13,7 +13,8 @@ part of 'admin_vehiculos_lista_screen.dart';
 
 class _ListaPorTipo extends StatelessWidget {
   final String tipo;
-  const _ListaPorTipo({required this.tipo});
+  final bool mostrarInactivos;
+  const _ListaPorTipo({required this.tipo, required this.mostrarInactivos});
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +27,9 @@ class _ListaPorTipo extends StatelessWidget {
         emptyIcon: Icons.local_shipping_outlined,
         filter: (doc, q) {
           final data = doc.data() as Map<String, dynamic>;
+          if (!mostrarInactivos && !AppActivo.esActivo(data)) {
+            return false;
+          }
           final hay = '${doc.id} ${data['MARCA'] ?? ''} '
                   '${data['MODELO'] ?? ''} ${data['VIN'] ?? ''}'
               .toUpperCase();
@@ -567,6 +571,10 @@ class _DetalleVehiculo extends StatelessWidget {
         ],
 
         const SizedBox(height: 30),
+        // Acción de soft-delete al final del sheet (mismo patrón que
+        // la ficha de Personal).
+        _BotonBajaReactivarVehiculo(patente: patente, data: data),
+        const SizedBox(height: 30),
       ],
     );
   }
@@ -605,6 +613,107 @@ class _DetalleVehiculo extends StatelessWidget {
 // =============================================================================
 // WIDGETS PRIVADOS DE ESTA PANTALLA (no se reutilizan en otras)
 // =============================================================================
+
+/// Botón final del sheet de detalle: muestra "Dar de baja" si la
+/// unidad está activa, o un panel "Reactivar" + nota de baja si está
+/// inactiva.
+class _BotonBajaReactivarVehiculo extends StatelessWidget {
+  final String patente;
+  final Map<String, dynamic> data;
+  const _BotonBajaReactivarVehiculo({
+    required this.patente,
+    required this.data,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final activo = AppActivo.esActivo(data);
+    if (activo) {
+      return Center(
+        child: TextButton.icon(
+          onPressed: () => VehiculoActions.confirmarYDarDeBaja(
+            context,
+            patente: patente,
+          ),
+          icon: const Icon(Icons.do_not_disturb_on_outlined,
+              color: AppColors.accentRed),
+          label: const Text(
+            'Dar de baja',
+            style: TextStyle(
+              color: AppColors.accentRed,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final bajaEnTs = data[AppActivo.campoBajaEn];
+    final bajaEnFmt = bajaEnTs is Timestamp
+        ? AppFormatters.formatearFecha(bajaEnTs.toDate())
+        : '?';
+    final motivo = (data[AppActivo.campoBajaMotivo] ?? '').toString();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.accentOrange.withAlpha(20),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.accentOrange.withAlpha(80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.archive_outlined,
+                  color: AppColors.accentOrange, size: 18),
+              SizedBox(width: 8),
+              Text(
+                'UNIDAD DADA DE BAJA',
+                style: TextStyle(
+                  color: AppColors.accentOrange,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Fecha: $bajaEnFmt',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          if (motivo.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Motivo: $motivo',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => VehiculoActions.confirmarYReactivar(
+                context,
+                patente: patente,
+              ),
+              icon: const Icon(Icons.unarchive_outlined,
+                  color: AppColors.accentGreen),
+              label: const Text(
+                'Reactivar',
+                style: TextStyle(
+                  color: AppColors.accentGreen,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _EstadoBadge extends StatelessWidget {
   final String estado;

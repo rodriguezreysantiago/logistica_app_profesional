@@ -41,6 +41,8 @@ class _AdminVencimientosChasisScreenState
     final items = <VencimientoItem>[];
     for (final doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Soft-delete: vehiculos dados de baja no se auditan.
+      if (!AppActivo.esActivo(data)) continue;
       final tipo = (data['TIPO'] ?? '').toString().toUpperCase();
       // Defensivo: el where ya filtra server-side, pero si algun doc
       // tiene TIPO null o casing distinto, igual lo skipeamos aca.

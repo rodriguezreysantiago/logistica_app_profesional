@@ -39,6 +39,9 @@ class _AdminPersonalListaScreenState
   // Stream cacheado para evitar lecturas duplicadas al buscar/refrescar.
   late final Stream<QuerySnapshot> _empleadosStream;
 
+  /// Por default solo activos. Toggle del AppBar lo invierte.
+  bool _mostrarInactivos = false;
+
   @override
   void initState() {
     super.initState();
@@ -52,6 +55,23 @@ class _AdminPersonalListaScreenState
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Gestión de Personal',
+      actions: [
+        IconButton(
+          tooltip: _mostrarInactivos
+              ? 'Ocultar empleados inactivos'
+              : 'Mostrar empleados inactivos',
+          icon: Icon(
+            _mostrarInactivos
+                ? Icons.visibility_off_outlined
+                : Icons.archive_outlined,
+            color: _mostrarInactivos
+                ? AppColors.accentOrange
+                : Colors.white70,
+          ),
+          onPressed: () =>
+              setState(() => _mostrarInactivos = !_mostrarInactivos),
+        ),
+      ],
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Navigator.push(
           context,
@@ -73,6 +93,12 @@ class _AdminPersonalListaScreenState
         emptyIcon: Icons.badge_outlined,
         filter: (doc, q) {
           final data = doc.data() as Map<String, dynamic>;
+          // Filtro de soft-delete: por default ocultamos inactivos.
+          // El toggle del AppBar permite verlos cuando hace falta
+          // gestionar reactivaciones.
+          if (!_mostrarInactivos && !AppActivo.esActivo(data)) {
+            return false;
+          }
           final hay = '${data['NOMBRE'] ?? ''} '
                   '${data['VEHICULO'] ?? ''} ${data['ENGANCHE'] ?? ''} '
                   '${doc.id}'

@@ -216,6 +216,8 @@ async function _runOnce(fs) {
     const choferByPatente = new Map();
     for (const doc of empleadosSnap.docs) {
       const data = doc.data();
+      // Soft-delete: empleados dados de baja NO reciben avisos.
+      if (data.ACTIVO === false) continue;
       const rolRaw = String(data.ROL || '').toUpperCase().trim();
       if (rolRaw !== 'CHOFER' && rolRaw !== 'USUARIO' && rolRaw !== '') {
         // ADMIN, SUPERVISOR, PLANTA → out. Si ROL viene vacío/null lo
@@ -293,6 +295,8 @@ async function _runOnce(fs) {
     const vehiculosSnap = await db.collection('VEHICULOS').get();
     for (const vDoc of vehiculosSnap.docs) {
       const v = vDoc.data();
+      // Soft-delete: vehiculos dados de baja NO reciben avisos.
+      if (v.ACTIVO === false) continue;
       const tipo = String(v.TIPO || '').toUpperCase();
       const specs = DOCS_VEHICULO[tipo];
       if (!specs) continue;
@@ -352,6 +356,8 @@ async function _runOnce(fs) {
     const tractoresConUrgencia = [];
     for (const vDoc of vehiculosSnap.docs) {
       const v = vDoc.data();
+      // Soft-delete: tractores dados de baja NO entran al resumen.
+      if (v.ACTIVO === false) continue;
       const tipo = String(v.TIPO || '').toUpperCase();
       if (tipo !== 'TRACTOR') continue;
 

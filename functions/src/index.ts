@@ -1126,10 +1126,14 @@ const AUDIT_ACCIONES_PERMITIDAS = new Set<string>([
   "EDITAR_CHOFER",
   "CAMBIAR_FOTO_PERFIL",
   "REEMPLAZAR_PAPEL_CHOFER",
+  "DAR_DE_BAJA_EMPLEADO",
+  "REACTIVAR_EMPLEADO",
   // Flota
   "CREAR_VEHICULO",
   "EDITAR_VEHICULO",
   "CAMBIAR_FOTO_VEHICULO",
+  "DAR_DE_BAJA_VEHICULO",
+  "REACTIVAR_VEHICULO",
   // Asignaciones
   "ASIGNAR_EQUIPO",
   "DESVINCULAR_EQUIPO",
@@ -1462,10 +1466,13 @@ export const volvoAlertasPoller = onSchedule(
     const esColdStart = !ultimoServerTs;
 
     // ─── 2. Map VIN → patente desde VEHICULOS ───────────────────────
+    // Soft-delete: vehiculos dados de baja NO se mapean — sus alertas
+    // del API Volvo se descartan en lugar de crearse en VOLVO_ALERTAS.
     const vehiculosSnap = await db.collection("VEHICULOS").get();
     const vinToPatente = new Map<string, string>();
     for (const doc of vehiculosSnap.docs) {
       const data = doc.data();
+      if (data.ACTIVO === false) continue;
       const vin = (data.VIN ?? "").toString().trim().toUpperCase();
       if (vin && vin !== "-") {
         vinToPatente.set(vin, doc.id);
@@ -2015,6 +2022,16 @@ export const onAlertaVolvoCreated = onDocumentCreated(
       choferDoc = empleadosSnap.docs[0];
     }
     const choferData = choferDoc.data() ?? {};
+
+    // Soft-delete: si el chofer fue dado de baja, no le mandamos.
+    if (choferData.ACTIVO === false) {
+      logger.info("[onAlertaVolvoCreated] chofer inactivo, skip", {
+        patente,
+        choferDni: choferDoc.id,
+      });
+      return;
+    }
+
     const telefonoRaw = (choferData.TELEFONO ?? "").toString().trim();
     if (!telefonoRaw || telefonoRaw === "-") {
       logger.info("[onAlertaVolvoCreated] chofer sin TELEFONO", {

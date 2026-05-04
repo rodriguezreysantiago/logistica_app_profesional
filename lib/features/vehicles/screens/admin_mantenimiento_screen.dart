@@ -90,7 +90,12 @@ class _AdminMantenimientoScreenState extends State<AdminMantenimientoScreen> {
             );
           }
 
-          final docs = snap.data?.docs ?? [];
+          // Soft-delete: tractores dados de baja se excluyen del
+          // listado de mantenimiento (no se les debe avisar service).
+          final docs = (snap.data?.docs ?? []).where((d) {
+            final data = d.data() as Map<String, dynamic>;
+            return AppActivo.esActivo(data);
+          }).toList();
 
           // Sort alfabético por patente (doc.id). Más predecible para el
           // admin que ya conoce las patentes de memoria. Los chips del

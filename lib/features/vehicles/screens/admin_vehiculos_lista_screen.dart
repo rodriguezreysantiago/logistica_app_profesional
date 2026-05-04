@@ -37,6 +37,9 @@ class AdminVehiculosListaScreen extends StatefulWidget {
 
 class _AdminVehiculosListaScreenState
     extends State<AdminVehiculosListaScreen> {
+  /// Por default solo activos. Toggle del AppBar lo invierte.
+  bool _mostrarInactivos = false;
+
   @override
   void initState() {
     super.initState();
@@ -61,6 +64,23 @@ class _AdminVehiculosListaScreenState
       length: tipos.length,
       child: AppScaffold(
         title: 'Gestión de Flota',
+        actions: [
+          IconButton(
+            tooltip: _mostrarInactivos
+                ? 'Ocultar unidades inactivas'
+                : 'Mostrar unidades inactivas',
+            icon: Icon(
+              _mostrarInactivos
+                  ? Icons.visibility_off_outlined
+                  : Icons.archive_outlined,
+              color: _mostrarInactivos
+                  ? AppColors.accentOrange
+                  : Colors.white70,
+            ),
+            onPressed: () =>
+                setState(() => _mostrarInactivos = !_mostrarInactivos),
+          ),
+        ],
         // isScrollable: con 5 tabs no entran cómodos en una sola fila;
         // esto los hace deslizables horizontalmente.
         bottom: TabBar(
@@ -83,7 +103,8 @@ class _AdminVehiculosListaScreenState
         ),
         body: TabBarView(
           children: [
-            for (final t in tipos) _ListaPorTipo(tipo: t),
+            for (final t in tipos)
+              _ListaPorTipo(tipo: t, mostrarInactivos: _mostrarInactivos),
           ],
         ),
       ),

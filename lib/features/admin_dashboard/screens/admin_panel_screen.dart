@@ -400,6 +400,8 @@ class _Stats {
     // así que los filtramos para no contaminar el dashboard.
     for (final doc in empleados.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Soft-delete: empleados dados de baja no cuentan en KPIs.
+      if (!AppActivo.esActivo(data)) continue;
       final rol = AppRoles.normalizar(data['ROL']?.toString());
       if (!AppRoles.tieneVehiculo(rol)) continue;
       final estado = (data['estado_cuenta'] ?? 'ACTIVO').toString();
@@ -413,6 +415,8 @@ class _Stats {
     int unidadesAsignadas = 0;
     for (final doc in vehiculos.docs) {
       final data = doc.data() as Map<String, dynamic>;
+      // Soft-delete: vehiculos dados de baja no cuentan en KPIs.
+      if (!AppActivo.esActivo(data)) continue;
       final estado = (data['ESTADO'] ?? '').toString().toUpperCase();
       if (estado == 'OCUPADO' || estado == 'ASIGNADO') {
         unidadesAsignadas++;
