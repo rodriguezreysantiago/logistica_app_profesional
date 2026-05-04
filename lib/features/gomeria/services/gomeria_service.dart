@@ -54,17 +54,45 @@ class GomeriaService {
 
   /// Genera el próximo código `CUB-XXXX` zero-padded a 4 dígitos.
   ///
-  /// Lo hace en una transaction sobre `META/cubiertas_counter`. Si el doc
-  /// no existe, arranca en 1. El padding crece naturalmente a 5 dígitos
-  /// cuando supere 9999 (el orden lexicográfico se rompe pero ya es
-  /// problema futuro — Vecchi tiene < 200 cubiertas hoy).
-  Future<String> _proximoCodigoCubierta(Transaction tx) async {
+  /// Implementación con read+update optimista + retry por rule:
+  /// la rule del counter exige `proximo == resource.data.proximo + 1`,
+  /// así que dos clientes en paralelo van a chocar — el segundo recibe
+  /// PERMISSION_DENIED y reintenta hasta [maxIntentos] veces. Es
+  /// equivalente al retry interno de `runTransaction` pero implementado
+  /// en cliente, porque el `runTransaction` del plugin C++ Windows
+  /// hace `abort()` con ciertos patrones de tx (ver crash 2026-05-04).
+  ///
+  /// El padding crece naturalmente a 5 dígitos cuando supere 9999 (el
+  /// orden lexicográfico se rompe pero ya es problema futuro — Vecchi
+  /// tiene < 200 cubiertas hoy).
+  Future<String> _proximoCodigoCubierta() async {
+    const maxIntentos = 5;
     final ref = _db.collection(AppCollections.meta).doc('cubiertas_counter');
-    final snap = await tx.get(ref);
-    final actual = (snap.data()?['proximo'] as num?)?.toInt() ?? 0;
-    final siguiente = actual + 1;
-    tx.set(ref, {'proximo': siguiente}, SetOptions(merge: true));
-    return 'CUB-${siguiente.toString().padLeft(4, '0')}';
+    for (var intento = 0; intento < maxIntentos; intento++) {
+      final snap = await ref.get();
+      final actual = (snap.data()?['proximo'] as num?)?.toInt() ?? 0;
+      final siguiente = actual + 1;
+      try {
+        if (snap.exists) {
+          await ref.update({'proximo': siguiente});
+        } else {
+          await ref.set({'proximo': siguiente});
+        }
+        return 'CUB-${siguiente.toString().padLeft(4, '0')}';
+      } on FirebaseException catch (e) {
+        if (e.code != 'permission-denied' || intento == maxIntentos - 1) {
+          rethrow;
+        }
+        // Otro cliente incrementó el counter al mismo tiempo. Backoff
+        // exponencial corto (50ms, 100ms, 200ms, 400ms) y reintentamos.
+        await Future<void>.delayed(
+            Duration(milliseconds: 50 * (1 << intento)));
+      }
+    }
+    throw StateError(
+      'No se pudo generar el código CUB tras $maxIntentos intentos. '
+      'Probá de nuevo en unos segundos.',
+    );
   }
 
   /// Da de alta una cubierta nueva en estado `EN_DEPOSITO` con vidas=1.
@@ -91,51 +119,52 @@ class GomeriaService {
       throw ArgumentError('supervisorDni vacío');
     }
 
+    // Validación del modelo FUERA de transaction. La diferencia con la
+    // versión anterior (todo dentro de runTransaction) es la atomicidad:
+    // si el supervisor desactiva el modelo justo entre nuestra lectura
+    // y nuestra escritura, podríamos crear una cubierta de un modelo
+    // recién dado de baja. En la práctica eso es virtualmente imposible
+    // (los modelos se dan de baja muy raramente y un solo supervisor
+    // opera el alta). Trade-off aceptable a cambio de evitar el crash
+    // del plugin C++ Windows con runTransaction (2026-05-04).
+    final modeloRef =
+        _db.collection(AppCollections.cubiertasModelos).doc(modeloLimpio);
+    final modeloSnap = await modeloRef.get();
+    if (!modeloSnap.exists) {
+      throw StateError('Modelo $modeloLimpio no existe');
+    }
+    final modelo = CubiertaModelo.fromMap(modeloLimpio, modeloSnap.data());
+    if (!modelo.activo) {
+      throw StateError('Modelo ${modelo.etiqueta} está dado de baja');
+    }
+
+    // Generar código del counter (con retry optimista en cliente).
+    final codigoNuevo = await _proximoCodigoCubierta();
+
+    // Crear el doc de cubierta con set simple. Si esto falla, el counter
+    // ya quedó incrementado y se "salta" un código — efecto idéntico al
+    // que tendría una tx que rolea: el siguiente código generado va a
+    // ser el siguiente en el counter, no el saltado. Eso ya estaba
+    // documentado como aceptable en la spec del módulo.
     final cubiertaId = _db.collection(AppCollections.cubiertas).doc().id;
-
-    final codigo = await _db.runTransaction((tx) async {
-      final modeloRef =
-          _db.collection(AppCollections.cubiertasModelos).doc(modeloLimpio);
-      final modeloSnap = await tx.get(modeloRef);
-      if (!modeloSnap.exists) {
-        throw StateError('Modelo $modeloLimpio no existe');
-      }
-      final modelo = CubiertaModelo.fromMap(modeloLimpio, modeloSnap.data());
-      if (!modelo.activo) {
-        throw StateError('Modelo ${modelo.etiqueta} está dado de baja');
-      }
-
-      final codigoNuevo = await _proximoCodigoCubierta(tx);
-
-      final cubiertaRef =
-          _db.collection(AppCollections.cubiertas).doc(cubiertaId);
-      // Timestamp.now() en lugar de FieldValue.serverTimestamp() —
-      // el sentinel `serverTimestamp` DENTRO de runTransaction crashea
-      // el plugin C++ de Firestore en Windows desktop. El resto de la
-      // app usa serverTimestamp pero FUERA de tx, donde sí anda. Para
-      // gomería (única que combina ambos) reemplazamos por Timestamp
-      // client-side. Trade-off mínimo: la diferencia entre el reloj
-      // del cliente y el servidor en una operación interactiva del
-      // supervisor es despreciable para auditoría.
-      tx.set(cubiertaRef, <String, dynamic>{
-        'codigo': codigoNuevo,
-        'modelo_id': modeloLimpio,
-        'modelo_etiqueta': modelo.etiqueta,
-        'tipo_uso': modelo.tipoUso.codigo,
-        'estado': EstadoCubierta.enDeposito.codigo,
-        'vidas': 1,
-        'km_acumulados': 0,
-        if (observaciones != null && observaciones.trim().isNotEmpty)
-          'observaciones': observaciones.trim(),
-        if (precioCompra != null && precioCompra > 0)
-          'precio_compra': precioCompra,
-        'creado_en': Timestamp.now(),
-        'creado_por_dni': supervisorLimpio,
-        if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
-          'creado_por_nombre': supervisorNombre.trim(),
-      });
-
-      return codigoNuevo;
+    final cubiertaRef =
+        _db.collection(AppCollections.cubiertas).doc(cubiertaId);
+    await cubiertaRef.set(<String, dynamic>{
+      'codigo': codigoNuevo,
+      'modelo_id': modeloLimpio,
+      'modelo_etiqueta': modelo.etiqueta,
+      'tipo_uso': modelo.tipoUso.codigo,
+      'estado': EstadoCubierta.enDeposito.codigo,
+      'vidas': 1,
+      'km_acumulados': 0,
+      if (observaciones != null && observaciones.trim().isNotEmpty)
+        'observaciones': observaciones.trim(),
+      if (precioCompra != null && precioCompra > 0)
+        'precio_compra': precioCompra,
+      'creado_en': FieldValue.serverTimestamp(),
+      'creado_por_dni': supervisorLimpio,
+      if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
+        'creado_por_nombre': supervisorNombre.trim(),
     });
 
     unawaited(AuditLog.registrar(
@@ -143,7 +172,7 @@ class GomeriaService {
       entidad: AppCollections.cubiertas,
       entidadId: cubiertaId,
       detalles: {
-        'codigo': codigo,
+        'codigo': codigoNuevo,
         'modelo_id': modeloLimpio,
       },
     ));
