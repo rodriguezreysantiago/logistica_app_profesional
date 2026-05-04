@@ -125,7 +125,21 @@ if ($DryRun) {
 
 Write-Host ""
 Write-Host "[2/3] Creando release $tag en GitHub..." -ForegroundColor Cyan
-& gh release create $tag $zipPath --title "Coopertrans Movil $tag" --notes $Notes
+
+# Si hay instalador .exe compilado en dist/, lo sumamos como segundo asset.
+# Soporta el filename que genera build_installer.ps1 (que reemplaza '+' por '-build').
+$versionInno = $version -replace '\+', '-build'
+$installerExe = Join-Path $repoRoot "dist\CoopertransMovil-Setup-$versionInno.exe"
+$assets = @($zipPath)
+if (Test-Path $installerExe) {
+    $instMB = [math]::Round((Get-Item $installerExe).Length / 1MB, 1)
+    Write-Host "  Sumando instalador: $(Split-Path $installerExe -Leaf) ($instMB MB)" -ForegroundColor Cyan
+    $assets += $installerExe
+} else {
+    Write-Host "  (sin instalador .exe en dist\ — para sumarlo: .\scripts\build_installer.ps1)" -ForegroundColor DarkGray
+}
+
+& gh release create $tag $assets --title "Coopertrans Movil $tag" --notes $Notes
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Error al crear release. El zip quedó en $zipPath" -ForegroundColor Red
     exit 1

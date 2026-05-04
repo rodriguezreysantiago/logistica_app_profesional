@@ -74,6 +74,9 @@ commit_msg*.txt
 # debería trackearse.
 .sentry-native/
 
+# Output del instalador Inno Setup (regenerable, pesado, NO committear).
+dist/
+
 # Entorno y Seguridad Coopertrans Móvil
 serviceAccountKey.json
 *.jks
