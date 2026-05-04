@@ -109,6 +109,14 @@ class GomeriaService {
 
       final cubiertaRef =
           _db.collection(AppCollections.cubiertas).doc(cubiertaId);
+      // Timestamp.now() en lugar de FieldValue.serverTimestamp() —
+      // el sentinel `serverTimestamp` DENTRO de runTransaction crashea
+      // el plugin C++ de Firestore en Windows desktop. El resto de la
+      // app usa serverTimestamp pero FUERA de tx, donde sí anda. Para
+      // gomería (única que combina ambos) reemplazamos por Timestamp
+      // client-side. Trade-off mínimo: la diferencia entre el reloj
+      // del cliente y el servidor en una operación interactiva del
+      // supervisor es despreciable para auditoría.
       tx.set(cubiertaRef, <String, dynamic>{
         'codigo': codigoNuevo,
         'modelo_id': modeloLimpio,
@@ -121,7 +129,7 @@ class GomeriaService {
           'observaciones': observaciones.trim(),
         if (precioCompra != null && precioCompra > 0)
           'precio_compra': precioCompra,
-        'creado_en': FieldValue.serverTimestamp(),
+        'creado_en': Timestamp.now(),
         'creado_por_dni': supervisorLimpio,
         if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
           'creado_por_nombre': supervisorNombre.trim(),
