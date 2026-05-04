@@ -311,6 +311,39 @@ async function escribirHeartbeat() {
         process.env.WORKING_TIMEZONE || 'America/Argentina/Buenos_Aires',
     },
 
+    // Reglas de notificación: a qué DNI van los resúmenes diarios
+    // (service + alertas Volvo). Las publicamos en el doc para que la
+    // app pueda mostrarlas en pantalla "Estado del Bot" sin tener que
+    // adivinar/duplicar valores. Si Vecchi cambia el destinatario, lo
+    // hace en el .env del bot y se refleja en el próximo heartbeat.
+    //
+    // Vencimientos profesionales/vehiculares NO van acá porque el
+    // destinatario es dinámico (chofer afectado / chofer asignado al
+    // vehículo) — la app lo describe textualmente.
+    reglasNotificacion: {
+      serviceDiario: {
+        destinatarioDni:
+          process.env.SERVICE_DESTINATARIO_DNI || null,
+        descripcion: 'Resumen diario de tractores con service próximo o vencido.',
+      },
+      alertasVolvoDiario: {
+        destinatarioDni:
+          process.env.ALERTAS_RESUMEN_DESTINATARIO_DNI || null,
+        descripcion:
+          'Resumen diario de eventos HIGH del Vehicle Alerts API.',
+      },
+      vencimientosChofer: {
+        destinatarioDni: 'CHOFER_AFECTADO',
+        descripcion:
+          'Vencimientos de licencia / ART / 931 al chofer dueño del documento.',
+      },
+      vencimientosVehiculo: {
+        destinatarioDni: 'CHOFER_ASIGNADO',
+        descripcion:
+          'Vencimientos de RTO / Seguro / Extintores al chofer asignado al vehículo.',
+      },
+    },
+
     bot: {
       version: VERSION,
       pid: process.pid,

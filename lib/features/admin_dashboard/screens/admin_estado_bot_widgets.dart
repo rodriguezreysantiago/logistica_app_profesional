@@ -34,6 +34,10 @@ class _DashboardBot extends StatelessWidget {
         const SizedBox(height: 12),
         _CardConfig(config: (data['config'] as Map?) ?? const {}),
         const SizedBox(height: 12),
+        _CardReglasNotificacion(
+          reglas: (data['reglasNotificacion'] as Map?) ?? const {},
+        ),
+        const SizedBox(height: 12),
         _CardErroresRecientes(
           errores: (data['erroresRecientes'] as List?) ?? const [],
         ),
@@ -297,6 +301,239 @@ class _CardCron extends StatelessWidget {
       titulo: 'Cron de avisos automáticos',
       icono: Icons.schedule,
       filas: filas,
+    );
+  }
+}
+
+/// Card "Reglas de notificación" — muestra QUIÉN recibe QUÉ tipo de
+/// mensaje. Lee del subdoc `reglasNotificacion` que el bot publica en
+/// cada heartbeat (env vars + lógica de cron).
+///
+/// Para destinatarios DNI, resuelve el nombre vía sub-stream a
+/// EMPLEADOS para mostrar "29.820.141 — Santiago Rodríguez" en vez del
+/// número crudo. Si el DNI no existe / no tiene registro, cae a "DNI: X".
+///
+/// Edición: las reglas hoy son hardcoded en el bot (.env vars). Si
+/// Vecchi quiere cambiar el destinatario del resumen diario, hay que
+/// modificar `SERVICE_DESTINATARIO_DNI` o `ALERTAS_RESUMEN_DESTINATARIO_DNI`
+/// en el .env del bot y reiniciar. Una pantalla de edición desde la app
+/// requeriría refactor para que el cron lea de Firestore — postpuesto.
+class _CardReglasNotificacion extends StatelessWidget {
+  final Map reglas;
+  const _CardReglasNotificacion({required this.reglas});
+
+  @override
+  Widget build(BuildContext context) {
+    if (reglas.isEmpty) {
+      return const _BloqueDatos(
+        titulo: 'Reglas de notificación',
+        icono: Icons.rule_folder_outlined,
+        filas: [
+          _Fila('Estado',
+              'No publicadas. Actualizar el bot a la versión nueva.',
+              color: AppColors.warning),
+        ],
+      );
+    }
+
+    final items = <Widget>[];
+    reglas.forEach((tipoKey, regla) {
+      if (regla is! Map) return;
+      final dni = (regla['destinatarioDni'] ?? '').toString();
+      final desc = (regla['descripcion'] ?? '').toString();
+      items.add(_FilaReglaNotif(
+        titulo: _etiquetaTipo(tipoKey.toString()),
+        descripcion: desc,
+        destinatarioDni: dni,
+      ));
+    });
+
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.rule_folder_outlined,
+                  color: AppColors.accentGreen, size: 18),
+              SizedBox(width: 8),
+              Text(
+                'Reglas de notificación',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...items,
+          const SizedBox(height: 8),
+          const Text(
+            'Para cambiar destinatarios: editar SERVICE_DESTINATARIO_DNI '
+            'y/o ALERTAS_RESUMEN_DESTINATARIO_DNI en el .env del bot y '
+            'reiniciar (npm restart). El próximo heartbeat refleja el cambio.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _etiquetaTipo(String key) {
+    switch (key) {
+      case 'serviceDiario':
+        return 'Resumen diario de service';
+      case 'alertasVolvoDiario':
+        return 'Resumen diario de alertas Volvo';
+      case 'vencimientosChofer':
+        return 'Vencimientos del chofer';
+      case 'vencimientosVehiculo':
+        return 'Vencimientos del vehículo';
+      default:
+        return key;
+    }
+  }
+}
+
+class _FilaReglaNotif extends StatelessWidget {
+  final String titulo;
+  final String descripcion;
+  /// Puede ser un DNI numérico, "CHOFER_AFECTADO", "CHOFER_ASIGNADO" o
+  /// vacío si no está configurado.
+  final String destinatarioDni;
+
+  const _FilaReglaNotif({
+    required this.titulo,
+    required this.descripcion,
+    required this.destinatarioDni,
+  });
+
+  bool get _esDinamico =>
+      destinatarioDni == 'CHOFER_AFECTADO' ||
+      destinatarioDni == 'CHOFER_ASIGNADO';
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if (descripcion.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                descripcion,
+                style: const TextStyle(color: Colors.white60, fontSize: 11),
+              ),
+            ),
+          const SizedBox(height: 4),
+          if (destinatarioDni.isEmpty)
+            const _BadgeDestinatario(
+              icono: Icons.warning_amber_outlined,
+              texto: 'No configurado en .env',
+              color: AppColors.warning,
+            )
+          else if (_esDinamico)
+            _BadgeDestinatario(
+              icono: Icons.person_outline,
+              texto: destinatarioDni == 'CHOFER_AFECTADO'
+                  ? 'Al chofer dueño del documento'
+                  : 'Al chofer asignado al vehículo',
+              color: AppColors.accentBlue,
+            )
+          else
+            _DniResolver(dni: destinatarioDni),
+        ],
+      ),
+    );
+  }
+}
+
+/// Resuelve un DNI a "DNI — NOMBRE" leyendo EMPLEADOS/{dni}. Stream
+/// chiquito, refresca solo si cambia el nombre del empleado.
+class _DniResolver extends StatelessWidget {
+  final String dni;
+  const _DniResolver({required this.dni});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('EMPLEADOS')
+          .doc(dni)
+          .snapshots(),
+      builder: (ctx, snap) {
+        String nombre = '';
+        if (snap.hasData && snap.data!.exists) {
+          final d = snap.data!.data() as Map<String, dynamic>?;
+          nombre = (d?['NOMBRE'] ?? '').toString();
+        }
+        final dniFmt = AppFormatters.formatearDNI(dni);
+        final texto = nombre.isEmpty
+            ? 'DNI $dniFmt (no encontrado en EMPLEADOS)'
+            : 'DNI $dniFmt · $nombre';
+        return _BadgeDestinatario(
+          icono: Icons.person,
+          texto: texto,
+          color: nombre.isEmpty
+              ? AppColors.warning
+              : AppColors.accentGreen,
+        );
+      },
+    );
+  }
+}
+
+class _BadgeDestinatario extends StatelessWidget {
+  final IconData icono;
+  final String texto;
+  final Color color;
+
+  const _BadgeDestinatario({
+    required this.icono,
+    required this.texto,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(30),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(80)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icono, color: color, size: 14),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              texto,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
