@@ -5,12 +5,17 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../../../shared/widgets/dato_editable.dart';
 import '../providers/vehiculo_provider.dart';
+import '../services/vehiculo_actions.dart';
+import '../services/volvo_api_service.dart';
 
 import 'admin_vehiculo_alta_screen.dart';
 import 'admin_vehiculo_form_screen.dart';
+import 'diagnostico_volvo_screen.dart';
 
 // 13 widgets visuales (cards, sheet de detalle, telemetría, badges,
 // rows) extraídos para mantener navegable el screen principal.

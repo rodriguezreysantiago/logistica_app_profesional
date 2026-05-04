@@ -218,22 +218,12 @@ void abrirDetalleVehiculo(BuildContext context, String patente,
     title: 'Ficha $patente',
     icon: Icons.local_shipping,
     actions: [
-      IconButton(
-        icon: const Icon(Icons.edit, color: AppColors.accentGreen, size: 20),
-        tooltip: 'Editar ficha',
-        onPressed: () {
-          Navigator.pop(context);
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AdminVehiculoFormScreen(
-                vehiculoId: patente,
-                datosIniciales: data,
-              ),
-            ),
-          );
-        },
-      ),
+      // Menú overflow con acciones secundarias. Antes había un botón
+      // "Editar ficha" que abría un form completo; ahora la edición
+      // de datos (marca, modelo, año, VIN, KM, empresa) se hace
+      // inline tappeando cada item del sheet — el form completo queda
+      // como fallback para fechas/comprobantes/foto.
+      _AccionesVehiculoMenu(patente: patente, data: data),
     ],
     builder: (sheetCtx, scrollCtl) => _DetalleVehiculo(
       patente: patente,
@@ -241,6 +231,140 @@ void abrirDetalleVehiculo(BuildContext context, String patente,
       scrollController: scrollCtl,
     ),
   );
+}
+
+/// Menú overflow del sheet de detalle. Agrupa acciones que NO son
+/// edición de campo simple (esas se hacen inline en el body):
+/// - Editar fechas/comprobantes/foto: abre el form completo (legacy).
+/// - Forzar sincro Volvo: refresca KM_ACTUAL desde el API.
+/// - Diagnóstico Volvo: abre el visor de diagnóstico (depuración).
+class _AccionesVehiculoMenu extends StatelessWidget {
+  final String patente;
+  final Map<String, dynamic> data;
+  const _AccionesVehiculoMenu({required this.patente, required this.data});
+
+  bool get _esVolvo =>
+      (data['MARCA'] ?? '').toString().toUpperCase() == 'VOLVO';
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert, color: Colors.white70, size: 20),
+      tooltip: 'Más acciones',
+      onSelected: (val) async {
+        switch (val) {
+          case 'form':
+            Navigator.pop(context);
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => AdminVehiculoFormScreen(
+                  vehiculoId: patente,
+                  datosIniciales: data,
+                ),
+              ),
+            );
+          case 'sync':
+            await _forzarSyncVolvo(context);
+          case 'diag':
+            await _abrirDiagnostico(context);
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+          value: 'form',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.event_note, color: AppColors.accentGreen),
+            title: Text('Editar fechas / comprobantes / foto'),
+            subtitle: Text(
+              'Form completo con vencimientos y archivos',
+              style: TextStyle(fontSize: 11),
+            ),
+          ),
+        ),
+        if (_esVolvo) ...[
+          const PopupMenuDivider(),
+          const PopupMenuItem(
+            value: 'sync',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.sync, color: AppColors.accentBlue),
+              title: Text('Forzar sincro Volvo'),
+              subtitle: Text(
+                'Refrescar KM desde el API',
+                style: TextStyle(fontSize: 11),
+              ),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'diag',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.bug_report_outlined,
+                  color: AppColors.accentOrange),
+              title: Text('Diagnóstico Volvo'),
+              subtitle: Text(
+                'Inspeccionar última respuesta del API',
+                style: TextStyle(fontSize: 11),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _forzarSyncVolvo(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final vin = (data['VIN'] ?? '').toString().trim().toUpperCase();
+    if (vin.length < 10) {
+      AppFeedback.warningOn(messenger, 'VIN inválido (mínimo 10 chars).');
+      return;
+    }
+    AppFeedback.infoOn(messenger, 'Sincronizando con Volvo...');
+    try {
+      final metros =
+          await VolvoApiService().traerKilometrajeCualquierVia(vin);
+      if (metros != null && metros > 0) {
+        // Update directo a Firestore — no usamos VehiculoActions.dato
+        // porque su SnackBar requiere un BuildContext que ya cruzó el
+        // await. Hacemos el update + audit log manual + feedback con
+        // el messenger que capturamos al principio.
+        await FirebaseFirestore.instance
+            .collection(AppCollections.vehiculos)
+            .doc(patente)
+            .update({
+          'KM_ACTUAL': metros / 1000,
+          'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
+          'ULTIMA_SINCRO': FieldValue.serverTimestamp(),
+          'SINCRO_TIPO': 'MANUAL',
+        });
+        AppFeedback.successOn(messenger,
+            'KM actualizado: ${AppFormatters.formatearMiles(metros / 1000)} km');
+      } else {
+        AppFeedback.warningOn(
+            messenger, 'Unidad en reposo o no encontrada.');
+      }
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error de conexión Volvo: $e');
+    }
+  }
+
+  Future<void> _abrirDiagnostico(BuildContext context) async {
+    final vin = (data['VIN'] ?? '').toString().trim().toUpperCase();
+    if (vin.length < 10) {
+      AppFeedback.warning(context, 'Necesito un VIN válido para diagnosticar.');
+      return;
+    }
+    Navigator.pop(context);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DiagnosticoVolvoScreen(patente: patente, vin: vin),
+      ),
+    );
+  }
 }
 
 // =============================================================================
@@ -272,25 +396,36 @@ class _DetalleVehiculo extends StatelessWidget {
             ? snap.data!.data() as Map<String, dynamic>
             : dataInicial;
 
-        return _buildBody(data);
+        return _buildBody(ctx, data);
       },
     );
   }
 
-  Widget _buildBody(Map<String, dynamic> data) {
-    final marca = (data['MARCA'] ?? 'S/D').toString();
-    final modelo = (data['MODELO'] ?? 'S/D').toString();
-    final anio = (data['ANIO'] ?? data['AÑO'] ?? '').toString();
+  Widget _buildBody(BuildContext context, Map<String, dynamic> data) {
+    final marca = (data['MARCA'] ?? '').toString();
+    final modelo = (data['MODELO'] ?? '').toString();
+    final anioInt =
+        (data['ANIO'] ?? data['AÑO'] as Object?) as int? ??
+            int.tryParse((data['ANIO'] ?? data['AÑO'] ?? '').toString()) ??
+            0;
     final estado = (data['ESTADO'] ?? 'LIBRE').toString().toUpperCase();
     final vin = (data['VIN'] ?? '').toString();
-    // KM ahora se lee dentro de _PanelTelemetria; no hace falta tenerlo
-    // como variable local acá.
+    final tipo = (data['TIPO'] ?? '').toString().toUpperCase();
+    final esTractor = tipo == AppTiposVehiculo.tractor;
+
+    // Sugerencias de marca según tipo: tractores VOLVO + opciones
+    // comunes. Para enganches (BATEA/TOLVA/etc.) las marcas habituales
+    // son distintas — dejamos un set general y el "Otro..." cubre el resto.
+    final sugerenciasMarca = esTractor
+        ? const ['VOLVO', 'MERCEDES-BENZ', 'SCANIA', 'IVECO', 'FORD']
+        : const ['HELVETICA', 'RANDON', 'MAXIM', 'OMBU', 'MONTENEGRO', 'SOLA Y BRUSA'];
 
     return ListView(
       controller: scrollController,
       padding: const EdgeInsets.all(20),
       children: [
-        // Header con marca + modelo + estado
+        // Header con marca + modelo + estado (solo display, edición
+        // inline más abajo en la sección de Identificación).
         Row(
           children: [
             Expanded(
@@ -298,16 +433,20 @@ class _DetalleVehiculo extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '$marca $modelo'.toUpperCase(),
+                    [marca, modelo]
+                        .where((s) => s.isNotEmpty)
+                        .join(' ')
+                        .toUpperCase()
+                        .ifEmpty('SIN DATOS'),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (anio.isNotEmpty && anio != '0')
+                  if (anioInt > 0)
                     Text(
-                      'Año $anio',
+                      'Año $anioInt',
                       style: const TextStyle(
                           color: Colors.white54, fontSize: 12),
                     ),
@@ -324,14 +463,58 @@ class _DetalleVehiculo extends StatelessWidget {
         // tarjeta simple de KM (compatibilidad con vehículos no-Volvo).
         _PanelTelemetria(data: data),
 
+        // Service: fecha + km restantes hasta el próximo. Sección
+        // separada de Identificación para que sea fácil de ver de un
+        // vistazo. Si no hay datos cargados, muestra placeholder con
+        // CTA para abrir el form completo.
+        if (esTractor) ...[
+          const SizedBox(height: 18),
+          const _SectionTitle(icon: Icons.build_circle_outlined, label: 'Service'),
+          _ResumenService(data: data),
+        ],
+
         const SizedBox(height: 18),
-        const _SectionTitle(icon: Icons.fingerprint, label: 'Datos técnicos'),
-        _InfoRow(
-            label: 'VIN',
-            valor: vin.isEmpty ? '—' : vin,
-            monoespaciado: true),
-        _InfoRow(
-            label: 'Empresa', valor: (data['EMPRESA'] ?? '—').toString()),
+        const _SectionTitle(
+            icon: Icons.fingerprint, label: 'Identificación'),
+        DatoEditableEnumExtensible(
+          etiqueta: 'MARCA',
+          valorActual: marca,
+          sugerencias: sugerenciasMarca,
+          icono: Icons.label_outline,
+          hintOtro: 'Ej. ${sugerenciasMarca.first}',
+          onSave: (v) => VehiculoActions.dato(context, patente, 'MARCA', v),
+        ),
+        DatoEditableEnumExtensible(
+          etiqueta: 'MODELO',
+          valorActual: modelo,
+          // Sugerencias frecuentes de Volvo (mayoría de la flota).
+          // Cualquier modelo nuevo se agrega con "Otro...".
+          sugerencias: const ['FH 540', 'FH 460', 'FH 420', 'FM 440', 'VM 270'],
+          icono: Icons.directions_car_outlined,
+          hintOtro: 'Ej. FH 500',
+          onSave: (v) => VehiculoActions.dato(context, patente, 'MODELO', v),
+        ),
+        _DatoEditableAnio(
+          valorActual: anioInt > 0 ? anioInt : null,
+          onSave: (v) => VehiculoActions.dato(context, patente, 'ANIO', v),
+        ),
+        DatoEditableTexto(
+          etiqueta: 'VIN',
+          valor: vin.isEmpty ? '—' : vin,
+          onSave: (v) => VehiculoActions.dato(
+              context, patente, 'VIN', v.isEmpty ? null : v),
+        ),
+        _DatoEditableEmpresa(
+          valor: (data['EMPRESA'] ?? '').toString(),
+          onSave: (v) => VehiculoActions.dato(context, patente, 'EMPRESA', v),
+        ),
+        DatoEditableMiles(
+          etiqueta: 'KM ACTUAL',
+          valor: (data['KM_ACTUAL'] as num?)?.toDouble(),
+          sufijo: 'km',
+          onSave: (v) => VehiculoActions.dato(
+              context, patente, 'KM_ACTUAL', v?.toDouble() ?? 0.0),
+        ),
 
         const SizedBox(height: 18),
         const _SectionTitle(icon: Icons.event_note, label: 'Vencimientos'),
@@ -515,49 +698,9 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String valor;
-  final bool monoespaciado;
-  const _InfoRow({
-    required this.label,
-    required this.valor,
-    this.monoespaciado = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              valor,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontFamily: monoespaciado ? 'monospace' : null,
-                letterSpacing: monoespaciado ? 0.5 : 0,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// _InfoRow eliminado — el detalle ahora usa los widgets `DatoEditable*`
+// del shared package, que muestran el dato con el mismo estilo + son
+// tappeables para editar inline.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TELEMETRÍA (combustible + autonomía leídos de Volvo Connect)
@@ -879,4 +1022,292 @@ class _VencimientoRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// =============================================================================
+// WIDGETS NUEVOS PARA EL DETALLE EDITABLE INLINE
+// =============================================================================
+
+/// Selector de empresa propietaria — dropdown con las 2 razones sociales
+/// del grupo Vecchi. Visualmente igual a un DatoEditable, abre un dialog
+/// de selección al tappear.
+class _DatoEditableEmpresa extends StatelessWidget {
+  final String valor;
+  final ValueChanged<String> onSave;
+
+  const _DatoEditableEmpresa({required this.valor, required this.onSave});
+
+  static const List<String> _empresas = [
+    'VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)',
+    'SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: const Text(
+        'EMPRESA',
+        style: TextStyle(fontSize: 11, color: Colors.white38),
+      ),
+      subtitle: Text(
+        valor.isEmpty ? '—' : valor,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+      trailing: const Icon(Icons.business_center,
+          color: AppColors.accentGreen, size: 20),
+      onTap: () => _seleccionar(context),
+    );
+  }
+
+  void _seleccionar(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Seleccionar empresa'),
+        content: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: _empresas.map((e) {
+              final esActual = e == valor;
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  esActual
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: esActual ? AppColors.accentGreen : Colors.white38,
+                  size: 18,
+                ),
+                title: Text(
+                  e,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  if (!esActual) onSave(e);
+                },
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Selector de año — dropdown scrolleable de los últimos 30 años hasta
+/// hoy. Al tappear, muestra una lista scrolleable con check del actual.
+/// El usuario puede seleccionar fuera del rango con "Otro..." si tiene
+/// una unidad muy vieja o un año tipográficamente especial.
+class _DatoEditableAnio extends StatelessWidget {
+  final int? valorActual;
+  final ValueChanged<int?> onSave;
+
+  const _DatoEditableAnio({required this.valorActual, required this.onSave});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: const Text(
+        'AÑO',
+        style: TextStyle(fontSize: 11, color: Colors.white38),
+      ),
+      subtitle: Text(
+        valorActual?.toString() ?? '—',
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+      trailing: const Icon(Icons.calendar_view_month,
+          color: AppColors.accentGreen, size: 20),
+      onTap: () => _seleccionar(context),
+    );
+  }
+
+  void _seleccionar(BuildContext context) {
+    final ahora = DateTime.now().year;
+    // Últimos 30 años + 1 (incluye año actual). Más que eso es ruido.
+    final anios = [for (var a = ahora; a >= ahora - 30; a--) a];
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Seleccionar año'),
+        content: SizedBox(
+          width: 280,
+          height: 320,
+          child: ListView.builder(
+            itemCount: anios.length,
+            itemBuilder: (_, i) {
+              final a = anios[i];
+              final esActual = a == valorActual;
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  esActual
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: esActual ? AppColors.accentGreen : Colors.white38,
+                  size: 18,
+                ),
+                title: Text(
+                  a.toString(),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  if (!esActual) onSave(a);
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Resumen del último service: fecha del último service + km restantes
+/// hasta el próximo (calculado con `vencimientos_config.kmHastaProximoService`
+/// si el caller necesita el detalle exacto). Si falta data, muestra
+/// CTA suave que sugiere abrir el form completo.
+class _ResumenService extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ResumenService({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final fechaRaw = data['ULTIMO_SERVICE_FECHA']?.toString();
+    final hayFecha = fechaRaw != null && fechaRaw.isNotEmpty && fechaRaw != '-';
+    final ultimoKm = (data['ULTIMO_SERVICE_KM'] as num?)?.toDouble();
+    final kmActual = (data['KM_ACTUAL'] as num?)?.toDouble();
+    final intervalo =
+        (data['INTERVALO_SERVICE_KM'] as num?)?.toInt() ?? 30000;
+
+    if (!hayFecha && ultimoKm == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            const Icon(Icons.info_outline,
+                size: 16, color: Colors.white38),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text(
+                'Sin último service cargado.',
+                style: TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AdminVehiculoFormScreen(
+                      vehiculoId: (data['PATENTE'] ?? '').toString(),
+                      datosIniciales: data,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Cargar'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Calcular km restantes hasta el próximo service.
+    int? kmRestantes;
+    if (ultimoKm != null && kmActual != null) {
+      final proximo = ultimoKm + intervalo;
+      kmRestantes = (proximo - kmActual).round();
+    }
+
+    final colorRestantes = kmRestantes == null
+        ? Colors.white60
+        : kmRestantes < 0
+            ? AppColors.accentRed
+            : kmRestantes < 2000
+                ? AppColors.accentOrange
+                : AppColors.accentGreen;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hayFecha)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                const Icon(Icons.event_available,
+                    size: 16, color: Colors.white54),
+                const SizedBox(width: 6),
+                Text(
+                  'Último service: ${AppFormatters.formatearFecha(fechaRaw)}',
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        if (ultimoKm != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                const Icon(Icons.speed_outlined,
+                    size: 16, color: Colors.white54),
+                const SizedBox(width: 6),
+                Text(
+                  'KM al hacerlo: ${AppFormatters.formatearMiles(ultimoKm)}',
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        if (kmRestantes != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(
+                  kmRestantes < 0
+                      ? Icons.warning_amber_outlined
+                      : Icons.timelapse,
+                  size: 16,
+                  color: colorRestantes,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  kmRestantes < 0
+                      ? 'Service VENCIDO hace ${AppFormatters.formatearMiles(kmRestantes.abs())} km'
+                      : 'Próximo service en ${AppFormatters.formatearMiles(kmRestantes)} km',
+                  style: TextStyle(
+                    color: colorRestantes,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// Extensión local para fallback de strings vacíos.
+extension _StringExt on String {
+  String ifEmpty(String fallback) => isEmpty ? fallback : this;
 }
