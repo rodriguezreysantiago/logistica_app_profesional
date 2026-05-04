@@ -1189,8 +1189,11 @@ class _ResumenService extends StatelessWidget {
     final hayFecha = fechaRaw != null && fechaRaw.isNotEmpty && fechaRaw != '-';
     final ultimoKm = (data['ULTIMO_SERVICE_KM'] as num?)?.toDouble();
     final kmActual = (data['KM_ACTUAL'] as num?)?.toDouble();
-    final intervalo =
-        (data['INTERVALO_SERVICE_KM'] as num?)?.toInt() ?? 30000;
+    // Default 50.000 (constante centralizada en AppMantenimiento). Antes
+    // estaba hardcoded en 30.000, lo que daba "vencido hace X km" incluso
+    // cuando todavía faltaba para el service según la fórmula real.
+    final intervalo = (data['INTERVALO_SERVICE_KM'] as num?)?.toInt() ??
+        AppMantenimiento.intervaloServiceKm.toInt();
 
     // Calcular km restantes hasta el próximo service (si hay datos).
     int? kmRestantes;
