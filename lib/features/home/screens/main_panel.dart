@@ -1,8 +1,10 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../auth/services/auth_service.dart';
@@ -53,7 +55,7 @@ class MainPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 20),
-                _WelcomeHeader(nombre: nombre),
+                _WelcomeHeader(dni: dni, nombre: nombre),
                 const SizedBox(height: 30),
                 Expanded(
                   child: GridView.count(
@@ -156,18 +158,12 @@ class MainPanel extends StatelessWidget {
 // =============================================================================
 
 class _WelcomeHeader extends StatelessWidget {
+  final String dni;
   final String nombre;
-  const _WelcomeHeader({required this.nombre});
+  const _WelcomeHeader({required this.dni, required this.nombre});
 
   @override
   Widget build(BuildContext context) {
-    // Los nombres en Firestore se guardan como APELLIDO NOMBRE SEGUNDO_NOMBRE,
-    // así que para saludar usamos el segundo token (el nombre real). Si por
-    // algún motivo el campo viene con una sola palabra, usamos esa como
-    // fallback para no quedar en blanco.
-    final partes = nombre.trim().split(RegExp(r'\s+'));
-    final primerNombre =
-        partes.length >= 2 ? partes[1] : (partes.isNotEmpty ? partes.first : '');
     return AppCard(
       padding: const EdgeInsets.all(25),
       margin: EdgeInsets.zero,
@@ -194,15 +190,77 @@ class _WelcomeHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            primerNombre,
-            style: const TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          // Saludo con prioridad APODO si está cargado, fallback al
+          // primer nombre del NOMBRE (segundo token, formato
+          // APELLIDO NOMBRE SEGUNDO_NOMBRE). Mismo patrón que el
+          // _Saludo del admin_panel_screen.
+          _NombreSaludo(dni: dni, nombreFull: nombre),
         ],
+      ),
+    );
+  }
+}
+
+/// Resuelve el nombre a saludar leyendo `EMPLEADOS/{dni}.APODO` una sola
+/// vez y, si no está cargado, cae al primer nombre del campo NOMBRE.
+/// Renderiza solo el `Text` grande con el resultado.
+class _NombreSaludo extends StatefulWidget {
+  final String dni;
+  final String nombreFull;
+
+  const _NombreSaludo({required this.dni, required this.nombreFull});
+
+  @override
+  State<_NombreSaludo> createState() => _NombreSaludoState();
+}
+
+class _NombreSaludoState extends State<_NombreSaludo> {
+  String? _apodoResuelto; // null = no leído todavía; '' = sin apodo cargado
+
+  @override
+  void initState() {
+    super.initState();
+    _resolverApodo();
+  }
+
+  Future<void> _resolverApodo() async {
+    final dni = widget.dni.trim();
+    if (dni.isEmpty) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection(AppCollections.empleados)
+          .doc(dni)
+          .get();
+      if (!mounted) return;
+      final apodo = (snap.data()?['APODO'] ?? '').toString().trim();
+      setState(() => _apodoResuelto = apodo);
+    } catch (_) {
+      // Si Firestore falla, dejamos el fallback del primer nombre.
+    }
+  }
+
+  /// Para nombres "APELLIDO NOMBRE …", devuelve "Nombre" capitalizado.
+  /// Si el campo NOMBRE viene con una sola palabra, devuelve esa palabra.
+  String _primerNombre(String full) {
+    final partes = full.trim().split(RegExp(r'\s+'));
+    if (partes.isEmpty) return '';
+    final n = partes.length >= 2 ? partes[1] : partes.first;
+    if (n.isEmpty) return '';
+    return '${n[0].toUpperCase()}${n.substring(1).toLowerCase()}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final apodoLimpio = (_apodoResuelto ?? '').trim();
+    final nombre = apodoLimpio.isNotEmpty
+        ? apodoLimpio
+        : _primerNombre(widget.nombreFull);
+    return Text(
+      nombre,
+      style: const TextStyle(
+        fontSize: 32,
+        fontWeight: FontWeight.bold,
+        color: Colors.white,
       ),
     );
   }
