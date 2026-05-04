@@ -38,7 +38,6 @@
 #define MyAppPublisher  "Coopertrans"
 #define MyAppURL        "https://github.com/rodriguezreysantiago/logistica_app_profesional"
 #define MyAppId         "{{B6F7E8A9-1234-4567-8901-COOPERTRANSMOV}"
-#define LauncherArgs "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File ""{app}\launcher.ps1"""
 
 [Setup]
 AppId={#MyAppId}
@@ -94,15 +93,18 @@ Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{commonappdata}\Coope
 Source: "VERSION.txt"; DestDir: "{commonappdata}\CoopertransMovil"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "powershell.exe"; Parameters: "{#LauncherArgs}"; IconFilename: "{app}\app_icon.ico"; WorkingDir: "{app}"
+; Inno Setup escapa comillas dentro de strings con "" (dos comillas).
+; powershell.exe necesita comillas alrededor del path al .ps1 porque
+; el path contiene espacios ("Program Files\CoopertransMovil\...").
+Name: "{group}\{#MyAppName}"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File ""{app}\launcher.ps1"""; IconFilename: "{app}\app_icon.ico"; WorkingDir: "{app}"
 Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "powershell.exe"; Parameters: "{#LauncherArgs}"; IconFilename: "{app}\app_icon.ico"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File ""{app}\launcher.ps1"""; IconFilename: "{app}\app_icon.ico"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 ; Ofrecer arrancar la app al final del install, vía el launcher (que
 ; chequea si hay versión más nueva en GitHub que la incluida en el
 ; instalador, y la baja si corresponde).
-Filename: "powershell.exe"; Parameters: "{#LauncherArgs}"; Description: "Iniciar {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\launcher.ps1"""; Description: "Iniciar {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Limpiar logs y carpeta de la app de ProgramData. La data del usuario
