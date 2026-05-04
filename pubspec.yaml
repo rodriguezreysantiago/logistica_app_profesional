@@ -56,26 +56,26 @@ dependencies:
     sdk: flutter
 
   # ================= FIREBASE =================
-  firebase_core: ^4.0.0
-  cloud_firestore: ^6.0.0
+  firebase_core: ^4.7.0
+  cloud_firestore: ^6.3.0
   # Pinned EXACT a 13.0.4 (sin caret): firebase_storage 13.1.0+ tiene un
   # bug de Windows desktop (PR flutterfire#18030) — agregaron una llamada
   # a `Storage::UseEmulator()` en el plugin C++ que NO existe en la
   # versión del firebase-cpp-sdk que descargan, lo que rompe el build con
   # `error C2039: "UseEmulator"`. 13.0.4 es la última versión sin esa
-  # llamada y sigue compatible con firebase_core 4.5.0. Volver a ^13 cuando
+  # llamada y sigue compatible con firebase_core 4.7.0. Volver a ^13 cuando
   # se publique un fix upstream.
   firebase_storage: 13.0.4
   # Crashlytics: solo se inicializa en Android/iOS (Web/Windows nativo
   # no son soportados — el AppLogger hace la decisión en runtime).
-  firebase_crashlytics: ^5.0.0
+  firebase_crashlytics: ^5.2.0
   # Firebase Auth: el login real se hace contra una Cloud Function
   # (`loginConDni`) que valida bcrypt server-side y emite un custom
   # token. La function se llama por HTTPS directo con dio (porque
   # el plugin `cloud_functions` no tiene implementación Windows).
   # Permite cerrar las firestore.rules con `request.auth.uid` (= DNI)
   # y `isAdmin()`.
-  firebase_auth: ^6.0.0
+  firebase_auth: ^6.4.0
 
   # ================= ARCHIVOS =================
   image_picker: ^1.2.2
