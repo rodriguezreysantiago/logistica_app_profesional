@@ -11,16 +11,14 @@ import '../../../shared/widgets/app_widgets.dart';
 /// del Vehicle Alerts API.
 ///
 /// En la flota de Coopertrans, un evento PTO = batea levantada para
-/// descargar carga (ningún tractor tiene grúa hidráulica). Cada evento
-/// queda registrado por Volvo con timestamp, geo-coords, patente y un
-/// snapshot del chofer asignado (cruce automático en `volvoAlertasPoller`
-/// con el log de `ASIGNACIONES_VEHICULO`).
+/// descargar carga. Cada evento queda registrado por Volvo con
+/// timestamp, geo-coords, patente y un snapshot del chofer asignado.
 ///
-/// Casos de uso:
-///   - Anti-fraude: validar que la descarga ocurrió donde dice el remito.
-///   - Tiempo retenido por cliente: cuántos minutos en descarga por sitio.
-///   - Productividad por chofer: comparar tiempos de descarga.
-///   - Insumo del módulo de planeamiento de viajes futuro.
+/// **Iteración 2026-05-04**: el calendario ahora soporta tanto un
+/// día específico como un rango (1/4 al 15/4). El toolbar siempre
+/// queda visible aunque no haya datos del período — Santiago reportó
+/// que cuando elegía un día sin PTO el calendario desaparecía y no
+/// podía cambiar de fecha.
 class AdminDescargasPtoScreen extends StatefulWidget {
   const AdminDescargasPtoScreen({super.key});
 
@@ -30,137 +28,189 @@ class AdminDescargasPtoScreen extends StatefulWidget {
 }
 
 class _AdminDescargasPtoScreenState extends State<AdminDescargasPtoScreen> {
-  /// Día seleccionado — por default hoy. El operador puede cambiar a
-  /// cualquier día anterior con el botón calendario del AppBar.
-  late DateTime _fecha;
+  /// Rango seleccionado. `start == end` (mismo día) representa una
+  /// fecha única — la UI lo etiqueta diferente. Default: hoy/hoy.
+  late DateTimeRange _rango;
   String? _filtroPatente;
 
   @override
   void initState() {
     super.initState();
-    final ahora = DateTime.now();
-    _fecha = DateTime(ahora.year, ahora.month, ahora.day);
+    final hoy = _truncarDia(DateTime.now());
+    _rango = DateTimeRange(start: hoy, end: hoy);
   }
+
+  static DateTime _truncarDia(DateTime dt) =>
+      DateTime(dt.year, dt.month, dt.day);
 
   bool get _esHoy {
-    final hoy = DateTime.now();
-    return _fecha.year == hoy.year &&
-        _fecha.month == hoy.month &&
-        _fecha.day == hoy.day;
+    final hoy = _truncarDia(DateTime.now());
+    return _rango.start == hoy && _rango.end == hoy;
   }
 
+  bool get _esUnDia => _rango.start == _rango.end;
+
   String get _etiquetaFecha {
-    final d = _fecha.day.toString().padLeft(2, '0');
-    final m = _fecha.month.toString().padLeft(2, '0');
-    return _esHoy ? 'HOY ($d-$m-${_fecha.year})' : '$d-$m-${_fecha.year}';
+    String fmt(DateTime d) =>
+        '${d.day.toString().padLeft(2, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-${d.year}';
+    if (_esHoy) return 'HOY (${fmt(_rango.start)})';
+    if (_esUnDia) return fmt(_rango.start);
+    return '${fmt(_rango.start)} al ${fmt(_rango.end)}';
   }
+
+  /// Inicio del rango como Timestamp (00:00:00 del día start).
+  Timestamp get _desdeTs => Timestamp.fromDate(_rango.start);
+
+  /// Fin EXCLUSIVO del rango: 00:00 del día siguiente al end. Eso
+  /// incluye todo el día `end` completo en la query `< _hastaTs`.
+  Timestamp get _hastaTs =>
+      Timestamp.fromDate(_rango.end.add(const Duration(days: 1)));
 
   Future<void> _elegirFecha() async {
     final ahora = DateTime.now();
-    final picked = await showDatePicker(
+    final picked = await showDateRangePicker(
       context: context,
-      initialDate: _fecha,
+      initialDateRange: _rango,
       firstDate: DateTime(2024),
-      lastDate: ahora,
-      helpText: 'Elegir día de descargas',
+      lastDate: _truncarDia(ahora),
+      helpText: 'Elegir fecha o rango de descargas',
       cancelText: 'CANCELAR',
       confirmText: 'VER',
+      saveText: 'VER',
       locale: const Locale('es', 'AR'),
     );
     if (picked != null && mounted) {
       setState(() {
-        _fecha = picked;
+        _rango = DateTimeRange(
+          start: _truncarDia(picked.start),
+          end: _truncarDia(picked.end),
+        );
         _filtroPatente = null;
       });
     }
   }
 
+  void _irAHoy() {
+    final hoy = _truncarDia(DateTime.now());
+    setState(() {
+      _rango = DateTimeRange(start: hoy, end: hoy);
+      _filtroPatente = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final inicio = DateTime(_fecha.year, _fecha.month, _fecha.day);
-    final fin = inicio.add(const Duration(days: 1));
     return AppScaffold(
       title: 'Descargas (PTO)',
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
             .collection(AppCollections.volvoAlertas)
             .where('tipo', isEqualTo: 'PTO')
-            .where('creado_en',
-                isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
-            .where('creado_en', isLessThan: Timestamp.fromDate(fin))
+            .where('creado_en', isGreaterThanOrEqualTo: _desdeTs)
+            .where('creado_en', isLessThan: _hastaTs)
             .orderBy('creado_en', descending: true)
             .snapshots(),
         builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: AppColors.accentGreen),
+          if (snap.hasError) {
+            return _bodyConToolbar(
+              cantTotal: 0,
+              cantVisibles: 0,
+              patentes: const [],
+              child: AppErrorState(
+                title: 'No pudimos cargar las descargas',
+                subtitle: snap.error.toString(),
+              ),
             );
           }
-          if (snap.hasError) {
-            return AppErrorState(
-              title: 'No pudimos cargar las descargas',
-              subtitle: snap.error.toString(),
+          if (snap.connectionState == ConnectionState.waiting) {
+            return _bodyConToolbar(
+              cantTotal: 0,
+              cantVisibles: 0,
+              patentes: const [],
+              child: const Center(
+                child:
+                    CircularProgressIndicator(color: AppColors.accentGreen),
+              ),
             );
           }
           final docs = snap.data?.docs ?? const [];
-          if (docs.isEmpty) {
-            return AppEmptyState(
-              icon: Icons.local_shipping_outlined,
-              title: 'Sin descargas el $_etiquetaFecha',
-              subtitle: _esHoy
-                  ? 'Todavía no hubo eventos PTO hoy. Probá con otro día.'
-                  : 'No hay eventos PTO ese día. Elegí otra fecha.',
-            );
-          }
-
-          // Patentes únicas para el filtro.
+          // Patentes únicas para el filtro (calculadas siempre, aunque
+          // la lista esté vacía — mantiene el toolbar consistente).
           final patentes = <String>{
             for (final d in docs)
               if ((d.data()['patente'] ?? '').toString().isNotEmpty)
                 d.data()['patente'].toString()
           }.toList()
             ..sort();
-
           // Filtrar in-memory por patente si hay filtro.
           final visibles = _filtroPatente == null
               ? docs
               : docs
                   .where((d) =>
-                      (d.data()['patente'] ?? '').toString() == _filtroPatente)
+                      (d.data()['patente'] ?? '').toString() ==
+                      _filtroPatente)
                   .toList();
 
-          return Column(
-            children: [
-              _Toolbar(
-                totalEventos: docs.length,
-                visibles: visibles.length,
-                patentes: patentes,
-                filtroPatente: _filtroPatente,
-                onFiltroChange: (p) => setState(() => _filtroPatente = p),
-                etiquetaFecha: _etiquetaFecha,
-                esHoy: _esHoy,
-                onElegirFecha: _elegirFecha,
-                onIrAHoy: () {
-                  final hoy = DateTime.now();
-                  setState(() {
-                    _fecha = DateTime(hoy.year, hoy.month, hoy.day);
-                    _filtroPatente = null;
-                  });
-                },
+          if (visibles.isEmpty) {
+            return _bodyConToolbar(
+              cantTotal: docs.length,
+              cantVisibles: 0,
+              patentes: patentes,
+              child: AppEmptyState(
+                icon: Icons.local_shipping_outlined,
+                title: docs.isEmpty
+                    ? 'Sin descargas en $_etiquetaFecha'
+                    : 'Sin descargas para esa patente',
+                subtitle: docs.isEmpty
+                    ? (_esHoy
+                        ? 'Todavía no hubo eventos PTO hoy. Probá con otro día o un rango.'
+                        : 'No hay eventos PTO en ese período. Elegí otra fecha o rango.')
+                    : 'Cambiá el filtro de patente o ampliá el rango.',
               ),
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
-                  itemCount: visibles.length,
-                  itemBuilder: (_, i) => _EventoPtoCard(
-                    data: visibles[i].data(),
-                  ),
-                ),
+            );
+          }
+          return _bodyConToolbar(
+            cantTotal: docs.length,
+            cantVisibles: visibles.length,
+            patentes: patentes,
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
+              itemCount: visibles.length,
+              itemBuilder: (_, i) => _EventoPtoCard(
+                data: visibles[i].data(),
               ),
-            ],
+            ),
           );
         },
       ),
+    );
+  }
+
+  /// Helper que envuelve cualquier estado del body con el toolbar
+  /// arriba — clave para que el calendario / filtros sigan siendo
+  /// accesibles aunque la lista esté vacía o haya error.
+  Widget _bodyConToolbar({
+    required int cantTotal,
+    required int cantVisibles,
+    required List<String> patentes,
+    required Widget child,
+  }) {
+    return Column(
+      children: [
+        _Toolbar(
+          totalEventos: cantTotal,
+          visibles: cantVisibles,
+          patentes: patentes,
+          filtroPatente: _filtroPatente,
+          onFiltroChange: (p) => setState(() => _filtroPatente = p),
+          etiquetaFecha: _etiquetaFecha,
+          esHoy: _esHoy,
+          onElegirFecha: _elegirFecha,
+          onIrAHoy: _irAHoy,
+        ),
+        Expanded(child: child),
+      ],
     );
   }
 }
@@ -195,10 +245,9 @@ class _Toolbar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Selector de fecha visible (no oculto en AppBar). Antes
-          // estaba como IconButton chiquito arriba a la derecha y
-          // pasaba inadvertido — Santiago: "falta un calendario para
-          // elegir otras fechas".
+          // Selector de fecha / rango — siempre visible. Tap abre
+          // showDateRangePicker (un solo día = elegir mismo desde y
+          // hasta).
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -231,32 +280,38 @@ class _Toolbar extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '$visibles de $totalEventos descargas',
+            totalEventos == 0
+                ? 'Sin eventos en este período'
+                : '$visibles de $totalEventos descargas',
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _ChipFiltro(
-                  label: 'TODAS',
-                  selected: filtroPatente == null,
-                  onTap: () => onFiltroChange(null),
-                ),
-                const SizedBox(width: 6),
-                ...patentes.map((p) => Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: _ChipFiltro(
-                        label: p,
-                        selected: filtroPatente == p,
-                        onTap: () => onFiltroChange(p),
-                      ),
-                    )),
-              ],
+          // Filtro de patente solo se muestra si hay docs (sino chips
+          // vacíos no aportan).
+          if (patentes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 36,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _ChipFiltro(
+                    label: 'TODAS',
+                    selected: filtroPatente == null,
+                    onTap: () => onFiltroChange(null),
+                  ),
+                  const SizedBox(width: 6),
+                  ...patentes.map((p) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: _ChipFiltro(
+                          label: p,
+                          selected: filtroPatente == p,
+                          onTap: () => onFiltroChange(p),
+                        ),
+                      )),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -337,7 +392,8 @@ class _EventoPtoCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.local_shipping, color: AppColors.accentGreen, size: 18),
+              const Icon(Icons.local_shipping,
+                  color: AppColors.accentGreen, size: 18),
               const SizedBox(width: 8),
               Text(
                 patente,
@@ -352,52 +408,49 @@ class _EventoPtoCard extends StatelessWidget {
               if (creado != null)
                 Text(
                   fmt.format(creado),
-                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  style: const TextStyle(
+                      color: Colors.white54, fontSize: 11),
                 ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            'Chofer: $chofer',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          Row(
+            children: [
+              const Icon(Icons.person_outline,
+                  color: Colors.white60, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                chofer,
+                style: const TextStyle(
+                    color: Colors.white70, fontSize: 12),
+              ),
+            ],
           ),
-          if (detalle != null && detalle.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              _resumirDetalle(detalle),
-              style: const TextStyle(color: Colors.white54, fontSize: 11),
-            ),
+          if (detalle != null) ...[
+            const SizedBox(height: 6),
+            _detalleRow('Duración',
+                '${detalle['duracion_segundos'] ?? '—'} segundos'),
+            _detalleRow('Modo', (detalle['modo'] ?? '—').toString()),
           ],
           if (lat != null && lng != null) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             InkWell(
-              onTap: () => _abrirMaps(lat, lng),
-              borderRadius: BorderRadius.circular(6),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.accentBlue.withAlpha(20),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.accentBlue.withAlpha(60)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.place, color: AppColors.accentBlue, size: 14),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                      style: const TextStyle(
-                        color: AppColors.accentBlue,
-                        fontSize: 11,
-                      ),
+              onTap: () => _abrirMapa(lat, lng),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on_outlined,
+                      color: AppColors.accentBlue, size: 14),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Ver en Google Maps · '
+                    '${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}',
+                    style: const TextStyle(
+                      color: AppColors.accentBlue,
+                      fontSize: 11,
+                      decoration: TextDecoration.underline,
                     ),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.open_in_new,
-                        color: AppColors.accentBlue, size: 12),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -406,25 +459,33 @@ class _EventoPtoCard extends StatelessWidget {
     );
   }
 
-  String _resumirDetalle(Map<String, dynamic> det) {
-    // El sub-objeto detalle_pto puede traer mode/duration/etc. según Volvo
-    // entrega. Mostramos los más útiles si están — el resto se ignora.
-    final partes = <String>[];
-    final mode = det['mode']?.toString();
-    if (mode != null && mode.isNotEmpty) partes.add('Modo: $mode');
-    final duration = det['duration'];
-    if (duration is num) {
-      final mins = (duration / 60).toStringAsFixed(0);
-      partes.add('Duración: ${mins}min');
-    }
-    if (partes.isEmpty) {
-      return 'Detalle: ${det.keys.take(3).join(', ')}';
-    }
-    return partes.join(' · ');
+  Widget _detalleRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(
+              label,
+              style:
+                  const TextStyle(color: Colors.white54, fontSize: 11),
+            ),
+          ),
+          Text(
+            value,
+            style:
+                const TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+        ],
+      ),
+    );
   }
 
-  Future<void> _abrirMaps(double lat, double lng) async {
-    final uri = Uri.parse('https://www.google.com/maps?q=$lat,$lng');
+  Future<void> _abrirMapa(double lat, double lng) async {
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
+    );
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
