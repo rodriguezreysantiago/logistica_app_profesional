@@ -181,6 +181,55 @@ class GomeriaService {
     return cubiertaId;
   }
 
+  /// Da de alta varias cubiertas idénticas (mismo modelo, mismo precio,
+  /// mismas observaciones) en una sola operación. Pensado para flotas
+  /// grandes donde el supervisor recibe del proveedor 50, 100, 250
+  /// cubiertas iguales y darlas de alta una por una es inviable.
+  ///
+  /// Devuelve la lista de doc ids creados (orden de creación). Los
+  /// códigos `CUB-XXXX` van consecutivos desde el counter actual.
+  ///
+  /// Si una creación intermedia falla, se devuelven solo las cubiertas
+  /// creadas hasta ese punto (best-effort) y la excepción se propaga
+  /// al caller. La UI puede mostrar "se crearon X de Y" y dejar al
+  /// supervisor reintentar el resto.
+  Future<List<String>> crearCubiertasEnLote({
+    required String modeloId,
+    required int cantidad,
+    required String supervisorDni,
+    String? supervisorNombre,
+    String? observaciones,
+    double? precioCompra,
+    void Function(int creadas, int total)? onProgreso,
+  }) async {
+    if (cantidad < 1) {
+      throw ArgumentError('cantidad debe ser >= 1 (se pasó $cantidad)');
+    }
+    if (cantidad > 500) {
+      throw ArgumentError(
+          'cantidad máxima 500 por lote (se pasó $cantidad). '
+          'Para más, dividir en varios lotes.');
+    }
+    final ids = <String>[];
+    for (var i = 0; i < cantidad; i++) {
+      // Reusamos `crearCubierta` para no duplicar lógica de validación
+      // del modelo, generación de código y registro de auditoría. Es
+      // serial — Firestore puede manejar miles de writes/sec, pero
+      // serializar evita pelearse con la rule monotónica del counter
+      // (que rebotaría a varios clientes paralelos).
+      final id = await crearCubierta(
+        modeloId: modeloId,
+        supervisorDni: supervisorDni,
+        supervisorNombre: supervisorNombre,
+        observaciones: observaciones,
+        precioCompra: precioCompra,
+      );
+      ids.add(id);
+      onProgreso?.call(ids.length, cantidad);
+    }
+    return ids;
+  }
+
   // ===========================================================================
   // INSTALAR / RETIRAR
   // ===========================================================================

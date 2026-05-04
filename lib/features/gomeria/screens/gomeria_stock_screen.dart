@@ -135,8 +135,13 @@ class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
       builder: (ctx) => _AltaCubiertaDialog(service: _service),
     );
     if (codigoCreado != null) {
+      // El dialog devuelve el código exacto (alta unitaria) o un resumen
+      // tipo "CUB-0010 a CUB-0050 (41 cubiertas)" (alta en lote).
+      final esLote = codigoCreado.contains('cubiertas)');
       messenger.showSnackBar(SnackBar(
-        content: Text('✓ Cubierta $codigoCreado creada.'),
+        content: Text(esLote
+            ? '✓ $codigoCreado creadas.'
+            : '✓ Cubierta $codigoCreado creada.'),
         backgroundColor: AppColors.accentGreen,
         duration: const Duration(seconds: 3),
       ));
@@ -440,14 +445,26 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
   CubiertaModelo? _modeloSel;
   final _obsCtrl = TextEditingController();
   final _precioCtrl = TextEditingController();
+  final _cantidadCtrl = TextEditingController(text: '1');
   bool _guardando = false;
+  // Progreso del lote (creadas / total). Solo visible si cantidad > 1.
+  int _creadas = 0;
+  int _total = 0;
   String? _error;
 
   @override
   void dispose() {
     _obsCtrl.dispose();
     _precioCtrl.dispose();
+    _cantidadCtrl.dispose();
     super.dispose();
+  }
+
+  int get _cantidadParsed {
+    final txt = _cantidadCtrl.text.trim();
+    if (txt.isEmpty) return 1;
+    final n = int.tryParse(txt);
+    return (n == null || n < 1) ? 1 : n;
   }
 
   @override
@@ -501,6 +518,18 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
               ),
               const SizedBox(height: 12),
               TextField(
+                controller: _cantidadCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Cantidad',
+                  hintText: '1',
+                  helperText:
+                      'Para alta en lote: una sola operación crea las N cubiertas idénticas.',
+                ),
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              TextField(
                 controller: _precioCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Precio de compra (\$, opcional)',
@@ -524,6 +553,24 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
                 'El código (CUB-XXXX) se asigna automáticamente.',
                 style: TextStyle(color: Colors.white60, fontSize: 11),
               ),
+              // Barra de progreso del lote: solo visible mientras se
+              // crean cubiertas en lote y muestra "X de Y creadas".
+              if (_guardando && _total > 1) ...[
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  value: _creadas / _total,
+                  minHeight: 6,
+                  backgroundColor: Colors.white12,
+                  valueColor:
+                      const AlwaysStoppedAnimation(AppColors.accentBlue),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Creando $_creadas de $_total…',
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12),
+                ),
+              ],
               if (_error != null) ...[
                 const SizedBox(height: 12),
                 Container(
@@ -554,7 +601,9 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
           child: _guardando
               ? const SizedBox(
                   width: 18, height: 18, child: CircularProgressIndicator())
-              : const Text('GUARDAR'),
+              : Text(_cantidadParsed > 1
+                  ? 'CREAR $_cantidadParsed CUBIERTAS'
+                  : 'GUARDAR'),
         ),
       ],
     );
@@ -566,30 +615,70 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
       setState(() => _error = 'Seleccioná un modelo del dropdown.');
       return;
     }
+    final cantidad = _cantidadParsed;
+    if (cantidad < 1 || cantidad > 500) {
+      setState(() => _error = 'Cantidad inválida (1 a 500).');
+      return;
+    }
     setState(() {
       _guardando = true;
       _error = null;
+      _creadas = 0;
+      _total = cantidad;
     });
     try {
-      final cubiertaId = await widget.service.crearCubierta(
+      final ids = await widget.service.crearCubiertasEnLote(
         modeloId: modelo.id,
+        cantidad: cantidad,
         supervisorDni: PrefsService.dni,
         supervisorNombre: PrefsService.nombre,
         observaciones: _obsCtrl.text.trim().isEmpty ? null : _obsCtrl.text,
         precioCompra:
             AppFormatters.parsearMiles(_precioCtrl.text)?.toDouble(),
+        onProgreso: (creadas, total) {
+          if (mounted) {
+            setState(() {
+              _creadas = creadas;
+              _total = total;
+            });
+          }
+        },
       );
-      final snap = await FirebaseFirestore.instance
-          .collection(AppCollections.cubiertas)
-          .doc(cubiertaId)
-          .get();
-      final codigo = snap.data()?['codigo']?.toString() ?? cubiertaId;
-      if (mounted) Navigator.pop(context, codigo);
+      // Para devolver el resumen al caller: si fue 1, el código directo;
+      // si fue lote, "CUB-XXXX a CUB-YYYY (N cubiertas)".
+      String resumen;
+      if (ids.length == 1) {
+        final snap = await FirebaseFirestore.instance
+            .collection(AppCollections.cubiertas)
+            .doc(ids.first)
+            .get();
+        resumen = snap.data()?['codigo']?.toString() ?? ids.first;
+      } else {
+        final primerSnap = await FirebaseFirestore.instance
+            .collection(AppCollections.cubiertas)
+            .doc(ids.first)
+            .get();
+        final ultimoSnap = await FirebaseFirestore.instance
+            .collection(AppCollections.cubiertas)
+            .doc(ids.last)
+            .get();
+        final primero =
+            primerSnap.data()?['codigo']?.toString() ?? ids.first;
+        final ultimo = ultimoSnap.data()?['codigo']?.toString() ?? ids.last;
+        resumen = '$primero a $ultimo (${ids.length} cubiertas)';
+      }
+      if (mounted) Navigator.pop(context, resumen);
     } catch (e) {
       if (mounted) {
         setState(() {
           _guardando = false;
-          _error = 'Error al guardar: $e';
+          // Si fallamos a mitad de un lote, indicamos cuántas alcanzaron.
+          if (_total > 1 && _creadas > 0) {
+            _error =
+                'Error tras crear $_creadas de $_total: $e\nReintentá con la cantidad restante.';
+          } else {
+            _error = 'Error al guardar: $e';
+          }
         });
       }
     }
