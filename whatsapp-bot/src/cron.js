@@ -96,6 +96,30 @@ function calcularDiasRestantes(fechaIso) {
   return Math.round(ms / (1000 * 60 * 60 * 24));
 }
 
+/**
+ * Busca al destinatario de un resumen consolidado (Emmanuel para
+ * service, Santiago para alertas Volvo). Como el cron solo carga
+ * empleados con ROL=CHOFER en `empleadosByDni` (regla "solo CHOFER
+ * cuenta como conductor" del 2026-05-02), los destinatarios de los
+ * resúmenes — que típicamente son SUPERVISOR o ADMIN — NO están en
+ * ese map y hay que pedirlos directo a Firestore.
+ *
+ * @returns `{id, data}` o `null` si el DNI no existe.
+ */
+async function _obtenerDestinatarioConsolidado(db, dni, empleadosByDni) {
+  const k = String(dni || '').trim();
+  if (!k) return null;
+  const hit = empleadosByDni.get(k);
+  if (hit) return hit;
+  try {
+    const snap = await db.collection('EMPLEADOS').doc(k).get();
+    if (!snap.exists) return null;
+    return { id: snap.id, data: snap.data() || {} };
+  } catch {
+    return null;
+  }
+}
+
 let _running = false;
 let _timer = null;
 
@@ -478,11 +502,18 @@ async function _runOnce(fs) {
       if (yaEnviado) {
         log.debug(`Service diario ya enviado hoy a ${dniDestinatarioService}, skip.`);
       } else {
-        const empDest = empleadosByDni.get(String(dniDestinatarioService).trim());
+        // Lookup con fallback a Firestore: el destinatario suele ser
+        // SUPERVISOR/ADMIN y NO está en `empleadosByDni` (que tiene
+        // solo CHOFERES desde el refactor del 2026-05-02).
+        const empDest = await _obtenerDestinatarioConsolidado(
+          db,
+          dniDestinatarioService,
+          empleadosByDni
+        );
         if (!empDest) {
           log.warn(
-            `SERVICE_DESTINATARIO_DNI=${dniDestinatarioService} no esta en EMPLEADOS. ` +
-            `Service diario no se envia hoy.`
+            `SERVICE_DESTINATARIO_DNI=${dniDestinatarioService} no existe en EMPLEADOS ` +
+            `(ni en cache ni en Firestore). Service diario no se envia hoy.`
           );
         } else {
           const telefonoDestRaw = empDest.data.TELEFONO;
@@ -569,13 +600,16 @@ async function _runOnce(fs) {
           `Alertas Volvo resumen ya enviado hoy a ${dniAlertasResumen}, skip.`
         );
       } else {
-        const empAlertas = empleadosByDni.get(
-          String(dniAlertasResumen).trim()
+        // Mismo lookup con fallback que para SERVICE_DESTINATARIO_DNI.
+        const empAlertas = await _obtenerDestinatarioConsolidado(
+          db,
+          dniAlertasResumen,
+          empleadosByDni
         );
         if (!empAlertas) {
           log.warn(
-            `ALERTAS_RESUMEN_DESTINATARIO_DNI=${dniAlertasResumen} no esta en EMPLEADOS. ` +
-              `Resumen alertas Volvo no se envia hoy.`
+            `ALERTAS_RESUMEN_DESTINATARIO_DNI=${dniAlertasResumen} no existe en ` +
+              `EMPLEADOS (ni en cache ni en Firestore). Resumen alertas Volvo no se envia hoy.`
           );
         } else {
           const telAlertas = empAlertas.data.TELEFONO
