@@ -413,12 +413,14 @@ class _DetalleVehiculo extends StatelessWidget {
     final tipo = (data['TIPO'] ?? '').toString().toUpperCase();
     final esTractor = tipo == AppTiposVehiculo.tractor;
 
-    // Sugerencias de marca según tipo: tractores VOLVO + opciones
-    // comunes. Para enganches (BATEA/TOLVA/etc.) las marcas habituales
-    // son distintas — dejamos un set general y el "Otro..." cubre el resto.
+    // Sugerencias de marca: en Coopertrans los tractores son TODOS
+    // VOLVO (Santiago: "no inventes otras marcas, si es necesario yo
+    // las agrego"). Para enganches dejamos lista vacía — se carga
+    // siempre con "Otro..." y la primera vez queda como sugerencia
+    // implícita en el valor actual.
     final sugerenciasMarca = esTractor
-        ? const ['VOLVO', 'MERCEDES-BENZ', 'SCANIA', 'IVECO', 'FORD']
-        : const ['HELVETICA', 'RANDON', 'MAXIM', 'OMBU', 'MONTENEGRO', 'SOLA Y BRUSA'];
+        ? const <String>['VOLVO']
+        : const <String>[];
 
     return ListView(
       controller: scrollController,
@@ -470,7 +472,7 @@ class _DetalleVehiculo extends StatelessWidget {
         if (esTractor) ...[
           const SizedBox(height: 18),
           const _SectionTitle(icon: Icons.build_circle_outlined, label: 'Service'),
-          _ResumenService(data: data),
+          _ResumenService(patente: patente, data: data),
         ],
 
         const SizedBox(height: 18),
@@ -481,7 +483,7 @@ class _DetalleVehiculo extends StatelessWidget {
           valorActual: marca,
           sugerencias: sugerenciasMarca,
           icono: Icons.label_outline,
-          hintOtro: 'Ej. ${sugerenciasMarca.first}',
+          hintOtro: esTractor ? 'Ej. VOLVO' : 'Ej. RANDON',
           onSave: (v) => VehiculoActions.dato(context, patente, 'MARCA', v),
         ),
         DatoEditableEnumExtensible(
@@ -508,13 +510,10 @@ class _DetalleVehiculo extends StatelessWidget {
           valor: (data['EMPRESA'] ?? '').toString(),
           onSave: (v) => VehiculoActions.dato(context, patente, 'EMPRESA', v),
         ),
-        DatoEditableMiles(
-          etiqueta: 'KM ACTUAL',
-          valor: (data['KM_ACTUAL'] as num?)?.toDouble(),
-          sufijo: 'km',
-          onSave: (v) => VehiculoActions.dato(
-              context, patente, 'KM_ACTUAL', v?.toDouble() ?? 0.0),
-        ),
+        // KM ACTUAL no se edita acá: el valor ya está visible arriba en
+        // el panel de telemetría y se sincroniza automático con Volvo.
+        // Dejarlo editable acá generaba duplicado visual y riesgo de
+        // que el admin lo bajara a mano sobreescribiendo el valor real.
 
         const SizedBox(height: 18),
         const _SectionTitle(icon: Icons.event_note, label: 'Vencimientos'),
@@ -1175,13 +1174,14 @@ class _DatoEditableAnio extends StatelessWidget {
   }
 }
 
-/// Resumen del último service: fecha del último service + km restantes
-/// hasta el próximo (calculado con `vencimientos_config.kmHastaProximoService`
-/// si el caller necesita el detalle exacto). Si falta data, muestra
-/// CTA suave que sugiere abrir el form completo.
+/// Resumen del último service: fecha + km al hacerlo + km restantes
+/// hasta el próximo. Edición inline con un botón "Editar" que abre un
+/// dialog con AMBOS campos a la vez (Santiago: "un solo botón donde
+/// clickeas y se editan ambos").
 class _ResumenService extends StatelessWidget {
+  final String patente;
   final Map<String, dynamic> data;
-  const _ResumenService({required this.data});
+  const _ResumenService({required this.patente, required this.data});
 
   @override
   Widget build(BuildContext context) {
@@ -1192,41 +1192,7 @@ class _ResumenService extends StatelessWidget {
     final intervalo =
         (data['INTERVALO_SERVICE_KM'] as num?)?.toInt() ?? 30000;
 
-    if (!hayFecha && ultimoKm == null) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            const Icon(Icons.info_outline,
-                size: 16, color: Colors.white38),
-            const SizedBox(width: 6),
-            const Expanded(
-              child: Text(
-                'Sin último service cargado.',
-                style: TextStyle(color: Colors.white60, fontSize: 12),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AdminVehiculoFormScreen(
-                      vehiculoId: (data['PATENTE'] ?? '').toString(),
-                      datosIniciales: data,
-                    ),
-                  ),
-                );
-              },
-              child: const Text('Cargar'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Calcular km restantes hasta el próximo service.
+    // Calcular km restantes hasta el próximo service (si hay datos).
     int? kmRestantes;
     if (ultimoKm != null && kmActual != null) {
       final proximo = ultimoKm + intervalo;
@@ -1241,9 +1207,27 @@ class _ResumenService extends StatelessWidget {
                 ? AppColors.accentOrange
                 : AppColors.accentGreen;
 
+    final sinDatos = !hayFecha && ultimoKm == null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (sinDatos)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: Colors.white38),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Sin último service cargado.',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (hayFecha)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1302,6 +1286,183 @@ class _ResumenService extends StatelessWidget {
               ],
             ),
           ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () => _abrirEdicion(context),
+            icon: const Icon(Icons.edit_calendar_outlined, size: 16),
+            label: Text(sinDatos ? 'Cargar último service' : 'Editar último service'),
+            style: TextButton.styleFrom(
+                foregroundColor: AppColors.accentGreen),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _abrirEdicion(BuildContext context) async {
+    final fechaRaw = data['ULTIMO_SERVICE_FECHA']?.toString();
+    final ultimoKm = (data['ULTIMO_SERVICE_KM'] as num?)?.toDouble();
+    await showDialog(
+      context: context,
+      builder: (_) => _EditarServiceDialog(
+        patente: patente,
+        fechaInicial: (fechaRaw != null && fechaRaw.isNotEmpty)
+            ? AppFormatters.tryParseFecha(fechaRaw)
+            : null,
+        kmInicial: ultimoKm?.toInt(),
+      ),
+    );
+  }
+}
+
+/// Dialog para editar fecha + km del último service en un solo paso.
+/// Persiste ambos campos juntos; un campo vacío se guarda como null
+/// (limpia el dato). Si la fecha elegida es futura la rechaza
+/// — un service no puede estar en el futuro.
+class _EditarServiceDialog extends StatefulWidget {
+  final String patente;
+  final DateTime? fechaInicial;
+  final int? kmInicial;
+
+  const _EditarServiceDialog({
+    required this.patente,
+    required this.fechaInicial,
+    required this.kmInicial,
+  });
+
+  @override
+  State<_EditarServiceDialog> createState() => _EditarServiceDialogState();
+}
+
+class _EditarServiceDialogState extends State<_EditarServiceDialog> {
+  late DateTime? _fecha;
+  late TextEditingController _kmCtrl;
+  bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fecha = widget.fechaInicial;
+    _kmCtrl = TextEditingController(
+      text: widget.kmInicial != null
+          ? AppFormatters.formatearMiles(widget.kmInicial)
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _kmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _elegirFecha() async {
+    final picked = await pickFecha(
+      context,
+      initial: _fecha ?? DateTime.now(),
+      titulo: 'Fecha del último service',
+    );
+    if (picked == null) return;
+    final hoy = DateTime.now();
+    final hoyTrunc = DateTime(hoy.year, hoy.month, hoy.day);
+    if (DateTime(picked.year, picked.month, picked.day).isAfter(hoyTrunc)) {
+      if (mounted) {
+        AppFeedback.warning(context,
+            'La fecha del último service no puede estar en el futuro.');
+      }
+      return;
+    }
+    setState(() => _fecha = picked);
+  }
+
+  Future<void> _guardar() async {
+    if (_guardando) return;
+    setState(() => _guardando = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final km = AppFormatters.parsearMiles(_kmCtrl.text);
+      await FirebaseFirestore.instance
+          .collection(AppCollections.vehiculos)
+          .doc(widget.patente)
+          .update({
+        'ULTIMO_SERVICE_FECHA':
+            _fecha == null ? null : AppFormatters.aIsoFechaLocal(_fecha!),
+        'ULTIMO_SERVICE_KM': km?.toDouble(),
+        'fecha_ultima_actualizacion': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        Navigator.pop(context);
+        AppFeedback.successOn(messenger, 'Service actualizado.');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _guardando = false);
+        AppFeedback.errorOn(messenger, 'Error al guardar: $e');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fechaTxt = _fecha == null
+        ? 'Sin fecha'
+        : '${_fecha!.day.toString().padLeft(2, '0')}/'
+            '${_fecha!.month.toString().padLeft(2, '0')}/${_fecha!.year}';
+    return AlertDialog(
+      title: const Text('Último service'),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.event,
+                  color: AppColors.accentGreen, size: 20),
+              title: const Text('Fecha',
+                  style: TextStyle(fontSize: 11, color: Colors.white38)),
+              subtitle: Text(
+                fechaTxt,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              trailing: TextButton(
+                onPressed: _guardando ? null : _elegirFecha,
+                child: const Text('CAMBIAR'),
+              ),
+              onTap: _guardando ? null : _elegirFecha,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _kmCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [AppFormatters.inputMiles],
+              enabled: !_guardando,
+              decoration: const InputDecoration(
+                labelText: 'KM al momento del service',
+                hintText: 'Ej. 350.000',
+                suffixText: 'km',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _guardando ? null : () => Navigator.pop(context),
+          child: const Text('CANCELAR'),
+        ),
+        ElevatedButton(
+          onPressed: _guardando ? null : _guardar,
+          child: _guardando
+              ? const SizedBox(
+                  width: 18, height: 18, child: CircularProgressIndicator())
+              : const Text('GUARDAR'),
+        ),
       ],
     );
   }
