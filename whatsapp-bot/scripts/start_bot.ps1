@@ -139,11 +139,24 @@ Write-Host "==========================================" -ForegroundColor Green
 Write-Host "OK BOT CORRIENDO" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Para ver los logs en vivo (en otra ventana):" -ForegroundColor Cyan
-Write-Host "  Get-Content $logsDir\bot.out.log -Tail 50 -Wait" -ForegroundColor White
-Write-Host ""
 Write-Host "Para detener cuando termines de trabajar:" -ForegroundColor Cyan
-Write-Host "  .\scripts\stop_bot.ps1" -ForegroundColor White
+Write-Host "  .\scripts\stop_bot.ps1   (o el icono 'Detener Bot WhatsApp')" -ForegroundColor White
 Write-Host ""
 Write-Host "RECORDATORIO: si tenes el bot tambien en otra PC, asegurate" -ForegroundColor Yellow
 Write-Host "de que esa otra este APAGADA o el bot detenido alla." -ForegroundColor Yellow
+Write-Host ""
+
+# Abrir ventana con los logs en vivo. Al estar el sistema en UTF-8
+# global, el QR ASCII y los acentos se renderizan bien sin parametros
+# extra. Pasamos -Encoding UTF8 igual por defensa en profundidad.
+$logFile = Join-Path $logsDir 'bot.out.log'
+$tailCmd = "`$Host.UI.RawUI.WindowTitle='Logs Bot WhatsApp'; Get-Content '$logFile' -Tail 80 -Wait -Encoding UTF8"
+Write-Host "Abriendo ventana con los logs en vivo..." -ForegroundColor Cyan
+try {
+    Start-Process powershell -ArgumentList @(
+        '-NoProfile', '-NoExit', '-Command', $tailCmd
+    ) -ErrorAction Stop | Out-Null
+} catch {
+    Write-Host "No pude abrir la ventana de logs. Abrila a mano:" -ForegroundColor Yellow
+    Write-Host "  Get-Content '$logFile' -Tail 50 -Wait" -ForegroundColor Yellow
+}
