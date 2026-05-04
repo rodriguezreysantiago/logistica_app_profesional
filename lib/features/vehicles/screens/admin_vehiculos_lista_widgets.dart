@@ -525,7 +525,10 @@ class _DetalleVehiculo extends StatelessWidget {
         for (final spec
             in AppVencimientos.forTipo(data['TIPO']?.toString()))
           _VencimientoRow(
+            patente: patente,
             etiqueta: spec.etiqueta,
+            campoFecha: spec.campoFecha,
+            campoArchivo: spec.campoArchivo,
             fecha: data[spec.campoFecha],
             url: data[spec.campoArchivo],
             tituloVisor: '${spec.etiqueta} $patente',
@@ -978,13 +981,19 @@ class _CeldaCombustible extends StatelessWidget {
 }
 
 class _VencimientoRow extends StatelessWidget {
+  final String patente;
   final String etiqueta;
+  final String campoFecha;
+  final String campoArchivo;
   final dynamic fecha;
   final String? url;
   final String tituloVisor;
 
   const _VencimientoRow({
+    required this.patente,
     required this.etiqueta,
+    required this.campoFecha,
+    required this.campoArchivo,
     required this.fecha,
     required this.url,
     required this.tituloVisor,
@@ -993,31 +1002,49 @@ class _VencimientoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tieneFecha = fecha != null && fecha.toString().isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          AppFileThumbnail(url: url, tituloVisor: tituloVisor),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 90,
-            child: Text(
-              etiqueta,
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
+    // Tappeable: abre el sheet de VehiculoActions.documento (mismo
+    // patrón que la ficha de Personal). Permite editar la fecha o
+    // subir/reemplazar el archivo digital del papel.
+    return InkWell(
+      onTap: () => VehiculoActions.documento(
+        context,
+        patente: patente,
+        etiqueta: etiqueta,
+        campoFecha: campoFecha,
+        campoUrl: campoArchivo,
+        fechaActual: fecha?.toString(),
+        urlActual: url,
+      ),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Row(
+          children: [
+            AppFileThumbnail(url: url, tituloVisor: tituloVisor),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 90,
+              child: Text(
+                etiqueta,
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-          ),
-          Expanded(
-            child: Text(
-              tieneFecha ? AppFormatters.formatearFecha(fecha) : '—',
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+            Expanded(
+              child: Text(
+                tieneFecha ? AppFormatters.formatearFecha(fecha) : '—',
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
             ),
-          ),
-          VencimientoBadge(fecha: fecha),
-        ],
+            VencimientoBadge(fecha: fecha),
+            const SizedBox(width: 4),
+            const Icon(Icons.edit_outlined,
+                size: 14, color: Colors.white38),
+          ],
+        ),
       ),
     );
   }
