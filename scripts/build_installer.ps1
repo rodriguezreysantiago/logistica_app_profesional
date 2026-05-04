@@ -40,11 +40,15 @@ if (-not (Test-Path (Join-Path $buildDir 'coopertrans_movil.exe'))) {
 }
 
 # --- 3. Encontrar iscc.exe (compilador Inno Setup) -----------------
+# winget puede instalar Inno Setup en system (Program Files) o user
+# (LOCALAPPDATA\Programs) según la opción que use. Buscamos en ambos.
 $iscc = $null
 $candidates = @(
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
-    "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe"
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 5\ISCC.exe"
 )
 foreach ($c in $candidates) {
     if (Test-Path $c) { $iscc = $c; break }
