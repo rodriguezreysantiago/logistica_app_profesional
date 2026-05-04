@@ -81,25 +81,6 @@ class _AdminDescargasPtoScreenState extends State<AdminDescargasPtoScreen> {
     final fin = inicio.add(const Duration(days: 1));
     return AppScaffold(
       title: 'Descargas (PTO)',
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.calendar_month_outlined),
-          tooltip: 'Elegir día',
-          onPressed: _elegirFecha,
-        ),
-        if (!_esHoy)
-          IconButton(
-            icon: const Icon(Icons.today_outlined),
-            tooltip: 'Volver a hoy',
-            onPressed: () {
-              final hoy = DateTime.now();
-              setState(() {
-                _fecha = DateTime(hoy.year, hoy.month, hoy.day);
-                _filtroPatente = null;
-              });
-            },
-          ),
-      ],
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
             .collection(AppCollections.volvoAlertas)
@@ -157,6 +138,15 @@ class _AdminDescargasPtoScreenState extends State<AdminDescargasPtoScreen> {
                 filtroPatente: _filtroPatente,
                 onFiltroChange: (p) => setState(() => _filtroPatente = p),
                 etiquetaFecha: _etiquetaFecha,
+                esHoy: _esHoy,
+                onElegirFecha: _elegirFecha,
+                onIrAHoy: () {
+                  final hoy = DateTime.now();
+                  setState(() {
+                    _fecha = DateTime(hoy.year, hoy.month, hoy.day);
+                    _filtroPatente = null;
+                  });
+                },
               ),
               Expanded(
                 child: ListView.builder(
@@ -182,6 +172,9 @@ class _Toolbar extends StatelessWidget {
   final String? filtroPatente;
   final ValueChanged<String?> onFiltroChange;
   final String etiquetaFecha;
+  final bool esHoy;
+  final VoidCallback onElegirFecha;
+  final VoidCallback onIrAHoy;
 
   const _Toolbar({
     required this.totalEventos,
@@ -190,6 +183,9 @@ class _Toolbar extends StatelessWidget {
     required this.filtroPatente,
     required this.onFiltroChange,
     required this.etiquetaFecha,
+    required this.esHoy,
+    required this.onElegirFecha,
+    required this.onIrAHoy,
   });
 
   @override
@@ -199,8 +195,43 @@ class _Toolbar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Selector de fecha visible (no oculto en AppBar). Antes
+          // estaba como IconButton chiquito arriba a la derecha y
+          // pasaba inadvertido — Santiago: "falta un calendario para
+          // elegir otras fechas".
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: onElegirFecha,
+                icon:
+                    const Icon(Icons.calendar_month_outlined, size: 18),
+                label: Text(etiquetaFecha),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: BorderSide(
+                    color: esHoy
+                        ? AppColors.accentGreen
+                        : Colors.white38,
+                  ),
+                ),
+              ),
+              if (!esHoy)
+                TextButton.icon(
+                  onPressed: onIrAHoy,
+                  icon: const Icon(Icons.today_outlined, size: 18),
+                  label: const Text('Ir a hoy'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.accentGreen,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Text(
-            '$visibles de $totalEventos descargas · $etiquetaFecha',
+            '$visibles de $totalEventos descargas',
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 8),

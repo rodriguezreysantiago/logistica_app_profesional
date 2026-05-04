@@ -16,12 +16,15 @@ import '../../eco_driving/utils/etiquetas_alerta_volvo.dart';
 /// Lista los eventos del Vehicle Alerts API que el `volvoAlertasPoller`
 /// (scheduled cada 5 min) guarda en `VOLVO_ALERTAS`.
 ///
-/// **Diseño revisado 2026-05-04**: por default muestra SOLO las alertas
-/// del día actual. El operador puede elegir otra fecha con el calendario,
-/// o togglear "Mostrar atendidas" para ver todo el día (sin importar
-/// estado). El histórico de muchos días se ve cambiando de fecha — no
-/// hay vista "todas las alertas de los últimos N días" para evitar
-/// listas inmanejables (a 50 eventos/día, 200 = ~4 días).
+/// **Diseño revisado 2026-05-04 (v2)**: por default muestra SOLO las
+/// alertas del día actual con paginación de 30 ítems por página.
+/// Filtros: severidad (HIGH/MEDIUM/LOW/Todas) + atendida (Pendientes/Todas).
+/// Búsqueda por texto sobre patente/tipo/VIN.
+///
+/// Por qué NO usamos `AppListPage`: ese widget solo invoca el callback
+/// `filter` cuando hay query de búsqueda (cortocircuito si query vacío).
+/// Acá necesitamos filtros independientes (severidad, pendientes) que
+/// se apliquen siempre, así que armamos el body manualmente.
 ///
 /// Query: `where('creado_en', between [startOfDay, endOfDay))` +
 /// `orderBy('creado_en', desc)`. Where + orderBy en el MISMO campo →
@@ -38,21 +41,45 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
   /// Día seleccionado — por default hoy.
   late DateTime _fecha;
 
-  /// `true` (default) → solo alertas no atendidas. `false` → todas.
+  /// `true` → solo alertas no atendidas. `false` → todas.
   bool _soloPendientes = true;
+
+  /// Filtro por severidad. `null` = todas.
+  String? _severidadFiltro;
+
+  /// Página actual (0-indexed). Reset a 0 cuando cambia algún filtro.
+  int _pagina = 0;
+  static const int _itemsPorPagina = 30;
+
+  /// Texto de búsqueda libre (patente/tipo/VIN).
+  final _searchCtl = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     final ahora = DateTime.now();
     _fecha = DateTime(ahora.year, ahora.month, ahora.day);
+    _searchCtl.addListener(() {
+      final nuevo = _searchCtl.text.trim().toUpperCase();
+      if (nuevo != _query) {
+        setState(() {
+          _query = nuevo;
+          _pagina = 0;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtl.dispose();
+    super.dispose();
   }
 
   Stream<QuerySnapshot> get _alertasStream {
     final inicio = DateTime(_fecha.year, _fecha.month, _fecha.day);
     final fin = inicio.add(const Duration(days: 1));
-    // where + orderBy en `creado_en` (mismo campo) → no necesita índice
-    // compuesto. Trae como mucho ~50 docs por día.
     return FirebaseFirestore.instance
         .collection(AppCollections.volvoAlertas)
         .where('creado_en',
@@ -88,80 +115,198 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
       locale: const Locale('es', 'AR'),
     );
     if (picked != null && mounted) {
-      setState(() => _fecha = picked);
+      setState(() {
+        _fecha = picked;
+        _pagina = 0;
+      });
     }
+  }
+
+  /// Aplica los filtros (severidad, pendientes, búsqueda) a la lista
+  /// completa del día. Se llama en cada rebuild del StreamBuilder.
+  List<QueryDocumentSnapshot> _filtrar(List<QueryDocumentSnapshot> docs) {
+    return docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (_soloPendientes && data['atendida'] == true) return false;
+      if (_severidadFiltro != null) {
+        final sev = (data['severidad'] ?? '').toString().toUpperCase();
+        if (sev != _severidadFiltro) return false;
+      }
+      if (_query.isEmpty) return true;
+      final hay = '${data['patente'] ?? ''} '
+              '${data['tipo'] ?? ''} '
+              '${data['vin'] ?? ''} '
+              '${data['severidad'] ?? ''}'
+          .toUpperCase();
+      return hay.contains(_query);
+    }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Alertas Volvo',
-      body: AppListPage(
-        stream: _alertasStream,
-        searchHint: 'Buscar por patente, tipo o VIN...',
-        emptyTitle: _soloPendientes
-            ? 'Sin alertas pendientes ese día'
-            : 'Sin alertas registradas ese día',
-        emptySubtitle: _soloPendientes
-            ? 'Cambiá a "Mostrar atendidas" para ver el histórico del día.'
-            : 'Probá con otro día desde el botón de calendario.',
-        emptyIcon: Icons.notifications_off_outlined,
-        header: _Header(
-          fechaEtiqueta: _etiquetaFecha,
-          esHoy: _esHoy,
-          soloPendientes: _soloPendientes,
-          onElegirFecha: _elegirFecha,
-          onIrAHoy: () {
-            final hoy = DateTime.now();
-            setState(() => _fecha = DateTime(hoy.year, hoy.month, hoy.day));
-          },
-          onTogglePendientes: (v) =>
-              setState(() => _soloPendientes = v),
-        ),
-        filter: (doc, q) {
-          final data = doc.data() as Map<String, dynamic>;
-          // Filtro client-side de "atendidas" — la query server ya
-          // limita por día.
-          if (_soloPendientes && data['atendida'] == true) return false;
-          if (q.isEmpty) return true;
-          final hay = '${data['patente'] ?? ''} '
-                  '${data['tipo'] ?? ''} '
-                  '${data['vin'] ?? ''} '
-                  '${data['severidad'] ?? ''}'
-              .toUpperCase();
-          return hay.contains(q);
-        },
-        itemBuilder: (ctx, doc) => _AlertaCard(doc: doc),
+      body: Column(
+        children: [
+          // Buscador.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: TextField(
+              controller: _searchCtl,
+              decoration: InputDecoration(
+                hintText: 'Buscar por patente, tipo o VIN...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () => _searchCtl.clear(),
+                      ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                isDense: true,
+              ),
+            ),
+          ),
+          // Filtros visuales.
+          _BarraFiltros(
+            fechaEtiqueta: _etiquetaFecha,
+            esHoy: _esHoy,
+            soloPendientes: _soloPendientes,
+            severidadFiltro: _severidadFiltro,
+            onElegirFecha: _elegirFecha,
+            onIrAHoy: () {
+              final hoy = DateTime.now();
+              setState(() {
+                _fecha = DateTime(hoy.year, hoy.month, hoy.day);
+                _pagina = 0;
+              });
+            },
+            onTogglePendientes: (v) => setState(() {
+              _soloPendientes = v;
+              _pagina = 0;
+            }),
+            onSeveridadChange: (s) => setState(() {
+              _severidadFiltro = s;
+              _pagina = 0;
+            }),
+          ),
+          // Lista paginada.
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _alertasStream,
+              builder: (ctx, snap) {
+                if (snap.hasError) {
+                  return AppErrorState(subtitle: snap.error.toString());
+                }
+                if (!snap.hasData) {
+                  return const AppLoadingState();
+                }
+                final docsTodos = snap.data!.docs;
+                final docsFiltrados = _filtrar(docsTodos);
+                if (docsFiltrados.isEmpty) {
+                  return AppEmptyState(
+                    icon: Icons.notifications_off_outlined,
+                    title: _emptyTitle(),
+                    subtitle: _emptySubtitle(),
+                  );
+                }
+                final totalPaginas =
+                    (docsFiltrados.length / _itemsPorPagina).ceil();
+                if (_pagina >= totalPaginas) {
+                  // Si la página actual queda fuera de rango (porque
+                  // se filtró más fuerte), volvemos a la primera.
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) setState(() => _pagina = 0);
+                  });
+                }
+                final inicio = _pagina * _itemsPorPagina;
+                final fin =
+                    (inicio + _itemsPorPagina).clamp(0, docsFiltrados.length);
+                final pagina = docsFiltrados.sublist(inicio, fin);
+                return Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: pagina.length,
+                        itemBuilder: (_, i) => _AlertaCard(doc: pagina[i]),
+                      ),
+                    ),
+                    if (totalPaginas > 1)
+                      _Paginador(
+                        pagina: _pagina,
+                        totalPaginas: totalPaginas,
+                        totalItems: docsFiltrados.length,
+                        itemsPorPagina: _itemsPorPagina,
+                        onPrev: _pagina > 0
+                            ? () => setState(() => _pagina--)
+                            : null,
+                        onNext: _pagina < totalPaginas - 1
+                            ? () => setState(() => _pagina++)
+                            : null,
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  String _emptyTitle() {
+    if (_query.isNotEmpty) return 'Sin resultados para "$_query"';
+    if (_severidadFiltro != null && _soloPendientes) {
+      return 'Sin alertas $_severidadFiltro pendientes ese día';
+    }
+    if (_severidadFiltro != null) {
+      return 'Sin alertas $_severidadFiltro ese día';
+    }
+    if (_soloPendientes) return 'Sin alertas pendientes ese día';
+    return 'Sin alertas registradas ese día';
+  }
+
+  String? _emptySubtitle() {
+    if (_query.isNotEmpty) return null;
+    if (_soloPendientes) {
+      return 'Cambiá a "Mostrar atendidas" para ver el histórico del día.';
+    }
+    return 'Probá con otro día desde el botón de calendario.';
   }
 }
 
 // =============================================================================
-// HEADER — selector de fecha + filtros
+// BARRA DE FILTROS — fecha + atendidas + severidad
 // =============================================================================
 
-class _Header extends StatelessWidget {
+class _BarraFiltros extends StatelessWidget {
   final String fechaEtiqueta;
   final bool esHoy;
   final bool soloPendientes;
+  final String? severidadFiltro;
   final VoidCallback onElegirFecha;
   final VoidCallback onIrAHoy;
   final ValueChanged<bool> onTogglePendientes;
+  final ValueChanged<String?> onSeveridadChange;
 
-  const _Header({
+  const _BarraFiltros({
     required this.fechaEtiqueta,
     required this.esHoy,
     required this.soloPendientes,
+    required this.severidadFiltro,
     required this.onElegirFecha,
     required this.onIrAHoy,
     required this.onTogglePendientes,
+    required this.onSeveridadChange,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -188,7 +333,7 @@ class _Header extends StatelessWidget {
             ),
           FilterChip(
             label: Text(
-              soloPendientes ? 'Solo pendientes' : 'Mostrar todas',
+              soloPendientes ? 'Solo pendientes' : 'Mostrar atendidas',
             ),
             selected: soloPendientes,
             onSelected: onTogglePendientes,
@@ -198,6 +343,121 @@ class _Header extends StatelessWidget {
                   : Icons.filter_alt_off_outlined,
               size: 18,
             ),
+          ),
+          // Filtro por severidad — null = todas.
+          ChoiceChip(
+            label: const Text('Todas'),
+            selected: severidadFiltro == null,
+            onSelected: (_) => onSeveridadChange(null),
+          ),
+          _ChipSeveridad(
+            label: 'HIGH',
+            color: const Color(0xFFD32F2F),
+            seleccionado: severidadFiltro == 'HIGH',
+            onTap: () => onSeveridadChange('HIGH'),
+          ),
+          _ChipSeveridad(
+            label: 'MEDIUM',
+            color: const Color(0xFFEF6C00),
+            seleccionado: severidadFiltro == 'MEDIUM',
+            onTap: () => onSeveridadChange('MEDIUM'),
+          ),
+          _ChipSeveridad(
+            label: 'LOW',
+            color: const Color(0xFFFBC02D),
+            seleccionado: severidadFiltro == 'LOW',
+            onTap: () => onSeveridadChange('LOW'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChipSeveridad extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool seleccionado;
+  final VoidCallback onTap;
+
+  const _ChipSeveridad({
+    required this.label,
+    required this.color,
+    required this.seleccionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: seleccionado,
+      onSelected: (_) => onTap(),
+      labelStyle: TextStyle(
+        color: seleccionado ? Colors.white : color,
+        fontWeight: FontWeight.bold,
+        fontSize: 11,
+      ),
+      backgroundColor: color.withAlpha(25),
+      selectedColor: color,
+      side: BorderSide(color: color, width: 1),
+    );
+  }
+}
+
+// =============================================================================
+// PAGINADOR (footer fijo abajo)
+// =============================================================================
+
+class _Paginador extends StatelessWidget {
+  final int pagina;
+  final int totalPaginas;
+  final int totalItems;
+  final int itemsPorPagina;
+  final VoidCallback? onPrev;
+  final VoidCallback? onNext;
+
+  const _Paginador({
+    required this.pagina,
+    required this.totalPaginas,
+    required this.totalItems,
+    required this.itemsPorPagina,
+    required this.onPrev,
+    required this.onNext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final desde = pagina * itemsPorPagina + 1;
+    final hasta = ((pagina + 1) * itemsPorPagina).clamp(0, totalItems);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0D1B2A),
+        border: Border(top: BorderSide(color: Colors.white12)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            'Mostrando $desde-$hasta de $totalItems',
+            style: const TextStyle(color: Colors.white60, fontSize: 11),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            onPressed: onPrev,
+            color: onPrev == null ? Colors.white24 : Colors.white,
+            tooltip: 'Anterior',
+          ),
+          Text(
+            'Pág. ${pagina + 1} / $totalPaginas',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            onPressed: onNext,
+            color: onNext == null ? Colors.white24 : Colors.white,
+            tooltip: 'Siguiente',
           ),
         ],
       ),
@@ -312,8 +572,6 @@ class _AlertaCard extends StatelessWidget {
         'atendida_por': dni,
         'atendida_en': FieldValue.serverTimestamp(),
       });
-      // Auditoría server-side. Fire-and-forget — si falla, no bloquea
-      // al admin (la marca ya quedó persistida).
       final data = doc.data() as Map<String, dynamic>;
       unawaited(AuditLog.registrar(
         accion: AuditAccion.marcarAlertaVolvoAtendida,
@@ -332,10 +590,6 @@ class _AlertaCard extends StatelessWidget {
   }
 }
 
-// =============================================================================
-// HELPERS
-// =============================================================================
-
 String _formatTimestamp(Timestamp? ts) {
   if (ts == null) return '—';
   final dt = ts.toDate().toLocal();
@@ -344,10 +598,6 @@ String _formatTimestamp(Timestamp? ts) {
       '${two(dt.hour)}:${two(dt.minute)}';
 }
 
-// =============================================================================
-// SEVERIDAD CHIP
-// =============================================================================
-
 class _SeveridadChip extends StatelessWidget {
   final String severidad;
   const _SeveridadChip({required this.severidad});
@@ -355,9 +605,9 @@ class _SeveridadChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (severidad.toUpperCase()) {
-      'HIGH' => const Color(0xFFD32F2F),    // rojo
-      'MEDIUM' => const Color(0xFFEF6C00),  // naranja
-      'LOW' => const Color(0xFFFBC02D),     // amarillo
+      'HIGH' => const Color(0xFFD32F2F),
+      'MEDIUM' => const Color(0xFFEF6C00),
+      'LOW' => const Color(0xFFFBC02D),
       _ => Colors.grey,
     };
     return Container(
