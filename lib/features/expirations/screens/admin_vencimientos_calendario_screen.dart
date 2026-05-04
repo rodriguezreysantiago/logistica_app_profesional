@@ -199,6 +199,10 @@ class _AdminVencimientosCalendarioScreenState
             lastDay: DateTime(2030),
             focusedDay: _focusedDay,
             calendarFormat: _format,
+            // Locale español-AR para que día/mes salgan en castellano
+            // (Lun, Mar, ... / Enero, Febrero, ...). Requiere que el
+            // main.dart haya hecho initializeDateFormatting('es_AR').
+            locale: 'es_AR',
             availableCalendarFormats: const {
               CalendarFormat.month: 'Mes',
               CalendarFormat.twoWeeks: '2 sem',

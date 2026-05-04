@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -81,6 +82,13 @@ void main() async {
   await AppLogger.init();
   await PrefsService.init();
   await NotificationService.init();
+
+  // Inicializar símbolos de fecha en español-AR para que widgets como
+  // TableCalendar muestren los nombres de días/meses en español.
+  // MaterialApp.locale solo configura las localizations de Flutter
+  // (botones, tooltips); el `intl` package usa una tabla aparte que
+  // hay que cargar explícitamente con esta llamada.
+  await initializeDateFormatting('es_AR', null);
 
   // ================= SENTRY =================
   // El DSN de Sentry NO es un secret crítico (solo permite enviar
