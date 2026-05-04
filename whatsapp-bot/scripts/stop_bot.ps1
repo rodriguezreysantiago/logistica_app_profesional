@@ -43,19 +43,38 @@ function Invoke-ElevatedServiceAction {
     }
 }
 
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "DETENIENDO BOT - Coopertrans Movil" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host ""
+
 $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $svc) {
-    Write-Host "El servicio '$serviceName' no esta instalado en esta PC." -ForegroundColor Yellow
+    Write-Host "==========================================" -ForegroundColor Yellow
+    Write-Host "SERVICIO NO INSTALADO" -ForegroundColor Yellow
+    Write-Host "==========================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "El servicio '$serviceName' no esta en esta PC." -ForegroundColor Yellow
     Write-Host "Si estas en una PC nueva, no hay nada que detener." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "(Esta ventana se queda abierta. Cerrala cuando quieras.)" -ForegroundColor DarkGray
     exit 0
 }
 
 if ($svc.Status -eq 'Stopped') {
-    Write-Host "El bot ya estaba detenido." -ForegroundColor Yellow
+    Write-Host "==========================================" -ForegroundColor Yellow
+    Write-Host "EL BOT YA ESTABA DETENIDO" -ForegroundColor Yellow
+    Write-Host "==========================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Estado: Stopped (no estaba corriendo en esta PC)" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "(Esta ventana se queda abierta. Cerrala cuando quieras.)" -ForegroundColor DarkGray
     exit 0
 }
 
-Write-Host "Deteniendo bot '$serviceName'..." -ForegroundColor Cyan
+Write-Host "Estado actual: $($svc.Status)" -ForegroundColor Cyan
+Write-Host "Deteniendo... (espera grace shutdown hasta 90s)" -ForegroundColor Cyan
+Write-Host ""
 $ok = Invoke-ElevatedServiceAction -Action 'Stop' -Name $serviceName
 if (-not $ok) {
     Write-Host "No pude detener el servicio." -ForegroundColor Red
@@ -74,19 +93,32 @@ while ((Get-Service -Name $serviceName).Status -ne 'Stopped' -and $elapsed -lt $
 }
 
 $svc = Get-Service -Name $serviceName
+$ts = Get-Date -Format 'HH:mm:ss'
 if ($svc.Status -eq 'Stopped') {
     Write-Host ""
-    Write-Host "OK Bot detenido." -ForegroundColor Green
+    Write-Host "==========================================" -ForegroundColor Green
+    Write-Host "OK BOT DETENIDO" -ForegroundColor Green
+    Write-Host "==========================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Si modificaste codigo y queres pushearlo:" -ForegroundColor Cyan
-    Write-Host "  git add -A; git commit -m '...'; git push" -ForegroundColor White
+    Write-Host "Servicio:  $serviceName" -ForegroundColor White
+    Write-Host "Estado:    Stopped" -ForegroundColor Green
+    Write-Host "Cerrado:   $ts (despues de ${elapsed}s de espera)" -ForegroundColor White
     Write-Host ""
-    Write-Host "Ahora podes arrancar el bot en la otra PC con seguridad." -ForegroundColor Cyan
+    Write-Host "Ya podes arrancar el bot en la otra PC con seguridad." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "(Esta ventana se queda abierta. Cerrala cuando quieras.)" -ForegroundColor DarkGray
 } else {
     Write-Host ""
-    Write-Host "ADVERTENCIA: el servicio no llego a Stopped despues de ${timeout}s." -ForegroundColor Yellow
+    Write-Host "==========================================" -ForegroundColor Red
+    Write-Host "FALLO AL DETENER" -ForegroundColor Red
+    Write-Host "==========================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "El servicio no llego a Stopped despues de ${timeout}s." -ForegroundColor Yellow
     Write-Host "Estado actual: $($svc.Status)" -ForegroundColor Yellow
+    Write-Host ""
     Write-Host "Forzar parada con (puede dejar un envio incompleto):" -ForegroundColor Yellow
     Write-Host "  Stop-Service -Name $serviceName -Force" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "(Esta ventana se queda abierta. Cerrala cuando quieras.)" -ForegroundColor DarkGray
     exit 1
 }
