@@ -38,8 +38,9 @@ class AdminVolvoAlertasScreen extends StatefulWidget {
 }
 
 class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
-  /// Día seleccionado — por default hoy.
-  late DateTime _fecha;
+  /// Rango seleccionado. `start == end` (mismo día) representa una
+  /// fecha única — la UI lo etiqueta diferente. Default: hoy/hoy.
+  late DateTimeRange _rango;
 
   /// `true` → solo alertas no atendidas. `false` → todas.
   bool _soloPendientes = true;
@@ -58,8 +59,8 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
   @override
   void initState() {
     super.initState();
-    final ahora = DateTime.now();
-    _fecha = DateTime(ahora.year, ahora.month, ahora.day);
+    final hoy = _truncarDia(DateTime.now());
+    _rango = DateTimeRange(start: hoy, end: hoy);
     _searchCtl.addListener(() {
       final nuevo = _searchCtl.text.trim().toUpperCase();
       if (nuevo != _query) {
@@ -77,46 +78,57 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
     super.dispose();
   }
 
+  static DateTime _truncarDia(DateTime dt) =>
+      DateTime(dt.year, dt.month, dt.day);
+
   Stream<QuerySnapshot> get _alertasStream {
-    final inicio = DateTime(_fecha.year, _fecha.month, _fecha.day);
-    final fin = inicio.add(const Duration(days: 1));
+    // Fin EXCLUSIVO: 00:00 del día siguiente al `end`. Eso incluye
+    // todo el día end completo en la query `< _hastaTs`.
+    final hasta = _rango.end.add(const Duration(days: 1));
     return FirebaseFirestore.instance
         .collection(AppCollections.volvoAlertas)
         .where('creado_en',
-            isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
-        .where('creado_en', isLessThan: Timestamp.fromDate(fin))
+            isGreaterThanOrEqualTo: Timestamp.fromDate(_rango.start))
+        .where('creado_en', isLessThan: Timestamp.fromDate(hasta))
         .orderBy('creado_en', descending: true)
         .snapshots();
   }
 
   bool get _esHoy {
-    final hoy = DateTime.now();
-    return _fecha.year == hoy.year &&
-        _fecha.month == hoy.month &&
-        _fecha.day == hoy.day;
+    final hoy = _truncarDia(DateTime.now());
+    return _rango.start == hoy && _rango.end == hoy;
   }
 
+  bool get _esUnDia => _rango.start == _rango.end;
+
   String get _etiquetaFecha {
-    final d = _fecha.day.toString().padLeft(2, '0');
-    final m = _fecha.month.toString().padLeft(2, '0');
-    return _esHoy ? 'HOY ($d-$m-${_fecha.year})' : '$d-$m-${_fecha.year}';
+    String fmt(DateTime d) =>
+        '${d.day.toString().padLeft(2, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-${d.year}';
+    if (_esHoy) return 'HOY (${fmt(_rango.start)})';
+    if (_esUnDia) return fmt(_rango.start);
+    return '${fmt(_rango.start)} al ${fmt(_rango.end)}';
   }
 
   Future<void> _elegirFecha() async {
     final ahora = DateTime.now();
-    final picked = await showDatePicker(
+    final picked = await showDateRangePicker(
       context: context,
-      initialDate: _fecha,
+      initialDateRange: _rango,
       firstDate: DateTime(2024),
-      lastDate: ahora,
-      helpText: 'Elegir día de alertas',
+      lastDate: _truncarDia(ahora),
+      helpText: 'Elegir fecha o rango de alertas',
       cancelText: 'CANCELAR',
       confirmText: 'VER',
+      saveText: 'VER',
       locale: const Locale('es', 'AR'),
     );
     if (picked != null && mounted) {
       setState(() {
-        _fecha = picked;
+        _rango = DateTimeRange(
+          start: _truncarDia(picked.start),
+          end: _truncarDia(picked.end),
+        );
         _pagina = 0;
       });
     }
@@ -177,9 +189,9 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
             severidadFiltro: _severidadFiltro,
             onElegirFecha: _elegirFecha,
             onIrAHoy: () {
-              final hoy = DateTime.now();
+              final hoy = _truncarDia(DateTime.now());
               setState(() {
-                _fecha = DateTime(hoy.year, hoy.month, hoy.day);
+                _rango = DateTimeRange(start: hoy, end: hoy);
                 _pagina = 0;
               });
             },
@@ -258,23 +270,24 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
   }
 
   String _emptyTitle() {
+    final periodo = _esUnDia ? 'ese día' : 'ese período';
     if (_query.isNotEmpty) return 'Sin resultados para "$_query"';
     if (_severidadFiltro != null && _soloPendientes) {
-      return 'Sin alertas $_severidadFiltro pendientes ese día';
+      return 'Sin alertas $_severidadFiltro pendientes $periodo';
     }
     if (_severidadFiltro != null) {
-      return 'Sin alertas $_severidadFiltro ese día';
+      return 'Sin alertas $_severidadFiltro $periodo';
     }
-    if (_soloPendientes) return 'Sin alertas pendientes ese día';
-    return 'Sin alertas registradas ese día';
+    if (_soloPendientes) return 'Sin alertas pendientes $periodo';
+    return 'Sin alertas registradas $periodo';
   }
 
   String? _emptySubtitle() {
     if (_query.isNotEmpty) return null;
     if (_soloPendientes) {
-      return 'Cambiá a "Mostrar atendidas" para ver el histórico del día.';
+      return 'Cambiá a "Mostrar atendidas" para ver el histórico${_esUnDia ? " del día" : " del período"}.';
     }
-    return 'Probá con otro día desde el botón de calendario.';
+    return 'Probá con otro ${_esUnDia ? "día" : "rango"} desde el botón de calendario.';
   }
 }
 
