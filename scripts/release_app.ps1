@@ -40,9 +40,12 @@ $gh = Get-Command gh -ErrorAction SilentlyContinue
 if (-not $gh) {
     throw "gh CLI no está instalado. Instalar con: winget install GitHub.cli"
 }
-$authStatus = & gh auth status 2>&1
+# Ejecutamos `gh auth status` redirigiendo TODOS los streams a $null.
+# Sin esto, los mensajes informativos de gh a stderr disparan excepción
+# en PowerShell con $ErrorActionPreference='Stop' y abortan el script.
+& gh auth status *>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host $authStatus
+    & gh auth status   # ahora sí mostrar el detalle al usuario
     throw "gh CLI no está autenticado. Correr: gh auth login"
 }
 
@@ -56,7 +59,10 @@ if (-not (Test-Path $exePath)) {
 }
 
 # --- 4. Verificar que el tag no exista ya --------------------------
-$existing = & gh release view $tag 2>&1
+# Mismo manejo de streams: si el release no existe gh escribe
+# "release not found" a stderr (esperable, no es error real para
+# nuestro flujo).
+& gh release view $tag *>$null
 if ($LASTEXITCODE -eq 0) {
     throw "El release $tag ya existe en GitHub. Bumpeá la versión en pubspec.yaml antes."
 }
