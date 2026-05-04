@@ -20,6 +20,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Helper para llamar comandos nativos (gh, git) sin que stderr dispare
+# excepción en PowerShell 5.1. PS 5.1 envuelve cada línea de stderr en
+# un ErrorRecord y con ErrorActionPreference='Stop' aborta el script
+# aunque el comando termine con exit code 0. Bajamos la setting solo
+# durante el call y la restauramos al final.
+function Invoke-Native {
+    param([scriptblock]$Block)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Block } finally { $ErrorActionPreference = $prev }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $pubspec  = Join-Path $repoRoot 'pubspec.yaml'
 $buildDir = Join-Path $repoRoot 'build\windows\x64\runner\Release'
@@ -40,12 +52,9 @@ $gh = Get-Command gh -ErrorAction SilentlyContinue
 if (-not $gh) {
     throw "gh CLI no está instalado. Instalar con: winget install GitHub.cli"
 }
-# Ejecutamos `gh auth status` redirigiendo TODOS los streams a $null.
-# Sin esto, los mensajes informativos de gh a stderr disparan excepción
-# en PowerShell con $ErrorActionPreference='Stop' y abortan el script.
-& gh auth status *>$null
+Invoke-Native { & gh auth status *>$null }
 if ($LASTEXITCODE -ne 0) {
-    & gh auth status   # ahora sí mostrar el detalle al usuario
+    Invoke-Native { & gh auth status }   # ahora sí mostrar el detalle al usuario
     throw "gh CLI no está autenticado. Correr: gh auth login"
 }
 
@@ -59,10 +68,9 @@ if (-not (Test-Path $exePath)) {
 }
 
 # --- 4. Verificar que el tag no exista ya --------------------------
-# Mismo manejo de streams: si el release no existe gh escribe
-# "release not found" a stderr (esperable, no es error real para
-# nuestro flujo).
-& gh release view $tag *>$null
+# Si el release no existe gh escribe "release not found" a stderr
+# (esperable). Invoke-Native evita que eso aborte el script.
+Invoke-Native { & gh release view $tag *>$null }
 if ($LASTEXITCODE -eq 0) {
     throw "El release $tag ya existe en GitHub. Bumpeá la versión en pubspec.yaml antes."
 }
@@ -70,20 +78,20 @@ if ($LASTEXITCODE -eq 0) {
 # --- 5. Verificar que el repo está limpio + pusheado ---------------
 Push-Location $repoRoot
 try {
-    $dirty = git status --porcelain
+    $dirty = Invoke-Native { git status --porcelain }
     if ($dirty) {
         Write-Host "ADVERTENCIA: hay cambios sin commitear:" -ForegroundColor Yellow
         Write-Host $dirty
         $confirm = Read-Host "¿Seguir igual? (s/N)"
         if ($confirm -ne 's' -and $confirm -ne 'S') { exit 1 }
     }
-    $unpushed = git log --oneline '@{u}..HEAD' 2>$null
+    $unpushed = Invoke-Native { git log --oneline '@{u}..HEAD' 2>$null }
     if ($unpushed) {
         Write-Host "ADVERTENCIA: hay $(($unpushed | Measure-Object).Count) commits sin pushear:" -ForegroundColor Yellow
         Write-Host $unpushed
         $confirm = Read-Host "El release apunta al codigo del remoto. ¿Pushear primero? (S/n)"
         if ($confirm -ne 'n' -and $confirm -ne 'N') {
-            git push
+            Invoke-Native { git push }
             if ($LASTEXITCODE -ne 0) { throw "git push falló" }
         }
     }
@@ -109,7 +117,7 @@ if (-not $Notes) {
     # Notas auto: últimos 5 commits
     Push-Location $repoRoot
     try {
-        $log = git log --oneline -5 --no-decorate
+        $log = Invoke-Native { git log --oneline -5 --no-decorate }
         $Notes = "Cambios recientes:`n`n" + ($log | ForEach-Object { "- $_" } | Out-String)
     }
     finally { Pop-Location }
@@ -145,7 +153,7 @@ if (Test-Path $installerExe) {
     Write-Host "  (sin instalador .exe en dist\ — para sumarlo: .\scripts\build_installer.ps1)" -ForegroundColor DarkGray
 }
 
-& gh release create $tag $assets --title "Coopertrans Movil $tag" --notes $Notes
+Invoke-Native { & gh release create $tag $assets --title "Coopertrans Movil $tag" --notes $Notes }
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Error al crear release. El zip quedó en $zipPath" -ForegroundColor Red
     exit 1
