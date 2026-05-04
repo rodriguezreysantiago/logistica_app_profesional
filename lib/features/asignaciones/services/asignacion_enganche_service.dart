@@ -186,6 +186,40 @@ class AsignacionEngancheService {
       await activaTractorDoc.reference.update({'hasta': ahora});
     }
 
+    // === Espejo en VEHICULOS.ESTADO del enganche (LIBRE / OCUPADO).
+    // Los enganches usan el mismo campo ESTADO que los tractores.
+    // Antes este service no lo tocaba — quedaba "OCUPADO" forever
+    // aunque la asignación estuviera cerrada. Best-effort, si falla
+    // no bloqueamos.
+    try {
+      await _db.collection(AppCollections.vehiculos).doc(engancheLimpio).update(
+        {'ESTADO': desenganchar ? 'LIBRE' : 'OCUPADO'},
+      );
+    } catch (e) {
+      // ignore: avoid_print
+      print('Aviso: actualizar ESTADO del enganche $engancheLimpio falló: $e');
+    }
+
+    // Si había OTRO enganche acoplado al tractor nuevo, ese se
+    // desacopló automáticamente — liberamos su ESTADO también.
+    if (activaTractorDoc != null &&
+        activaTractorDoc.id != activaEngancheDoc?.id) {
+      final otroEngancheId =
+          activaTractorDoc.data()['enganche_id']?.toString();
+      if (otroEngancheId != null && otroEngancheId.isNotEmpty) {
+        try {
+          await _db
+              .collection(AppCollections.vehiculos)
+              .doc(otroEngancheId)
+              .update({'ESTADO': 'LIBRE'});
+        } catch (e) {
+          // ignore: avoid_print
+          print(
+              'Aviso: liberar ESTADO del otro enganche $otroEngancheId falló: $e');
+        }
+      }
+    }
+
     // 6) Audit log fuera de la transaction (fire-and-forget).
     unawaited(AuditLog.registrar(
       accion: desenganchar
