@@ -46,9 +46,25 @@ class AsignacionVehiculoService {
   /// - Si el chofer ya tenía esa misma patente (no-op), retorna sin
   ///   tocar nada.
   ///
-  /// La operación corre dentro de una transaction para evitar race
-  /// conditions con sincronizaciones simultáneas. El audit log
-  /// (fire-and-forget) se dispara después.
+  /// La operación corre como writes secuenciales (NO usa runTransaction).
+  /// El plugin C++ de cloud_firestore en Windows desktop tiene un bug
+  /// con runTransaction cuando se mezclan reads + tx.set + tx.update —
+  /// dispara un abort() nativo del Visual C++ Runtime imposible de
+  /// catchear desde Dart. Mismo patrón resuelto en Gomería 2026-05-04
+  /// (ver `feedback_windows_cloud_firestore_bugs.md`).
+  ///
+  /// Trade-off vs versión transaccional: si una operación intermedia
+  /// falla (red caída, rules), queda estado parcial. Lo asumimos:
+  /// (a) probabilidad baja con un solo supervisor + red estable,
+  /// (b) los logs siguen siendo la fuente de verdad,
+  /// (c) un job de cleanup futuro puede reconciliar.
+  ///
+  /// Orden de writes diseñado para minimizar inconsistencia visible si
+  /// algo falla: primero CREAR la nueva asignación, después CERRAR las
+  /// viejas. Si crashea entremedio, hay momentáneamente 2 activas (la
+  /// nueva + alguna vieja) pero no queda al chofer "sin asignación".
+  ///
+  /// El audit log (fire-and-forget) se dispara después.
   Future<void> cambiarAsignacion({
     required String choferDni,
     required String? nuevaPatente,
@@ -69,11 +85,7 @@ class AsignacionVehiculoService {
     final patenteNorm = _normalizarPatente(nuevaPatente);
     final desvincular = patenteNorm == null;
 
-    // Pre-lectura del doc del empleado para 2 cosas:
-    //   1. Validar que sea CHOFER (admins/supervisores/planta no manejan).
-    //      Solo aplica al ASIGNAR — desvincular siempre se permite, así
-    //      podemos limpiar si quedó un dato sucio de antes de esta regla.
-    //   2. Tomar el snapshot del nombre.
+    // === 1. Pre-lectura del empleado (validación + snapshot de nombre).
     final empSnap =
         await _db.collection(AppCollections.empleados).doc(dniLimpio).get();
     if (!empSnap.exists) {
@@ -90,121 +102,146 @@ class AsignacionVehiculoService {
         );
       }
     }
-    final choferNombreFinal =
-        choferNombre ?? empData['NOMBRE']?.toString();
+    final choferNombreFinal = choferNombre ?? empData['NOMBRE']?.toString();
     final asignadoPorNombreFinal =
         asignadoPorNombre ?? await _leerNombreEmpleado(asignadorLimpio);
 
-    // Snapshot que la transaction llena. Lo usamos después del commit
-    // para escribir el audit log con la patente anterior real.
-    String? patenteAnterior;
-
-    await _db.runTransaction((tx) async {
-      final colAsig = _db.collection(AppCollections.asignacionesVehiculo);
-
-      // 1) Lecturas primero (Firestore exige reads antes de writes).
-      final activaChoferQ = await colAsig
-          .where('chofer_dni', isEqualTo: dniLimpio)
-          .where('hasta', isNull: true)
-          .limit(1)
-          .get();
-
-      QuerySnapshot<Map<String, dynamic>>? activaPatenteQ;
-      if (!desvincular) {
-        activaPatenteQ = await colAsig
+    // === 2. Lecturas en paralelo: asignación activa del chofer + de la
+    // patente nueva. Ambos `.get()` arrancan en paralelo al asignarse;
+    // el segundo `await` no agrega latencia porque la request ya está
+    // en vuelo.
+    final colAsig = _db.collection(AppCollections.asignacionesVehiculo);
+    final activaChoferQF = colAsig
+        .where('chofer_dni', isEqualTo: dniLimpio)
+        .where('hasta', isNull: true)
+        .limit(1)
+        .get();
+    final activaPatenteQF = desvincular
+        ? null
+        : colAsig
             .where('vehiculo_id', isEqualTo: patenteNorm)
             .where('hasta', isNull: true)
             .limit(1)
             .get();
-      }
 
-      final activaChoferDoc =
-          activaChoferQ.docs.isEmpty ? null : activaChoferQ.docs.first;
-      final patenteActualChofer =
-          activaChoferDoc?.data()['vehiculo_id']?.toString();
-      patenteAnterior = patenteActualChofer;
+    final activaChoferQ = await activaChoferQF;
+    final activaPatenteQ =
+        activaPatenteQF == null ? null : await activaPatenteQF;
 
-      final activaPatenteDoc =
-          (activaPatenteQ?.docs.isEmpty ?? true) ? null : activaPatenteQ!.docs.first;
-      final choferActualPatente =
-          activaPatenteDoc?.data()['chofer_dni']?.toString();
+    final activaChoferDoc =
+        activaChoferQ.docs.isEmpty ? null : activaChoferQ.docs.first;
+    final patenteActualChofer =
+        activaChoferDoc?.data()['vehiculo_id']?.toString();
 
-      // 2) No-ops: si el chofer ya tenía esa patente, o si pidieron
-      // desvincular pero no había nada, salimos sin escribir.
-      if (desvincular && activaChoferDoc == null) {
-        return;
-      }
-      if (!desvincular &&
-          patenteActualChofer == patenteNorm &&
-          choferActualPatente == dniLimpio) {
-        return;
-      }
+    final activaPatenteDoc =
+        (activaPatenteQ == null || activaPatenteQ.docs.isEmpty)
+            ? null
+            : activaPatenteQ.docs.first;
+    final choferActualPatente =
+        activaPatenteDoc?.data()['chofer_dni']?.toString();
 
-      final ahora = Timestamp.now();
+    // === 3. No-ops.
+    if (desvincular && activaChoferDoc == null) {
+      return;
+    }
+    if (!desvincular &&
+        patenteActualChofer == patenteNorm &&
+        choferActualPatente == dniLimpio) {
+      return;
+    }
 
-      // 3) Cerrar asignación activa del chofer (si tenía).
-      if (activaChoferDoc != null) {
-        tx.update(activaChoferDoc.reference, {'hasta': ahora});
-      }
+    final ahora = Timestamp.now();
+    final patenteAnterior = patenteActualChofer;
 
-      // 4) Cerrar asignación activa de la patente nueva (si la tenía
-      // y NO es la misma asignación que la del chofer — caso raro pero
-      // posible si el dato venía corrupto).
-      if (activaPatenteDoc != null &&
-          activaPatenteDoc.id != activaChoferDoc?.id) {
-        tx.update(activaPatenteDoc.reference, {'hasta': ahora});
-      }
-
-      // 5) Crear la nueva asignación si corresponde.
-      if (!desvincular) {
-        final nuevaRef = colAsig.doc();
-        tx.set(nuevaRef, <String, dynamic>{
-          'vehiculo_id': patenteNorm,
-          'chofer_dni': dniLimpio,
-          'chofer_nombre': choferNombreFinal,
-          'desde': ahora,
-          'hasta': null,
-          'asignado_por_dni': asignadorLimpio,
-          'asignado_por_nombre': asignadoPorNombreFinal,
-          if (motivo != null && motivo.trim().isNotEmpty)
-            'motivo': motivo.trim(),
-        });
-      }
-
-      // 6) Espejos en EMPLEADOS y VEHICULOS — el resto de la app sigue
-      // leyendo de ahí, no se entera del cambio de fuente de verdad.
-      tx.update(_db.collection(AppCollections.empleados).doc(dniLimpio), {
-        'VEHICULO': desvincular ? _sinAsignar : patenteNorm,
+    // === 4. CREAR primero la nueva asignación (si aplica) — writes
+    // secuenciales en orden que minimiza ventana de inconsistencia.
+    if (!desvincular) {
+      final nuevaRef = colAsig.doc();
+      await nuevaRef.set(<String, dynamic>{
+        'vehiculo_id': patenteNorm,
+        'chofer_dni': dniLimpio,
+        'chofer_nombre': choferNombreFinal,
+        'desde': ahora,
+        'hasta': null,
+        'asignado_por_dni': asignadorLimpio,
+        'asignado_por_nombre': asignadoPorNombreFinal,
+        if (motivo != null && motivo.trim().isNotEmpty)
+          'motivo': motivo.trim(),
       });
+    }
 
-      if (!desvincular) {
-        tx.update(_db.collection(AppCollections.vehiculos).doc(patenteNorm), {
-          'ESTADO': _estadoOcupado,
-        });
+    // === 5. Cerrar asignación activa del chofer (si tenía).
+    if (activaChoferDoc != null) {
+      await activaChoferDoc.reference.update({'hasta': ahora});
+    }
+
+    // === 6. Cerrar asignación de la patente nueva si la tenía OTRO chofer.
+    if (activaPatenteDoc != null &&
+        activaPatenteDoc.id != activaChoferDoc?.id) {
+      await activaPatenteDoc.reference.update({'hasta': ahora});
+    }
+
+    // === 7. Espejos en EMPLEADOS y VEHICULOS — best-effort. Si alguno
+    // falla, logueamos y seguimos: el log temporal de ASIGNACIONES_*
+    // ya quedó correcto, los espejos pueden reconciliarse después.
+    final empleadoRef =
+        _db.collection(AppCollections.empleados).doc(dniLimpio);
+    try {
+      await empleadoRef.update(
+        {'VEHICULO': desvincular ? _sinAsignar : patenteNorm},
+      );
+    } catch (e) {
+      // ignore: avoid_print
+      print('Aviso: update espejo EMPLEADOS.$dniLimpio.VEHICULO falló: $e');
+    }
+
+    if (!desvincular) {
+      try {
+        await _db
+            .collection(AppCollections.vehiculos)
+            .doc(patenteNorm)
+            .update({'ESTADO': _estadoOcupado});
+      } catch (e) {
+        // ignore: avoid_print
+        print('Aviso: update espejo VEHICULOS.$patenteNorm.ESTADO falló: $e');
       }
+    }
 
-      if (patenteActualChofer != null &&
-          patenteActualChofer != _sinAsignar &&
-          patenteActualChofer.isNotEmpty &&
-          patenteActualChofer != patenteNorm) {
-        tx.update(
-          _db.collection(AppCollections.vehiculos).doc(patenteActualChofer),
-          {'ESTADO': _estadoLibre},
+    if (patenteActualChofer != null &&
+        patenteActualChofer != _sinAsignar &&
+        patenteActualChofer.isNotEmpty &&
+        patenteActualChofer != patenteNorm) {
+      try {
+        await _db
+            .collection(AppCollections.vehiculos)
+            .doc(patenteActualChofer)
+            .update({'ESTADO': _estadoLibre});
+      } catch (e) {
+        // ignore: avoid_print
+        print(
+          'Aviso: liberar VEHICULOS.$patenteActualChofer.ESTADO falló: $e',
         );
       }
+    }
 
-      // 7) Cleanup del bug pre-existente: si la patente nueva tenía
-      // otro chofer en EMPLEADOS, limpiamos su campo VEHICULO también.
-      if (!desvincular &&
-          choferActualPatente != null &&
-          choferActualPatente != dniLimpio &&
-          choferActualPatente.isNotEmpty) {
-        tx.update(
-          _db.collection(AppCollections.empleados).doc(choferActualPatente),
-          {'VEHICULO': _sinAsignar},
+    // === 8. Cleanup: si la patente nueva tenía otro chofer en EMPLEADOS,
+    // limpiarle su campo VEHICULO.
+    if (!desvincular &&
+        choferActualPatente != null &&
+        choferActualPatente != dniLimpio &&
+        choferActualPatente.isNotEmpty) {
+      try {
+        await _db
+            .collection(AppCollections.empleados)
+            .doc(choferActualPatente)
+            .update({'VEHICULO': _sinAsignar});
+      } catch (e) {
+        // ignore: avoid_print
+        print(
+          'Aviso: limpiar EMPLEADOS.$choferActualPatente.VEHICULO falló: $e',
         );
       }
-    });
+    }
 
     // 8) Audit log fuera de la transaction (fire-and-forget).
     unawaited(AuditLog.registrar(

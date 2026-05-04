@@ -48,9 +48,13 @@ class AsignacionEngancheService {
   /// - Si el enganche ya estaba en ese tractor (no-op), retorna sin
   ///   tocar nada.
   ///
-  /// La operación corre dentro de una transaction para evitar race
-  /// conditions con cambios simultáneos. El audit log (fire-and-forget)
-  /// se dispara después.
+  /// La operación corre como writes secuenciales (NO usa runTransaction).
+  /// Mismo motivo que [AsignacionVehiculoService.cambiarAsignacion]: el
+  /// plugin C++ de cloud_firestore en Windows desktop crashea con
+  /// abort() nativo cuando una runTransaction mezcla reads + tx.set +
+  /// tx.update (ver `feedback_windows_cloud_firestore_bugs.md`).
+  ///
+  /// El audit log (fire-and-forget) se dispara después.
   Future<void> cambiarAsignacion({
     required String engancheId,
     required String? nuevoTractorId,
@@ -110,80 +114,77 @@ class AsignacionEngancheService {
     final asignadoPorNombreFinal =
         asignadoPorNombre ?? await _leerNombreEmpleado(asignadorLimpio);
 
-    // Snapshot que la transaction llena. Lo usamos después del commit
-    // para escribir el audit log con el tractor anterior real.
-    String? tractorAnterior;
-
-    await _db.runTransaction((tx) async {
-      final colAsig = _db.collection(AppCollections.asignacionesEnganche);
-
-      // 1) Lecturas primero (Firestore exige reads antes de writes).
-      final activaEngancheQ = await colAsig
-          .where('enganche_id', isEqualTo: engancheLimpio)
-          .where('hasta', isNull: true)
-          .limit(1)
-          .get();
-
-      QuerySnapshot<Map<String, dynamic>>? activaTractorQ;
-      if (!desenganchar) {
-        activaTractorQ = await colAsig
+    // === Lecturas en paralelo: asignación activa del enganche + del
+    // tractor. Ambos `.get()` arrancan en paralelo al asignarse.
+    final colAsig = _db.collection(AppCollections.asignacionesEnganche);
+    final activaEngancheQF = colAsig
+        .where('enganche_id', isEqualTo: engancheLimpio)
+        .where('hasta', isNull: true)
+        .limit(1)
+        .get();
+    final activaTractorQF = desenganchar
+        ? null
+        : colAsig
             .where('tractor_id', isEqualTo: tractorNorm)
             .where('hasta', isNull: true)
             .limit(1)
             .get();
-      }
 
-      final activaEngancheDoc =
-          activaEngancheQ.docs.isEmpty ? null : activaEngancheQ.docs.first;
-      final tractorActualEnganche =
-          activaEngancheDoc?.data()['tractor_id']?.toString();
-      tractorAnterior = tractorActualEnganche;
+    final activaEngancheQ = await activaEngancheQF;
+    final activaTractorQ =
+        activaTractorQF == null ? null : await activaTractorQF;
 
-      final activaTractorDoc =
-          (activaTractorQ?.docs.isEmpty ?? true) ? null : activaTractorQ!.docs.first;
-      final engancheActualTractor =
-          activaTractorDoc?.data()['enganche_id']?.toString();
+    final activaEngancheDoc =
+        activaEngancheQ.docs.isEmpty ? null : activaEngancheQ.docs.first;
+    final tractorActualEnganche =
+        activaEngancheDoc?.data()['tractor_id']?.toString();
+    final tractorAnterior = tractorActualEnganche;
 
-      // 2) No-ops.
-      if (desenganchar && activaEngancheDoc == null) {
-        return;
-      }
-      if (!desenganchar &&
-          tractorActualEnganche == tractorNorm &&
-          engancheActualTractor == engancheLimpio) {
-        return;
-      }
+    final activaTractorDoc =
+        (activaTractorQ == null || activaTractorQ.docs.isEmpty)
+            ? null
+            : activaTractorQ.docs.first;
+    final engancheActualTractor =
+        activaTractorDoc?.data()['enganche_id']?.toString();
 
-      final ahora = Timestamp.now();
+    // === No-ops.
+    if (desenganchar && activaEngancheDoc == null) {
+      return;
+    }
+    if (!desenganchar &&
+        tractorActualEnganche == tractorNorm &&
+        engancheActualTractor == engancheLimpio) {
+      return;
+    }
 
-      // 3) Cerrar asignación activa del enganche (si tenía).
-      if (activaEngancheDoc != null) {
-        tx.update(activaEngancheDoc.reference, {'hasta': ahora});
-      }
+    final ahora = Timestamp.now();
 
-      // 4) Cerrar asignación activa del tractor nuevo (si tenía OTRO
-      // enganche — caso raro pero posible si el dato venía corrupto).
-      if (activaTractorDoc != null &&
-          activaTractorDoc.id != activaEngancheDoc?.id) {
-        tx.update(activaTractorDoc.reference, {'hasta': ahora});
-      }
+    // === Crear nueva asignación primero (minimiza ventana sin asignación).
+    if (!desenganchar) {
+      final nuevaRef = colAsig.doc();
+      await nuevaRef.set(<String, dynamic>{
+        'enganche_id': engancheLimpio,
+        'tractor_id': tractorNorm,
+        'tractor_modelo': tractorModeloFinal,
+        'desde': ahora,
+        'hasta': null,
+        'asignado_por_dni': asignadorLimpio,
+        'asignado_por_nombre': asignadoPorNombreFinal,
+        if (motivo != null && motivo.trim().isNotEmpty)
+          'motivo': motivo.trim(),
+      });
+    }
 
-      // 5) Crear la nueva asignación si corresponde.
-      if (!desenganchar) {
-        final nuevaRef = colAsig.doc();
-        tx.set(nuevaRef, <String, dynamic>{
-          'enganche_id': engancheLimpio,
-          'tractor_id': tractorNorm,
-          'tractor_modelo': tractorModeloFinal,
-          'desde': ahora,
-          'hasta': null,
-          'asignado_por_dni': asignadorLimpio,
-          'asignado_por_nombre': asignadoPorNombreFinal,
-          if (motivo != null && motivo.trim().isNotEmpty)
-            'motivo': motivo.trim(),
-        });
-      }
-    });
+    // === Cerrar asignación activa del enganche (si tenía).
+    if (activaEngancheDoc != null) {
+      await activaEngancheDoc.reference.update({'hasta': ahora});
+    }
+
+    // === Cerrar asignación del tractor si tenía otro enganche.
+    if (activaTractorDoc != null &&
+        activaTractorDoc.id != activaEngancheDoc?.id) {
+      await activaTractorDoc.reference.update({'hasta': ahora});
+    }
 
     // 6) Audit log fuera de la transaction (fire-and-forget).
     unawaited(AuditLog.registrar(
