@@ -19,12 +19,24 @@
 $ErrorActionPreference = 'Stop'
 
 # === CONFIG ========================================================
-$repo       = 'rodriguezreysantiago/logistica_app_profesional'
-$exeName    = 'coopertrans_movil.exe'
-$installDir = Join-Path $env:LOCALAPPDATA 'CoopertransMovil'
-$logFile    = Join-Path $installDir 'update.log'
-$exePath    = Join-Path $installDir $exeName
-$verFile    = Join-Path $installDir 'VERSION.txt'
+$repo    = 'rodriguezreysantiago/logistica_app_profesional'
+$exeName = 'coopertrans_movil.exe'
+
+# Install dir con auto-detección:
+#   - ProgramData\CoopertransMovil  → si fue creado por el instalador
+#     Inno Setup (con permisos users-modify para que el launcher pueda
+#     actualizar sin UAC). Una sola copia compartida entre todos los
+#     usuarios de la PC.
+#   - LOCALAPPDATA\CoopertransMovil → fallback para modo "sin instalador"
+#     (correr el launcher directo desde el repo en una PC dev).
+$installDir = if (Test-Path (Join-Path $env:ProgramData 'CoopertransMovil')) {
+    Join-Path $env:ProgramData 'CoopertransMovil'
+} else {
+    Join-Path $env:LOCALAPPDATA 'CoopertransMovil'
+}
+$logFile = Join-Path $installDir 'update.log'
+$exePath = Join-Path $installDir $exeName
+$verFile = Join-Path $installDir 'VERSION.txt'
 
 # GitHub requiere User-Agent en cualquier request a la API.
 $apiHeaders = @{

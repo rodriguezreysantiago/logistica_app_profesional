@@ -66,7 +66,13 @@ if (-not (Test-Path $distDir)) {
     New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 }
 
-# --- 5. Compilar ---------------------------------------------------
+# --- 5. Generar VERSION.txt en installer/ --------------------------
+# Este archivo se incluye en el setup y queda en
+# ProgramData\CoopertransMovil para que el launcher pueda comparar
+# con la última release.
+Set-Content -Path (Join-Path $repoRoot 'installer\VERSION.txt') -Value $version -Encoding UTF8
+
+# --- 6. Compilar ---------------------------------------------------
 Write-Host ""
 Write-Host "Compilando $iss ..." -ForegroundColor Cyan
 & $iscc "/DMyAppVersion=$versionInno" $iss

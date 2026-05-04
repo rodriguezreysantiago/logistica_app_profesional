@@ -76,6 +76,7 @@ commit_msg*.txt
 
 # Output del instalador Inno Setup (regenerable, pesado, NO committear).
 dist/
+installer/VERSION.txt
 
 # Entorno y Seguridad Coopertrans Móvil
 serviceAccountKey.json

@@ -1,15 +1,33 @@
-; Inno Setup script para Coopertrans Móvil.
+; Inno Setup script para Coopertrans Móvil — modelo "instalador + launcher".
 ;
 ; Compilar con `scripts\build_installer.ps1` (toma la versión del
 ; pubspec.yaml y se la pasa a iscc.exe). NO compilar el .iss directo
 ; sin pasarle MyAppVersion.
 ;
-; Pre-requisito (una vez en la PC que crea releases):
+; Pre-requisitos (una vez en la PC que crea releases):
 ;   winget install JRSoftware.InnoSetup
+;   flutter build windows --release  (antes de cada build del instalador)
 ;
-; Este script asume que el build de Flutter ya está en
-; build\windows\x64\runner\Release\ — correr antes:
-;   flutter build windows --release
+; ARQUITECTURA del install resultante:
+;   Program Files\CoopertransMovil\
+;     ├── launcher.ps1                  (auto-update vía GitHub Releases)
+;     └── app_icon.ico                  (ícono compartido)
+;
+;   ProgramData\CoopertransMovil\       (Permissions: users-modify)
+;     ├── coopertrans_movil.exe         (la app real)
+;     ├── flutter_windows.dll
+;     ├── data\flutter_assets\          (assets de Flutter)
+;     ├── ...                           (DLLs nativos)
+;     └── VERSION.txt                   (versión instalada)
+;
+; FLUJO:
+;   1. Pendrive con .exe → doble click → UAC → instala ambas carpetas.
+;   2. Doble click en icono "Coopertrans Móvil" del escritorio → corre
+;      launcher.ps1 (sin UAC) → chequea último release en GitHub →
+;      si hay nuevo, descarga el zip y reemplaza los archivos en
+;      ProgramData\CoopertransMovil → lanza la app.
+;   3. Updates futuros: simplemente abrir el icono. No hace falta
+;      pendrive ni reinstalar.
 
 #ifndef MyAppVersion
   #error MyAppVersion no definido. Compilar via scripts\build_installer.ps1
@@ -20,6 +38,7 @@
 #define MyAppPublisher  "Coopertrans"
 #define MyAppURL        "https://github.com/rodriguezreysantiago/logistica_app_profesional"
 #define MyAppId         "{{B6F7E8A9-1234-4567-8901-COOPERTRANSMOV}"
+#define LauncherArgs "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File ""{app}\launcher.ps1"""
 
 [Setup]
 AppId={#MyAppId}
@@ -34,19 +53,16 @@ DefaultDirName={autopf}\CoopertransMovil
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\dist
 OutputBaseFilename=CoopertransMovil-Setup-{#MyAppVersion}
 SetupIconFile=..\windows\runner\resources\app_icon.ico
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\app_icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 WizardResizable=no
 
-; Detectar y actualizar versión instalada limpia. Inno usa AppId como
-; clave; si encuentra un install previo con el mismo AppId, lo trata
-; como upgrade (cierra la app si está corriendo, reemplaza archivos).
+; Cierra la app si está corriendo, evitando "no se pudo reemplazar el .exe".
 CloseApplications=yes
 RestartApplications=no
 
@@ -59,20 +75,37 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Crear icono en el escritorio"; GroupDescription: "Iconos adicionales:"; Flags: checkedonce
 
+[Dirs]
+; ProgramData\CoopertransMovil con permisos modify para Users → el
+; launcher puede actualizar sin UAC. Esta es la diferencia clave vs
+; instalar la app en Program Files (que sería read-only para users).
+Name: "{commonappdata}\CoopertransMovil"; Permissions: users-modify
+
 [Files]
-; Todo el output del flutter build, incluyendo data\flutter_assets, DLLs, etc.
-Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; --- Launcher + ícono en Program Files (read-only por users) ----
+Source: "..\scripts\launcher_app.ps1"; DestDir: "{app}"; DestName: "launcher.ps1"; Flags: ignoreversion
+Source: "..\windows\runner\resources\app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; --- App completa en ProgramData (writable por users vía launcher) ----
+Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{commonappdata}\CoopertransMovil"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; VERSION.txt para que el launcher sepa qué versión está instalada y
+; pueda compararla con la última release en GitHub.
+Source: "VERSION.txt"; DestDir: "{commonappdata}\CoopertransMovil"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "powershell.exe"; Parameters: "{#LauncherArgs}"; IconFilename: "{app}\app_icon.ico"; WorkingDir: "{app}"
 Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "powershell.exe"; Parameters: "{#LauncherArgs}"; IconFilename: "{app}\app_icon.ico"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Iniciar {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; Ofrecer arrancar la app al final del install, vía el launcher (que
+; chequea si hay versión más nueva en GitHub que la incluida en el
+; instalador, y la baja si corresponde).
+Filename: "powershell.exe"; Parameters: "{#LauncherArgs}"; Description: "Iniciar {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Limpiar logs y archivos temporales que la app pueda haber dejado
-; en su carpeta install. La data del usuario vive en %APPDATA% y
-; no se toca en uninstall (queda intacta para reinstalación futura).
-Type: filesandordirs; Name: "{app}\logs"
+; Limpiar logs y carpeta de la app de ProgramData. La data del usuario
+; vive en %APPDATA% (Firebase cache, Sentry, etc.) — no se toca para
+; permitir reinstalación con datos preservados.
+Type: filesandordirs; Name: "{commonappdata}\CoopertransMovil"
