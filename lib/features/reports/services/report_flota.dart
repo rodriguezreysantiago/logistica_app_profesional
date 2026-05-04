@@ -468,24 +468,26 @@ class _FilaFlota {
         if (n != null && n > 0) ultimoServiceKm = n;
       }
 
-      // Próximo service: preferimos `serviceDistance` del API Volvo
-      // (en metros, lo convertimos a km). Fallback al cálculo manual
-      // ULTIMO_SERVICE_KM + 50.000 - KM_ACTUAL.
-      double? distanceMetros;
-      if (volvoData is Map) {
-        final uptime = volvoData['uptimeData'];
-        if (uptime is Map) {
-          final raw = uptime['serviceDistance'];
-          if (raw is num) distanceMetros = raw.toDouble();
+      // Próximo service: preferimos el cálculo manual
+      // (ULTIMO_SERVICE_KM + 50.000 - KM_ACTUAL) cuando hay datos
+      // cargados a mano. Fallback al `serviceDistance` del API Volvo
+      // si no hay manual. Manual gana porque el paquete UPTIME no
+      // está activo y a veces el API devuelve valores absurdos —
+      // ver _resolverServiceDistance en admin_mantenimiento_widgets.
+      proxServiceEnKm = AppMantenimiento.serviceDistanceDesdeManual(
+        ultimoServiceKm: ultimoServiceKm,
+        kmActual: kmActual,
+      );
+      if (proxServiceEnKm == null) {
+        double? distanceMetros;
+        if (volvoData is Map) {
+          final uptime = volvoData['uptimeData'];
+          if (uptime is Map) {
+            final raw = uptime['serviceDistance'];
+            if (raw is num) distanceMetros = raw.toDouble();
+          }
         }
-      }
-      if (distanceMetros != null) {
-        proxServiceEnKm = distanceMetros / 1000.0;
-      } else {
-        proxServiceEnKm = AppMantenimiento.serviceDistanceDesdeManual(
-          ultimoServiceKm: ultimoServiceKm,
-          kmActual: kmActual,
-        );
+        if (distanceMetros != null) proxServiceEnKm = distanceMetros / 1000.0;
       }
       estadoService = AppMantenimiento.clasificar(proxServiceEnKm);
     }

@@ -743,16 +743,24 @@ async function _runOnce(fs) {
 /**
  * Calcula `serviceDistanceKm` para un doc de VEHICULOS.
  * Espejo de `_resolverServiceDistance` en el cliente Dart.
+ *
+ * Prioridad MANUAL: si hay ULTIMO_SERVICE_KM + KM_ACTUAL cargados,
+ * usa el cálculo manual `ULTIMO_SERVICE_KM + 50.000 - KM_ACTUAL`.
+ * El API Volvo (`SERVICE_DISTANCE_KM`) queda como fallback porque
+ * a veces devuelve valores absurdos para vehículos sin paquete
+ * UPTIME activo (caso real: AG218ZD con 642.069 km al próximo
+ * service según API, pero -1.500 km según manual).
  */
 function _resolverServiceDistance(v) {
-  const api = Number(v.SERVICE_DISTANCE_KM);
-  if (!isNaN(api) && v.SERVICE_DISTANCE_KM != null) return api;
-
   const ultimo = Number(v.ULTIMO_SERVICE_KM);
   const actual = Number(v.KM_ACTUAL);
   if (!isNaN(ultimo) && !isNaN(actual) && v.ULTIMO_SERVICE_KM != null && v.KM_ACTUAL != null) {
     return ultimo + INTERVALO_SERVICE_KM - actual;
   }
+
+  const api = Number(v.SERVICE_DISTANCE_KM);
+  if (!isNaN(api) && v.SERVICE_DISTANCE_KM != null) return api;
+
   return null;
 }
 

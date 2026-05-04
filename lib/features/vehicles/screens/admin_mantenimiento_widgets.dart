@@ -20,27 +20,34 @@ class _ResolucionServiceDistance {
 }
 
 /// Decide qué `serviceDistance` mostrar para un tractor:
-/// 1. Si el doc tiene `SERVICE_DISTANCE_KM` (vino del API Volvo) → API.
-/// 2. Si tiene `ULTIMO_SERVICE_KM` cargado manualmente + `KM_ACTUAL` →
+/// 1. Si tiene `ULTIMO_SERVICE_KM` cargado manualmente + `KM_ACTUAL` →
 ///    calcula `(ULTIMO_SERVICE_KM + 50.000) − KM_ACTUAL`.
+/// 2. Si NO hay manual pero el doc tiene `SERVICE_DISTANCE_KM` (del
+///    API Volvo) → usa eso como fallback.
 /// 3. Si nada → ninguno (la pantalla muestra un hint).
 ///
-/// Vecchi cae en path 2 porque el paquete API actual no entrega
-/// `uptimeData.serviceDistance`. Si en el futuro Volvo lo habilita,
-/// el path 1 toma prioridad sin tocar nada en la app.
+/// **Por qué manual gana**: el paquete UPTIME del contrato Volvo
+/// Connect actual de Vecchi no está activado, y el campo
+/// `uptimeData.serviceDistance` que devuelve el API a veces trae
+/// valores absurdos (ej. AG218ZD: 642.069 km al próximo service para
+/// un tractor con KM_ACTUAL 357.930 que tenía manual −1.500 km, lo
+/// cual indicaba que estaba vencido). El admin carga
+/// ULTIMO_SERVICE_KM cada vez que pasa por taller, así que ese dato
+/// es la fuente más confiable hoy. Si en el futuro Volvo activa el
+/// paquete UPTIME y el API se vuelve confiable, podemos volver a
+/// invertir la prioridad.
 _ResolucionServiceDistance _resolverServiceDistance(
     Map<String, dynamic> data) {
-  final api = (data['SERVICE_DISTANCE_KM'] as num?)?.toDouble();
-  if (api != null) {
-    return _ResolucionServiceDistance(api, _FuenteServiceDistance.api);
-  }
-  final calculado = AppMantenimiento.serviceDistanceDesdeManual(
+  final manual = AppMantenimiento.serviceDistanceDesdeManual(
     ultimoServiceKm: (data['ULTIMO_SERVICE_KM'] as num?)?.toDouble(),
     kmActual: (data['KM_ACTUAL'] as num?)?.toDouble(),
   );
-  if (calculado != null) {
-    return _ResolucionServiceDistance(
-        calculado, _FuenteServiceDistance.manual);
+  if (manual != null) {
+    return _ResolucionServiceDistance(manual, _FuenteServiceDistance.manual);
+  }
+  final api = (data['SERVICE_DISTANCE_KM'] as num?)?.toDouble();
+  if (api != null) {
+    return _ResolucionServiceDistance(api, _FuenteServiceDistance.api);
   }
   return const _ResolucionServiceDistance(null,
       _FuenteServiceDistance.ninguno);
