@@ -59,7 +59,6 @@ UninstallDisplayIcon={app}\app_icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-WizardResizable=no
 
 ; Cierra la app si está corriendo, evitando "no se pudo reemplazar el .exe".
 CloseApplications=yes
