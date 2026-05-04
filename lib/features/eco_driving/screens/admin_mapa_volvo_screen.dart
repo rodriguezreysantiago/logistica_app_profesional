@@ -9,26 +9,22 @@ import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../widgets/evento_volvo_detalle_sheet.dart';
 
-/// Pantalla "Mapa Volvo" — visualización geográfica de todos los eventos
-/// del Vehicle Alerts API sobre OpenStreetMap.
+/// Pantalla "Mapa Volvo" — visualización geográfica de eventos del
+/// Vehicle Alerts API sobre OpenStreetMap.
 ///
-/// Para qué sirve:
-///   - Detectar PATRONES geográficos: "todos los OVERSPEED están en el
-///     tramo entre planta y ruta 5 → ahí los choferes saben que no hay
-///     control".
-///   - Detectar accesos a clientes congestionados (DISTANCE_ALERT en
-///     bocacalles concretas).
-///   - Anti-fraude visual: ver dónde se levantó la batea (PTO) — si
-///     aparece en una banquina rara, es bandera roja.
-///   - Vista de plata: el admin ve la flota completa de un vistazo.
+/// **Iteración 2 (2026-05-04)**: además del listado de pins, ahora
+/// puede mostrar:
+/// - **Ruta del chofer**: polyline que conecta los eventos en orden
+///   cronológico cuando hay un filtro de patente activo. Ayuda a ver
+///   el recorrido real del día y validar contra el remito.
+/// - **Heatmap OVERSPEED**: capa de calor sobre los eventos de
+///   exceso de velocidad — concentra los puntos en celdas geográficas
+///   y dibuja círculos cuya intensidad aumenta con la densidad. Útil
+///   para identificar TRAMOS recurrentes donde los choferes aceleran
+///   (ej. "siempre pasan a 110 km/h en el km 17 de la 22").
 ///
-/// Diseño:
-///   - Mapa centrado en Bahía Blanca (centro operativo de Vecchi).
-///   - Pins coloreados por SEVERIDAD (rojo HIGH, amarillo MEDIUM,
-///     verde LOW).
-///   - Filtros: rango temporal (popup AppBar), tipos de evento
-///     (chips horizontales), patente (chips horizontales).
-///   - Tap en pin → bottom sheet con detalle + acción "Marcar atendida".
+/// Filtros: rango temporal (popup AppBar), tipos de evento, patente,
+/// toggle de heatmap.
 class AdminMapaVolvoScreen extends StatefulWidget {
   const AdminMapaVolvoScreen({super.key});
 
@@ -37,14 +33,17 @@ class AdminMapaVolvoScreen extends StatefulWidget {
 }
 
 class _AdminMapaVolvoScreenState extends State<AdminMapaVolvoScreen> {
-  // Bahía Blanca centro — operación de Vecchi. Razonable como centro
-  // inicial; el zoom muestra la región.
+  // Bahía Blanca centro — operación de Vecchi.
   static const _centroInicial = LatLng(-38.7196, -62.2724);
   static const _zoomInicial = 8.0;
 
   int _diasRango = 30;
   String? _filtroTipo; // null = todos los tipos
   String? _filtroPatente; // null = todas las patentes
+  /// Si está activo, dibuja la capa de heatmap con los OVERSPEED del
+  /// rango. Aplicar a TODA la flota (ignora filtros de patente / tipo
+  /// — el heatmap es vista agregada, no filtrada).
+  bool _heatmapActivo = false;
 
   final _mapController = MapController();
 
@@ -96,8 +95,6 @@ class _AdminMapaVolvoScreenState extends State<AdminMapaVolvoScreen> {
           }
 
           final allDocs = snap.data?.docs ?? const [];
-          // Filtramos in-memory por tipo y patente. Eventos sin GPS
-          // válido los descartamos (no se pueden mapear).
           final docsConGps = allDocs.where(_tieneGpsValido).toList();
           final tiposDisponibles = <String>{
             for (final d in docsConGps)
@@ -125,6 +122,22 @@ class _AdminMapaVolvoScreenState extends State<AdminMapaVolvoScreen> {
             return true;
           }).toList();
 
+          // Ruta del chofer: solo se calcula si hay patente filtrada.
+          // Ordenamos cronológico ascendente para que la polyline siga
+          // el orden real del día.
+          List<_PuntoRuta> puntosRuta = const [];
+          if (_filtroPatente != null) {
+            puntosRuta = _construirRuta(visibles);
+          }
+
+          // Heatmap OVERSPEED: clusterizamos los OVERSPEED del rango
+          // (siempre toda la flota — el heatmap muestra patrones
+          // agregados que no tienen sentido filtrar por patente).
+          List<_CeldaHeatmap> celdasHeatmap = const [];
+          if (_heatmapActivo) {
+            celdasHeatmap = _construirHeatmap(docsConGps);
+          }
+
           return Column(
             children: [
               _Toolbar(
@@ -135,8 +148,11 @@ class _AdminMapaVolvoScreenState extends State<AdminMapaVolvoScreen> {
                 patentes: patentesDisponibles,
                 filtroTipo: _filtroTipo,
                 filtroPatente: _filtroPatente,
+                heatmapActivo: _heatmapActivo,
+                rutaActiva: puntosRuta.isNotEmpty,
                 onTipoChange: (v) => setState(() => _filtroTipo = v),
                 onPatenteChange: (v) => setState(() => _filtroPatente = v),
+                onHeatmapToggle: (v) => setState(() => _heatmapActivo = v),
                 rangoDias: _diasRango,
               ),
               Expanded(
@@ -145,6 +161,8 @@ class _AdminMapaVolvoScreenState extends State<AdminMapaVolvoScreen> {
                   centroInicial: _centroInicial,
                   zoomInicial: _zoomInicial,
                   docs: visibles,
+                  puntosRuta: puntosRuta,
+                  celdasHeatmap: celdasHeatmap,
                 ),
               ),
             ],
@@ -161,10 +179,101 @@ class _AdminMapaVolvoScreenState extends State<AdminMapaVolvoScreen> {
     final lng = gps['lng'];
     return lat is num && lng is num;
   }
+
+  /// Convierte los docs filtrados a `_PuntoRuta` ordenados ascendente
+  /// por timestamp. Cada punto lleva la velocidad si el doc la trae —
+  /// la usamos para colorear el segmento que SALE de él.
+  static List<_PuntoRuta> _construirRuta(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    final puntos = <_PuntoRuta>[];
+    for (final d in docs) {
+      final data = d.data();
+      final gps = data['posicion_gps'] as Map?;
+      final lat = (gps?['lat'] as num?)?.toDouble();
+      final lng = (gps?['lng'] as num?)?.toDouble();
+      final ts = data['creado_en'] as Timestamp?;
+      if (lat == null || lng == null || ts == null) continue;
+      // Velocidad puede venir en distintos campos según subtipo de
+      // alerta. Probamos los dos más frecuentes.
+      double? vel;
+      final velRaw = data['velocidad'] ?? data['velocidad_kmh'];
+      if (velRaw is num) vel = velRaw.toDouble();
+      puntos.add(_PuntoRuta(
+        punto: LatLng(lat, lng),
+        timestamp: ts.toDate(),
+        velocidad: vel,
+      ));
+    }
+    puntos.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return puntos;
+  }
+
+  /// Cluster simple en celdas de ~0.005° de lado (~550m a -38° lat).
+  /// Solo cuenta eventos OVERSPEED. Devuelve una celda por bucket con
+  /// el centro y la cantidad — el caller mapea la cantidad a alpha.
+  static List<_CeldaHeatmap> _construirHeatmap(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    const tamCelda = 0.005;
+    final buckets = <String, _CeldaHeatmap>{};
+    for (final d in docs) {
+      final data = d.data();
+      final tipo = (data['tipo'] ?? '').toString().toUpperCase();
+      if (tipo != 'OVERSPEED') continue;
+      final gps = data['posicion_gps'] as Map?;
+      final lat = (gps?['lat'] as num?)?.toDouble();
+      final lng = (gps?['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) continue;
+      // Snapeamos a la celda truncando a múltiplos de tamCelda.
+      final celdaLat = (lat / tamCelda).floor() * tamCelda;
+      final celdaLng = (lng / tamCelda).floor() * tamCelda;
+      final key = '$celdaLat,$celdaLng';
+      final actual = buckets[key];
+      if (actual == null) {
+        buckets[key] = _CeldaHeatmap(
+          centro: LatLng(celdaLat + tamCelda / 2, celdaLng + tamCelda / 2),
+          cuenta: 1,
+        );
+      } else {
+        buckets[key] = _CeldaHeatmap(
+          centro: actual.centro,
+          cuenta: actual.cuenta + 1,
+        );
+      }
+    }
+    return buckets.values.toList();
+  }
 }
 
 // =============================================================================
-// TOOLBAR (filtros + contador)
+// MODELOS LIVIANOS PARA LAS CAPAS NUEVAS
+// =============================================================================
+
+/// Punto de la ruta del chofer (ordenable por timestamp).
+class _PuntoRuta {
+  final LatLng punto;
+  final DateTime timestamp;
+  /// Velocidad en km/h cuando está disponible. Define el color del
+  /// segmento que sale de este punto al siguiente.
+  final double? velocidad;
+
+  const _PuntoRuta({
+    required this.punto,
+    required this.timestamp,
+    required this.velocidad,
+  });
+}
+
+/// Celda agregada del heatmap (centro + cantidad de eventos OVERSPEED).
+class _CeldaHeatmap {
+  final LatLng centro;
+  final int cuenta;
+  const _CeldaHeatmap({required this.centro, required this.cuenta});
+}
+
+// =============================================================================
+// TOOLBAR (filtros + contador + toggles de capas)
 // =============================================================================
 
 class _Toolbar extends StatelessWidget {
@@ -175,8 +284,11 @@ class _Toolbar extends StatelessWidget {
   final List<String> patentes;
   final String? filtroTipo;
   final String? filtroPatente;
+  final bool heatmapActivo;
+  final bool rutaActiva;
   final ValueChanged<String?> onTipoChange;
   final ValueChanged<String?> onPatenteChange;
+  final ValueChanged<bool> onHeatmapToggle;
   final int rangoDias;
 
   const _Toolbar({
@@ -187,8 +299,11 @@ class _Toolbar extends StatelessWidget {
     required this.patentes,
     required this.filtroTipo,
     required this.filtroPatente,
+    required this.heatmapActivo,
+    required this.rutaActiva,
     required this.onTipoChange,
     required this.onPatenteChange,
+    required this.onHeatmapToggle,
     required this.rangoDias,
   });
 
@@ -206,9 +321,27 @@ class _Toolbar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '$visibles de $conGps eventos georref. (${sinGps > 0 ? "$sinGps sin GPS · " : ""}rango $rangoDias d)',
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '$visibles de $conGps eventos georref. '
+                  '(${sinGps > 0 ? "$sinGps sin GPS · " : ""}rango $rangoDias d)'
+                  '${rutaActiva ? " · ruta activa" : ""}',
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 11),
+                ),
+              ),
+              // Toggle heatmap OVERSPEED. Visible siempre — independiente
+              // de filtros (el heatmap muestra agregado de la flota).
+              _ToggleChip(
+                label: 'HEATMAP',
+                icono: Icons.local_fire_department,
+                activo: heatmapActivo,
+                colorActivo: AppColors.accentRed,
+                onChange: onHeatmapToggle,
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           // Filtros de tipo (chip horizontal scrolleable).
@@ -307,6 +440,55 @@ class _Chip extends StatelessWidget {
   }
 }
 
+class _ToggleChip extends StatelessWidget {
+  final String label;
+  final IconData icono;
+  final bool activo;
+  final Color colorActivo;
+  final ValueChanged<bool> onChange;
+
+  const _ToggleChip({
+    required this.label,
+    required this.icono,
+    required this.activo,
+    required this.colorActivo,
+    required this.onChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = activo ? colorActivo : Colors.white54;
+    return InkWell(
+      onTap: () => onChange(!activo),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: activo ? colorActivo.withAlpha(35) : Colors.white.withAlpha(8),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withAlpha(120)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icono, size: 14, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // =============================================================================
 // MAPA
 // =============================================================================
@@ -316,12 +498,16 @@ class _Mapa extends StatelessWidget {
   final LatLng centroInicial;
   final double zoomInicial;
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs;
+  final List<_PuntoRuta> puntosRuta;
+  final List<_CeldaHeatmap> celdasHeatmap;
 
   const _Mapa({
     required this.controller,
     required this.centroInicial,
     required this.zoomInicial,
     required this.docs,
+    required this.puntosRuta,
+    required this.celdasHeatmap,
   });
 
   @override
@@ -338,26 +524,82 @@ class _Mapa extends StatelessWidget {
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.coopertrans.movil',
-          // Tiles se descargan on-demand. La cache la maneja flutter_map
-          // internamente — queda en memoria por defecto. Suficiente para
-          // sesiones admin de minutos.
         ),
+        // Capa heatmap (debajo de la ruta y los markers para no taparlos).
+        if (celdasHeatmap.isNotEmpty) _capaHeatmap(),
+        // Capa ruta (línea coloreada por velocidad). Va debajo de los
+        // markers para que los pins queden tappables.
+        if (puntosRuta.length >= 2) _capaRuta(),
         MarkerLayer(
           markers: docs
               .map((d) => _markerDeDoc(context, d))
               .whereType<Marker>()
               .toList(),
         ),
-        // Atribución obligatoria de OpenStreetMap. Required by their TOS.
         const RichAttributionWidget(
           attributions: [
-            TextSourceAttribution(
-              '© OpenStreetMap',
-            ),
+            TextSourceAttribution('© OpenStreetMap'),
           ],
         ),
       ],
     );
+  }
+
+  /// Heatmap como `CircleLayer` — cada celda es un círculo cuya alpha
+  /// crece con la cantidad de OVERSPEED en esa celda. Mapeamos
+  /// `cuenta → alpha` con un cap a 5+ eventos = full opaco.
+  Widget _capaHeatmap() {
+    final maxCuenta = celdasHeatmap.map((c) => c.cuenta).reduce(
+          (a, b) => a > b ? a : b,
+        );
+    return CircleLayer(
+      circles: celdasHeatmap.map((c) {
+        // Normalizamos 1..max a 0.2..0.8 — siempre algo de transparencia
+        // para que se vea el mapa abajo.
+        final intensidad = (c.cuenta / (maxCuenta == 0 ? 1 : maxCuenta))
+            .clamp(0.0, 1.0);
+        final alpha = (50 + intensidad * 150).round().clamp(50, 200);
+        return CircleMarker(
+          point: c.centro,
+          // Radio físico en metros — escala con el zoom solo (no
+          // depende de pixels). 250m ≈ tamaño del bucket /2 — los
+          // círculos vecinos se solapan formando una mancha.
+          radius: 250,
+          useRadiusInMeter: true,
+          color: AppColors.accentRed.withAlpha(alpha),
+          borderStrokeWidth: 0,
+        );
+      }).toList(),
+    );
+  }
+
+  /// Ruta del chofer como secuencia de polylines coloreadas por
+  /// velocidad. Cada par consecutivo es un Polyline propio con su
+  /// color — más simple que un gradiente real y suficiente para
+  /// visualizar tramos peligrosos en rojo.
+  Widget _capaRuta() {
+    final segmentos = <Polyline>[];
+    for (var i = 0; i < puntosRuta.length - 1; i++) {
+      final a = puntosRuta[i];
+      final b = puntosRuta[i + 1];
+      // Color del segmento según velocidad del PUNTO DE ORIGEN.
+      // Si no hay velocidad reportada (caso común para tipos no-OVERSPEED),
+      // gris neutro — la línea sigue sirviendo para ver la traza.
+      final color = _colorVelocidad(a.velocidad);
+      segmentos.add(Polyline(
+        points: [a.punto, b.punto],
+        color: color,
+        strokeWidth: 4,
+      ));
+    }
+    return PolylineLayer(polylines: segmentos);
+  }
+
+  static Color _colorVelocidad(double? vel) {
+    if (vel == null) return Colors.white38;
+    if (vel > 100) return AppColors.accentRed;
+    if (vel > 80) return AppColors.accentOrange;
+    return AppColors.accentGreen;
   }
 
   Marker? _markerDeDoc(
