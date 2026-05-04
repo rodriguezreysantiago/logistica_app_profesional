@@ -67,12 +67,36 @@ if (-not (Test-Path $exePath)) {
     exit 1
 }
 
-# --- 4. Verificar que el tag no exista ya --------------------------
+# --- 4. Detectar si el release ya existe (idempotente) -------------
 # Si el release no existe gh escribe "release not found" a stderr
 # (esperable). Invoke-Native evita que eso aborte el script.
-Invoke-Native { & gh release view $tag *>$null }
-if ($LASTEXITCODE -eq 0) {
-    throw "El release $tag ya existe en GitHub. Bumpeá la versión en pubspec.yaml antes."
+# Si EXISTE, en lugar de abortar, después del [1/3] decidimos qué hacer:
+#   - Si los assets locales ya están subidos al release remoto → "ya
+#     estaba publicado", exit 0.
+#   - Si faltan assets → los subimos al release existente.
+#   - Si los assets locales son distintos a los remotos (mismo nombre
+#     pero size distinto) → reemplazamos con --clobber.
+$releaseJson = Invoke-Native { & gh release view $tag --json tagName,assets 2>$null }
+$releaseExiste = ($LASTEXITCODE -eq 0)
+$assetsRemotos = @()
+if ($releaseExiste) {
+    try {
+        $assetsRemotos = ($releaseJson | ConvertFrom-Json).assets
+    } catch {
+        $assetsRemotos = @()
+    }
+    Write-Host ""
+    Write-Host "AVISO: el release $tag ya existe en GitHub." -ForegroundColor Yellow
+    Write-Host "  Voy a reusarlo en vez de crear uno nuevo." -ForegroundColor Yellow
+    Write-Host "  Assets remotos actuales:" -ForegroundColor DarkGray
+    if ($assetsRemotos.Count -eq 0) {
+        Write-Host "    (ninguno)" -ForegroundColor DarkGray
+    } else {
+        foreach ($a in $assetsRemotos) {
+            $mb = [math]::Round($a.size / 1MB, 1)
+            Write-Host "    $($a.name) ($mb MB)" -ForegroundColor DarkGray
+        }
+    }
 }
 
 # --- 5. Verificar que el repo está limpio + pusheado ---------------
@@ -137,11 +161,9 @@ if ($DryRun) {
     exit 0
 }
 
-Write-Host ""
-Write-Host "[2/3] Creando release $tag en GitHub..." -ForegroundColor Cyan
-
+# Armado de la lista de assets locales a publicar.
 # Si hay instalador .exe compilado en dist/, lo sumamos como segundo asset.
-# Soporta el filename que genera build_installer.ps1 (que reemplaza '+' por '-build').
+# build_installer.ps1 reemplaza '+' por '-build' en el filename.
 $versionInno = $version -replace '\+', '-build'
 $installerExe = Join-Path $repoRoot "dist\CoopertransMovil-Setup-$versionInno.exe"
 $assets = @($zipPath)
@@ -153,6 +175,70 @@ if (Test-Path $installerExe) {
     Write-Host "  (sin instalador .exe en dist\ — para sumarlo: .\scripts\build_installer.ps1)" -ForegroundColor DarkGray
 }
 
+if ($releaseExiste) {
+    # Modo upload: comparar assets locales vs remotos. Subir los que
+    # faltan o tienen size distinto. Sin tocar los que ya coinciden.
+    Write-Host ""
+    Write-Host "[2/3] Sincronizando assets con release existente $tag..." -ForegroundColor Cyan
+    $remoteByName = @{}
+    foreach ($a in $assetsRemotos) { $remoteByName[$a.name] = $a }
+
+    $subidos = 0
+    $reemplazados = 0
+    $yaIguales = 0
+    foreach ($localPath in $assets) {
+        $localName = Split-Path $localPath -Leaf
+        $localSize = (Get-Item $localPath).Length
+        if ($remoteByName.ContainsKey($localName)) {
+            $remoteSize = [int64]$remoteByName[$localName].size
+            if ($remoteSize -eq $localSize) {
+                Write-Host "  $localName ya estaba subido (size match)" -ForegroundColor DarkGray
+                $yaIguales++
+                continue
+            }
+            Write-Host "  $localName existe pero size distinto, reemplazando..." -ForegroundColor Cyan
+            Invoke-Native { & gh release upload $tag $localPath --clobber }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Error al reemplazar $localName" -ForegroundColor Red
+                exit 1
+            }
+            $reemplazados++
+        } else {
+            Write-Host "  Subiendo $localName..." -ForegroundColor Cyan
+            Invoke-Native { & gh release upload $tag $localPath }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Error al subir $localName" -ForegroundColor Red
+                exit 1
+            }
+            $subidos++
+        }
+    }
+
+    # Cleanup
+    Remove-Item $zipPath -Force
+
+    Write-Host ""
+    Write-Host "[3/3] Sincronización lista." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "==========================================" -ForegroundColor Green
+    Write-Host "OK RELEASE $tag" -ForegroundColor Green
+    Write-Host "==========================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Assets subidos:      $subidos" -ForegroundColor White
+    Write-Host "Assets reemplazados: $reemplazados" -ForegroundColor White
+    Write-Host "Assets sin cambios:  $yaIguales" -ForegroundColor White
+    Write-Host ""
+    if ($subidos -eq 0 -and $reemplazados -eq 0) {
+        Write-Host "El release ya estaba completo, no hubo cambios." -ForegroundColor Cyan
+    } else {
+        Write-Host "Las otras PCs van a tomar la actualización la próxima vez" -ForegroundColor Cyan
+        Write-Host "que el operador haga doble click en el icono 'Coopertrans Móvil'." -ForegroundColor Cyan
+    }
+    exit 0
+}
+
+Write-Host ""
+Write-Host "[2/3] Creando release $tag en GitHub..." -ForegroundColor Cyan
 Invoke-Native { & gh release create $tag $assets --title "Coopertrans Movil $tag" --notes $Notes }
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Error al crear release. El zip quedó en $zipPath" -ForegroundColor Red
