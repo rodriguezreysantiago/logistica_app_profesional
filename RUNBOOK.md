@@ -9,15 +9,16 @@ Documento operativo para resolver incidentes en producción. Pensado para que **
 ## Tabla de contenidos
 
 1. [Diagnóstico rápido — ¿qué está roto?](#diagnóstico-rápido)
-2. [Bot WhatsApp no envía mensajes](#bot-whatsapp-no-envía-mensajes)
-3. [Login no funciona / la app no deja entrar](#login-no-funciona)
-4. [Volvo Connect: telemetría sin actualizar](#volvo-connect-telemetría-sin-actualizar)
-5. [Volvo Alertas: tablero sin eventos nuevos](#volvo-alertas-tablero-sin-eventos-nuevos)
-6. [Migrar Cloud Functions de region (gotchas)](#migrar-cloud-functions-de-region)
-7. [Rollback de un deploy malo](#rollback-de-un-deploy-malo)
-8. [Backup y disaster recovery](#backup-y-disaster-recovery)
-9. [Comandos rápidos de diagnóstico](#comandos-rápidos-de-diagnóstico)
-10. [Contactos y secretos](#contactos-y-secretos)
+2. [Cambio de PC (sync casa ↔ oficina)](#cambio-de-pc-sync-casa--oficina)
+3. [Bot WhatsApp no envía mensajes](#bot-whatsapp-no-envía-mensajes)
+4. [Login no funciona / la app no deja entrar](#login-no-funciona)
+5. [Volvo Connect: telemetría sin actualizar](#volvo-connect-telemetría-sin-actualizar)
+6. [Volvo Alertas: tablero sin eventos nuevos](#volvo-alertas-tablero-sin-eventos-nuevos)
+7. [Migrar Cloud Functions de region (gotchas)](#migrar-cloud-functions-de-region)
+8. [Rollback de un deploy malo](#rollback-de-un-deploy-malo)
+9. [Backup y disaster recovery](#backup-y-disaster-recovery)
+10. [Comandos rápidos de diagnóstico](#comandos-rápidos-de-diagnóstico)
+11. [Contactos y secretos](#contactos-y-secretos)
 
 ---
 
@@ -34,6 +35,183 @@ Documento operativo para resolver incidentes en producción. Pensado para que **
 | `firebase deploy` falla con `eslint no se reconoce` o `No currently active project` | [Pre-checks de deploy](#pre-checks-antes-de-correr-firebase-deploy) |
 | `start_bot.ps1` aborta diciendo que hay cambios pero `git diff` está vacío | [Stat dirty del package-lock](#start_botps1-aborta-por-package-lock-modificado-pero-git-diff-está-vacío) |
 | Pantalla blanca al abrir la app | Crashlytics en Firebase Console (solo mobile) — desktop solo logs locales |
+
+---
+
+## Cambio de PC (sync casa ↔ oficina)
+
+Santiago alterna entre PC de casa y PC de oficina. La PC que NO se usa
+queda atrás: faltan commits de Flutter, faltan deploys ya hechos, el
+bot puede estar corriendo en la otra. Esta sección es la check-list
+para ponerla al día sin perderse nada.
+
+> **Tip operativo**: hacé un `git push` y `git status` siempre **antes
+> de cerrar la PC actual**. Si dejás cambios sin commitear, la otra
+> PC va a empezar el día con un estado raro (rama divergida) y vas a
+> perder tiempo merging.
+
+### Paso 1 — Cerrar correctamente la PC actual
+
+Antes de irte de la PC donde estuviste trabajando:
+
+```bash
+# 1) Verificar que no hay cambios sin commitear
+git status
+
+# 2) Si hay cambios pendientes, commitearlos (o stashearlos)
+git add -A && git commit -m "WIP: <descripción corta>"
+# o si querés guardarlo sin ensuciar la historia:
+# git stash push -m "wip-<fecha>"
+
+# 3) Push a remote — esto es lo que la otra PC va a bajar
+git push origin main
+
+# 4) Si tenés el bot corriendo acá, decidir qué hacer (ver paso 4)
+```
+
+### Paso 2 — Sync de código en la PC nueva (oficina)
+
+```bash
+cd C:\Users\santi\logistica_app_profesional
+
+# 1) Bajar todo lo que se pusheó desde la otra PC
+git fetch origin
+git pull origin main
+
+# 2) Si la PC estuvo varios días sin abrir el repo, mirá el changelog:
+git log --oneline -20
+
+# 3) Resolver dependencias Flutter (puede haber packages nuevos)
+flutter pub get
+
+# 4) Si pubspec.yaml o pubspec.lock cambiaron, reinstalar plugins nativos:
+flutter clean
+flutter pub get
+```
+
+### Paso 3 — Compilar y arrancar la app
+
+```bash
+# Para ver que todo compila antes de correr en debug
+flutter analyze --no-pub
+flutter test --no-pub
+
+# Si pasaron, arrancar la app
+flutter run -d windows
+```
+
+> Si el build Windows falla con `Filename too long` en submódulos de
+> sentry-native, el path del cwd es muy profundo. Asegurate de
+> trabajar desde `C:\Users\santi\logistica_app_profesional\` y NO
+> desde un worktree dentro de `.claude/worktrees/...`.
+
+### Paso 4 — Bot WhatsApp: ¿dónde corre ahora?
+
+**El bot solo puede correr en UNA PC a la vez** (anti-doble-bot
+chequea heartbeat compartido en `BOT_HEALTH/main` para evitar
+mensajes duplicados a choferes — ver `start_bot.ps1`).
+
+#### Caso A: el bot estaba corriendo en casa y ahora estás en oficina
+
+Si querés que el bot siga corriendo desde casa (más estable porque
+esa PC tiene menos chance de apagarse), **no hacés nada**: la oficina
+solo edita código, el bot sigue donde está.
+
+Si querés moverlo a la oficina:
+
+```bash
+# === En la PC de CASA, parar el bot ===
+nssm stop CoopertransBot
+# Verificar que paró
+nssm status CoopertransBot   # debería mostrar SERVICE_STOPPED
+
+# === En la PC de OFICINA, levantarlo ===
+cd C:\Users\santi\logistica_app_profesional\whatsapp-bot
+
+# 1) Sync del código del bot también (es parte del mismo repo)
+git pull origin main
+
+# 2) Instalar dependencias si cambiaron
+npm ci
+
+# 3) Si nunca se instaló como servicio en esta PC, ver
+#    whatsapp-bot/scripts/install_nssm.ps1 (paso one-shot).
+
+# 4) Levantar el bot (anti-doble-bot validará que no haya otro vivo)
+nssm start CoopertransBot
+
+# 5) Verificar
+nssm status CoopertransBot   # SERVICE_RUNNING
+# y mirar la pantalla "Estado del Bot" en la app — heartbeat < 30s
+```
+
+#### Caso B: el bot está pausado / no querés bot ahora
+
+Si solo vas a hacer testing local sin bot real, dejá el servicio
+parado en ambas PCs y trabajá tranquilo. El admin puede ver en la
+pantalla "Estado del Bot" que está caído (heartbeat viejo) — eso es
+esperable mientras desarrollás.
+
+### Paso 5 — Deploys pendientes
+
+Si en casa hiciste cambios a `firestore.rules`, `firestore.indexes.json`,
+`functions/`, `storage.rules`, los deploys los hace el que tiene
+acceso a Firebase y NO se replican automáticamente. Algunos quedan
+"pendientes" hasta que corras los comandos.
+
+Para ver qué te falta deployar:
+
+```bash
+# Diff de los últimos commits, mirar si tocan rules/indexes/functions
+git log --oneline --name-only -10 | grep -E "(rules|indexes|functions/)"
+```
+
+Comandos típicos (correr de a UNO — el filter combinado tiene un bug
+de Firebase CLI conocido):
+
+```bash
+firebase deploy --only firestore:rules
+firebase deploy --only firestore:indexes
+firebase deploy --only functions
+firebase deploy --only storage:rules
+```
+
+### Paso 6 — Cron `volvoPoller` y schedules
+
+No requieren acción al cambiar PC: están en GCP Cloud Scheduler y
+corren igual desde dónde sea. Solo verificar en la pantalla "Sync
+Dashboard" de la app que el último poll fue reciente.
+
+### Check-list rápida para "vine después de varios días"
+
+```bash
+# 1. Sync
+git pull origin main
+
+# 2. Dependencias
+flutter pub get
+
+# 3. Migraciones de schema/rules: ya están en Firestore (server-side),
+#    no hay nada que correr local
+flutter analyze --no-pub
+flutter test --no-pub
+
+# 4. ¿Hay deploys pendientes?
+git log --oneline --name-only origin/main..HEAD 2>/dev/null   # vacío = ok
+# Si la oficina hace 5 días que no commitea, NO hay nada para deployar
+# desde acá — los deploys los hizo casa. Mirá el ESTADO_PROYECTO para
+# confirmar que las rules/indexes/functions deployadas están al día.
+
+# 5. Bot
+# Decidir si lo querés correr en oficina (paso 4 caso A) o dejarlo en casa.
+
+# 6. Arrancar
+flutter run -d windows
+```
+
+> **Memoria de Drive**: si trabajás con Claude Code, la memoria vive
+> en `G:\Mi unidad\ClaudeCodeSync\memory\` y es la misma en ambas PCs
+> (Drive sincroniza sola). No hace falta sync explícito.
 
 ---
 

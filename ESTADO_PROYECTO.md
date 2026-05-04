@@ -1,8 +1,9 @@
 # Estado del proyecto — Coopertrans Móvil
 
-Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-05-01** (sesión grande post-30-abril: imports bulk Excel → Firestore, fix UI extintores en ficha admin, chips clickeables en mantenimiento, unificación menus admin, auditoría profunda con dos agentes paralelos, y plan de acción de 4 fases ejecutado completo: RBAC + rate limit + idempotencia bot + rules + AppDocsEmpleado + tryParseFecha + AppColors + perf + .gitattributes).
+Documento de handoff para retomar trabajo en otra máquina o en una conversación nueva con Claude. Última actualización: **2026-05-04** (revisión profunda del módulo Gomería + descubrimiento de causa raíz del crash Windows: `runTransaction` mal soportado por el plugin C++ — refactor completo del service sin tx + alta en lote + fixes UX masivos).
 
 Sesiones recientes:
+- **2026-05-04 (sesión larga)** — Revisión profunda de **Módulo Gomería** tras testing de Santiago donde el alta crasheaba con `abort()` C++. Bloque (1) revisión exhaustiva: 8 fases de mejora — fixes críticos (rules `motivo_retiro`, `puedeRecaparse` mintiendo a UI, `unidad_tipo` enmascarando errores), UX visual de unidades (tile con marca/modelo/% vida útil consumida, KM_ACTUAL en cabecera, geometría dual con gap), pantalla detalle de cubierta + búsqueda + filtros por estado, recapados con tabs En Proceso / Histórico + catálogo `CUBIERTAS_PROVEEDORES`, alertas en hub (≥80% vida útil), unicidad transaccional con docs de control (`CUBIERTAS_POSICIONES_ACTIVAS`, `CUBIERTAS_ACTIVAS`), feature **Rotar cubiertas** (mover/swap dentro de unidad), costo de cubierta + edición inline de modelo + presión/banda + registrar control. Bloque (2) **descubrimiento causa raíz Windows**: el bug de "Lost connection / abort()" NO era del plugin "en general" sino específicamente de `runTransaction` con cierta combinación de operaciones (reads + writes mixtos, especialmente con `tx.set` + `SetOptions(merge: true)` o `FieldValue.serverTimestamp()` adentro). Refactor completo del `GomeriaService`: las 7 transactions (crearCubierta, instalar, retirar, descartar, mandarARecapar, recibirDeRecapado, rotar) reemplazadas por `.get()` simples + writes secuenciales con cleanup best-effort. Unicidad ahora la garantizan rules `allow update: if false` sobre los locks. Bloque (3) **alta en lote**: nuevo método `crearCubiertasEnLote(cantidad: 1..500)` con barra de progreso para flotas grandes. Tests 65/65, analyzer global limpio. Ver sección 6.16.
 - **2026-05-01 (sesión larga)** — Continuación del trabajo del 30-abril. Tres bloques: **(1) imports bulk de datos** desde Excel a Firestore via 2 scripts Python idempotentes con `--dry-run`/`--apply`: `importar_servicios_y_matafuegos.py` (56 patentes con KM/fecha de último service + matafuegos cabina/exterior) e `importar_apodos.py` (53 choferes con APODO; matching exacto + fallback starts-with normalizado Unicode para SCHRÖDER/IBAÑEZ). Snapshot Excel se incluye y se borra al final una vez aplicado. **(2) fixes UI**: la ficha de detalle del vehículo en Gestión de Flota tenía los vencimientos hardcoded a RTO+Seguro — ahora itera `AppVencimientos.forTipo()` y los TRACTORES muestran los 4 vencimientos (extintores incluidos). Los chips del header de MANTENIMIENTO PREVENTIVO (Vencidos/Urgentes/Programar/Falta poco/OK) son clickeables y filtran la lista por estado, conteos siguen globales, tap-toggle limpia el filtro. Sidebar admin y panel central de "Accesos rápidos" unificados (mismo orden y mismos nombres cortos: Revisiones/Flota/Service/Personal/Vencimientos/Reportes/Sync/Estado Bot). **(3) auditoría profunda con 2 agentes paralelos** (cliente Flutter + backend Functions/bot/rules) que produjo plan de 4 fases ejecutado completo — ver sección 6.10. `flutter analyze` y `flutter test` (25 tests) pasan limpios al cierre.
 - **2026-04-29 (madrugada+)** — Bot WhatsApp Fase 2/3 endurecido: avisos automáticos de service preventivo (sumado al cron del bot Node.js, 4 niveles igual que la pantalla cliente: 5000/2500/1000/0 km), recordatorios diarios de vencidos (papeles + service) — el id del histórico incluye fecha del día así se reenvía hasta regularización con copy escalado por días/km transcurridos. **Plan B activo** (`uptimeData.serviceDistance` no viene del API por restricción de paquete Volvo): la pantalla y el bot calculan `serviceDistance` desde `(ULTIMO_SERVICE_KM + 50.000) − KM_ACTUAL` cuando falta el dato del API; el cliente puede registrar "service hecho" desde la card con un tap. Ticket abierto a Volvo para activar el bloque UPTIME en la cuenta. **Bot Node.js refactor crítico**: cambiado `onSnapshot` (gRPC stream) por polling con `get()` cada 15s — el stream gRPC se caía cada ~2 min en redes con NAT/firewall agresivo cortando conexiones idle. Solución mucho más resiliente, latencia despreciable. Polling tolera errores transientes sin romper el ciclo.
 - **2026-04-29 (madrugada)** — Mantenimiento preventivo (roadmap Volvo, ~1 día): nueva pantalla `admin_mantenimiento_screen` que ordena tractores por urgencia de service (5 estados: OK / Falta poco / Programar / Urgente / Vencido). Parseo de `serviceDistance` agregado a `VolvoTelemetria` + persistencia en `VEHICULOS.SERVICE_DISTANCE_KM` desde `VehiculoManager` y en `TELEMETRIA_HISTORICO` desde la scheduled function. Campos manuales `ULTIMO_SERVICE_KM` + `ULTIMO_SERVICE_FECHA` editables desde la ficha del tractor (form admin). Notificación local con idempotencia en `MANTENIMIENTOS_AVISADOS/{patente}` cuando un tractor cruza el umbral a VENCIDO. Constants centralizadas en `AppMantenimiento` (umbrales 5000/2500/1000/0). Pendiente: deploy de `firestore.rules` (sumó match para `MANTENIMIENTOS_AVISADOS`).
@@ -931,6 +932,83 @@ Deuda DRY conocida (NO bug): los 16 `DateFormat` dispersos podrían centralizars
 #### 6.15.5 Memoria sincronizada bidireccional
 
 Detección post-sesión: la memoria local en `C:\Users\santi\.claude\projects\...` divergía respecto a `G:/Mi unidad/ClaudeCodeSync/memory/` (single source of truth multi-PC). Drive tenía 5 entries que faltaban en local + el roadmap Volvo más actualizado; local tenía la nueva memoria de brand visual + correcciones del 2026-05-03 que faltaban en Drive. Sync bidireccional ejecutado, MEMORY.md mergeado, ambos lados quedaron al día.
+
+### 6.16 Sesión 2026-05-04 — Revisión profunda Gomería + causa raíz crash Windows + alta en lote
+
+Sesión larga de 8 horas con dos descubrimientos clave: el módulo Gomería tenía bugs operativos ocultos (rules + UX) que bloqueaban testing real, Y la causa del crash Windows que estaba documentada como "bug del plugin C++" era en realidad **`runTransaction` con cierta combinación de operaciones** — el resto de la app que usa Firestore intensivamente (alertas Volvo, telemetría, descargas, vencimientos) no rompía porque NO usaba ese patrón.
+
+#### 6.16.1 Bugs críticos pre-existentes en gomería
+
+Encontrados auditando el código antes de testear:
+
+- **Rule `motivo_retiro` rebotaba el retiro entero** (`firestore.rules:408`): el `hasOnly` del update path en `CUBIERTAS_INSTALADAS` no incluía `motivo_retiro`, así que cualquier retiro con motivo escrito tiraba PERMISSION_DENIED y rolaba la transacción. Sin motivo andaba; con motivo no.
+- **`Cubierta.puedeRecaparse` retornaba true para INSTALADA** pero el service rechazaba si no estaba EN_DEPOSITO. UI ofrecía cubiertas que después fallaban al guardar.
+- **`CubiertaInstalada.fromMap` caía a TRACTOR por default** si `unidad_tipo` venía corrupto en Firestore — enmascaraba bugs de escritura. Reemplazado por `throw StateError` explícito.
+- **Rules CUBIERTAS** sin validación de `creado_por_dni == auth.uid` (autoría falsificable).
+- **`META/cubiertas_counter`** con regla `allow read, write: if isAdminOrSupervisor()` — un set manual o un bug de cliente podía romper la secuencia de códigos para siempre. Cerrada a `proximo == resource.data.proximo + 1` monotónico.
+
+#### 6.16.2 Bloque UX masivo (8 fases)
+
+- **Tile de posición ocupada** ahora muestra marca/modelo + vida (NUEVA/V2/V3...) + barra de % de vida útil consumida (verde/ámbar/rojo). El operador a 1m de distancia identifica la cubierta de un vistazo.
+- **Cabecera del detalle de unidad** muestra `KM_ACTUAL` del tractor (info clave para decidir cambios sin ir a Flota).
+- **Geometría dual**: gap entre INT|INT en los ejes de tracción para reflejar el espacio físico del eje.
+- **Lista de unidades**: filtro `whereIn` server-side (antes bajaba toda la colección VEHICULOS).
+- **Pantalla nueva detalle de cubierta** (`/admin_gomeria_cubierta`): historial completo de instalaciones + recapados + costo por km calculado.
+- **Stock con búsqueda** por código (`CUB-XXXX`) y modelo + filtros completos por estado (TODAS / DEPÓSITO / INSTALADAS / EN_RECAPADO / DESCARTADAS).
+- **Recapados** con tabs EN PROCESO / HISTÓRICO + resumen mensual (total, recibidas, descartadas, costo total).
+- **Catálogo `CUBIERTAS_PROVEEDORES`** con dropdown extensible (selector + opción "+ nuevo proveedor" inline). Termina con typos en reportes.
+- **Banner alertas en hub**: cubiertas instaladas que pasaron 80% de vida útil estimada (rojo si pasaron 100%). Tap → bottom sheet con detalle, navegable a la unidad.
+- **Acción Rotar** en `_PosicionOcupadaDialog`: mover cubierta a otra posición de la misma unidad (vacía o swap).
+- **Edición inline de modelo** (bottom sheet con `DatoEditable*` alineado al pattern de Personal/Flota).
+- **Registrar control** (presión PSI + profundidad de banda mm) sobre la cubierta instalada.
+- **Costo de cubierta**: `precio_compra` opcional en alta + cálculo automático de costo por km en detalle.
+
+#### 6.16.3 Causa raíz crash Windows: `runTransaction` mal soportado por plugin C++
+
+Santiago reportó que después de subir el stack Firebase a 6.3.0+ la app NI ABRÍA en Windows (regresión más grave). Revertido al 6.1.3 anterior. Pero el crash original "Lost connection" en gomería seguía. Diagnóstico fino:
+
+- **Síntoma exacto**: al apretar GUARDAR en "Nueva cubierta", spinner gira y luego aparece **popup modal de Visual C++ Runtime: "Debug Error! abort() has been called"**. Crash nativo NO catcheable desde Dart.
+- **Auditoría de patrones**: el resto de la app usa `runTransaction` también (asignaciones chofer↔vehículo, enganche↔tractor) pero con tx que solo hacen `tx.update`. Gomería era el único lugar con `tx.set` + `SetOptions(merge: true)` + `FieldValue.serverTimestamp()` dentro de la tx — combinación que dispara el bug del plugin.
+- **Solución consolidada**: refactor de las 7 operaciones del `GomeriaService` para NO USAR runTransaction. Patrón aplicado:
+  - Lecturas con `.get()` simples (paralelas con `Future.wait` cuando se puede).
+  - Validaciones en cliente.
+  - Writes secuenciales individuales.
+  - Críticos primero (cerrar log, crear log); secundarios al final con `try/catch` que loguea a Crashlytics y continúa.
+  - **Unicidad** que antes garantizaba la tx → ahora la garantizan rules `allow update: if false` sobre los docs de lock (`CUBIERTAS_POSICIONES_ACTIVAS` indexado por `{patente}__{POSICION}`, `CUBIERTAS_ACTIVAS` indexado por `cubierta_id`). Un `set` sobre un lock que ya existe rebota con permission-denied → race-safe sin tx.
+  - Cleanup best-effort con `unawaited(...delete())` cuando una operación intermedia falla.
+
+**Trade-off vs versión transaccional original**: si una operación falla mid-way (ej. red caída entre dos writes), queda estado parcial. Probabilidad práctica baja con un solo supervisor + red estable; los logs siguen siendo la fuente de verdad y un job de cleanup futuro puede reconciliar. Aceptable para destrabar Windows.
+
+**Confirmado funcionando** end-to-end por Santiago: alta unitaria, alta en lote, instalar, retirar, rotar, mandar a recapar, recibir, descartar.
+
+#### 6.16.4 Alta de cubiertas en lote (1 a 500)
+
+A pedido explícito de Santiago: "cargar de a 1 con 120+ unidades es una locura". Vecchi compra cubiertas en lotes de 50/100/200 idénticas (mismo modelo, mismo precio, mismo lote del proveedor) y darlas de alta una por una era inviable.
+
+- Service: `crearCubiertasEnLote(modeloId, cantidad: 1..500, ...)` reusa `crearCubierta` en serie. Serial porque la rule monotónica del counter rebotaría altas paralelas. Acepta callback `onProgreso(creadas, total)` para feedback de UI.
+- UI: campo "Cantidad" en el dialog (default 1). Si > 1, el botón cambia a "CREAR N CUBIERTAS" + barra de progreso linear con "Creando X de Y…". Al terminar, snackbar muestra `✓ CUB-0010 a CUB-0050 (41 cubiertas) creadas`.
+- Si una creación intermedia falla, el error muestra "Error tras crear X de Y" — el supervisor reintenta con la cantidad restante.
+- Cap 500 por lote para evitar bloqueos de UI con números irrazonables.
+
+#### 6.16.5 Schema y rules nuevos
+
+Colecciones nuevas (todas con rules deployadas):
+- `CUBIERTAS_POSICIONES_ACTIVAS/{patente}__{POSICION}` — lock de unicidad de posición. `allow update: if false`.
+- `CUBIERTAS_ACTIVAS/{cubierta_id}` — lock de unicidad de cubierta. `allow update: if false`.
+- `CUBIERTAS_PROVEEDORES/{auto}` — catálogo de proveedores de recapado. CRUD ABM por admin/supervisor.
+
+Cambios sobre rules existentes:
+- `CUBIERTAS_INSTALADAS` update path ampliado para incluir `motivo_retiro` + flow nuevo "registrar lectura" (presión + banda) sin cerrar el log.
+- `META/cubiertas_counter` cerrado a increment monotónico.
+- `CUBIERTAS` create con validación `creado_por_dni == auth.uid`.
+
+Índices nuevos: `CUBIERTAS_RECAPADOS (cubierta_id ASC, fecha_envio DESC)` para historial por cubierta.
+
+#### 6.16.6 Memoria actualizada
+
+Re-escrita `feedback_windows_cloud_firestore_bugs.md` con la causa raíz correcta: el bug NO es del plugin "en general", es específicamente de `runTransaction` con cierta combinación de ops. Regla práctica nueva: **NO USAR `runTransaction` en código nuevo si la app correrá en Windows** — usar writes secuenciales con rules de unicidad sobre docs de control.
+
+`project_modulo_gomeria.md` actualizada con el estado final post-refactor (7 colecciones totales contando los locks, 65 tests, todas las operaciones operativas).
 
 ## 7. Pendientes / roadmap
 
