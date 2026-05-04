@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../constants/posiciones.dart';
 import '../models/cubierta.dart';
@@ -237,104 +238,145 @@ class GomeriaService {
         _db.collection(AppCollections.cubiertasInstaladas).doc().id;
 
     final posicionLockId = _posicionLockId(unidadLimpia, posicionLimpia);
+    final posicionLockRef = _db
+        .collection(AppCollections.cubiertasPosicionesActivas)
+        .doc(posicionLockId);
+    final cubiertaLockRef =
+        _db.collection(AppCollections.cubiertasActivas).doc(cubiertaLimpia);
+    final cubiertaRef =
+        _db.collection(AppCollections.cubiertas).doc(cubiertaLimpia);
+    final vehiculoRef =
+        _db.collection(AppCollections.vehiculos).doc(unidadLimpia);
 
-    await _db.runTransaction((tx) async {
-      // 1) Locks de unicidad — se leen FIRST con `tx.get` para
-      //    detectar colisiones aún si dos clientes instalan en paralelo.
-      //    `where().get()` dentro de tx no es transaccional en client
-      //    SDK, así que esta es la única forma de garantizar atomicidad.
-      final posicionLockRef = _db
-          .collection(AppCollections.cubiertasPosicionesActivas)
-          .doc(posicionLockId);
-      final posicionLockSnap = await tx.get(posicionLockRef);
-      if (posicionLockSnap.exists) {
-        final otroCodigo =
-            (posicionLockSnap.data()?['cubierta_codigo'] ?? '').toString();
+    // Lecturas de dominio en paralelo (sin tx — el plugin C++ Windows
+    // crashea con runTransaction en cierta combinación de operaciones).
+    // La unicidad la garantizan las rules: los locks tienen
+    // `allow update: if false`, así que un `set` sobre un lock que
+    // ya existe rebota con permission-denied y eso lo interpretamos
+    // como race con otro cliente.
+    final results = await Future.wait([
+      cubiertaRef.get(),
+      vehiculoRef.get(),
+      posicionLockRef.get(),
+      cubiertaLockRef.get(),
+    ]);
+    final cubiertaSnap = results[0];
+    final vehiculoSnap = results[1];
+    final posicionLockSnap = results[2];
+    final cubiertaLockSnap = results[3];
+
+    if (posicionLockSnap.exists) {
+      final otroCodigo =
+          (posicionLockSnap.data()?['cubierta_codigo'] ?? '').toString();
+      throw StateError(
+        'La posición ${posicion.etiqueta} ya tiene la cubierta '
+        '$otroCodigo instalada. Retirala primero.',
+      );
+    }
+    if (cubiertaLockSnap.exists) {
+      throw StateError(
+        'La cubierta $cubiertaLimpia figura activa en otra posición. '
+        'Cerrá esa instalación antes de instalar acá.',
+      );
+    }
+    if (!cubiertaSnap.exists) {
+      throw StateError('Cubierta $cubiertaLimpia no existe');
+    }
+    final cubierta = Cubierta.fromMap(cubiertaLimpia, cubiertaSnap.data());
+    if (cubierta.estado != EstadoCubierta.enDeposito) {
+      throw StateError(
+        'La cubierta ${cubierta.codigo} está ${cubierta.estado.codigo}, '
+        'solo se puede instalar si está EN_DEPOSITO',
+      );
+    }
+    // VALIDACIÓN ESTRICTA tipo_uso vs posición (Santiago: "es un
+    // error de tipeo seguramente").
+    if (!posicion.aceptaTipoUso(cubierta.tipoUso)) {
+      throw StateError(
+        'La cubierta ${cubierta.codigo} es ${cubierta.tipoUso.codigo} y la '
+        'posición ${posicion.etiqueta} requiere '
+        '${posicion.tipoUsoRequerido.codigo}',
+      );
+    }
+    if (!vehiculoSnap.exists) {
+      throw StateError('Unidad $unidadLimpia no existe');
+    }
+    final vehiculoData = vehiculoSnap.data() ?? const <String, dynamic>{};
+    final tipoVehiculo =
+        (vehiculoData['TIPO'] ?? '').toString().toUpperCase();
+    final esTractor = tipoVehiculo == AppTiposVehiculo.tractor;
+    if (unidadTipo == TipoUnidadCubierta.tractor && !esTractor) {
+      throw StateError(
+        '$unidadLimpia tiene TIPO=$tipoVehiculo, no es TRACTOR',
+      );
+    }
+    if (unidadTipo == TipoUnidadCubierta.enganche && esTractor) {
+      throw StateError(
+        '$unidadLimpia es TRACTOR — se esperaba un enganche',
+      );
+    }
+    final double? kmUnidadActual = esTractor
+        ? (vehiculoData['KM_ACTUAL'] as num?)?.toDouble()
+        : null;
+
+    // Snapshot del modelo (lectura adicional fuera del Future.wait
+    // porque depende del modeloId que sale de la cubierta).
+    final modeloSnap = await _db
+        .collection(AppCollections.cubiertasModelos)
+        .doc(cubierta.modeloId)
+        .get();
+    final modelo = modeloSnap.exists
+        ? CubiertaModelo.fromMap(cubierta.modeloId, modeloSnap.data())
+        : null;
+    final kmEsperadosSnapshot = modelo?.kmEsperadosParaVida(cubierta.vidas);
+
+    // Writes secuenciales con rollback manual. Orden: primero los locks
+    // (los que pueden chocar por race), después el log y el estado de
+    // la cubierta. Si alguno intermedio falla, deshacemos los pasos
+    // anteriores con `unawaited` (best-effort cleanup).
+    final ahora = Timestamp.now();
+    try {
+      await posicionLockRef.set(<String, dynamic>{
+        'instalacion_id': instalacionId,
+        'cubierta_id': cubiertaLimpia,
+        'cubierta_codigo': cubierta.codigo,
+        'unidad_id': unidadLimpia,
+        'posicion': posicionLimpia,
+        'desde': ahora,
+      });
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') {
         throw StateError(
-          'La posición ${posicion.etiqueta} ya tiene la cubierta '
-          '$otroCodigo instalada. Retirala primero.',
+          'La posición ${posicion.etiqueta} fue ocupada por otro supervisor '
+          'justo antes. Refrescá y volvé a intentar.',
         );
       }
-      final cubiertaLockRef = _db
-          .collection(AppCollections.cubiertasActivas)
-          .doc(cubiertaLimpia);
-      final cubiertaLockSnap = await tx.get(cubiertaLockRef);
-      if (cubiertaLockSnap.exists) {
+      rethrow;
+    }
+
+    try {
+      await cubiertaLockRef.set(<String, dynamic>{
+        'instalacion_id': instalacionId,
+        'unidad_id': unidadLimpia,
+        'posicion': posicionLimpia,
+        'desde': ahora,
+      });
+    } on FirebaseException catch (e) {
+      // Rollback: liberar el lock de posición que recién creamos.
+      unawaited(posicionLockRef.delete());
+      if (e.code == 'permission-denied') {
         throw StateError(
-          'La cubierta $cubiertaLimpia figura activa en otra posición. '
-          'Cerrá esa instalación antes de instalar acá.',
+          'La cubierta ${cubierta.codigo} fue instalada en otro lado '
+          'justo antes. Refrescá y volvé a intentar.',
         );
       }
+      rethrow;
+    }
 
-      // 2) Lecturas de dominio (Firestore exige reads antes de writes).
-      final cubiertaRef =
-          _db.collection(AppCollections.cubiertas).doc(cubiertaLimpia);
-      final cubiertaSnap = await tx.get(cubiertaRef);
-      if (!cubiertaSnap.exists) {
-        throw StateError('Cubierta $cubiertaLimpia no existe');
-      }
-      final cubierta = Cubierta.fromMap(cubiertaLimpia, cubiertaSnap.data());
-
-      if (cubierta.estado != EstadoCubierta.enDeposito) {
-        throw StateError(
-          'La cubierta ${cubierta.codigo} está ${cubierta.estado.codigo}, '
-          'solo se puede instalar si está EN_DEPOSITO',
-        );
-      }
-
-      // VALIDACIÓN ESTRICTA tipo_uso vs posición. La regla más importante
-      // del módulo (Santiago: "es un error de tipeo seguramente").
-      if (!posicion.aceptaTipoUso(cubierta.tipoUso)) {
-        throw StateError(
-          'La cubierta ${cubierta.codigo} es ${cubierta.tipoUso.codigo} y la '
-          'posición ${posicion.etiqueta} requiere '
-          '${posicion.tipoUsoRequerido.codigo}',
-        );
-      }
-
-      // Snapshot del modelo al instalar — la grilla de la unidad muestra
-      // marca/modelo en cada tile y el % de vida útil consumida sin
-      // joinear contra CUBIERTAS_MODELOS en cada rebuild.
-      final modeloSnap = await tx.get(_db
-          .collection(AppCollections.cubiertasModelos)
-          .doc(cubierta.modeloId));
-      final modelo = modeloSnap.exists
-          ? CubiertaModelo.fromMap(cubierta.modeloId, modeloSnap.data())
-          : null;
-      final kmEsperadosSnapshot = modelo?.kmEsperadosParaVida(cubierta.vidas);
-
-      // Validar que la unidad existe y es del tipo esperado.
-      final vehiculoRef =
-          _db.collection(AppCollections.vehiculos).doc(unidadLimpia);
-      final vehiculoSnap = await tx.get(vehiculoRef);
-      if (!vehiculoSnap.exists) {
-        throw StateError('Unidad $unidadLimpia no existe');
-      }
-      final vehiculoData = vehiculoSnap.data() ?? const <String, dynamic>{};
-      final tipoVehiculo =
-          (vehiculoData['TIPO'] ?? '').toString().toUpperCase();
-      final esTractor = tipoVehiculo == AppTiposVehiculo.tractor;
-      if (unidadTipo == TipoUnidadCubierta.tractor && !esTractor) {
-        throw StateError(
-          '$unidadLimpia tiene TIPO=$tipoVehiculo, no es TRACTOR',
-        );
-      }
-      if (unidadTipo == TipoUnidadCubierta.enganche && esTractor) {
-        throw StateError(
-          '$unidadLimpia es TRACTOR — se esperaba un enganche',
-        );
-      }
-
-      // Tomar km_actual SOLO si es tractor (los enganches no tienen
-      // odómetro propio).
-      final double? kmUnidadActual = esTractor
-          ? (vehiculoData['KM_ACTUAL'] as num?)?.toDouble()
-          : null;
-
-      final colInst = _db.collection(AppCollections.cubiertasInstaladas);
-      final ahora = Timestamp.now();
-      final nuevaRef = colInst.doc(instalacionId);
-      tx.set(nuevaRef, <String, dynamic>{
+    final colInst = _db.collection(AppCollections.cubiertasInstaladas);
+    final nuevaRef = colInst.doc(instalacionId);
+    try {
+      await nuevaRef.set(<String, dynamic>{
         'cubierta_id': cubiertaLimpia,
         'cubierta_codigo': cubierta.codigo,
         'unidad_id': unidadLimpia,
@@ -357,29 +399,27 @@ class GomeriaService {
         if (motivo != null && motivo.trim().isNotEmpty)
           'motivo': motivo.trim(),
       });
+    } catch (_) {
+      // Rollback de ambos locks si la creación del log falla.
+      unawaited(posicionLockRef.delete());
+      unawaited(cubiertaLockRef.delete());
+      rethrow;
+    }
 
-      tx.update(cubiertaRef, {
+    // Update final del estado de la cubierta. Si esto falla queda un
+    // estado raro (cubierta EN_DEPOSITO con instalación activa), pero
+    // las queries siguen funcionando porque la verdad operativa vive en
+    // CUBIERTAS_INSTALADAS y los locks. Logueamos el problema pero NO
+    // hacemos rollback completo (sería peor: dejaríamos la cubierta sin
+    // instalar pero el supervisor ya la cambió físicamente).
+    try {
+      await cubiertaRef.update({
         'estado': EstadoCubierta.instalada.codigo,
       });
-
-      // Crear los locks de unicidad — su existencia bloquea cualquier
-      // intento concurrente de instalar otra cubierta en la misma
-      // posición o de instalar esta cubierta en otra posición.
-      tx.set(posicionLockRef, <String, dynamic>{
-        'instalacion_id': instalacionId,
-        'cubierta_id': cubiertaLimpia,
-        'cubierta_codigo': cubierta.codigo,
-        'unidad_id': unidadLimpia,
-        'posicion': posicionLimpia,
-        'desde': ahora,
-      });
-      tx.set(cubiertaLockRef, <String, dynamic>{
-        'instalacion_id': instalacionId,
-        'unidad_id': unidadLimpia,
-        'posicion': posicionLimpia,
-        'desde': ahora,
-      });
-    });
+    } catch (e, st) {
+      AppLogger.recordError(e, st,
+          reason: 'CUBIERTAS.estado update tras instalar (no fatal)');
+    }
 
     unawaited(AuditLog.registrar(
       accion: AuditAccion.instalarCubierta,
@@ -422,76 +462,88 @@ class GomeriaService {
       );
     }
 
-    await _db.runTransaction((tx) async {
-      final instRef =
-          _db.collection(AppCollections.cubiertasInstaladas).doc(idLimpio);
-      final instSnap = await tx.get(instRef);
-      if (!instSnap.exists) {
-        throw StateError('Instalación $idLimpio no existe');
-      }
-      final inst = CubiertaInstalada.fromDoc(instSnap);
-      if (!inst.esActiva) {
-        throw StateError(
-            'La instalación $idLimpio ya está cerrada (hasta != null)');
-      }
+    // Lecturas de dominio (sin tx — el plugin C++ Windows crashea con
+    // runTransaction; ver crearCubierta y la memoria
+    // feedback_windows_cloud_firestore_bugs).
+    final instRef =
+        _db.collection(AppCollections.cubiertasInstaladas).doc(idLimpio);
+    final instSnap = await instRef.get();
+    if (!instSnap.exists) {
+      throw StateError('Instalación $idLimpio no existe');
+    }
+    final inst = CubiertaInstalada.fromDoc(instSnap);
+    if (!inst.esActiva) {
+      throw StateError(
+          'La instalación $idLimpio ya está cerrada (hasta != null)');
+    }
 
-      // Releer la cubierta para mantener km_acumulados consistente.
-      final cubiertaRef =
-          _db.collection(AppCollections.cubiertas).doc(inst.cubiertaId);
-      final cubiertaSnap = await tx.get(cubiertaRef);
-      if (!cubiertaSnap.exists) {
-        throw StateError('Cubierta ${inst.cubiertaId} no existe');
+    final cubiertaRef =
+        _db.collection(AppCollections.cubiertas).doc(inst.cubiertaId);
+
+    // Releemos cubierta + (opcional) vehículo en paralelo para poder
+    // calcular km_acumulados consistente y km_recorridos del tractor.
+    final readsToDo = <Future<DocumentSnapshot<Map<String, dynamic>>>>[
+      cubiertaRef.get(),
+      if (inst.unidadTipo == TipoUnidadCubierta.tractor)
+        _db.collection(AppCollections.vehiculos).doc(inst.unidadId).get(),
+    ];
+    final reads = await Future.wait(readsToDo);
+    final cubiertaSnap = reads[0];
+    if (!cubiertaSnap.exists) {
+      throw StateError('Cubierta ${inst.cubiertaId} no existe');
+    }
+    final cubierta = Cubierta.fromMap(inst.cubiertaId, cubiertaSnap.data());
+
+    double? kmActualTractor;
+    double? kmRecorridos;
+    if (inst.unidadTipo == TipoUnidadCubierta.tractor) {
+      final vehSnap = reads[1];
+      kmActualTractor = (vehSnap.data()?['KM_ACTUAL'] as num?)?.toDouble();
+      if (kmActualTractor != null && inst.kmUnidadAlInstalar != null) {
+        final diff = kmActualTractor - inst.kmUnidadAlInstalar!;
+        // Si el odómetro retrocedió (sync Volvo erróneo, reset manual)
+        // no contamos km negativos.
+        kmRecorridos = diff < 0 ? 0 : diff;
       }
-      final cubierta = Cubierta.fromMap(inst.cubiertaId, cubiertaSnap.data());
+    }
+    // Enganche: km_recorridos null hasta Fase 2.
 
-      // Para tractor: km_actual del tractor en este momento.
-      double? kmActualTractor;
-      double? kmRecorridos;
-      if (inst.unidadTipo == TipoUnidadCubierta.tractor) {
-        final vehSnap = await tx.get(_db
-            .collection(AppCollections.vehiculos)
-            .doc(inst.unidadId));
-        kmActualTractor =
-            (vehSnap.data()?['KM_ACTUAL'] as num?)?.toDouble();
-        if (kmActualTractor != null && inst.kmUnidadAlInstalar != null) {
-          final diff = kmActualTractor - inst.kmUnidadAlInstalar!;
-          // Defensa: si por algún motivo el odómetro retrocedió (sync
-          // Volvo erróneo, reset manual), no contamos km negativos.
-          kmRecorridos = diff < 0 ? 0 : diff;
-        }
-      }
-      // Para enganche: dejamos los km en null. Cuando arranque Fase 2 el
-      // cálculo se hará en background sobre los docs cerrados.
+    // Writes secuenciales con cleanup best-effort si una falla mid-way.
+    // Orden: cerrar el log primero (la fuente de verdad); después
+    // actualizar la cubierta y liberar los locks. Si el segundo bloque
+    // falla, la operación queda parcial pero el log ya está cerrado.
+    final ahora = Timestamp.now();
+    await instRef.update({
+      'hasta': ahora,
+      'km_unidad_al_retirar': kmActualTractor,
+      'km_recorridos': kmRecorridos,
+      'retirado_por_dni': supervisorLimpio,
+      if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
+        'retirado_por_nombre': supervisorNombre.trim(),
+      if (motivo != null && motivo.trim().isNotEmpty)
+        'motivo_retiro': motivo.trim(),
+    });
 
-      final ahora = Timestamp.now();
-      tx.update(instRef, {
-        'hasta': ahora,
-        'km_unidad_al_retirar': kmActualTractor,
-        'km_recorridos': kmRecorridos,
-        'retirado_por_dni': supervisorLimpio,
-        if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
-          'retirado_por_nombre': supervisorNombre.trim(),
-        if (motivo != null && motivo.trim().isNotEmpty)
-          'motivo_retiro': motivo.trim(),
-      });
-
-      tx.update(cubiertaRef, {
+    try {
+      await cubiertaRef.update({
         'estado': destinoFinal.codigo,
         if (kmRecorridos != null && kmRecorridos > 0)
           'km_acumulados': cubierta.kmAcumulados + kmRecorridos,
       });
+    } catch (e, st) {
+      AppLogger.recordError(e, st,
+          reason: 'CUBIERTAS.estado update tras retirar (no fatal)');
+    }
 
-      // Liberar locks de unicidad — la posición vuelve a estar
-      // disponible y la cubierta deja de figurar como activa. Si por
-      // estado inconsistente el lock no existe, igual seguimos (delete
-      // en doc inexistente es no-op para Firestore).
-      tx.delete(_db
-          .collection(AppCollections.cubiertasPosicionesActivas)
-          .doc(_posicionLockId(inst.unidadId, inst.posicion)));
-      tx.delete(_db
-          .collection(AppCollections.cubiertasActivas)
-          .doc(inst.cubiertaId));
-    });
+    // Liberar locks (delete en doc inexistente es no-op).
+    unawaited(_db
+        .collection(AppCollections.cubiertasPosicionesActivas)
+        .doc(_posicionLockId(inst.unidadId, inst.posicion))
+        .delete());
+    unawaited(_db
+        .collection(AppCollections.cubiertasActivas)
+        .doc(inst.cubiertaId)
+        .delete());
 
     unawaited(AuditLog.registrar(
       accion: destinoFinal == EstadoCubierta.descartada
@@ -522,26 +574,24 @@ class GomeriaService {
       throw ArgumentError('cubiertaId y supervisorDni son obligatorios');
     }
 
-    await _db.runTransaction((tx) async {
-      final cubiertaRef =
-          _db.collection(AppCollections.cubiertas).doc(cubiertaLimpia);
-      final cubiertaSnap = await tx.get(cubiertaRef);
-      if (!cubiertaSnap.exists) {
-        throw StateError('Cubierta $cubiertaLimpia no existe');
-      }
-      final cubierta = Cubierta.fromMap(cubiertaLimpia, cubiertaSnap.data());
-      if (cubierta.estado == EstadoCubierta.instalada) {
-        throw StateError(
-          'La cubierta ${cubierta.codigo} está INSTALADA — usá retirar() '
-          'con destinoFinal=DESCARTADA',
-        );
-      }
-      if (cubierta.estado == EstadoCubierta.descartada) {
-        return; // no-op idempotente
-      }
-      tx.update(cubiertaRef, {
-        'estado': EstadoCubierta.descartada.codigo,
-      });
+    final cubiertaRef =
+        _db.collection(AppCollections.cubiertas).doc(cubiertaLimpia);
+    final cubiertaSnap = await cubiertaRef.get();
+    if (!cubiertaSnap.exists) {
+      throw StateError('Cubierta $cubiertaLimpia no existe');
+    }
+    final cubierta = Cubierta.fromMap(cubiertaLimpia, cubiertaSnap.data());
+    if (cubierta.estado == EstadoCubierta.instalada) {
+      throw StateError(
+        'La cubierta ${cubierta.codigo} está INSTALADA — usá retirar() '
+        'con destinoFinal=DESCARTADA',
+      );
+    }
+    if (cubierta.estado == EstadoCubierta.descartada) {
+      return; // no-op idempotente
+    }
+    await cubiertaRef.update({
+      'estado': EstadoCubierta.descartada.codigo,
     });
 
     unawaited(AuditLog.registrar(
@@ -635,199 +685,253 @@ class GomeriaService {
       throw ArgumentError('Posición destino desconocida: $destinoCodigo');
     }
 
-    // Generamos los IDs de las nuevas instalaciones afuera de la tx
-    // para mantenerlos estables si la tx se reintenta.
+    // IDs de las nuevas instalaciones generados afuera, estables.
     final nuevoIdA = _db.collection(AppCollections.cubiertasInstaladas).doc().id;
     final nuevoIdB = _db.collection(AppCollections.cubiertasInstaladas).doc().id;
 
-    await _db.runTransaction((tx) async {
-      final colInst = _db.collection(AppCollections.cubiertasInstaladas);
-      final origenRef = colInst.doc(origenId);
-      final origenSnap = await tx.get(origenRef);
-      if (!origenSnap.exists) {
-        throw StateError('Instalación $origenId no existe');
-      }
-      final origen = CubiertaInstalada.fromDoc(origenSnap);
-      if (!origen.esActiva) {
-        throw StateError('La instalación de origen ya está cerrada');
-      }
-      final posicionOrigen = origen.posicionTipada;
-      if (posicionOrigen == null) {
-        throw StateError(
-            'Posición origen desconocida: ${origen.posicion}');
-      }
-      if (posicionOrigen.codigo == posicionDestino.codigo) {
-        throw StateError('Origen y destino son la misma posición');
-      }
-      if (posicionOrigen.tipoUnidad != posicionDestino.tipoUnidad) {
-        throw StateError(
-            'Origen y destino deben ser de la misma unidad (tractor vs enganche).');
-      }
+    final colInst = _db.collection(AppCollections.cubiertasInstaladas);
+    final origenRef = colInst.doc(origenId);
 
-      // Lock destino: si existe, hay swap.
-      final lockDestinoRef = _db
-          .collection(AppCollections.cubiertasPosicionesActivas)
-          .doc(_posicionLockId(origen.unidadId, posicionDestino.codigo));
-      final lockDestinoSnap = await tx.get(lockDestinoRef);
-      final lockOrigenRef = _db
-          .collection(AppCollections.cubiertasPosicionesActivas)
-          .doc(_posicionLockId(origen.unidadId, posicionOrigen.codigo));
-      // No hace falta releer el lock de origen — sabemos que existe
-      // porque hay una instalación activa.
+    // Leer la instalación origen primero — define unidad y posicion.
+    final origenSnap = await origenRef.get();
+    if (!origenSnap.exists) {
+      throw StateError('Instalación $origenId no existe');
+    }
+    final origen = CubiertaInstalada.fromDoc(origenSnap);
+    if (!origen.esActiva) {
+      throw StateError('La instalación de origen ya está cerrada');
+    }
+    final posicionOrigen = origen.posicionTipada;
+    if (posicionOrigen == null) {
+      throw StateError('Posición origen desconocida: ${origen.posicion}');
+    }
+    if (posicionOrigen.codigo == posicionDestino.codigo) {
+      throw StateError('Origen y destino son la misma posición');
+    }
+    if (posicionOrigen.tipoUnidad != posicionDestino.tipoUnidad) {
+      throw StateError(
+          'Origen y destino deben ser de la misma unidad (tractor vs enganche).');
+    }
 
-      // Cubierta de origen (la que se está moviendo).
-      final cubiertaARef =
-          _db.collection(AppCollections.cubiertas).doc(origen.cubiertaId);
-      final cubiertaASnap = await tx.get(cubiertaARef);
-      if (!cubiertaASnap.exists) {
-        throw StateError('Cubierta ${origen.cubiertaId} no existe');
-      }
-      final cubiertaA = Cubierta.fromMap(origen.cubiertaId, cubiertaASnap.data());
+    final lockDestinoRef = _db
+        .collection(AppCollections.cubiertasPosicionesActivas)
+        .doc(_posicionLockId(origen.unidadId, posicionDestino.codigo));
+    final lockOrigenRef = _db
+        .collection(AppCollections.cubiertasPosicionesActivas)
+        .doc(_posicionLockId(origen.unidadId, posicionOrigen.codigo));
+    final lockCubiertaARef =
+        _db.collection(AppCollections.cubiertasActivas).doc(origen.cubiertaId);
+    final cubiertaARef =
+        _db.collection(AppCollections.cubiertas).doc(origen.cubiertaId);
 
-      // Validar que destino acepte la cubierta A.
-      if (!posicionDestino.aceptaTipoUso(cubiertaA.tipoUso)) {
-        throw StateError(
-          'La cubierta ${cubiertaA.codigo} es ${cubiertaA.tipoUso.codigo} '
-          'y la posición ${posicionDestino.etiqueta} requiere '
-          '${posicionDestino.tipoUsoRequerido.codigo}',
-        );
-      }
-
-      // Si destino tiene cubierta (swap), preparar B.
-      CubiertaInstalada? destinoOriginal;
-      Cubierta? cubiertaB;
-      if (lockDestinoSnap.exists) {
-        final destinoInstId =
-            (lockDestinoSnap.data()?['instalacion_id'] ?? '').toString();
-        if (destinoInstId.isEmpty) {
-          throw StateError(
-              'Lock de destino sin instalacion_id — estado inconsistente');
-        }
-        final destinoInstRef = colInst.doc(destinoInstId);
-        final destinoInstSnap = await tx.get(destinoInstRef);
-        if (!destinoInstSnap.exists) {
-          throw StateError(
-              'La instalación destino $destinoInstId no existe');
-        }
-        destinoOriginal = CubiertaInstalada.fromDoc(destinoInstSnap);
-        final cubiertaBRef = _db
-            .collection(AppCollections.cubiertas)
-            .doc(destinoOriginal.cubiertaId);
-        final cubiertaBSnap = await tx.get(cubiertaBRef);
-        if (!cubiertaBSnap.exists) {
-          throw StateError(
-              'Cubierta destino ${destinoOriginal.cubiertaId} no existe');
-        }
-        cubiertaB = Cubierta.fromMap(destinoOriginal.cubiertaId, cubiertaBSnap.data());
-        // Para swap, B tiene que poder instalarse en la posición de A.
-        if (!posicionOrigen.aceptaTipoUso(cubiertaB.tipoUso)) {
-          throw StateError(
-            'No se puede intercambiar: la cubierta ${cubiertaB.codigo} '
-            'es ${cubiertaB.tipoUso.codigo} y la posición '
-            '${posicionOrigen.etiqueta} requiere '
-            '${posicionOrigen.tipoUsoRequerido.codigo}',
-          );
-        }
-      }
-
-      // Snapshots de modelos para los nuevos logs (uno o dos).
-      final modeloASnap = await tx.get(_db
-          .collection(AppCollections.cubiertasModelos)
-          .doc(cubiertaA.modeloId));
-      final modeloA = modeloASnap.exists
-          ? CubiertaModelo.fromMap(cubiertaA.modeloId, modeloASnap.data())
-          : null;
-      CubiertaModelo? modeloB;
-      if (cubiertaB != null) {
-        final modeloBSnap = await tx.get(_db
-            .collection(AppCollections.cubiertasModelos)
-            .doc(cubiertaB.modeloId));
-        modeloB = modeloBSnap.exists
-            ? CubiertaModelo.fromMap(cubiertaB.modeloId, modeloBSnap.data())
+    // Lecturas paralelas restantes: lock destino (puede haber swap),
+    // cubierta A, vehículo si tractor.
+    final readsRound1 = await Future.wait([
+      lockDestinoRef.get(),
+      cubiertaARef.get(),
+      if (origen.unidadTipo == TipoUnidadCubierta.tractor)
+        _db.collection(AppCollections.vehiculos).doc(origen.unidadId).get(),
+    ]);
+    final lockDestinoSnap = readsRound1[0];
+    final cubiertaASnap = readsRound1[1];
+    if (!cubiertaASnap.exists) {
+      throw StateError('Cubierta ${origen.cubiertaId} no existe');
+    }
+    final cubiertaA = Cubierta.fromMap(origen.cubiertaId, cubiertaASnap.data());
+    if (!posicionDestino.aceptaTipoUso(cubiertaA.tipoUso)) {
+      throw StateError(
+        'La cubierta ${cubiertaA.codigo} es ${cubiertaA.tipoUso.codigo} '
+        'y la posición ${posicionDestino.etiqueta} requiere '
+        '${posicionDestino.tipoUsoRequerido.codigo}',
+      );
+    }
+    final double? kmActualUnidad =
+        origen.unidadTipo == TipoUnidadCubierta.tractor
+            ? (readsRound1[2].data()?['KM_ACTUAL'] as num?)?.toDouble()
             : null;
-      }
 
-      // KM actual de la unidad para tractor (para cerrar y abrir logs).
-      double? kmActualUnidad;
-      if (origen.unidadTipo == TipoUnidadCubierta.tractor) {
-        final vehSnap = await tx.get(
-          _db.collection(AppCollections.vehiculos).doc(origen.unidadId),
+    // Si el destino estaba ocupado, leer la instalación + cubierta B
+    // (round 2 secuencial porque depende del lockDestinoSnap).
+    CubiertaInstalada? destinoOriginal;
+    Cubierta? cubiertaB;
+    DocumentReference<Map<String, dynamic>>? destinoInstRef;
+    DocumentReference<Map<String, dynamic>>? cubiertaBRef;
+    DocumentReference<Map<String, dynamic>>? lockCubiertaBRef;
+    if (lockDestinoSnap.exists) {
+      final destinoInstId =
+          (lockDestinoSnap.data()?['instalacion_id'] ?? '').toString();
+      if (destinoInstId.isEmpty) {
+        throw StateError(
+            'Lock de destino sin instalacion_id — estado inconsistente');
+      }
+      destinoInstRef = colInst.doc(destinoInstId);
+      final destinoInstSnap = await destinoInstRef.get();
+      if (!destinoInstSnap.exists) {
+        throw StateError('La instalación destino $destinoInstId no existe');
+      }
+      destinoOriginal = CubiertaInstalada.fromDoc(destinoInstSnap);
+      cubiertaBRef = _db
+          .collection(AppCollections.cubiertas)
+          .doc(destinoOriginal.cubiertaId);
+      lockCubiertaBRef = _db
+          .collection(AppCollections.cubiertasActivas)
+          .doc(destinoOriginal.cubiertaId);
+      final cubiertaBSnap = await cubiertaBRef.get();
+      if (!cubiertaBSnap.exists) {
+        throw StateError(
+            'Cubierta destino ${destinoOriginal.cubiertaId} no existe');
+      }
+      cubiertaB = Cubierta.fromMap(destinoOriginal.cubiertaId, cubiertaBSnap.data());
+      if (!posicionOrigen.aceptaTipoUso(cubiertaB.tipoUso)) {
+        throw StateError(
+          'No se puede intercambiar: la cubierta ${cubiertaB.codigo} '
+          'es ${cubiertaB.tipoUso.codigo} y la posición '
+          '${posicionOrigen.etiqueta} requiere '
+          '${posicionOrigen.tipoUsoRequerido.codigo}',
         );
-        kmActualUnidad =
-            (vehSnap.data()?['KM_ACTUAL'] as num?)?.toDouble();
       }
+    }
 
-      double? calcularKm(CubiertaInstalada inst) {
-        if (inst.unidadTipo != TipoUnidadCubierta.tractor) return null;
-        final km = kmActualUnidad;
-        final base = inst.kmUnidadAlInstalar;
-        if (km == null || base == null) return null;
-        final diff = km - base;
-        return diff < 0 ? 0 : diff;
+    // Snapshots de los modelos (en paralelo).
+    final modelosFutures = <Future<DocumentSnapshot<Map<String, dynamic>>>>[
+      _db
+          .collection(AppCollections.cubiertasModelos)
+          .doc(cubiertaA.modeloId)
+          .get(),
+      if (cubiertaB != null)
+        _db
+            .collection(AppCollections.cubiertasModelos)
+            .doc(cubiertaB.modeloId)
+            .get(),
+    ];
+    final modelosSnaps = await Future.wait(modelosFutures);
+    final modeloA = modelosSnaps[0].exists
+        ? CubiertaModelo.fromMap(cubiertaA.modeloId, modelosSnaps[0].data())
+        : null;
+    final modeloB = (cubiertaB != null && modelosSnaps[1].exists)
+        ? CubiertaModelo.fromMap(cubiertaB.modeloId, modelosSnaps[1].data())
+        : null;
+
+    double? calcularKm(CubiertaInstalada inst) {
+      if (inst.unidadTipo != TipoUnidadCubierta.tractor) return null;
+      final km = kmActualUnidad;
+      final base = inst.kmUnidadAlInstalar;
+      if (km == null || base == null) return null;
+      final diff = km - base;
+      return diff < 0 ? 0 : diff;
+    }
+
+    final ahora = Timestamp.now();
+    final motivoLimpio = motivo?.trim();
+    final motivoEtiqueta =
+        motivoLimpio == null || motivoLimpio.isEmpty ? 'rotación' : motivoLimpio;
+
+    // ====== WRITES SECUENCIALES (sin tx, ver crearCubierta) ======
+    //
+    // Orden cuidadoso para que un fallo intermedio deje el sistema en
+    // un estado lo más cercano posible al original:
+    // 1) Cerrar logs viejos (origen, y destino si swap).
+    // 2) Liberar locks de posición de los logs viejos.
+    // 3) Crear logs nuevos.
+    // 4) Crear locks de posición nuevos (apuntando a los nuevos logs).
+    // 5) Recrear locks de cubierta (delete + set en cada cubierta movida).
+    //
+    // Si algo falla a mitad, los pasos previos quedan aplicados; el
+    // siguiente intento del usuario tendrá que partir desde donde quedó
+    // (los logs ya están cerrados, por ejemplo). En la práctica las
+    // chances de fallo intermedio en gomería con un solo supervisor
+    // son ínfimas; el costo de complicar el rollback no se justifica.
+
+    // 1) Cerrar logs viejos.
+    final kmRecorridosA = calcularKm(origen);
+    await origenRef.update({
+      'hasta': ahora,
+      'km_unidad_al_retirar': kmActualUnidad,
+      'km_recorridos': kmRecorridosA,
+      'retirado_por_dni': supervisorLimpio,
+      if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
+        'retirado_por_nombre': supervisorNombre.trim(),
+      'motivo_retiro': motivoEtiqueta,
+    });
+    if (kmRecorridosA != null && kmRecorridosA > 0) {
+      try {
+        await cubiertaARef.update({
+          'km_acumulados': cubiertaA.kmAcumulados + kmRecorridosA,
+        });
+      } catch (e, st) {
+        AppLogger.recordError(e, st,
+            reason: 'CUBIERTAS.km_acumulados update tras rotar A (no fatal)');
       }
+    }
 
-      final ahora = Timestamp.now();
-      final motivoLimpio = motivo?.trim();
-      final motivoEtiqueta =
-          motivoLimpio == null || motivoLimpio.isEmpty ? 'rotación' : motivoLimpio;
-
-      // 1) Cerrar log origen (A).
-      final kmRecorridosA = calcularKm(origen);
-      tx.update(origenRef, {
+    if (destinoOriginal != null &&
+        cubiertaB != null &&
+        destinoInstRef != null &&
+        cubiertaBRef != null) {
+      final kmRecorridosB = calcularKm(destinoOriginal);
+      await destinoInstRef.update({
         'hasta': ahora,
         'km_unidad_al_retirar': kmActualUnidad,
-        'km_recorridos': kmRecorridosA,
+        'km_recorridos': kmRecorridosB,
         'retirado_por_dni': supervisorLimpio,
         if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
           'retirado_por_nombre': supervisorNombre.trim(),
         'motivo_retiro': motivoEtiqueta,
       });
-      if (kmRecorridosA != null && kmRecorridosA > 0) {
-        tx.update(cubiertaARef, {
-          'km_acumulados': cubiertaA.kmAcumulados + kmRecorridosA,
-        });
-      }
-
-      // 2) Si swap, cerrar log destino (B).
-      if (destinoOriginal != null && cubiertaB != null) {
-        final destinoInstRef = colInst.doc(destinoOriginal.id);
-        final cubiertaBRef = _db
-            .collection(AppCollections.cubiertas)
-            .doc(cubiertaB.id);
-        final kmRecorridosB = calcularKm(destinoOriginal);
-        tx.update(destinoInstRef, {
-          'hasta': ahora,
-          'km_unidad_al_retirar': kmActualUnidad,
-          'km_recorridos': kmRecorridosB,
-          'retirado_por_dni': supervisorLimpio,
-          if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
-            'retirado_por_nombre': supervisorNombre.trim(),
-          'motivo_retiro': motivoEtiqueta,
-        });
-        if (kmRecorridosB != null && kmRecorridosB > 0) {
-          tx.update(cubiertaBRef, {
+      if (kmRecorridosB != null && kmRecorridosB > 0) {
+        try {
+          await cubiertaBRef.update({
             'km_acumulados': cubiertaB.kmAcumulados + kmRecorridosB,
           });
+        } catch (e, st) {
+          AppLogger.recordError(e, st,
+              reason:
+                  'CUBIERTAS.km_acumulados update tras rotar B (no fatal)');
         }
       }
+    }
 
-      // 3) Liberar lock origen y, si swap, lock destino.
-      tx.delete(lockOrigenRef);
-      if (destinoOriginal != null) tx.delete(lockDestinoRef);
+    // 2) Liberar locks de posición vieja (delete).
+    await lockOrigenRef.delete();
+    if (destinoOriginal != null) await lockDestinoRef.delete();
 
-      // 4) Crear log nuevo en destino con cubierta A.
-      final kmEsperadosA = modeloA?.kmEsperadosParaVida(cubiertaA.vidas);
-      final nuevoARef = colInst.doc(nuevoIdA);
-      tx.set(nuevoARef, <String, dynamic>{
-        'cubierta_id': cubiertaA.id,
-        'cubierta_codigo': cubiertaA.codigo,
+    // 3) Crear logs nuevos.
+    final kmEsperadosA = modeloA?.kmEsperadosParaVida(cubiertaA.vidas);
+    final nuevoARef = colInst.doc(nuevoIdA);
+    await nuevoARef.set(<String, dynamic>{
+      'cubierta_id': cubiertaA.id,
+      'cubierta_codigo': cubiertaA.codigo,
+      'unidad_id': origen.unidadId,
+      'unidad_tipo': origen.unidadTipo.codigo,
+      'posicion': posicionDestino.codigo,
+      'vida_al_instalar': cubiertaA.vidas,
+      'modelo_etiqueta': cubiertaA.modeloEtiqueta,
+      if (kmEsperadosA != null) 'km_vida_estimada_al_instalar': kmEsperadosA,
+      'desde': ahora,
+      'hasta': null,
+      'km_unidad_al_instalar': kmActualUnidad,
+      'km_unidad_al_retirar': null,
+      'km_recorridos': null,
+      'instalado_por_dni': supervisorLimpio,
+      if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
+        'instalado_por_nombre': supervisorNombre.trim(),
+      'retirado_por_dni': null,
+      'retirado_por_nombre': null,
+      'motivo': motivoEtiqueta,
+    });
+
+    if (destinoOriginal != null && cubiertaB != null) {
+      final kmEsperadosB = modeloB?.kmEsperadosParaVida(cubiertaB.vidas);
+      final nuevoBRef = colInst.doc(nuevoIdB);
+      await nuevoBRef.set(<String, dynamic>{
+        'cubierta_id': cubiertaB.id,
+        'cubierta_codigo': cubiertaB.codigo,
         'unidad_id': origen.unidadId,
         'unidad_tipo': origen.unidadTipo.codigo,
-        'posicion': posicionDestino.codigo,
-        'vida_al_instalar': cubiertaA.vidas,
-        'modelo_etiqueta': cubiertaA.modeloEtiqueta,
-        if (kmEsperadosA != null)
-          'km_vida_estimada_al_instalar': kmEsperadosA,
+        'posicion': posicionOrigen.codigo,
+        'vida_al_instalar': cubiertaB.vidas,
+        'modelo_etiqueta': cubiertaB.modeloEtiqueta,
+        if (kmEsperadosB != null) 'km_vida_estimada_al_instalar': kmEsperadosB,
         'desde': ahora,
         'hasta': null,
         'km_unidad_al_instalar': kmActualUnidad,
@@ -840,78 +944,47 @@ class GomeriaService {
         'retirado_por_nombre': null,
         'motivo': motivoEtiqueta,
       });
-      // Crear lock posición destino apuntando al nuevo log A.
-      tx.set(lockDestinoRef, <String, dynamic>{
-        'instalacion_id': nuevoIdA,
-        'cubierta_id': cubiertaA.id,
-        'cubierta_codigo': cubiertaA.codigo,
-        'unidad_id': origen.unidadId,
-        'posicion': posicionDestino.codigo,
-        'desde': ahora,
-      });
-      // Lock cubierta A: ya existe (no se borró), pero apuntaba al log
-      // anterior — actualizamos su contenido para reflejar la posición
-      // nueva. `set` con merge no aplica acá porque las rules prohíben
-      // update; lo borramos y recreamos.
-      final lockCubiertaARef = _db
-          .collection(AppCollections.cubiertasActivas)
-          .doc(cubiertaA.id);
-      tx.delete(lockCubiertaARef);
-      tx.set(lockCubiertaARef, <String, dynamic>{
-        'instalacion_id': nuevoIdA,
-        'unidad_id': origen.unidadId,
-        'posicion': posicionDestino.codigo,
-        'desde': ahora,
-      });
+    }
 
-      // 5) Si swap, crear log nuevo en origen con cubierta B + lock.
-      if (destinoOriginal != null && cubiertaB != null) {
-        final kmEsperadosB = modeloB?.kmEsperadosParaVida(cubiertaB.vidas);
-        final nuevoBRef = colInst.doc(nuevoIdB);
-        tx.set(nuevoBRef, <String, dynamic>{
-          'cubierta_id': cubiertaB.id,
-          'cubierta_codigo': cubiertaB.codigo,
-          'unidad_id': origen.unidadId,
-          'unidad_tipo': origen.unidadTipo.codigo,
-          'posicion': posicionOrigen.codigo,
-          'vida_al_instalar': cubiertaB.vidas,
-          'modelo_etiqueta': cubiertaB.modeloEtiqueta,
-          if (kmEsperadosB != null)
-            'km_vida_estimada_al_instalar': kmEsperadosB,
-          'desde': ahora,
-          'hasta': null,
-          'km_unidad_al_instalar': kmActualUnidad,
-          'km_unidad_al_retirar': null,
-          'km_recorridos': null,
-          'instalado_por_dni': supervisorLimpio,
-          if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
-            'instalado_por_nombre': supervisorNombre.trim(),
-          'retirado_por_dni': null,
-          'retirado_por_nombre': null,
-          'motivo': motivoEtiqueta,
-        });
-        // Recrear lock posición origen apuntando al nuevo log B.
-        tx.set(lockOrigenRef, <String, dynamic>{
-          'instalacion_id': nuevoIdB,
-          'cubierta_id': cubiertaB.id,
-          'cubierta_codigo': cubiertaB.codigo,
-          'unidad_id': origen.unidadId,
-          'posicion': posicionOrigen.codigo,
-          'desde': ahora,
-        });
-        // Lock cubierta B.
-        final lockCubiertaBRef = _db
-            .collection(AppCollections.cubiertasActivas)
-            .doc(cubiertaB.id);
-        tx.delete(lockCubiertaBRef);
-        tx.set(lockCubiertaBRef, <String, dynamic>{
-          'instalacion_id': nuevoIdB,
-          'unidad_id': origen.unidadId,
-          'posicion': posicionOrigen.codigo,
-          'desde': ahora,
-        });
-      }
+    // 4) Crear locks de posición nuevos (apuntando a los logs nuevos).
+    await lockDestinoRef.set(<String, dynamic>{
+      'instalacion_id': nuevoIdA,
+      'cubierta_id': cubiertaA.id,
+      'cubierta_codigo': cubiertaA.codigo,
+      'unidad_id': origen.unidadId,
+      'posicion': posicionDestino.codigo,
+      'desde': ahora,
     });
+    if (destinoOriginal != null && cubiertaB != null) {
+      await lockOrigenRef.set(<String, dynamic>{
+        'instalacion_id': nuevoIdB,
+        'cubierta_id': cubiertaB.id,
+        'cubierta_codigo': cubiertaB.codigo,
+        'unidad_id': origen.unidadId,
+        'posicion': posicionOrigen.codigo,
+        'desde': ahora,
+      });
+    }
+
+    // 5) Recrear lock cubierta A (rules prohíben update — borrar + set).
+    await lockCubiertaARef.delete();
+    await lockCubiertaARef.set(<String, dynamic>{
+      'instalacion_id': nuevoIdA,
+      'unidad_id': origen.unidadId,
+      'posicion': posicionDestino.codigo,
+      'desde': ahora,
+    });
+    if (destinoOriginal != null &&
+        cubiertaB != null &&
+        lockCubiertaBRef != null) {
+      await lockCubiertaBRef.delete();
+      await lockCubiertaBRef.set(<String, dynamic>{
+        'instalacion_id': nuevoIdB,
+        'unidad_id': origen.unidadId,
+        'posicion': posicionOrigen.codigo,
+        'desde': ahora,
+      });
+    }
 
     unawaited(AuditLog.registrar(
       accion: AuditAccion.instalarCubierta,
@@ -955,62 +1028,63 @@ class GomeriaService {
         _db.collection(AppCollections.cubiertasRecapados).doc().id;
     final fechaEnvioFinal = fechaEnvio ?? DateTime.now();
 
-    await _db.runTransaction((tx) async {
-      final cubiertaRef =
-          _db.collection(AppCollections.cubiertas).doc(cubiertaLimpia);
-      final cubiertaSnap = await tx.get(cubiertaRef);
-      if (!cubiertaSnap.exists) {
-        throw StateError('Cubierta $cubiertaLimpia no existe');
-      }
-      final cubierta = Cubierta.fromMap(cubiertaLimpia, cubiertaSnap.data());
-      if (cubierta.estado != EstadoCubierta.enDeposito) {
-        throw StateError(
-          'Solo se puede mandar a recapar una cubierta EN_DEPOSITO '
-          '(${cubierta.codigo} está ${cubierta.estado.codigo})',
-        );
-      }
+    // Lecturas paralelas (sin tx — ver crearCubierta).
+    final cubiertaRef =
+        _db.collection(AppCollections.cubiertas).doc(cubiertaLimpia);
+    final cubiertaSnap = await cubiertaRef.get();
+    if (!cubiertaSnap.exists) {
+      throw StateError('Cubierta $cubiertaLimpia no existe');
+    }
+    final cubierta = Cubierta.fromMap(cubiertaLimpia, cubiertaSnap.data());
+    if (cubierta.estado != EstadoCubierta.enDeposito) {
+      throw StateError(
+        'Solo se puede mandar a recapar una cubierta EN_DEPOSITO '
+        '(${cubierta.codigo} está ${cubierta.estado.codigo})',
+      );
+    }
 
-      // Validar que el modelo sea recapable.
-      final modeloSnap = await tx.get(_db
-          .collection(AppCollections.cubiertasModelos)
-          .doc(cubierta.modeloId));
-      if (!modeloSnap.exists) {
-        throw StateError(
-            'El modelo ${cubierta.modeloId} de la cubierta no existe');
-      }
-      final modelo =
-          CubiertaModelo.fromMap(cubierta.modeloId, modeloSnap.data());
-      if (!modelo.recapable) {
-        throw StateError(
-          'El modelo ${modelo.etiqueta} no es recapable',
-        );
-      }
+    final modeloSnap = await _db
+        .collection(AppCollections.cubiertasModelos)
+        .doc(cubierta.modeloId)
+        .get();
+    if (!modeloSnap.exists) {
+      throw StateError(
+          'El modelo ${cubierta.modeloId} de la cubierta no existe');
+    }
+    final modelo = CubiertaModelo.fromMap(cubierta.modeloId, modeloSnap.data());
+    if (!modelo.recapable) {
+      throw StateError('El modelo ${modelo.etiqueta} no es recapable');
+    }
 
-      final recapadoRef = _db
-          .collection(AppCollections.cubiertasRecapados)
-          .doc(recapadoId);
-      tx.set(recapadoRef, <String, dynamic>{
-        'cubierta_id': cubiertaLimpia,
-        'cubierta_codigo': cubierta.codigo,
-        // vida que TENDRÁ si vuelve recibida (vida actual + 1).
-        'vida_recapado': cubierta.vidas + 1,
-        'proveedor': proveedorLimpio,
-        'fecha_envio': Timestamp.fromDate(fechaEnvioFinal),
-        'fecha_retorno': null,
-        'costo': null,
-        'resultado': null,
-        if (notas != null && notas.trim().isNotEmpty) 'notas': notas.trim(),
-        'enviado_por_dni': supervisorLimpio,
-        if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
-          'enviado_por_nombre': supervisorNombre.trim(),
-        'cerrado_por_dni': null,
-        'cerrado_por_nombre': null,
-      });
+    // Writes secuenciales: log primero, después estado de la cubierta.
+    final recapadoRef =
+        _db.collection(AppCollections.cubiertasRecapados).doc(recapadoId);
+    await recapadoRef.set(<String, dynamic>{
+      'cubierta_id': cubiertaLimpia,
+      'cubierta_codigo': cubierta.codigo,
+      // vida que TENDRÁ si vuelve recibida (vida actual + 1).
+      'vida_recapado': cubierta.vidas + 1,
+      'proveedor': proveedorLimpio,
+      'fecha_envio': Timestamp.fromDate(fechaEnvioFinal),
+      'fecha_retorno': null,
+      'costo': null,
+      'resultado': null,
+      if (notas != null && notas.trim().isNotEmpty) 'notas': notas.trim(),
+      'enviado_por_dni': supervisorLimpio,
+      if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
+        'enviado_por_nombre': supervisorNombre.trim(),
+      'cerrado_por_dni': null,
+      'cerrado_por_nombre': null,
+    });
 
-      tx.update(cubiertaRef, {
+    try {
+      await cubiertaRef.update({
         'estado': EstadoCubierta.enRecapado.codigo,
       });
-    });
+    } catch (e, st) {
+      AppLogger.recordError(e, st,
+          reason: 'CUBIERTAS.estado update tras mandarARecapar (no fatal)');
+    }
 
     unawaited(AuditLog.registrar(
       accion: AuditAccion.enviarCubiertaARecapar,
@@ -1047,50 +1121,60 @@ class GomeriaService {
 
     final fechaFinal = fechaRetorno ?? DateTime.now();
 
-    await _db.runTransaction((tx) async {
-      final recapadoRef =
-          _db.collection(AppCollections.cubiertasRecapados).doc(idLimpio);
-      final recapadoSnap = await tx.get(recapadoRef);
-      if (!recapadoSnap.exists) {
-        throw StateError('Recapado $idLimpio no existe');
-      }
-      final recapado = CubiertaRecapado.fromDoc(recapadoSnap);
-      if (!recapado.enProceso) {
-        throw StateError(
-            'El recapado $idLimpio ya está cerrado (fecha_retorno != null)');
-      }
+    final recapadoRef =
+        _db.collection(AppCollections.cubiertasRecapados).doc(idLimpio);
 
-      final cubiertaRef =
-          _db.collection(AppCollections.cubiertas).doc(recapado.cubiertaId);
-      final cubiertaSnap = await tx.get(cubiertaRef);
-      if (!cubiertaSnap.exists) {
-        throw StateError('Cubierta ${recapado.cubiertaId} no existe');
-      }
-      final cubierta =
-          Cubierta.fromMap(recapado.cubiertaId, cubiertaSnap.data());
+    // Lecturas paralelas. Necesitamos el doc del recapado (para validar
+    // y conocer cubierta_id + vidas previas) y la cubierta (para
+    // incrementar vidas si el resultado es RECIBIDA).
+    final recapadoSnap = await recapadoRef.get();
+    if (!recapadoSnap.exists) {
+      throw StateError('Recapado $idLimpio no existe');
+    }
+    final recapado = CubiertaRecapado.fromDoc(recapadoSnap);
+    if (!recapado.enProceso) {
+      throw StateError(
+          'El recapado $idLimpio ya está cerrado (fecha_retorno != null)');
+    }
 
-      tx.update(recapadoRef, {
-        'fecha_retorno': Timestamp.fromDate(fechaFinal),
-        'resultado': resultado.codigo,
-        if (costo != null) 'costo': costo,
-        if (notas != null && notas.trim().isNotEmpty) 'notas': notas.trim(),
-        'cerrado_por_dni': supervisorLimpio,
-        if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
-          'cerrado_por_nombre': supervisorNombre.trim(),
-      });
+    final cubiertaRef =
+        _db.collection(AppCollections.cubiertas).doc(recapado.cubiertaId);
+    final cubiertaSnap = await cubiertaRef.get();
+    if (!cubiertaSnap.exists) {
+      throw StateError('Cubierta ${recapado.cubiertaId} no existe');
+    }
+    final cubierta =
+        Cubierta.fromMap(recapado.cubiertaId, cubiertaSnap.data());
 
+    // Writes secuenciales: cerrar el recapado primero (verdad operativa)
+    // y después actualizar la cubierta (estado + vidas si aplica).
+    await recapadoRef.update({
+      'fecha_retorno': Timestamp.fromDate(fechaFinal),
+      'resultado': resultado.codigo,
+      if (costo != null) 'costo': costo,
+      if (notas != null && notas.trim().isNotEmpty) 'notas': notas.trim(),
+      'cerrado_por_dni': supervisorLimpio,
+      if (supervisorNombre != null && supervisorNombre.trim().isNotEmpty)
+        'cerrado_por_nombre': supervisorNombre.trim(),
+    });
+
+    try {
       switch (resultado) {
         case ResultadoRecapado.recibida:
-          tx.update(cubiertaRef, {
+          await cubiertaRef.update({
             'estado': EstadoCubierta.enDeposito.codigo,
             'vidas': cubierta.vidas + 1,
           });
         case ResultadoRecapado.descartadaPorProveedor:
-          tx.update(cubiertaRef, {
+          await cubiertaRef.update({
             'estado': EstadoCubierta.descartada.codigo,
           });
       }
-    });
+    } catch (e, st) {
+      AppLogger.recordError(e, st,
+          reason:
+              'CUBIERTAS.estado/vidas update tras recibirDeRecapado (no fatal)');
+    }
 
     unawaited(AuditLog.registrar(
       accion: AuditAccion.recibirCubiertaDeRecapado,
