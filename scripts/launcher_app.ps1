@@ -1,19 +1,19 @@
-# Launcher de Coopertrans Móvil — chequea GitHub Releases (vía API
-# pública, sin auth ni gh CLI), baja la versión nueva si hay, y lanza
+﻿# Launcher de Coopertrans Movil - chequea GitHub Releases (via API
+# publica, sin auth ni gh CLI), baja la version nueva si hay, y lanza
 # la app.
 #
-# El icono "Coopertrans Móvil" del escritorio apunta a este script.
-# El operador hace doble click → si hay update se actualiza solo →
+# El icono "Coopertrans Movil" del escritorio apunta a este script.
+# El operador hace doble click -> si hay update se actualiza solo ->
 # arranca la app. Sin ir PC por PC copiando archivos.
 #
-# Como el repo es PÚBLICO, no hace falta instalar gh CLI ni autenticar
+# Como el repo es PUBLICO, no hace falta instalar gh CLI ni autenticar
 # nada. Usa Invoke-RestMethod / Invoke-WebRequest directos contra la
-# API pública de GitHub. Cero setup en cada PC, solo bajar este archivo.
+# API publica de GitHub. Cero setup en cada PC, solo bajar este archivo.
 #
 # Ubicaciones (por usuario, NO requiere admin):
-#   - Instalación de la app: %LOCALAPPDATA%\CoopertransMovil\
+#   - Instalacion de la app: %LOCALAPPDATA%\CoopertransMovil\
 #   - Ejecutable:             %LOCALAPPDATA%\CoopertransMovil\coopertrans_movil.exe
-#   - Versión instalada:      %LOCALAPPDATA%\CoopertransMovil\VERSION.txt
+#   - Version instalada:      %LOCALAPPDATA%\CoopertransMovil\VERSION.txt
 #   - Log de updates:         %LOCALAPPDATA%\CoopertransMovil\update.log
 
 $ErrorActionPreference = 'Stop'
@@ -22,12 +22,12 @@ $ErrorActionPreference = 'Stop'
 $repo    = 'rodriguezreysantiago/logistica_app_profesional'
 $exeName = 'coopertrans_movil.exe'
 
-# Install dir con auto-detección:
-#   - ProgramData\CoopertransMovil  → si fue creado por el instalador
+# Install dir con auto-deteccion:
+#   - ProgramData\CoopertransMovil  -> si fue creado por el instalador
 #     Inno Setup (con permisos users-modify para que el launcher pueda
 #     actualizar sin UAC). Una sola copia compartida entre todos los
 #     usuarios de la PC.
-#   - LOCALAPPDATA\CoopertransMovil → fallback para modo "sin instalador"
+#   - LOCALAPPDATA\CoopertransMovil -> fallback para modo "sin instalador"
 #     (correr el launcher directo desde el repo en una PC dev).
 $installDir = if (Test-Path (Join-Path $env:ProgramData 'CoopertransMovil')) {
     Join-Path $env:ProgramData 'CoopertransMovil'
@@ -64,11 +64,11 @@ function Lanzar-App {
     Start-Process -FilePath $exePath -WorkingDirectory $installDir
 }
 
-# === 1. ¿La app ya está corriendo? =================================
+# === 1. La app ya esta corriendo? =================================
 $running = Get-Process -Name ($exeName -replace '\.exe$') -ErrorAction SilentlyContinue
 if ($running) {
-    Log "La app ya está corriendo (PID $($running[0].Id)). No actualizo." 'Yellow'
-    Log "Cerrá la app antes para chequear updates." 'Yellow'
+    Log "La app ya esta corriendo (PID $($running[0].Id)). No actualizo." 'Yellow'
+    Log "Cerra la app antes para chequear updates." 'Yellow'
     Start-Sleep -Seconds 2
     exit 0
 }
@@ -76,11 +76,11 @@ if ($running) {
 # === 2. Crear installDir si no existe (primer arranque) ===========
 if (-not (Test-Path $installDir)) {
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    Log "Primer arranque — voy a bajar la última release." 'Cyan'
+    Log "Primer arranque - voy a bajar la ultima release." 'Cyan'
 }
 
-# === 3. Chequear última release vía GitHub API pública ============
-Log "Chequeando última release en GitHub..." 'Cyan'
+# === 3. Chequear ultima release via GitHub API publica ============
+Log "Chequeando ultima release en GitHub..." 'Cyan'
 
 $latest = $null
 try {
@@ -90,7 +90,7 @@ try {
         -TimeoutSec 15
 } catch {
     Log "No pude consultar GitHub (capaz sin red): $($_.Exception.Message)" 'Yellow'
-    Log "Lanzo versión local sin chequear updates." 'Yellow'
+    Log "Lanzo version local sin chequear updates." 'Yellow'
     Lanzar-App
     exit 0
 }
@@ -102,22 +102,22 @@ $versionLocal = if (Test-Path $verFile) {
     (Get-Content $verFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
 } else { '' }
 
-Log "Versión local:  $(if ($versionLocal) { $versionLocal } else { '(ninguna instalada)' })" 'White'
-Log "Versión remota: $versionRemota" 'White'
+Log "Version local:  $(if ($versionLocal) { $versionLocal } else { '(ninguna instalada)' })" 'White'
+Log "Version remota: $versionRemota" 'White'
 
 if ($versionLocal -eq $versionRemota) {
-    Log "Estás al día. Lanzando app." 'Green'
+    Log "Estas al dia. Lanzando app." 'Green'
     Lanzar-App
     exit 0
 }
 
-# === 4. Hay versión nueva — bajar e instalar ======================
+# === 4. Hay version nueva - bajar e instalar ======================
 Log "" 'White'
-Log "Hay versión nueva disponible: $versionRemota" 'Cyan'
+Log "Hay version nueva disponible: $versionRemota" 'Cyan'
 
 $asset = $latest.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
 if (-not $asset) {
-    Log "ERROR: el release $tagRemoto no tiene asset .zip. Lanzo versión local." 'Red'
+    Log "ERROR: el release $tagRemoto no tiene asset .zip. Lanzo version local." 'Red'
     Lanzar-App
     exit 1
 }
@@ -141,14 +141,14 @@ try {
     Expand-Archive -Path $zipPath -DestinationPath $stagingDir -Force
 
     if (-not (Test-Path (Join-Path $stagingDir $exeName))) {
-        throw "El zip no contiene $exeName en la raíz"
+        throw "El zip no contiene $exeName en la raiz"
     }
 
-    # Backup atómico de la versión actual (si existía algo instalado).
+    # Backup atomico de la version actual (si existia algo instalado).
     if (Test-Path (Join-Path $installDir $exeName)) {
         $backupDir = "$installDir.bak"
         if (Test-Path $backupDir) { Remove-Item $backupDir -Recurse -Force }
-        Log "Backup de versión actual..." 'Cyan'
+        Log "Backup de version actual..." 'Cyan'
         Move-Item -Path $installDir -Destination $backupDir
         New-Item -ItemType Directory -Force -Path $installDir | Out-Null
     }
@@ -164,7 +164,7 @@ try {
 } catch {
     Log "ERROR durante el update: $($_.Exception.Message)" 'Red'
     if ($backupDir -and (Test-Path $backupDir)) {
-        Log "Restaurando versión anterior..." 'Yellow'
+        Log "Restaurando version anterior..." 'Yellow'
         if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
         Move-Item -Path $backupDir -Destination $installDir
     }
