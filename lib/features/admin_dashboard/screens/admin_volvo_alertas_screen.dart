@@ -13,18 +13,19 @@ import '../../eco_driving/utils/etiquetas_alerta_volvo.dart';
 
 /// Pantalla "Alertas Volvo" del admin/supervisor.
 ///
-/// Lista los eventos que el `volvoAlertasPoller` (scheduled cada 5 min)
-/// trae de la Volvo Vehicle Alerts API y guarda en `VOLVO_ALERTAS`:
-/// IDLING, OVERSPEED, DISTANCE_ALERT, PTO, TELL_TALE, ALARM, etc.
+/// Lista los eventos del Vehicle Alerts API que el `volvoAlertasPoller`
+/// (scheduled cada 5 min) guarda en `VOLVO_ALERTAS`.
 ///
-/// El admin puede:
-///   - Ver pendientes (default) o todas (toggle).
-///   - Filtrar por patente / tipo / VIN.
-///   - Marcar como atendida (escribe `atendida=true`, `atendida_por`,
-///     `atendida_en` + bitácora `MARCAR_ALERTA_VOLVO_ATENDIDA`).
+/// **Diseño revisado 2026-05-04**: por default muestra SOLO las alertas
+/// del día actual. El operador puede elegir otra fecha con el calendario,
+/// o togglear "Mostrar atendidas" para ver todo el día (sin importar
+/// estado). El histórico de muchos días se ve cambiando de fecha — no
+/// hay vista "todas las alertas de los últimos N días" para evitar
+/// listas inmanejables (a 50 eventos/día, 200 = ~4 días).
 ///
-/// La query usa solo `orderBy('creado_en', descending: true)` —
-/// single-field index, no requiere índice compuesto.
+/// Query: `where('creado_en', between [startOfDay, endOfDay))` +
+/// `orderBy('creado_en', desc)`. Where + orderBy en el MISMO campo →
+/// no requiere índice compuesto.
 class AdminVolvoAlertasScreen extends StatefulWidget {
   const AdminVolvoAlertasScreen({super.key});
 
@@ -34,19 +35,61 @@ class AdminVolvoAlertasScreen extends StatefulWidget {
 }
 
 class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
-  late final Stream<QuerySnapshot> _alertasStream;
+  /// Día seleccionado — por default hoy.
+  late DateTime _fecha;
+
+  /// `true` (default) → solo alertas no atendidas. `false` → todas.
   bool _soloPendientes = true;
 
   @override
   void initState() {
     super.initState();
-    // Limit defensivo a 200: con ~50 eventos/día, son los últimos ~4 días.
-    // Si hay que ver más histórico, sumar paginación o filtros server-side.
-    _alertasStream = FirebaseFirestore.instance
+    final ahora = DateTime.now();
+    _fecha = DateTime(ahora.year, ahora.month, ahora.day);
+  }
+
+  Stream<QuerySnapshot> get _alertasStream {
+    final inicio = DateTime(_fecha.year, _fecha.month, _fecha.day);
+    final fin = inicio.add(const Duration(days: 1));
+    // where + orderBy en `creado_en` (mismo campo) → no necesita índice
+    // compuesto. Trae como mucho ~50 docs por día.
+    return FirebaseFirestore.instance
         .collection(AppCollections.volvoAlertas)
+        .where('creado_en',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
+        .where('creado_en', isLessThan: Timestamp.fromDate(fin))
         .orderBy('creado_en', descending: true)
-        .limit(200)
         .snapshots();
+  }
+
+  bool get _esHoy {
+    final hoy = DateTime.now();
+    return _fecha.year == hoy.year &&
+        _fecha.month == hoy.month &&
+        _fecha.day == hoy.day;
+  }
+
+  String get _etiquetaFecha {
+    final d = _fecha.day.toString().padLeft(2, '0');
+    final m = _fecha.month.toString().padLeft(2, '0');
+    return _esHoy ? 'HOY ($d-$m-${_fecha.year})' : '$d-$m-${_fecha.year}';
+  }
+
+  Future<void> _elegirFecha() async {
+    final ahora = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fecha,
+      firstDate: DateTime(2024),
+      lastDate: ahora,
+      helpText: 'Elegir día de alertas',
+      cancelText: 'CANCELAR',
+      confirmText: 'VER',
+      locale: const Locale('es', 'AR'),
+    );
+    if (picked != null && mounted) {
+      setState(() => _fecha = picked);
+    }
   }
 
   @override
@@ -57,16 +100,28 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
         stream: _alertasStream,
         searchHint: 'Buscar por patente, tipo o VIN...',
         emptyTitle: _soloPendientes
-            ? 'No hay alertas pendientes'
-            : 'Sin alertas registradas',
+            ? 'Sin alertas pendientes ese día'
+            : 'Sin alertas registradas ese día',
         emptySubtitle: _soloPendientes
-            ? 'Todas las alertas fueron atendidas. Cambiá a "Todas" para ver el histórico.'
-            : 'El poller corre cada 5 min. Las alertas nuevas van a aparecer acá.',
+            ? 'Cambiá a "Mostrar atendidas" para ver el histórico del día.'
+            : 'Probá con otro día desde el botón de calendario.',
         emptyIcon: Icons.notifications_off_outlined,
-        header: _buildHeader(),
+        header: _Header(
+          fechaEtiqueta: _etiquetaFecha,
+          esHoy: _esHoy,
+          soloPendientes: _soloPendientes,
+          onElegirFecha: _elegirFecha,
+          onIrAHoy: () {
+            final hoy = DateTime.now();
+            setState(() => _fecha = DateTime(hoy.year, hoy.month, hoy.day));
+          },
+          onTogglePendientes: (v) =>
+              setState(() => _soloPendientes = v),
+        ),
         filter: (doc, q) {
           final data = doc.data() as Map<String, dynamic>;
-          // Toggle "Pendientes" → excluye atendidas.
+          // Filtro client-side de "atendidas" — la query server ya
+          // limita por día.
           if (_soloPendientes && data['atendida'] == true) return false;
           if (q.isEmpty) return true;
           final hay = '${data['patente'] ?? ''} '
@@ -80,18 +135,65 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
       ),
     );
   }
+}
 
-  Widget _buildHeader() {
+// =============================================================================
+// HEADER — selector de fecha + filtros
+// =============================================================================
+
+class _Header extends StatelessWidget {
+  final String fechaEtiqueta;
+  final bool esHoy;
+  final bool soloPendientes;
+  final VoidCallback onElegirFecha;
+  final VoidCallback onIrAHoy;
+  final ValueChanged<bool> onTogglePendientes;
+
+  const _Header({
+    required this.fechaEtiqueta,
+    required this.esHoy,
+    required this.soloPendientes,
+    required this.onElegirFecha,
+    required this.onIrAHoy,
+    required this.onTogglePendientes,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          OutlinedButton.icon(
+            onPressed: onElegirFecha,
+            icon: const Icon(Icons.calendar_month_outlined, size: 18),
+            label: Text(fechaEtiqueta),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: BorderSide(
+                color: esHoy ? AppColors.accentGreen : Colors.white38,
+              ),
+            ),
+          ),
+          if (!esHoy)
+            TextButton.icon(
+              onPressed: onIrAHoy,
+              icon: const Icon(Icons.today_outlined, size: 18),
+              label: const Text('Ir a hoy'),
+              style: TextButton.styleFrom(
+                  foregroundColor: AppColors.accentGreen),
+            ),
           FilterChip(
-            label: const Text('Solo pendientes'),
-            selected: _soloPendientes,
-            onSelected: (v) => setState(() => _soloPendientes = v),
+            label: Text(
+              soloPendientes ? 'Solo pendientes' : 'Mostrar todas',
+            ),
+            selected: soloPendientes,
+            onSelected: onTogglePendientes,
             avatar: Icon(
-              _soloPendientes
+              soloPendientes
                   ? Icons.filter_alt
                   : Icons.filter_alt_off_outlined,
               size: 18,
