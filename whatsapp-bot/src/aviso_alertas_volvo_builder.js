@@ -13,7 +13,15 @@
 
 const { aDdMmYyyyLocal, aLocalTime } = require('./fechas');
 
+// Banner que se muestra al final del mensaje mientras la app esté en
+// etapa de prueba. Quitar (junto con su uso en FIRMA) cuando se pase a
+// producción real con todos los choferes/admins onboardeados.
+const BANNER_TESTING =
+  '⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. ' +
+  'No tomes el contenido al 100%.\n\n';
+
 const FIRMA =
+  BANNER_TESTING +
   '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
   '_Detalle completo en la app → Alertas._';
 

@@ -8,7 +8,15 @@
 // Si modificás el copy, mantené coherencia con el tono "Te aviso desde
 // la oficina..." que usa el bot para los demás avisos.
 
+// Banner que se muestra al final del mensaje mientras la app esté en
+// etapa de prueba. Quitar (junto con su uso en FIRMA) cuando se pase a
+// producción real con todos los choferes/admins onboardeados.
+const BANNER_TESTING =
+  '⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. ' +
+  'No tomes el contenido al 100%.\n\n';
+
 const FIRMA =
+  BANNER_TESTING +
   '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
   '_Para coordinar el ingreso al taller, comunicate con la oficina._';
 

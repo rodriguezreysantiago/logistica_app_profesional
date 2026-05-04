@@ -18,6 +18,12 @@
 
 const { aDdMmYyyyLocal, aLocalTime } = require('./fechas');
 
+// Banner que se muestra al final del mensaje mientras la app esté en
+// etapa de prueba. Quitar cuando se pase a producción real.
+const BANNER_TESTING =
+  '⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. ' +
+  'No tomes el contenido al 100%.\n\n';
+
 /** Origenes que disparan agrupación al envío. */
 const ORIGENES_AGRUPABLES = new Set([
   'volvo_alert_high',
@@ -168,6 +174,7 @@ function _armarMensajeAlertHighAgrupado(docs) {
     `${bloques.join('\n\n')}\n\n` +
     'Te pedimos prestar atención a estos avisos. Si hubo una situación ' +
     'particular, avisanos a la oficina.\n\n' +
+    BANNER_TESTING +
     '_Coopertrans Móvil — Mensaje automático._'
   );
 }

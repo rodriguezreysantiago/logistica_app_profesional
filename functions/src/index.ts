@@ -70,6 +70,15 @@ const auth = getAuth();
 const MAX_INTENTOS_FALLIDOS = 3;
 const BLOQUEO_DURACION_MS = 15 * 60 * 1000; // 15 minutos
 
+// Banner que se inyecta al final de cada mensaje de WhatsApp generado
+// por estas funciones mientras la app esté en etapa de prueba. Quitar
+// cuando se pase a producción real con todos los choferes/admins
+// onboardeados (espejo del BANNER_TESTING que vive en los builders del
+// bot Node.js).
+const BANNER_TESTING =
+  "⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. " +
+  "No tomes el contenido al 100%.\n\n";
+
 // ============================================================================
 // loginConDni
 // ============================================================================
@@ -2041,20 +2050,20 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         `⚠️ ${etiqueta}\n\n` +
         "Te pedimos ajustar tu manejo. Si hubo una situación particular, " +
         "avisanos a la oficina.\n\n" +
-        "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
       `${saludo}.\n\n` +
         `Aviso desde la oficina: el ${fechaTxt} a las ${horaTxt} se ` +
         `registró un evento en el tractor ${patente}.\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Si hubo algo particular contanos en la oficina; si no, te " +
         "pedimos prestar atención al manejo.\n\n" +
-        "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
       `${saludo}, te escribo desde la oficina.\n\n` +
         `Volvo registró un evento en el tractor ${patente} ` +
         `el ${fechaTxt} a las ${horaTxt}:\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Cualquier comentario sobre la situación, mejor en la oficina.\n\n" +
-        "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
     ];
     const mensaje = variantes[Math.floor(Math.random() * variantes.length)];
 
@@ -2572,7 +2581,7 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
         `🕐 ${fechaTxt} ${horaTxt}` +
         choferTxt +
         linkMaps +
-        "\n\n_Sistema Coopertrans Móvil — Aviso automático._",
+        "\n\n" + BANNER_TESTING + "_Sistema Coopertrans Móvil — Aviso automático._",
       "🔧 *Mantenimiento — aviso automático*\n\n" +
         `Tractor: *${patenteTxt}*\n` +
         `Detalle: ${etiqueta}\n` +
@@ -2580,14 +2589,14 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
         `Cuándo: ${fechaTxt} ${horaTxt}` +
         choferTxt +
         linkMaps +
-        "\n\n_Sistema Coopertrans Móvil._",
+        "\n\n" + BANNER_TESTING + "_Sistema Coopertrans Móvil._",
       "🔧 *Aviso de la flota Volvo*\n\n" +
         `${patenteTxt} (${fechaTxt} ${horaTxt}):\n` +
         `${etiqueta}\n` +
         `${sevEmoji} ${severidad || "—"}` +
         choferTxt +
         linkMaps +
-        "\n\n_Sistema Coopertrans Móvil — Aviso automático._",
+        "\n\n" + BANNER_TESTING + "_Sistema Coopertrans Móvil — Aviso automático._",
     ];
     const mensaje = variantesMant[Math.floor(Math.random() * variantesMant.length)];
 
@@ -2849,6 +2858,7 @@ export const botHealthWatchdog = onSchedule(
       `(hace ${minRedondeo} min) en PC \`${pcId}\`.\n\n` +
       "Los avisos de vencimientos y alertas Volvo están en cola pero " +
       "no se están enviando. Revisá la PC del bot o reiniciá el servicio.\n\n" +
+      BANNER_TESTING +
       "_Aviso automático del watchdog. Solo se envía 1 vez por caída._";
 
     await db.collection("COLA_WHATSAPP").add({
