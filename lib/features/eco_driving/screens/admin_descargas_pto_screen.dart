@@ -30,40 +30,83 @@ class AdminDescargasPtoScreen extends StatefulWidget {
 }
 
 class _AdminDescargasPtoScreenState extends State<AdminDescargasPtoScreen> {
-  int _diasRango = 30;
+  /// Día seleccionado — por default hoy. El operador puede cambiar a
+  /// cualquier día anterior con el botón calendario del AppBar.
+  late DateTime _fecha;
   String? _filtroPatente;
 
-  DateTime get _desde =>
-      DateTime.now().subtract(Duration(days: _diasRango));
+  @override
+  void initState() {
+    super.initState();
+    final ahora = DateTime.now();
+    _fecha = DateTime(ahora.year, ahora.month, ahora.day);
+  }
+
+  bool get _esHoy {
+    final hoy = DateTime.now();
+    return _fecha.year == hoy.year &&
+        _fecha.month == hoy.month &&
+        _fecha.day == hoy.day;
+  }
+
+  String get _etiquetaFecha {
+    final d = _fecha.day.toString().padLeft(2, '0');
+    final m = _fecha.month.toString().padLeft(2, '0');
+    return _esHoy ? 'HOY ($d-$m-${_fecha.year})' : '$d-$m-${_fecha.year}';
+  }
+
+  Future<void> _elegirFecha() async {
+    final ahora = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fecha,
+      firstDate: DateTime(2024),
+      lastDate: ahora,
+      helpText: 'Elegir día de descargas',
+      cancelText: 'CANCELAR',
+      confirmText: 'VER',
+      locale: const Locale('es', 'AR'),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _fecha = picked;
+        _filtroPatente = null;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final inicio = DateTime(_fecha.year, _fecha.month, _fecha.day);
+    final fin = inicio.add(const Duration(days: 1));
     return AppScaffold(
       title: 'Descargas (PTO)',
       actions: [
-        PopupMenuButton<int>(
-          icon: const Icon(Icons.calendar_today),
-          tooltip: 'Rango temporal',
-          initialValue: _diasRango,
-          onSelected: (v) => setState(() {
-            _diasRango = v;
-            _filtroPatente = null;
-          }),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 7, child: Text('Últimos 7 días')),
-            PopupMenuItem(value: 15, child: Text('Últimos 15 días')),
-            PopupMenuItem(value: 30, child: Text('Últimos 30 días')),
-            PopupMenuItem(value: 60, child: Text('Últimos 60 días')),
-            PopupMenuItem(value: 90, child: Text('Últimos 90 días')),
-          ],
+        IconButton(
+          icon: const Icon(Icons.calendar_month_outlined),
+          tooltip: 'Elegir día',
+          onPressed: _elegirFecha,
         ),
+        if (!_esHoy)
+          IconButton(
+            icon: const Icon(Icons.today_outlined),
+            tooltip: 'Volver a hoy',
+            onPressed: () {
+              final hoy = DateTime.now();
+              setState(() {
+                _fecha = DateTime(hoy.year, hoy.month, hoy.day);
+                _filtroPatente = null;
+              });
+            },
+          ),
       ],
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance
             .collection(AppCollections.volvoAlertas)
             .where('tipo', isEqualTo: 'PTO')
             .where('creado_en',
-                isGreaterThanOrEqualTo: Timestamp.fromDate(_desde))
+                isGreaterThanOrEqualTo: Timestamp.fromDate(inicio))
+            .where('creado_en', isLessThan: Timestamp.fromDate(fin))
             .orderBy('creado_en', descending: true)
             .snapshots(),
         builder: (ctx, snap) {
@@ -80,10 +123,12 @@ class _AdminDescargasPtoScreenState extends State<AdminDescargasPtoScreen> {
           }
           final docs = snap.data?.docs ?? const [];
           if (docs.isEmpty) {
-            return const AppEmptyState(
+            return AppEmptyState(
               icon: Icons.local_shipping_outlined,
-              title: 'Sin descargas en este rango',
-              subtitle: 'No hay eventos PTO registrados en el período.',
+              title: 'Sin descargas el $_etiquetaFecha',
+              subtitle: _esHoy
+                  ? 'Todavía no hubo eventos PTO hoy. Probá con otro día.'
+                  : 'No hay eventos PTO ese día. Elegí otra fecha.',
             );
           }
 
@@ -111,7 +156,7 @@ class _AdminDescargasPtoScreenState extends State<AdminDescargasPtoScreen> {
                 patentes: patentes,
                 filtroPatente: _filtroPatente,
                 onFiltroChange: (p) => setState(() => _filtroPatente = p),
-                rangoDias: _diasRango,
+                etiquetaFecha: _etiquetaFecha,
               ),
               Expanded(
                 child: ListView.builder(
@@ -136,7 +181,7 @@ class _Toolbar extends StatelessWidget {
   final List<String> patentes;
   final String? filtroPatente;
   final ValueChanged<String?> onFiltroChange;
-  final int rangoDias;
+  final String etiquetaFecha;
 
   const _Toolbar({
     required this.totalEventos,
@@ -144,7 +189,7 @@ class _Toolbar extends StatelessWidget {
     required this.patentes,
     required this.filtroPatente,
     required this.onFiltroChange,
-    required this.rangoDias,
+    required this.etiquetaFecha,
   });
 
   @override
@@ -155,7 +200,7 @@ class _Toolbar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '$visibles de $totalEventos descargas · últimos $rangoDias días',
+            '$visibles de $totalEventos descargas · $etiquetaFecha',
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 8),
