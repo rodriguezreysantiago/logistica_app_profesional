@@ -69,6 +69,12 @@ service firebase.storage {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
+    // Comprobantes (RTO, Seguro, extintores) — el código sube a VEHICULOS
+    // en mayúsculas para distinguirlo de la carpeta de fotos (minúsculas).
+    match /VEHICULOS/{patente}/{archivo=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
 
     // ========================================================================
     // EMPLEADOS — papeles del chofer reemplazados por admin

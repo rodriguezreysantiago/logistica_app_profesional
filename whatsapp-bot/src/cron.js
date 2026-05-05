@@ -81,10 +81,14 @@ const DOCS_VEHICULO = {
 function calcularDiasRestantes(fechaIso) {
   if (!fechaIso) return null;
   const str = String(fechaIso).trim();
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
   let venc;
-  if (m) {
-    venc = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  const mIso = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+  // DD/MM/YYYY o DD-MM-YYYY — formato AR guardado antes de la migración a ISO
+  const mAr = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})/.exec(str);
+  if (mIso) {
+    venc = new Date(parseInt(mIso[1], 10), parseInt(mIso[2], 10) - 1, parseInt(mIso[3], 10));
+  } else if (mAr) {
+    venc = new Date(parseInt(mAr[3], 10), parseInt(mAr[2], 10) - 1, parseInt(mAr[1], 10));
   } else {
     venc = new Date(str);
   }
