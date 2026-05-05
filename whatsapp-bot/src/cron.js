@@ -732,6 +732,143 @@ async function _runOnce(fs) {
       );
     }
 
+    // ─── Mantenimiento diario consolidado (1 msg/día al admin) ────────
+    // Mismo patrón que cron_alertas_volvo_diario pero para eventos de
+    // mantenimiento: FUEL, CATALYST, y GENERIC con sub-tipo TELL_TALE /
+    // ADBLUELEVEL_LOW / WITHOUT_ADBLUE. La Cloud Function
+    // onAlertaVolvoMantenimientoCreated ya NO encola en COLA_WHATSAPP —
+    // solo persiste en VOLVO_ALERTAS. Este bloque del cron los recoge una
+    // vez por día y arma UN solo mensaje consolidado para el admin.
+    const TIPOS_MANT_DIRECTOS = new Set(['FUEL', 'CATALYST']);
+    const SUBTIPOS_MANT_GENERIC = new Set(['TELL_TALE', 'ADBLUELEVEL_LOW', 'WITHOUT_ADBLUE']);
+
+    const dniMantenimiento = process.env.ALERTAS_RESUMEN_DESTINATARIO_DNI;
+    if (dniMantenimiento) {
+      const yaEnviadoMant = await hist.yaSeEnvioMantenimientoDiario(db, dniMantenimiento);
+      if (yaEnviadoMant) {
+        log.debug(`Mantenimiento diario ya enviado hoy a ${dniMantenimiento}, skip.`);
+      } else {
+        const empMant = await _obtenerDestinatarioConsolidado(db, dniMantenimiento, empleadosByDni);
+        if (!empMant) {
+          log.warn(
+            `ALERTAS_RESUMEN_DESTINATARIO_DNI=${dniMantenimiento} no existe en EMPLEADOS. ` +
+            `Mantenimiento diario no se envía hoy.`
+          );
+        } else {
+          const telMantRaw = empMant.data.TELEFONO;
+          const telMant = normalizarTelefonoAWid(telMantRaw)
+            ? String(telMantRaw).trim()
+            : null;
+          if (!telMant) {
+            log.warn(
+              `Destinatario mantenimiento ${dniMantenimiento} sin TELEFONO válido. ` +
+              `Mantenimiento diario no se envía hoy.`
+            );
+          } else {
+            const desdeMant = admin.firestore.Timestamp.fromMillis(
+              Date.now() - 24 * 60 * 60 * 1000
+            );
+            const mantSnap = await db
+              .collection('VOLVO_ALERTAS')
+              .where('creado_en', '>=', desdeMant)
+              .get();
+
+            const eventosMant = [];
+            for (const d of mantSnap.docs) {
+              const data = d.data();
+              const tipo = String(data.tipo || '').toUpperCase();
+              let esMant = TIPOS_MANT_DIRECTOS.has(tipo);
+              let subTipo = null;
+              if (!esMant && tipo === 'GENERIC') {
+                const subType = String(
+                  (data.detalle_generic?.type ?? '')
+                ).toUpperCase();
+                if (SUBTIPOS_MANT_GENERIC.has(subType)) {
+                  esMant = true;
+                  subTipo = subType;
+                }
+              }
+              if (!esMant) continue;
+
+              const creadoEn = data.creado_en;
+              const fechaHora =
+                creadoEn && typeof creadoEn.toDate === 'function'
+                  ? creadoEn.toDate()
+                  : new Date();
+              eventosMant.push({
+                patente: String(data.patente || '—').trim(),
+                tipo,
+                subTipo,
+                choferNombre: data.chofer_nombre
+                  ? String(data.chofer_nombre).trim()
+                  : null,
+                fechaHora,
+              });
+            }
+
+            const mensajeMant = avisoAlertasVolvo.buildResumenMantenimientoDiario({
+              destinatarioNombre: aviso.resolverNombreSaludo(empMant.data),
+              eventos: eventosMant,
+            });
+
+            if (!mensajeMant) {
+              log.info(
+                `Mantenimiento diario: 0 eventos en últimas 24h, no se envía.`
+              );
+              await hist.registrarMantenimientoDiario(db, dniMantenimiento, {
+                cantidadEventos: 0,
+                colaDocId: null,
+              });
+            } else {
+              try {
+                const colaRef = await db.collection(fs.COLECCION).add({
+                  telefono: telMant,
+                  mensaje: mensajeMant,
+                  estado: fs.ESTADO.pendiente,
+                  encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                  enviado_en: null,
+                  error: null,
+                  intentos: 0,
+                  origen: 'cron_mantenimiento_diario',
+                  destinatario_coleccion: 'EMPLEADOS',
+                  destinatario_id: dniMantenimiento,
+                  campo_base: 'MANTENIMIENTO_DIARIO',
+                  admin_dni: 'BOT',
+                  admin_nombre: 'Bot automatico',
+                  items_agrupados: eventosMant.map((e) => ({
+                    tipoDoc: e.subTipo || e.tipo,
+                    campoBase: 'VOLVO_ALERT_MANTENIMIENTO',
+                    coleccion: 'VOLVO_ALERTAS',
+                    docId: `${e.patente}_${e.tipo}`,
+                    fecha: e.fechaHora.toISOString(),
+                    tipo: e.tipo,
+                    subTipo: e.subTipo,
+                    chofer: e.choferNombre,
+                  })),
+                });
+                await hist.registrarMantenimientoDiario(db, dniMantenimiento, {
+                  cantidadEventos: eventosMant.length,
+                  colaDocId: colaRef.id,
+                });
+                stats.encolados++;
+                log.info(
+                  `+ Encolado MANTENIMIENTO DIARIO: ${dniMantenimiento} ` +
+                  `(${eventosMant.length} eventos) -> ${colaRef.id}`
+                );
+              } catch (e) {
+                stats.errores++;
+                log.error(`No se pudo encolar mantenimiento diario: ${e.message}`);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      log.debug(
+        'ALERTAS_RESUMEN_DESTINATARIO_DNI no configurado. Skip mantenimiento diario.'
+      );
+    }
+
     log.info(
       `Cron ciclo cerrado: encolados=${stats.encolados} ` +
         `(de los cuales ${stats.agrupados} agrupados) ` +

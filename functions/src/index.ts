@@ -2529,32 +2529,8 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
     }
 
     const patente = (data.patente ?? "").toString().trim().toUpperCase();
-    const severidad = (data.severidad ?? "").toString().toUpperCase();
 
-    // Destinatario: el doc de EMPLEADOS del jefe de mantenimiento.
-    const destinatarioSnap = await db
-      .collection("EMPLEADOS")
-      .doc(MANTENIMIENTO_DESTINATARIO_DNI)
-      .get();
-    if (!destinatarioSnap.exists) {
-      logger.warn(
-        "[onAlertaVolvoMantenimientoCreated] destinatario no existe en EMPLEADOS",
-        { dni: MANTENIMIENTO_DESTINATARIO_DNI, alertId: event.params.alertId }
-      );
-      return;
-    }
-    const destData = destinatarioSnap.data() ?? {};
-    const telefono = (destData.TELEFONO ?? "").toString().trim();
-    if (!telefono || telefono === "-") {
-      logger.warn(
-        "[onAlertaVolvoMantenimientoCreated] destinatario sin TELEFONO",
-        { dni: MANTENIMIENTO_DESTINATARIO_DNI, alertId: event.params.alertId }
-      );
-      return;
-    }
-
-    // Etiqueta legible. Para tipo GENERIC vamos al sub-tipo (TELL_TALE,
-    // ADBLUELEVEL_LOW, etc). Para FUEL/CATALYST usamos el tipo top-level.
+    // Etiqueta legible para el log.
     let etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
     if (tipo === "GENERIC") {
       const detalleGeneric = data.detalle_generic as
@@ -2564,95 +2540,17 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
       etiqueta = ETIQUETAS_TIPO_ALERTA[subType] ?? subType ?? "Evento genérico";
     }
 
-    const creadoMs =
-      (data.creado_en as Timestamp | undefined)?.toMillis() ?? Date.now();
-    const horaTxt = _formatHoraArg(creadoMs);
-    const fechaTxt = _formatFechaArg(creadoMs);
-
-    // Snapshot del chofer al volante en el momento del evento (lo dejó
-    // el poller cruzando con el log temporal ASIGNACIONES_VEHICULO).
-    const choferNombre = (data.chofer_nombre ?? "").toString().trim();
-    const choferTxt = choferNombre ? `\n👤 Chofer: ${choferNombre}` : "";
-
-    // Coords si están disponibles (link clickeable a Google Maps).
-    const gps = data.posicion_gps as Record<string, unknown> | undefined;
-    const lat = (gps?.lat as number | undefined);
-    const lng = (gps?.lng as number | undefined);
-    const linkMaps = lat != null && lng != null ?
-      `\n📍 https://www.google.com/maps?q=${lat},${lng}` :
-      "";
-
-    const sevEmoji = severidad === "HIGH" ? "🔴" :
-      severidad === "MEDIUM" ? "🟡" :
-        "🟢";
-
-    // Variantes anti-baneo (ver justificación en onAlertaVolvoCreated).
-    // El destinatario casi siempre es el mismo (jefe de mantenimiento),
-    // pero igual rotamos formato para que WhatsApp no detecte un patrón
-    // idéntico que potencialmente coincida con otros mensajes del bot.
-    const patenteTxt = patente || "(sin patente)";
-    const variantesMant = [
-      "🔧 *Alerta de mantenimiento*\n\n" +
-        `*${patenteTxt}* — ${etiqueta}\n` +
-        `${sevEmoji} Severidad: ${severidad || "—"}\n` +
-        `🕐 ${fechaTxt} ${horaTxt}` +
-        choferTxt +
-        linkMaps +
-        "\n\n" + BANNER_TESTING + "_Sistema Coopertrans Móvil — Aviso automático._",
-      "🔧 *Mantenimiento — aviso automático*\n\n" +
-        `Tractor: *${patenteTxt}*\n` +
-        `Detalle: ${etiqueta}\n` +
-        `Severidad: ${sevEmoji} ${severidad || "—"}\n` +
-        `Cuándo: ${fechaTxt} ${horaTxt}` +
-        choferTxt +
-        linkMaps +
-        "\n\n" + BANNER_TESTING + "_Sistema Coopertrans Móvil._",
-      "🔧 *Aviso de la flota Volvo*\n\n" +
-        `${patenteTxt} (${fechaTxt} ${horaTxt}):\n` +
-        `${etiqueta}\n` +
-        `${sevEmoji} ${severidad || "—"}` +
-        choferTxt +
-        linkMaps +
-        "\n\n" + BANNER_TESTING + "_Sistema Coopertrans Móvil — Aviso automático._",
-    ];
-    const mensaje = variantesMant[Math.floor(Math.random() * variantesMant.length)];
-
-    try {
-      const colaRef = await db.collection("COLA_WHATSAPP").add({
-        telefono,
-        mensaje,
-        estado: "PENDIENTE",
-        encolado_en: FieldValue.serverTimestamp(),
-        enviado_en: null,
-        error: null,
-        intentos: 0,
-        origen: "volvo_alert_mantenimiento",
-        destinatario_coleccion: "EMPLEADOS",
-        destinatario_id: MANTENIMIENTO_DESTINATARIO_DNI,
-        campo_base: "VOLVO_ALERT_MANTENIMIENTO",
-        admin_dni: "BOT",
-        admin_nombre: "Bot automatico",
-        alert_id: event.params.alertId,
-        alert_tipo: tipo,
-        alert_patente: patente,
-        // Para que el agrupador del bot tenga la fecha real del evento.
-        alert_creado_en: Timestamp.fromMillis(creadoMs),
-      });
-      logger.info("[onAlertaVolvoMantenimientoCreated] OK encolado", {
-        alertId: event.params.alertId,
-        patente,
-        tipo,
-        destinatarioDni: MANTENIMIENTO_DESTINATARIO_DNI,
-        colaDocId: colaRef.id,
-      });
-    } catch (e) {
-      logger.error("[onAlertaVolvoMantenimientoCreated] no se pudo encolar", {
-        alertId: event.params.alertId,
-        error: (e as Error).message,
-      });
-      // No re-throw: si el encolado falla, queda registro en log y la
-      // alerta sigue visible en el tablero "Alertas Volvo" del admin.
-    }
+    // No encolamos en COLA_WHATSAPP aquí. El cron del bot lee
+    // VOLVO_ALERTAS una vez por día y manda UN mensaje consolidado con
+    // todos los eventos de mantenimiento de las últimas 24h
+    // (cron_mantenimiento_diario en whatsapp-bot/src/cron.js).
+    // Enviar uno por evento generaba N mensajes separados al admin.
+    logger.info("[onAlertaVolvoMantenimientoCreated] evento registrado en VOLVO_ALERTAS — cron diario lo incluirá en resumen", {
+      alertId: event.params.alertId,
+      patente,
+      tipo,
+      etiqueta,
+    });
   }
 );
 

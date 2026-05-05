@@ -280,6 +280,29 @@ async function registrarAlertasResumen(db, dniDestinatario, meta) {
 }
 
 /**
+ * Para el resumen DIARIO de alertas de mantenimiento (FUEL, CATALYST,
+ * TELL_TALE, ADBLUELEVEL_LOW, WITHOUT_ADBLUE). Mismo patrón que
+ * yaSeEnvioAlertasResumen: idempotencia por día + por DNI destinatario.
+ */
+async function yaSeEnvioMantenimientoDiario(db, dniDestinatario) {
+  const id = `mantenimiento_diario_${_fechaHoyIso()}_${dniDestinatario}`;
+  const doc = await db.collection(COLECCION).doc(id).get();
+  return doc.exists;
+}
+
+async function registrarMantenimientoDiario(db, dniDestinatario, meta) {
+  const id = `mantenimiento_diario_${_fechaHoyIso()}_${dniDestinatario}`;
+  await db.collection(COLECCION).doc(id).set({
+    tipo: 'mantenimiento_diario',
+    destinatario_dni: dniDestinatario,
+    fecha: _fechaHoyIso(),
+    cantidad_eventos: meta?.cantidadEventos || 0,
+    cola_doc_id: meta?.colaDocId || null,
+    creado_en: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+/**
  * Limpia docs viejos de AVISOS_AUTOMATICOS_HISTORICO.
  *
  * Borra los docs con `creado_en` anterior a `diasMin` días atrás
@@ -339,8 +362,10 @@ module.exports = {
   yaSeEnvioServiceMaxUrgencia,
   yaSeEnvioServiceDiario,
   yaSeEnvioAlertasResumen,
+  yaSeEnvioMantenimientoDiario,
   registrar,
   registrarServiceDiario,
   registrarAlertasResumen,
+  registrarMantenimientoDiario,
   limpiarObsoletos,
 };

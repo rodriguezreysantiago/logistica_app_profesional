@@ -27,7 +27,8 @@ const BANNER_TESTING =
 /** Origenes que disparan agrupación al envío. */
 const ORIGENES_AGRUPABLES = new Set([
   'volvo_alert_high',
-  'volvo_alert_mantenimiento',
+  // volvo_alert_mantenimiento ya no se encola individualmente — el cron
+  // genera un único mensaje diario (cron_mantenimiento_diario).
 ]);
 
 /**
