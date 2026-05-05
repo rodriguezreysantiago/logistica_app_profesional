@@ -20,8 +20,8 @@ subprojects {
 
 // Kotlin 2.x dejó de soportar languageVersion 1.6 (usado por sentry_flutter
 // y otros plugins viejos). Forzamos mínimo 1.9 en todos los subproyectos.
-subprojects {
-    afterEvaluate {
+gradle.projectsEvaluated {
+    subprojects {
         tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
             compilerOptions {
                 languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9)
