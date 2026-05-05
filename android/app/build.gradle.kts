@@ -26,9 +26,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
 
     signingConfigs {
         create("release") {
@@ -42,7 +39,7 @@ android {
 
     defaultConfig {
         applicationId = "com.coopertrans.movil"
-        minSdk = 23
+        minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -52,8 +49,8 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-            minifyEnabled = true
-            shrinkResources = true
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
