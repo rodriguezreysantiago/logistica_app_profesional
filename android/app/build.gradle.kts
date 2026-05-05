@@ -1,14 +1,19 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // El plugin de Google Services debe ir despu�s de los de Android/Kotlin
     id("com.google.gms.google-services")
-    // Crashlytics: requiere google-services declarado antes � el plugin
-    // se engancha al build para subir el mapping de obfuscaci�n a
-    // Firebase. En debug es no-op porque AppLogger desactiva la
-    // colecci�n, pero el plugin igual debe estar declarado.
     id("com.google.firebase.crashlytics")
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Leer key.properties si existe (no existe en CI sin secrets configurados)
+val keyPropertiesFile = rootProject.file("app/key.properties")
+val keyProperties = Properties()
+if (keyPropertiesFile.exists()) {
+    keyProperties.load(FileInputStream(keyPropertiesFile))
 }
 
 android {
@@ -17,7 +22,6 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // Mantenemos 17 pero aseguramos la compatibilidad
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -26,27 +30,37 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keyProperties["keyAlias"] as String? ?: System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword = keyProperties["keyPassword"] as String? ?: System.getenv("ANDROID_KEY_PASSWORD")
+            storeFile = keyProperties["storeFile"]?.let { file(it) }
+                ?: System.getenv("ANDROID_KEYSTORE_PATH")?.let { file(it) }
+            storePassword = keyProperties["storePassword"] as String? ?: System.getenv("ANDROID_STORE_PASSWORD")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.coopertrans.movil"
-        
-        // ?? FORZAMOS minSdk a 23 para evitar errores de compatibilidad con Firebase
-        minSdk = 23 
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-
-        // ?? ACTIVAMOS MULTIDEX: Vital para que no choquen los hilos en apps grandes
         multiDexEnabled = true
     }
 
     buildTypes {
         release {
-            // Signing with the debug keys for now
+            signingConfig = signingConfigs.getByName("release")
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        debug {
             signingConfig = signingConfigs.getByName("debug")
-            
-            // Sugerencia: optimizaci�n de recursos
-            minifyEnabled = false
-            shrinkResources = false
         }
     }
 }
@@ -56,6 +70,5 @@ flutter {
 }
 
 dependencies {
-    // Agregamos la dependencia de multidex expl�cita por seguridad
     implementation("androidx.multidex:multidex:2.0.1")
 }
