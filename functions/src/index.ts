@@ -2053,7 +2053,18 @@ export const onAlertaVolvoCreated = onDocumentCreated(
     // el lunes y "hoy" sería mentira. Con la fecha explícita el chofer
     // siempre sabe a qué momento se refiere el aviso.
     const fechaTxt = _formatFechaArg(creadoMs);
-    const etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
+    let etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
+    if (tipo === "GENERIC") {
+      const triggerType = (
+        (data.detalle_generic as Record<string, unknown> | undefined)
+          ?.triggerType ?? ""
+      ).toString().toUpperCase();
+      if (triggerType) {
+        etiqueta =
+          ETIQUETAS_TIPO_ALERTA[triggerType] ??
+          `Evento genérico (${triggerType})`;
+      }
+    }
 
     // Variantes random del mensaje — anti-baneo de WhatsApp. Mandar el
     // MISMO texto a múltiples destinatarios en poco tiempo es señal
