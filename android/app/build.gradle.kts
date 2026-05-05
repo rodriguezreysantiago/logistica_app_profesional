@@ -10,7 +10,7 @@ plugins {
 }
 
 // Leer key.properties si existe (no existe en CI sin secrets configurados)
-val keyPropertiesFile = rootProject.file("app/key.properties")
+val keyPropertiesFile = rootProject.file("key.properties")
 val keyProperties = Properties()
 if (keyPropertiesFile.exists()) {
     keyProperties.load(FileInputStream(keyPropertiesFile))
