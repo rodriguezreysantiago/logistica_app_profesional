@@ -30,6 +30,6 @@ buildscript {
     }
     dependencies {
         // Asegurate de que esta versión de gms sea compatible con tu Firebase
-        classpath("com.google.gms:google-services:4.4.0")
+        classpath("com.google.gms:google-services:4.4.2")
     }
 }
