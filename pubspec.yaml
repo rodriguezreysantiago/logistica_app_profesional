@@ -78,8 +78,6 @@ dependencies:
   firebase_auth: ^6.0.0
   # In-app update alerts via Firebase App Distribution (Android only).
   # Solo activo en builds distribuidos por App Distribution — en debug es no-op.
-  firebase_app_distribution: ^1.2.5
-
   # ================= ARCHIVOS =================
   image_picker: ^1.2.2
   # `flutter_pdfview` se removió (2026-04-28): la previsualización
