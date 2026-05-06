@@ -1,4 +1,6 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -6,9 +8,15 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
+    <!-- Solo declaramos READ_MEDIA_IMAGES porque la app sólo permite subir
+         fotos de comprobantes (RTO, seguro, licencia, etc.). NO se usan
+         videos ni audios. Si algún plugin transitivo (image_picker u otro)
+         intenta sumar READ_MEDIA_VIDEO o READ_MEDIA_AUDIO en el manifest
+         mergeado, los excluimos explícitamente con tools:node="remove" para
+         que Play Store no objete permisos no usados. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove" />
 
     <!-- Notificaciones runtime permission (Android 13+ / API 33).
          Sin esto flutter_local_notifications no puede mostrar avisos en
