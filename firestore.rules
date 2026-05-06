@@ -62,11 +62,19 @@ service cloud.firestore {
     match /EMPLEADOS/{dni} {
       // Lectura: el dueño puede ver su legajo, admin/supervisor todos.
       allow read: if isAdminOrSupervisor() || isSelf(dni);
-      // Escritura: admin y supervisor. ADMIN exclusivo solo para
-      // cambiar el campo ROL/AREA de otros (eso lo manejamos con
-      // Cloud Function `cambiarRolEmpleado` para validar que
-      // SUPERVISOR no se auto-eleve).
-      allow write: if isAdminOrSupervisor();
+      // Crear y borrar: solo admin/supervisor (alta y baja).
+      allow create, delete: if isAdminOrSupervisor();
+      // Update: admin/supervisor sin restricción.
+      // El chofer (dueño del legajo) puede actualizar SOLO los campos
+      // self-service de "Mi Perfil":
+      //   - ARCHIVO_PERFIL: foto de perfil (sube nueva foto y actualiza URL).
+      //   - CONTRASEÑA: hash bcrypt nuevo cuando cambia su clave.
+      // Cualquier otro campo (DNI, rol, vencimientos, vehículo asignado,
+      // etc.) está reservado a admin/supervisor.
+      allow update: if isAdminOrSupervisor()
+        || (isSelf(dni)
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['ARCHIVO_PERFIL', 'CONTRASEÑA']));
     }
 
     // ========================================================================

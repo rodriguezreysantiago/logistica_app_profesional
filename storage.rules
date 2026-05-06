@@ -46,19 +46,26 @@ service firebase.storage {
     // ========================================================================
     // PERFILES — foto del chofer
     // ========================================================================
-    // El chofer puede ver su propia foto, el admin todas. Solo el admin
-    // la sube (alta de chofer + cambio de foto desde la pantalla de
-    // gestión de personal).
+    // Lectura: cualquier signedIn (chofer ve su perfil + admin ve todos).
+    // Escritura:
+    //   - Admin/supervisor: cualquier foto (alta del chofer + cambio
+    //     desde gestión de personal).
+    //   - Chofer: solo SU propia foto (archivo cuyo nombre arranca con
+    //     su DNI/UID + extensión, ej. "12345678.jpg").
+    // El path de la app es `PERFILES/{dni}.jpg`. Si algún día se usa
+    // otra extensión (.png/.webp) la regex la cubre con `.\\..*`.
     //
     // Soportamos dos paths legacy + nuevo (mayúsculas/minúsculas).
 
     match /PERFILES/{archivo} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isAdmin()
+        || (isSignedIn() && archivo.matches(request.auth.uid + '\\..*'));
     }
     match /perfiles/{archivo} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isAdmin()
+        || (isSignedIn() && archivo.matches(request.auth.uid + '\\..*'));
     }
 
     // ========================================================================
