@@ -25,6 +25,14 @@
       ]
     },
     {
+      "collectionGroup": "VOLVO_ALERTAS",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "severidad", "order": "ASCENDING" },
+        { "fieldPath": "creado_en", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "CUBIERTAS_INSTALADAS",
       "queryScope": "COLLECTION",
       "fields": [
