@@ -827,6 +827,30 @@ git status   # debe decir "working tree clean"
 
 Cliente Flutter: la pantalla "Estado del Bot" muestra heartbeat OK pero los push notifications de admin no llegan. Causa típica: la sesión del admin está cacheando claims viejos. **Logout + login** en la app suele arreglarlo (renueva el JWT con custom claims actuales).
 
+### El bot arranca y se cierra en seguida — `client.initialize() falló: The browser is already running`
+
+Síntoma en `bot.err.log`:
+```
+[ERROR] client.initialize() falló: The browser is already running for ...\.wwebjs_auth\session. Use a different `userDataDir` or stop the running browser first.
+[INFO] Reintentando conexión (intento 1/5) en 1000ms...
+[WARN] Reconexión falló: The browser is already running for ...
+```
+
+Pasa cuando el proceso anterior (`node`/Chromium de Puppeteer) crasheó o no cerró limpio (ej. Ctrl+C duro, kill -9, NSSM kill, host suspendido). Quedó un `chrome.exe` zombi corriendo contra el `userDataDir` y el nuevo intento rebota.
+
+**Fix automatizado** (commit `eb8b37f`): la función `matarProcesosChromiumZombi()` en `whatsapp-bot/src/index.js` corre en pre-flight y mata los `chrome.exe` cuyo CommandLine contiene el path del bot. Con el bot al día (>= `eb8b37f`) el arranque debería ser self-healing.
+
+**Fix manual** si necesitás resolverlo a mano (ej. con un bot viejo):
+```powershell
+# Listar y matar zombis del bot (NO toca otros Chromes del sistema)
+Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+  Where-Object { $_.CommandLine -like '*whatsapp-bot*' -or $_.CommandLine -like '*wwebjs_auth*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host "Matado PID $($_.ProcessId)" }
+
+# Después arrancar normal
+.\whatsapp-bot\scripts\start_bot.ps1
+```
+
 ### "Working tree clean" pero `git status` muestra `.claude/` untracked
 
 Eso es el state directory del agent (Claude Code). Está ignorado por `.gitignore` desde el commit `80874b3`. Si igual aparece, tu copia local del repo no tiene ese commit — `git pull` y debería desaparecer.
