@@ -1,3 +1,5 @@
+import re
+
 import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -11,6 +13,48 @@ try:
 except Exception as e:
     print(f"❌ Error de conexión: {e}")
     exit()
+
+
+# --- Helper de parseo de fechas ---
+# La convención del proyecto es STORAGE en YYYY-MM-DD (string ISO).
+# Si el CSV viene con formato AR (DD/MM/YYYY) o variantes con 1 dígito
+# (D/M/YYYY), normalizamos. Si es ambiguo (ambos números ≤ 12) asumimos
+# DD/MM (regla AR default) — el script imprime warning para que el
+# operator pueda revisar a mano si hace falta.
+#
+# Sin este parseo el script copiaba el string crudo y dejaba en
+# Firestore valores como '5/1/2027' o '23/12/2026' mezclados. Diagnosticado
+# 2026-05-06 (ver scripts/listar_rto_a_corregir.py).
+def parsear_fecha_a_iso(valor, contexto="?"):
+    """Devuelve YYYY-MM-DD a partir de un valor de fecha en formato libre.
+    Acepta YYYY-MM-DD, DD/MM/YYYY, D/M/YYYY, DD-MM-YYYY (con dashes).
+    Si el valor está vacío/NaN devuelve "". Si no se puede parsear
+    levanta ValueError (rompe el load — preferible a guardar basura)."""
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+    s = str(valor).strip()
+    if s == "" or s.lower() == "nan":
+        return ""
+    # Ya en YYYY-MM-DD (con o sin padding).
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", s)
+    if m:
+        y, mth, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return f"{y:04d}-{mth:02d}-{d:02d}"
+    # D[D]/[/-]M[M]/[/-]YYYY.
+    m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", s)
+    if m:
+        n1, n2, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if n1 > 12:
+            day, month = n1, n2
+        elif n2 > 12:
+            day, month = n2, n1
+            print(f"⚠️ [{contexto}] '{s}' interpretado como MM/DD ({day:02d}/{month:02d}/{year}). Verificar.")
+        else:
+            day, month = n1, n2  # default AR DD/MM
+            print(f"⚠️ [{contexto}] '{s}' es AMBIGUO (ambos ≤12). Asumido DD/MM = {day:02d}/{month:02d}/{year}. Verificar.")
+        if 1 <= day <= 31 and 1 <= month <= 12:
+            return f"{year:04d}-{month:02d}-{day:02d}"
+    raise ValueError(f"Formato de fecha no reconocido en {contexto}: {valor!r}")
 
 def cargar_datos():
     file_path = 'vehiculos.csv'
@@ -42,9 +86,9 @@ def cargar_datos():
                 'AÑO': str(row.iloc[4]) if len(row) > 4 else "---",
                 'TIPIFICADA': str(row.iloc[5]) if len(row) > 5 else "---",
                 'RTO_NRO': str(row.iloc[6]) if len(row) > 6 else "---",
-                'VENCIMIENTO_RTO': str(row.iloc[7]) if len(row) > 7 else "---",
+                'VENCIMIENTO_RTO': parsear_fecha_a_iso(row.iloc[7], f"{dominio}/RTO") if len(row) > 7 else "",
                 'POLIZA_NRO': str(row.iloc[8]) if len(row) > 8 else "---",
-                'VENCIMIENTO_POLIZA': str(row.iloc[9]) if len(row) > 9 else "---",
+                'VENCIMIENTO_POLIZA': parsear_fecha_a_iso(row.iloc[9], f"{dominio}/POLIZA") if len(row) > 9 else "",
                 'EMPRESA': str(row.iloc[10]) if len(row) > 10 else "---",
             }
 
