@@ -2175,22 +2175,27 @@ export const onAlertaVolvoCreated = onDocumentCreated(
     // recibió 6 mensajes de "Sin AdBlue" en 6 horas porque el camión
     // sigue sin AdBlue y Volvo dispara el evento cada hora.
     //
-    // - WITHOUT_ADBLUE / ADBLUELEVEL_LOW: el chofer no carga AdBlue en
-    //   ruta. Va a planta cuando llega.
-    // - FUEL / CATALYST: cambios anormales que el chofer no puede
-    //   investigar — corresponde a mantenimiento.
-    // - TELL_TALE: testigo del tablero (ABS, freno de mano, etc.) —
-    //   problema de mantenimiento.
-    // - DRIVING_WITHOUT_BEING_LOGGED_IN: chofer sin loguearse al
-    //   tachógrafo — Vecchi decidió no enforcear (memoria proyecto).
+    // AdBlue (3 tipos) — operación de planta, el chofer no carga
+    // AdBlue en ruta. Va al jefe de mantenimiento via cron diario.
+    //   - WITHOUT_ADBLUE     ("Sin AdBlue")
+    //   - ADBLUELEVEL_LOW    ("AdBlue bajo")
+    //   - CATALYST           ("Cambio de nivel AdBlue")
     //
-    // Todos siguen visibles en el tablero del admin y entran al
-    // resumen diario que se manda 1x/día al jefe de mant. Nada se
-    // pierde — solo no spameamos al chofer.
+    // Otros del filtro original (legacy 2026-05-03):
+    //   - TELL_TALE: testigo del tablero — un sensor intermitente
+    //     puede tirar 10-15 eventos por día.
+    //   - DRIVING_WITHOUT_BEING_LOGGED_IN: chofer sin loguearse al
+    //     TACHÓGRAFO. Vecchi NO enforcea identificación por tacógrafo
+    //     porque usa el iButton de Sitrack para identificar al chofer.
+    //     El equivalente "no se identificó por iButton" se notifica
+    //     desde sitrackPosicionPoller cuando detecta drift_tipo
+    //     CHOFER_NO_IDENTIFICADO — usa otra fuente de datos.
+    //
+    // FUEL ("Cambio anormal de combustible") SÍ llega al chofer —
+    // puede ser robo / vaciado raro y conviene que esté avisado.
     const TIPOS_BLACKLIST_CHOFER = new Set([
       "WITHOUT_ADBLUE",
       "ADBLUELEVEL_LOW",
-      "FUEL",
       "CATALYST",
       "TELL_TALE",
       "DRIVING_WITHOUT_BEING_LOGGED_IN",
@@ -3284,6 +3289,17 @@ export const sitrackPosicionPoller = onSchedule(
     let descartados = 0;
     let conDrift = 0;
 
+    // Choferes con drift CHOFER_NO_IDENTIFICADO en este ciclo —
+    // recolectamos para avisarles al final (después del batch commit)
+    // que pasen el iButton de Sitrack. Vecchi NO usa el login del
+    // tachógrafo Volvo; usa el iButton de Sitrack para identificar al
+    // chofer. Por eso este aviso lo dispara este cron y no
+    // onAlertaVolvoCreated.
+    const choferesParaAvisarNoId: Array<{
+      patente: string;
+      choferDni: string;
+    }> = [];
+
     for (const r of reports) {
       const patente = (r.assetId ?? "").toString().trim().toUpperCase();
       if (!patente) {
@@ -3353,6 +3369,13 @@ export const sitrackPosicionPoller = onSchedule(
         driftTipo = "CHOFER_DISTINTO";
       } else if (!driverDni && asignacion && ignitionOn) {
         driftTipo = "CHOFER_NO_IDENTIFICADO";
+        // Recolectamos para enviar aviso al chofer asignado después
+        // del batch commit. La dedup se hace en
+        // `_encolarAvisoChoferNoIdentificado` para no spamear cada 5min.
+        choferesParaAvisarNoId.push({
+          patente,
+          choferDni: asignacion.choferDni,
+        });
       }
       if (driftTipo) conDrift++;
 
@@ -3424,14 +3447,131 @@ export const sitrackPosicionPoller = onSchedule(
       { merge: true }
     );
 
+    // ─── Avisar a choferes con drift CHOFER_NO_IDENTIFICADO ─────────
+    // Best-effort: cada aviso es independiente, fallas se loguean y
+    // no abortan el ciclo. Dedup diaria via META para no spamear cada
+    // 5 min mientras el chofer no pasa el iButton.
+    let avisosEnviados = 0;
+    let avisosDedup = 0;
+    for (const item of choferesParaAvisarNoId) {
+      try {
+        const enviado = await _encolarAvisoChoferNoIdentificado(
+          item.patente,
+          item.choferDni
+        );
+        if (enviado) {
+          avisosEnviados++;
+        } else {
+          avisosDedup++;
+        }
+      } catch (e) {
+        logger.warn(
+          "[sitrackPosicionPoller] aviso CHOFER_NO_IDENTIFICADO falló",
+          {
+            patente: item.patente,
+            choferDni: item.choferDni,
+            error: (e as Error).message,
+          }
+        );
+      }
+    }
+
     logger.info("[sitrackPosicionPoller] OK", {
       recibidos: reports.length,
       escritos,
       descartados,
       conDrift,
+      avisosEnviados,
+      avisosDedup,
     });
   }
 );
+
+// Encola un aviso al chofer pidiéndole que pase el iButton de Sitrack
+// para identificarse. Devuelve `true` si efectivamente encoló (true =
+// "novedad de hoy"); `false` si la dedup ya marcó hoy como avisado.
+//
+// Dedup atómica via `.create()` en `META/dedup_chofer_no_id_{dni}_{fecha}`.
+// El cron corre cada 5 min — sin dedup, el chofer recibiría un aviso
+// cada 5 min mientras manejara sin iButton (peor que el spam original).
+async function _encolarAvisoChoferNoIdentificado(
+  patente: string,
+  choferDni: string
+): Promise<boolean> {
+  // Dedup ID: chofer + fecha ART. No incluye patente porque si rota
+  // entre tractores en el mismo día sin pasar iButton, queremos un
+  // único aviso (el problema es el iButton, no la patente).
+  const fechaArt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const dedupRef = db
+    .collection("META")
+    .doc(`dedup_chofer_no_id_${choferDni}_${fechaArt}`);
+
+  try {
+    await dedupRef.create({
+      chofer_dni: choferDni,
+      fecha_art: fechaArt,
+      primer_aviso_at: FieldValue.serverTimestamp(),
+      patente_inicial: patente,
+    });
+  } catch (_) {
+    // Ya avisamos hoy a este chofer — skip silencioso.
+    return false;
+  }
+
+  // Lookup chofer.
+  const empSnap = await db.collection("EMPLEADOS").doc(choferDni).get();
+  if (!empSnap.exists) {
+    logger.warn(
+      "[noIdentificado] chofer asignado no existe en EMPLEADOS",
+      { choferDni, patente }
+    );
+    return false;
+  }
+  const empData = empSnap.data() ?? {};
+  if (empData.ACTIVO === false) {
+    return false;
+  }
+  const tel = (empData.TELEFONO ?? "").toString().trim();
+  if (!tel || tel === "-") {
+    return false;
+  }
+
+  const apodo = (empData.APODO ?? "").toString().trim();
+  const nombreFull = (empData.NOMBRE ?? "").toString().trim();
+  const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+  const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+
+  const mensaje =
+    `${saludo},\n\n` +
+    `Estás manejando el TRACTOR ${patente} pero todavía no pasaste ` +
+    "tu iButton de Sitrack hoy. Por favor pasalo apenas puedas, así " +
+    "quedan registrados los datos del recorrido.\n\n" +
+    BANNER_TESTING +
+    "_Coopertrans Móvil — Mensaje automático._";
+
+  await db.collection("COLA_WHATSAPP").add({
+    telefono: tel,
+    mensaje,
+    estado: "PENDIENTE",
+    encolado_en: FieldValue.serverTimestamp(),
+    enviado_en: null,
+    error: null,
+    intentos: 0,
+    origen: "sitrack_chofer_no_identificado",
+    destinatario_coleccion: "EMPLEADOS",
+    destinatario_id: choferDni,
+    campo_base: "SITRACK_DRIFT",
+    admin_dni: "BOT",
+    admin_nombre: "Bot Sitrack",
+    alert_patente: patente,
+  });
+  return true;
+}
 
 // ============================================================================
 // resumenDriftsAsignacionesDiario
