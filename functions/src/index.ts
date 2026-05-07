@@ -2167,36 +2167,55 @@ export const onAlertaVolvoCreated = onDocumentCreated(
       return;
     }
 
-    // Filtro de subtipos GENERIC ruidosos (incidente 2026-05-03):
-    // Volvo emite varios eventos GENERIC con severidad HIGH que NO son
-    // urgencias del manejo y que generaban spam masivo al chofer:
+    // ─── Filtro de tipos "no para el chofer" ───────────────────────
+    // Tipos / subtipos que el chofer NO puede arreglar en ruta. Van
+    // solo al jefe de mantenimiento via el cron diario consolidado del
+    // bot. Si los mandamos también al chofer, le spameamos sin que
+    // pueda hacer nada — caso real (incidente 2026-05-07): Raul
+    // recibió 6 mensajes de "Sin AdBlue" en 6 horas porque el camión
+    // sigue sin AdBlue y Volvo dispara el evento cada hora.
     //
-    // - TELL_TALE: testigo del tablero (ABS, freno de mano, AdBlue, etc.).
-    //   Es problema de mantenimiento — ya va al jefe de mantenimiento via
-    //   `onAlertaVolvoMantenimientoCreated`. Mandárselo TAMBIÉN al chofer
-    //   no aporta (el chofer no puede arreglar un sensor del tablero) y
-    //   un testigo intermitente puede generar 10-15 eventos por día.
+    // - WITHOUT_ADBLUE / ADBLUELEVEL_LOW: el chofer no carga AdBlue en
+    //   ruta. Va a planta cuando llega.
+    // - FUEL / CATALYST: cambios anormales que el chofer no puede
+    //   investigar — corresponde a mantenimiento.
+    // - TELL_TALE: testigo del tablero (ABS, freno de mano, etc.) —
+    //   problema de mantenimiento.
+    // - DRIVING_WITHOUT_BEING_LOGGED_IN: chofer sin loguearse al
+    //   tachógrafo — Vecchi decidió no enforcear (memoria proyecto).
     //
-    // - DRIVING_WITHOUT_BEING_LOGGED_IN: chofer sin loguearse al tachógrafo.
-    //   Decisión de Vecchi (memoria del proyecto): NO se enforcea
-    //   identificación de chofer en tachógrafo. Evento de baja relevancia.
-    //
-    // Estos eventos siguen visibles en el tablero "Alertas Volvo" del
-    // admin y se acumulan en el resumen diario (aviso_alertas_volvo_builder)
-    // que se manda 1x/día al admin. Nada se pierde — solo no spameamos.
+    // Todos siguen visibles en el tablero del admin y entran al
+    // resumen diario que se manda 1x/día al jefe de mant. Nada se
+    // pierde — solo no spameamos al chofer.
+    const TIPOS_BLACKLIST_CHOFER = new Set([
+      "WITHOUT_ADBLUE",
+      "ADBLUELEVEL_LOW",
+      "FUEL",
+      "CATALYST",
+      "TELL_TALE",
+      "DRIVING_WITHOUT_BEING_LOGGED_IN",
+    ]);
+
+    // Resolver el "tipo efectivo" para los GENERIC con subtipo.
+    let tipoEfectivo = tipo.toUpperCase();
     if (tipo === "GENERIC") {
       const triggerType = (
         (data.detalle_generic as Record<string, unknown> | undefined)
           ?.triggerType ?? ""
       ).toString().toUpperCase();
-      const subtiposRuidosos = ["TELL_TALE", "DRIVING_WITHOUT_BEING_LOGGED_IN"];
-      if (subtiposRuidosos.includes(triggerType)) {
-        logger.info(
-          "[onAlertaVolvoCreated] GENERIC subtipo ruidoso, skip al chofer (sigue en tablero)",
-          { alertId: event.params.alertId, patente, triggerType }
-        );
-        return;
-      }
+      if (triggerType) tipoEfectivo = triggerType;
+    }
+
+    if (TIPOS_BLACKLIST_CHOFER.has(tipoEfectivo)) {
+      logger.info(
+        "[onAlertaVolvoCreated] tipo blacklist al chofer, skip (sigue en tablero + resumen mant)",
+        {
+          alertId: event.params.alertId,
+          patente,
+          tipoEfectivo,
+        }
+      );
+      return;
     }
 
     // Lookup chofer: priorizamos el `chofer_dni` snapshoteado por
@@ -2268,6 +2287,52 @@ export const onAlertaVolvoCreated = onDocumentCreated(
     // el lunes y "hoy" sería mentira. Con la fecha explícita el chofer
     // siempre sabe a qué momento se refiere el aviso.
     const fechaTxt = _formatFechaArg(creadoMs);
+
+    // ─── Dedup diaria por (chofer + tipoEfectivo + fecha ART) ─────
+    // Evita el caso real (incidente 2026-05-07): Raul recibió 6 mensajes
+    // del MISMO tipo (WITHOUT_ADBLUE) en 6 horas porque el camión seguía
+    // sin AdBlue todo el día y Volvo dispara el evento periódicamente.
+    // Una sola alerta por (chofer, tipo, día) es suficiente — las
+    // repetidas se siguen registrando en VOLVO_ALERTAS para histórico,
+    // solo no spamean al chofer.
+    //
+    // Atomicidad: usamos `.create()` que tira si el doc ya existe. Si
+    // dos triggers del mismo tipo llegan en paralelo (raro pero posible
+    // si Volvo envía dos eventos simultáneos), uno gana y el otro hace
+    // skip — sin race condition.
+    const fechaArt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(creadoMs));
+
+    const dedupDocId =
+      `dedup_${choferDoc.id}_${tipoEfectivo}_${fechaArt}`;
+    const dedupRef = db.collection("META").doc(dedupDocId);
+
+    try {
+      await dedupRef.create({
+        chofer_dni: choferDoc.id,
+        tipo_efectivo: tipoEfectivo,
+        fecha_art: fechaArt,
+        primer_alert_id: event.params.alertId,
+        primer_aviso_at: FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Ya existe → ya enviamos un aviso de este tipo hoy.
+      logger.info(
+        "[onAlertaVolvoCreated] dedup hit, ya se mando hoy, skip",
+        {
+          alertId: event.params.alertId,
+          choferDni: choferDoc.id,
+          tipoEfectivo,
+          fechaArt,
+        }
+      );
+      return;
+    }
+
     let etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
     // subTipoResolvido se guarda en COLA_WHATSAPP como `alert_sub_tipo`
     // para que el agrupador del bot (agrupador.js) pueda mostrar la
