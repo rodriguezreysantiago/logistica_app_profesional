@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/notification_service.dart';
+import '../../../core/services/prefs_service.dart';
 import 'vehiculo_repository.dart';
 import 'volvo_api_service.dart';
 
@@ -36,11 +37,22 @@ class VehiculoManager {
   // INIT / CACHE
   // ================================
   Future<void> precargarDatosVolvo() async {
+    // Solo ADMIN tiene permiso server-side para invocar `volvoProxy`
+    // (el callable rechaza con 401/403 a cualquier otro rol). Para
+    // los demás (chofer, planta, gomería, seg-higiene, supervisor)
+    // salimos en silencio — sin llamada al API y sin log ruidoso.
+    //
+    // Bug observado vía Sentry breadcrumbs 2026-05-06: choferes
+    // disparaban "[VOLVO FLOTA] HTTP 401" al arrancar la app porque
+    // este método se ejecutaba sin gating de rol. La precarga es
+    // útil solo para el panel admin (metadata de unidades para sync);
+    // los demás roles ya leen del cache de Firestore.
+    if (PrefsService.rol != 'ADMIN') {
+      cacheVolvo = [];
+      return;
+    }
     try {
       cacheVolvo = await _repo.traerFlotaVolvo();
-      // Silenciado: log de bootstrap. Si la cache esta vacia (0
-      // unidades) lo notas igual cuando la app no muestre nada.
-      // debugPrint("📦 Cache Volvo cargada: ${cacheVolvo.length} unidades");
     } catch (e) {
       debugPrint("⚠️ Error cargando cache Volvo: $e");
       cacheVolvo = [];

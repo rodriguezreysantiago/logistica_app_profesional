@@ -92,17 +92,25 @@ try {
 
 # --- 5. Build release (APK o AAB segun modo) -------------------------
 Write-Host ""
-$artefacto = if ($PlayStore) { 'AAB' } else { 'APK' }
-$cmd       = if ($PlayStore) { 'appbundle' } else { 'apk' }
-$outPath   = if ($PlayStore) { $aabPath } else { $apkPath }
-Write-Host "[1/3] Buildeando $artefacto release..." -ForegroundColor Cyan
+$artefacto  = if ($PlayStore) { 'AAB' } else { 'APK' }
+$cmd        = if ($PlayStore) { 'appbundle' } else { 'apk' }
+$outPath    = if ($PlayStore) { $aabPath } else { $apkPath }
+# Carpeta donde flutter genera los symbols Dart (1 archivo por arch).
+# Sin estos symbols, Sentry muestra los crashes Dart como offsets crudos
+# tipo `+0x4eb638` que son inutiles para diagnosticar.
+$symbolsDir = Join-Path $repoRoot 'build\symbols'
+Write-Host "[1/3] Buildeando $artefacto release con symbols Dart..." -ForegroundColor Cyan
 
 if ($DryRun) {
-    Write-Host "  [DRY-RUN] flutter build $cmd --release" -ForegroundColor Yellow
+    Write-Host "  [DRY-RUN] flutter build $cmd --release --obfuscate --split-debug-info=$symbolsDir" -ForegroundColor Yellow
 } else {
+    # Crear carpeta de symbols si no existe (idempotente).
+    if (-not (Test-Path $symbolsDir)) {
+        New-Item -ItemType Directory -Force -Path $symbolsDir | Out-Null
+    }
     Push-Location $repoRoot
     try {
-        Invoke-Native { & flutter build $cmd --release }
+        Invoke-Native { & flutter build $cmd --release --obfuscate --split-debug-info=$symbolsDir }
         if ($LASTEXITCODE -ne 0) { throw "flutter build $cmd falló" }
     } finally { Pop-Location }
 }
@@ -115,6 +123,60 @@ if (-not $DryRun -and -not (Test-Path $outPath)) {
 if (-not $DryRun) {
     $sizeMB = [math]::Round((Get-Item $outPath).Length / 1MB, 1)
     Write-Host "  OK — $artefacto`: $sizeMB MB" -ForegroundColor Green
+}
+
+# --- 5b. Subir symbols Dart a Sentry (best-effort) -------------------
+# Para que cada crash en Sentry venga con stack legible (linea de codigo
+# en lugar de offset hex), subimos los .symbols generados por
+# --split-debug-info. Si sentry-cli no esta instalado o falta config,
+# salta sin fallar — el AAB es valido igual.
+#
+# Setup one-time por maquina:
+#   1) Instalar sentry-cli:
+#        npm install -g @sentry/cli       (cualquier OS)
+#        scoop install sentry-cli         (Win, alternativa)
+#        brew install getsentry/tools/sentry-cli  (Mac)
+#   2) Configurar org/project/auth token via git config:
+#        git config sentry.org      "<tu-org>"
+#        git config sentry.project  "flutter"
+#        git config sentry.authtoken "sntrys_xxxxxx..."
+#      (el auth token lo generas en Sentry > Settings > Account >
+#       Auth Tokens, con scope `project:releases` y `project:write`).
+if (-not $DryRun) {
+    Write-Host ""
+    Write-Host "[2/3] Subiendo symbols a Sentry..." -ForegroundColor Cyan
+    $sentryCli = Get-Command sentry-cli -ErrorAction SilentlyContinue
+    $sentryOrg     = (Invoke-Native { & git config --get sentry.org }) | Out-String
+    $sentryProject = (Invoke-Native { & git config --get sentry.project }) | Out-String
+    $sentryToken   = (Invoke-Native { & git config --get sentry.authtoken }) | Out-String
+    $sentryOrg     = $sentryOrg.Trim()
+    $sentryProject = $sentryProject.Trim()
+    $sentryToken   = $sentryToken.Trim()
+
+    if (-not $sentryCli) {
+        Write-Host "  sentry-cli no esta instalado. Salto upload de symbols." -ForegroundColor Yellow
+        Write-Host "  Para activarlo: npm install -g @sentry/cli + git config sentry.{org,project,authtoken}" -ForegroundColor DarkGray
+    } elseif (-not $sentryOrg -or -not $sentryProject -or -not $sentryToken) {
+        Write-Host "  Falta config Sentry (sentry.org/project/authtoken). Salto upload." -ForegroundColor Yellow
+        Write-Host "  Para activarlo: git config sentry.org/project/authtoken (ver comentarios del script)." -ForegroundColor DarkGray
+    } else {
+        Push-Location $repoRoot
+        try {
+            Invoke-Native {
+                & sentry-cli debug-files upload `
+                    --auth-token $sentryToken `
+                    --org $sentryOrg `
+                    --project $sentryProject `
+                    --include-sources `
+                    $symbolsDir
+            }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  WARN: sentry-cli upload fallo (exit $LASTEXITCODE). El AAB sigue valido." -ForegroundColor Yellow
+            } else {
+                Write-Host "  OK — symbols subidos a Sentry." -ForegroundColor Green
+            }
+        } finally { Pop-Location }
+    }
 }
 
 # --- 6. Modo Play Store: parar aca con instrucciones de subida ------
