@@ -55,6 +55,7 @@ const ETIQUETAS_TIPO = {
   ADBLUELEVEL_LOW: 'AdBlue bajo',
   WITHOUT_ADBLUE: 'Sin AdBlue',
   DRIVING_WITHOUT_BEING_LOGGED_IN: 'Conducción sin chofer identificado',
+  SEATBELT: 'Cinturón de seguridad sin abrochar',
 };
 
 /**
@@ -65,9 +66,14 @@ const ETIQUETAS_TIPO = {
  * @param {Array<{
  *   patente: string,
  *   tipo: string,
+ *   subTipo: string|null,
  *   choferNombre: string|null,
  *   fechaHora: Date,
- * }>} args.eventos - Eventos HIGH de las ultimas 24h.
+ * }>} args.eventos - Eventos HIGH de las ultimas 24h. Si `tipo === 'GENERIC'`
+ *   y `subTipo` esta presente, se muestra el subtipo (ej. SEATBELT,
+ *   TELL_TALE) en lugar de "Evento generico" — sino el reporte se
+ *   convierte en una lista de "Evento generico" sin info util para el
+ *   destinatario.
  * @returns {string|null} Mensaje listo para encolar, o null si no hay
  *   eventos (caller decide no encolar).
  */
@@ -110,14 +116,19 @@ function buildResumenDiario({ destinatarioNombre, eventos }) {
     //   "2x Exceso de velocidad (14:23 / 17:08)"
     // Sino:
     //   "Exceso de velocidad (14:23)"
+    //
+    // Para los GENERIC con subtipo conocido (SEATBELT, TELL_TALE, etc.)
+    // agrupamos por subtipo en lugar del tipo crudo. Sino el reporte
+    // queda lleno de "Evento genérico" sin diferenciar el problema real.
     const porTipo = new Map();
     for (const ev of ordenados) {
-      if (!porTipo.has(ev.tipo)) porTipo.set(ev.tipo, []);
-      porTipo.get(ev.tipo).push(ev);
+      const key = (ev.tipo === 'GENERIC' && ev.subTipo) ? ev.subTipo : ev.tipo;
+      if (!porTipo.has(key)) porTipo.set(key, []);
+      porTipo.get(key).push(ev);
     }
 
-    const lineas = [...porTipo.entries()].map(([tipo, evs]) => {
-      const etiqueta = ETIQUETAS_TIPO[tipo] || tipo;
+    const lineas = [...porTipo.entries()].map(([key, evs]) => {
+      const etiqueta = ETIQUETAS_TIPO[key] || key;
       const horas = evs.map((e) => aLocalTime(e.fechaHora)).join(' / ');
       const prefijo = evs.length > 1 ? `${evs.length}x ` : '';
       return `   • ${prefijo}${etiqueta} (${horas})`;

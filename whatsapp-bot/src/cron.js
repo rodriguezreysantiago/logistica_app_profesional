@@ -644,6 +644,21 @@ async function _runOnce(fs) {
               const data = d.data();
               const patente = String(data.patente || '—').trim();
               const tipo = String(data.tipo || '').trim();
+              // Volvo Vehicle Alerts API devuelve un solo tipo "GENERIC"
+              // que envuelve varios sub-eventos (SEATBELT, TELL_TALE,
+              // ALERTA_FATIGA, etc.). El subtipo viene en
+              // detalle_generic — pero según el endpoint puede estar
+              // como `triggerType` (alertas HIGH) o como `type`
+              // (alertas mantenimiento). Leemos ambos defensivamente.
+              // Sin esto el resumen muestra todo como "Evento genérico"
+              // sin info útil para el destinatario.
+              const subTipo = (tipo === 'GENERIC')
+                ? (
+                    String(data.detalle_generic?.triggerType ?? '').toUpperCase() ||
+                    String(data.detalle_generic?.type ?? '').toUpperCase() ||
+                    null
+                  )
+                : null;
               const creadoEn = data.creado_en;
               const fechaHora = creadoEn && typeof creadoEn.toDate === 'function'
                 ? creadoEn.toDate()
@@ -657,7 +672,7 @@ async function _runOnce(fs) {
               const choferNombre = chofer
                 ? aviso.resolverNombreSaludo(chofer.data)
                 : null;
-              return { patente, tipo, choferNombre, fechaHora };
+              return { patente, tipo, subTipo, choferNombre, fechaHora };
             });
 
             if (eventos.length === 0) {
