@@ -599,7 +599,13 @@ async function _runOnce(fs) {
     // Si no hubo eventos HIGH, NO se manda nada (silencio = nada que
     // reportar; mandar "todo OK" todos los dias seria ruido para algo
     // que ya tiene baja frecuencia).
-    const dniAlertasResumen = process.env.ALERTAS_RESUMEN_DESTINATARIO_DNI;
+    // El resumen diario de alertas Volvo va SOLO al jefe de Seg e
+    // Higiene (Molina, DNI 34730329). Decisión Vecchi 2026-05-07: el
+    // admin (Santiago) no necesita recibirlo. Hardcodeado a propósito
+    // porque "Jefe de Seg e Higiene" es un rol estable; si rota la
+    // persona se cambia acá. El bloque de mantenimiento más abajo
+    // sigue usando `ALERTAS_RESUMEN_DESTINATARIO_DNI` y va al admin.
+    const dniAlertasResumen = '34730329';
     if (dniAlertasResumen) {
       const yaEnviadoAlertas = await hist.yaSeEnvioAlertasResumen(
         db,
@@ -618,7 +624,7 @@ async function _runOnce(fs) {
         );
         if (!empAlertas) {
           log.warn(
-            `ALERTAS_RESUMEN_DESTINATARIO_DNI=${dniAlertasResumen} no existe en ` +
+            `Jefe Seg e Higiene DNI=${dniAlertasResumen} no existe en ` +
               `EMPLEADOS (ni en cache ni en Firestore). Resumen alertas Volvo no se envia hoy.`
           );
         } else {
@@ -745,10 +751,6 @@ async function _runOnce(fs) {
           }
         }
       }
-    } else {
-      log.debug(
-        'ALERTAS_RESUMEN_DESTINATARIO_DNI no configurado. Skip resumen alertas Volvo.'
-      );
     }
 
     // ─── Mantenimiento diario consolidado (1 msg/día al admin) ────────
