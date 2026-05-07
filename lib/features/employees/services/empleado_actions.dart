@@ -18,6 +18,7 @@ import '../../../core/services/prefs_service.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/fecha_dialog.dart';
@@ -77,6 +78,10 @@ class EmpleadoActions {
   /// el plugin oficial `cloud_functions` no tiene impl Windows.
   static const String _endpointActualizarRol =
       'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/actualizarRolEmpleado';
+
+  /// Endpoint del callable `renombrarEmpleadoDni`.
+  static const String _endpointRenombrarDni =
+      'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/renombrarEmpleadoDni';
 
   static Dio? _dioCallable;
   static Dio get _httpCallable => _dioCallable ??= Dio(
@@ -163,6 +168,196 @@ class EmpleadoActions {
       AppFeedback.successOn(messenger, mensaje);
     } catch (e) {
       AppFeedback.errorOn(messenger, 'Error al actualizar rol: $e');
+    }
+  }
+
+  /// Renombra el DNI de un empleado mal cargado.
+  ///
+  /// El DNI es el doc id de EMPLEADOS, así que no se puede editar inline
+  /// — hay que crear un doc nuevo, cascadear las referencias en las
+  /// otras colecciones (ASIGNACIONES_VEHICULO, VOLVO_ALERTAS,
+  /// COLA_WHATSAPP) y borrar el viejo. Todo eso lo hace la Cloud
+  /// Function `renombrarEmpleadoDni`. Acá solo abrimos un dialog para
+  /// pedir el DNI nuevo y mostramos confirmación + resultado.
+  ///
+  /// La operación es destructiva y solo ADMIN puede ejecutarla. La rule
+  /// se valida también server-side en la function.
+  static Future<void> renombrarDni(
+    BuildContext context,
+    String dniViejo,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    // ─── Dialog 1: pedir el DNI nuevo ──────────────────────────────
+    final ctrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final dniNuevo = await showDialog<String>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Cambiar DNI (renombrar)'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Cambiar el DNI implica recrear el legajo y actualizar '
+                'todas las referencias (asignaciones, alertas Volvo, '
+                'cola de WhatsApp). El chofer va a tener que volver a '
+                'loguear con el DNI nuevo.\n\n'
+                'DNI actual: $dniViejo',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
+                decoration: const InputDecoration(
+                  labelText: 'DNI nuevo',
+                  prefixIcon: Icon(Icons.badge),
+                ),
+                validator: (v) {
+                  final t = (v ?? '').trim();
+                  if (t.length < 7 || t.length > 8) {
+                    return 'Tiene que tener 7 u 8 dígitos';
+                  }
+                  if (t == dniViejo) return 'Es igual al DNI actual';
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                Navigator.of(dCtx).pop(ctrl.text.trim());
+              }
+            },
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+
+    if (dniNuevo == null || dniNuevo.isEmpty) return;
+    // Guard contra unmount mientras esperaba el dialog 1.
+    if (!context.mounted) return;
+
+    // ─── Dialog 2: confirmación final ──────────────────────────────
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Confirmar cambio de DNI'),
+        content: Text(
+          '¿Renombrar el DNI $dniViejo → $dniNuevo?\n\n'
+          'Esto NO se puede deshacer. El legajo se recrea con el DNI '
+          'nuevo y las asignaciones, alertas Volvo y mensajes pendientes '
+          'se actualizan. El historial de auditoría queda intacto (sigue '
+          'mostrando el DNI viejo en eventos pasados).',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accentRed,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('SÍ, RENOMBRAR'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    // ─── Llamada a la Cloud Function ───────────────────────────────
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        AppFeedback.errorOn(messenger, 'Sin sesión activa.');
+        return;
+      }
+      final idToken = await user.getIdToken();
+      if (idToken == null || idToken.isEmpty) {
+        AppFeedback.errorOn(messenger, 'No se pudo obtener el token de sesión.');
+        return;
+      }
+
+      final response = await _httpCallable.post<Map<String, dynamic>>(
+        _endpointRenombrarDni,
+        data: {
+          'data': {
+            'dniViejo': dniViejo,
+            'dniNuevo': dniNuevo,
+          },
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          validateStatus: (_) => true,
+          responseType: ResponseType.json,
+        ),
+      );
+
+      if (response.statusCode == null || response.statusCode! >= 400) {
+        final err = response.data?['error'] as Map<String, dynamic>?;
+        final mensaje = err?['message']?.toString() ??
+            'Error ${response.statusCode} al renombrar.';
+        AppFeedback.errorOn(messenger, mensaje);
+        return;
+      }
+
+      final result = response.data?['result'] as Map<String, dynamic>?;
+      final cascada = (result?['cascada'] as List?) ?? const [];
+      final resumen = cascada
+          .map((c) {
+            final m = c as Map<String, dynamic>;
+            final col = m['coleccion'] ?? '';
+            final n = m['actualizados'] ?? 0;
+            final err = m['error'];
+            return err == null ? '$col: $n' : '$col: ERROR';
+          })
+          .join(', ');
+
+      unawaited(AuditLog.registrar(
+        accion: AuditAccion.editarChofer,
+        entidad: 'EMPLEADOS',
+        entidadId: dniNuevo,
+        detalles: {
+          'campo': 'DNI',
+          'dni_viejo': dniViejo,
+          'dni_nuevo': dniNuevo,
+          'cascada': resumen,
+        },
+      ));
+
+      AppFeedback.successOn(
+        messenger,
+        'Renombrado OK ($dniViejo → $dniNuevo). $resumen',
+      );
+
+      // Cierra el sheet de detalle del chofer viejo (el doc ya no existe).
+      // El admin abre el del DNI nuevo desde la lista cuando quiera.
+      navigator.pop();
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al renombrar: $e');
     }
   }
 

@@ -452,6 +452,205 @@ export const actualizarRolEmpleado = onCall(
 );
 
 // ============================================================================
+// renombrarEmpleadoDni — corrige el DNI de un empleado mal cargado
+// ============================================================================
+//
+// El DNI es el doc id de EMPLEADOS, así que NO se puede "editar" inline
+// como cualquier otro campo. Renombrar implica:
+//   1. Crear EMPLEADOS/{dniNuevo} copiando todos los campos.
+//   2. Cascadear las referencias por chofer_dni / destinatario_id en
+//      otras colecciones (asignaciones, alertas Volvo, cola WhatsApp).
+//   3. Borrar EMPLEADOS/{dniViejo}.
+//
+// Solo ADMIN. No se permite renombrar al admin que ejecuta la operación
+// (se quedaría sin sesión sin poder loguear).
+//
+// Cascada best-effort por colección — si una falla, la rest sigue. Las
+// fallas se loguean y se devuelven en el response para que el admin
+// las pueda revisar manualmente.
+//
+// AUDIT_LOG NO se reescribe (es histórico inmutable). Cualquier consulta
+// futura va a encontrar el DNI viejo en el audit; eso es correcto, pasó
+// con ese DNI en ese momento.
+
+export const renombrarEmpleadoDni = onCall(
+  { timeoutSeconds: 60 },
+  async (request) => {
+    // ─── Auth: solo ADMIN ──────────────────────────────────────────
+    const rolCaller = request.auth?.token?.rol;
+    if (!request.auth || rolCaller !== "ADMIN") {
+      logger.warn("[renombrarEmpleadoDni] sin auth ADMIN", {
+        uid: request.auth?.uid ?? "no-uid",
+        rol: rolCaller ?? "no-rol",
+      });
+      throw new HttpsError(
+        "permission-denied",
+        "Solo ADMIN puede renombrar empleados."
+      );
+    }
+
+    // ─── Validación de input ───────────────────────────────────────
+    const dniViejo = (request.data?.dniViejo ?? "")
+      .toString()
+      .trim()
+      .replace(/\D/g, "");
+    const dniNuevo = (request.data?.dniNuevo ?? "")
+      .toString()
+      .trim()
+      .replace(/\D/g, "");
+
+    if (!dniViejo || !dniNuevo) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Hay que pasar `dniViejo` y `dniNuevo`."
+      );
+    }
+    if (dniViejo === dniNuevo) {
+      throw new HttpsError(
+        "invalid-argument",
+        "El DNI nuevo es igual al viejo."
+      );
+    }
+    if (dniNuevo.length < 7 || dniNuevo.length > 8) {
+      throw new HttpsError(
+        "invalid-argument",
+        `El DNI nuevo (${dniNuevo}) debe tener 7 u 8 dígitos.`
+      );
+    }
+    if (request.auth.uid === dniViejo) {
+      // Renombrarse a uno mismo cierra la sesión actual sin poder
+      // re-loguear con el JWT viejo. Para evitar el lockout, lo
+      // bloqueamos: tenés que pedírselo a otro admin.
+      throw new HttpsError(
+        "failed-precondition",
+        "No podés renombrar tu propio DNI. Pedíselo a otro admin."
+      );
+    }
+
+    // ─── Lecturas previas ──────────────────────────────────────────
+    const refViejo = db.collection("EMPLEADOS").doc(dniViejo);
+    const refNuevo = db.collection("EMPLEADOS").doc(dniNuevo);
+
+    const [snapViejo, snapNuevo] = await Promise.all([
+      refViejo.get(),
+      refNuevo.get(),
+    ]);
+
+    if (!snapViejo.exists) {
+      throw new HttpsError(
+        "not-found",
+        `Empleado ${dniViejo} no existe.`
+      );
+    }
+    if (snapNuevo.exists) {
+      throw new HttpsError(
+        "already-exists",
+        `Ya existe un empleado con DNI ${dniNuevo}. ` +
+          "Para fusionar legajos, hace falta una operación distinta."
+      );
+    }
+
+    const dataViejo = snapViejo.data() ?? {};
+
+    // ─── Step 1: crear el doc nuevo copiando todo + actualizar campo
+    // DNI (si existe) y agregando trazabilidad. ─────────────────────
+    const dataNuevo: Record<string, unknown> = {
+      ...dataViejo,
+      // Si alguien tocó "DNI" inline en la ficha, ese campo ahora
+      // queda alineado al doc id nuevo. Si nunca existió, lo creamos
+      // por las dudas para que sea consistente.
+      DNI: dniNuevo,
+      // Trazabilidad de la operación.
+      renombrado_desde: dniViejo,
+      renombrado_en: FieldValue.serverTimestamp(),
+      renombrado_por: request.auth.uid,
+      fecha_ultima_actualizacion: FieldValue.serverTimestamp(),
+    };
+    await refNuevo.set(dataNuevo);
+
+    // ─── Step 2: cascada — best-effort por colección ───────────────
+    interface CascadaResult {
+      coleccion: string;
+      actualizados: number;
+      error: string | null;
+    }
+    const cascada: CascadaResult[] = [];
+
+    async function actualizarReferencias(
+      coleccion: string,
+      campo: string,
+      filtroExtra?: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query
+    ): Promise<void> {
+      try {
+        let q: FirebaseFirestore.Query = db
+          .collection(coleccion)
+          .where(campo, "==", dniViejo);
+        if (filtroExtra) q = filtroExtra(q);
+        const snap = await q.get();
+        if (snap.empty) {
+          cascada.push({ coleccion, actualizados: 0, error: null });
+          return;
+        }
+        // Updates en batch (límite Firestore: 500 ops por batch — más
+        // que suficiente para ratios típicos). Si un día un chofer
+        // tiene > 500 alertas Volvo, paginamos.
+        const MAX_BATCH = 500;
+        let actualizados = 0;
+        for (let i = 0; i < snap.docs.length; i += MAX_BATCH) {
+          const batch = db.batch();
+          for (const d of snap.docs.slice(i, i + MAX_BATCH)) {
+            batch.update(d.ref, { [campo]: dniNuevo });
+            actualizados++;
+          }
+          await batch.commit();
+        }
+        cascada.push({ coleccion, actualizados, error: null });
+      } catch (e) {
+        cascada.push({
+          coleccion,
+          actualizados: 0,
+          error: (e as Error).message,
+        });
+      }
+    }
+
+    // Asignaciones chofer↔vehículo: histórico completo + activas.
+    await actualizarReferencias("ASIGNACIONES_VEHICULO", "chofer_dni");
+
+    // Eventos del Volvo Vehicle Alerts API: snapshot del chofer en el
+    // momento del evento. Lo actualizamos para que las consultas
+    // futuras "alertas de este chofer" devuelvan los del DNI nuevo.
+    await actualizarReferencias("VOLVO_ALERTAS", "chofer_dni");
+
+    // Cola de WhatsApp: solo PENDIENTES — los enviados ya viajaron
+    // con el DNI viejo y no tiene sentido reescribirlos.
+    await actualizarReferencias(
+      "COLA_WHATSAPP",
+      "destinatario_id",
+      (q) => q.where("estado", "==", "PENDIENTE")
+    );
+
+    // ─── Step 3: borrar el doc viejo ───────────────────────────────
+    await refViejo.delete();
+
+    logger.info("[renombrarEmpleadoDni] OK", {
+      dniViejoHash: hashId(dniViejo),
+      dniNuevoHash: hashId(dniNuevo),
+      cascada,
+    });
+
+    return {
+      ok: true,
+      dniViejo,
+      dniNuevo,
+      cascada,
+      mensaje: "Empleado renombrado. El chofer debe re-loguear con el " +
+        "DNI nuevo (su sesión actual deja de funcionar).",
+    };
+  }
+);
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
