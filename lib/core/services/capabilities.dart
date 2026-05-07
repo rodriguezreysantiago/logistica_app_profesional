@@ -47,6 +47,11 @@ enum Capability {
   /// con AREA=GOMERIA, sea el operador habitual). El gating fino por
   /// AREA lo decidirá Vecchi si más adelante quieren restringir.
   verGomeria,
+  /// Módulo Logística — catálogos de empresas, ubicaciones y tarifas
+  /// que arman la base del futuro sistema de planeamiento de viajes.
+  /// Acceso ADMIN + SUPERVISOR (mismo nivel que personal/flota: son los
+  /// que arman la operación). Choferes y otros roles no entran.
+  verLogistica,
 
   // ─── Acciones sobre personal ───
   crearEmpleado,
@@ -114,6 +119,7 @@ class Capabilities {
       Capability.verEstadoBot,
       Capability.verAlertasVolvo,
       Capability.verGomeria,
+      Capability.verLogistica,
       // Editar y crear personal/vehículos: sí. Pero NO puede asignar
       // rol ADMIN ni cambiar rol de admins existentes.
       Capability.crearEmpleado,

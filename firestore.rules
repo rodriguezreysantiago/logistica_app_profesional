@@ -342,6 +342,39 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // LOGÍSTICA — catálogos para el futuro planeamiento de viajes
+    // ========================================================================
+    // Tres colecciones que arman el modelo de "rutas con precio":
+    //   - EMPRESAS_LOGISTICA: clientes (origen/destino) + dadores de
+    //     transporte (otros transportistas que nos ceden cargas).
+    //   - UBICACIONES_LOGISTICA: puntos físicos de carga/descarga.
+    //   - TARIFAS_LOGISTICA: ruta con precio + comisión del dador (si
+    //     aplica) + tarifa al chofer.
+    //
+    // Acceso: admin/supervisor lee y escribe. Otros roles bloqueados —
+    // los choferes no necesitan ver tarifas (es info comercial), Seg e
+    // Higiene tampoco (es parte de operación, no de monitoreo).
+    //
+    // Soft-delete via campo `activa: bool`. Las históricas se mantienen
+    // para reportes pasados. NO permitimos `delete` para preservar el
+    // histórico — si el operador se equivoca con un alta, la desactiva.
+
+    match /EMPRESAS_LOGISTICA/{doc} {
+      allow read, create, update: if isAdminOrSupervisor();
+      allow delete: if false;
+    }
+
+    match /UBICACIONES_LOGISTICA/{doc} {
+      allow read, create, update: if isAdminOrSupervisor();
+      allow delete: if false;
+    }
+
+    match /TARIFAS_LOGISTICA/{doc} {
+      allow read, create, update: if isAdminOrSupervisor();
+      allow delete: if false;
+    }
+
+    // ========================================================================
     // ASIGNACIONES_VEHICULO — log temporal de quién manejó qué unidad
     // ========================================================================
     // Cada doc representa el período en que un chofer manejó una patente.

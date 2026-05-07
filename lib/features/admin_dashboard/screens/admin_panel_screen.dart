@@ -139,6 +139,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               color: AppColors.accentOrange,
               ruta: AppRoutes.adminGomeriaHub,
             ),
+          if (Capabilities.can(PrefsService.rol, Capability.verLogistica))
+            const _AdminTile(
+              titulo: 'LOGÍSTICA',
+              subtitulo: 'Empresas, ubicaciones y tarifas',
+              icono: Icons.route_outlined,
+              color: AppColors.accentGreen,
+              ruta: AppRoutes.adminLogisticaHub,
+            ),
           if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
             const _AdminTile(
               titulo: 'PERSONAL',

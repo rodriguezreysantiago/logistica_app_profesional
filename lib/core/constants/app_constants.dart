@@ -40,6 +40,15 @@
   static const String adminGomeriaCubierta = '/admin_gomeria_cubierta';
   static const String adminGomeriaMarcasModelos = '/admin_gomeria_marcas_modelos';
 
+  // Logística — preparación del módulo de planeamiento de viajes.
+  // Por ahora son catálogos (empresas, ubicaciones, tarifas) que en el
+  // futuro alimentan la planificación de viajes y reportes de margen.
+  static const String adminLogisticaHub = '/admin_logistica';
+  static const String adminLogisticaEmpresas = '/admin_logistica_empresas';
+  static const String adminLogisticaUbicaciones = '/admin_logistica_ubicaciones';
+  static const String adminLogisticaTarifas = '/admin_logistica_tarifas';
+  static const String adminLogisticaTarifaForm = '/admin_logistica_tarifa_form';
+
 
   // Auditorías
   static const String vencimientosChoferes = '/vencimientos_choferes';
@@ -189,6 +198,51 @@ class AppCollections {
   /// score total 0-100 + 17+ sub-scores (anticipation, braking, idling,
   /// etc.) + métricas operativas crudas (km, combustible, CO2).
   static const String volvoScoresDiarios = 'VOLVO_SCORES_DIARIOS';
+
+  // ─── Módulo Logística (2026-05-07) ────────────────────────────────────
+  // Catálogos para preparar el futuro planeamiento de viajes. Hoy son
+  // ABMs simples; mañana van a ser el backbone de:
+  //   - Asignación chofer + vehículo + tarifa
+  //   - Cálculo de margen (tarifa_real − tarifa_chofer − combustible)
+  //   - Reportes por dador / cliente / ruta
+  //   - Histórico de qué cargas hizo Vecchi para predecir capacidad
+  //
+  // Todas las colecciones usan soft-delete (campo `activa: bool`) — se
+  // requiere mantener visibles las históricas para reportes pasados.
+
+  /// Empresas con las que Vecchi opera. Doc:
+  /// `{nombre, tipo (CLIENTE | DADOR_TRANSPORTE), cuit, contacto, activa,
+  /// creado_en, creado_por}`. Las empresas pueden ser:
+  ///   - CLIENTE: empresa origen o destino del viaje (silo, planta,
+  ///     puerto, fábrica) que paga el flete o lo recibe.
+  ///   - DADOR_TRANSPORTE: otra empresa de transporte que tenía la carga
+  ///     asignada y nos la cede; ellos cobran un % del flete (variable
+  ///     por carga, se carga en TARIFAS_LOGISTICA).
+  static const String empresasLogistica = 'EMPRESAS_LOGISTICA';
+
+  /// Ubicaciones físicas (puntos de carga / descarga). Doc:
+  /// `{nombre, localidad, provincia, direccion, lat, lng, activa,
+  /// creado_en, creado_por}`. Reusable: una misma ubicación puede ser
+  /// origen de una tarifa y destino de otra. `lat/lng` opcionales para
+  /// el futuro mapa de planeamiento.
+  static const String ubicacionesLogistica = 'UBICACIONES_LOGISTICA';
+
+  /// Tarifas de viaje — el corazón del módulo. Cada doc es una "ruta
+  /// con precio" para un caso operativo concreto. Doc:
+  /// `{tipo_carga (PROPIA | TERCEROS), dador_id, porcentaje_comision_dador,
+  /// empresa_origen_id, ubicacion_origen_id, empresa_destino_id,
+  /// ubicacion_destino_id, flete (ORIGEN | DESTINO), unidad_tarifa
+  /// (TN | VIAJE), tarifa_real, tarifa_chofer, vigente_desde, activa,
+  /// notas, creado_en, creado_por}`.
+  ///
+  /// Doble tarifa: `tarifa_real` (lo que cobra Vecchi al cliente) y
+  /// `tarifa_chofer` (lo que se le paga al chofer). La diferencia menos
+  /// gastos = margen.
+  ///
+  /// Versionado: cuando cambia un precio se desactiva la vieja
+  /// (`activa=false`) y se crea una nueva con `vigente_desde=now`. Así
+  /// los reportes históricos siguen mostrando el precio que aplicaba.
+  static const String tarifasLogistica = 'TARIFAS_LOGISTICA';
 }
 
 class AppRoles {

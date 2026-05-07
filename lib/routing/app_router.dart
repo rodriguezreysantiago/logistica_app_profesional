@@ -26,6 +26,11 @@ import '../features/gomeria/screens/gomeria_recapados_screen.dart';
 import '../features/gomeria/screens/gomeria_stock_screen.dart';
 import '../features/gomeria/screens/gomeria_unidad_detalle_screen.dart';
 import '../features/gomeria/screens/gomeria_unidades_lista_screen.dart';
+import '../features/logistica/screens/logistica_empresas_screen.dart';
+import '../features/logistica/screens/logistica_hub_screen.dart';
+import '../features/logistica/screens/logistica_tarifa_form_screen.dart';
+import '../features/logistica/screens/logistica_tarifas_screen.dart';
+import '../features/logistica/screens/logistica_ubicaciones_screen.dart';
 import '../features/eco_driving/screens/admin_descargas_pto_screen.dart';
 import '../features/eco_driving/screens/admin_eco_driving_screen.dart';
 import '../features/eco_driving/screens/admin_mapa_volvo_screen.dart';
@@ -328,6 +333,37 @@ class AppRouter {
       case AppRoutes.adminGomeriaMarcasModelos:
         return _buildRoute(
           _protegerSoloAdmin(const AdminGomeriaMarcasModelosScreen()),
+          settings,
+        );
+
+      // ================= LOGÍSTICA =================
+      // Catálogos para preparar el futuro planeamiento de viajes.
+      // Acceso ADMIN + SUPERVISOR (cap verLogistica).
+      case AppRoutes.adminLogisticaHub:
+        return _buildRoute(
+          _protegerAdmin(const LogisticaHubScreen()),
+          settings,
+        );
+      case AppRoutes.adminLogisticaEmpresas:
+        return _buildRoute(
+          _protegerAdmin(const LogisticaEmpresasScreen()),
+          settings,
+        );
+      case AppRoutes.adminLogisticaUbicaciones:
+        return _buildRoute(
+          _protegerAdmin(const LogisticaUbicacionesScreen()),
+          settings,
+        );
+      case AppRoutes.adminLogisticaTarifas:
+        return _buildRoute(
+          _protegerAdmin(const LogisticaTarifasScreen()),
+          settings,
+        );
+      case AppRoutes.adminLogisticaTarifaForm:
+        final args = settings.arguments as Map<String, dynamic>?;
+        final tarifaId = args?['tarifaId'] as String?;
+        return _buildRoute(
+          _protegerAdmin(LogisticaTarifaFormScreen(tarifaId: tarifaId)),
           settings,
         );
 

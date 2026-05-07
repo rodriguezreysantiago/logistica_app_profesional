@@ -1,0 +1,233 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../../../core/constants/app_constants.dart';
+import '../../../core/services/prefs_service.dart';
+import '../models/empresa_logistica.dart';
+import '../models/tarifa_logistica.dart';
+import '../models/ubicacion_logistica.dart';
+
+/// CRUD del módulo Logística. Centraliza lógica de creación + auditoría
+/// (creado_en/creado_por) + validaciones simples antes del write.
+///
+/// Nota Windows: este service NO usa `runTransaction`. La unicidad de
+/// nombres por colección la garantizan las queries del cliente al crear
+/// (mostramos error si ya existe). Si en el futuro hay race con
+/// múltiples operadores creando exactamente el mismo nombre al mismo
+/// tiempo, agregamos un doc-id determinista (slugify del nombre) para
+/// que Firestore rechace el duplicado a nivel de doc, sin transactions.
+class LogisticaService {
+  LogisticaService._();
+
+  static final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  // ─── EMPRESAS ──────────────────────────────────────────────────────────
+  static CollectionReference<Map<String, dynamic>> get empresasCol =>
+      _db.collection(AppCollections.empresasLogistica);
+
+  /// Stream de empresas filtradas opcionalmente por tipo. Sin filtro
+  /// devuelve todas (clientes + dadores).
+  static Stream<List<EmpresaLogistica>> streamEmpresas({
+    TipoEmpresaLogistica? tipo,
+    bool soloActivas = false,
+  }) {
+    Query<Map<String, dynamic>> q = empresasCol.orderBy('nombre');
+    if (tipo != null) q = q.where('tipo', isEqualTo: tipo.codigo);
+    if (soloActivas) q = q.where('activa', isEqualTo: true);
+    return q.snapshots().map(
+          (s) => s.docs.map(EmpresaLogistica.fromDoc).toList(),
+        );
+  }
+
+  /// Crea una empresa. Tira [StateError] si ya existe otra con el mismo
+  /// nombre (case-insensitive) para evitar duplicados por typo.
+  static Future<DocumentReference<Map<String, dynamic>>> crearEmpresa({
+    required String nombre,
+    required TipoEmpresaLogistica tipo,
+    String? cuit,
+    String? contacto,
+  }) async {
+    final nombreNorm = nombre.trim().toUpperCase();
+    if (nombreNorm.isEmpty) {
+      throw ArgumentError('El nombre de la empresa no puede estar vacío.');
+    }
+    // Pre-check de unicidad por nombre (case-insensitive). Best-effort
+    // — sin transaction — pero suficiente para el caso real (operadores
+    // humanos cargando uno por vez).
+    final existentes = await empresasCol.get();
+    for (final d in existentes.docs) {
+      final n = (d.data()['nombre'] ?? '').toString().trim().toUpperCase();
+      if (n == nombreNorm) {
+        throw StateError('Ya existe una empresa con ese nombre.');
+      }
+    }
+    return empresasCol.add({
+      'nombre': nombreNorm,
+      'tipo': tipo.codigo,
+      if (cuit != null && cuit.trim().isNotEmpty) 'cuit': cuit.trim(),
+      if (contacto != null && contacto.trim().isNotEmpty)
+        'contacto': contacto.trim(),
+      'activa': true,
+      'creado_en': FieldValue.serverTimestamp(),
+      'creado_por': PrefsService.dni,
+    });
+  }
+
+  static Future<void> actualizarEmpresa({
+    required String id,
+    required Map<String, dynamic> cambios,
+  }) async {
+    await empresasCol.doc(id).update(cambios);
+  }
+
+  // ─── UBICACIONES ───────────────────────────────────────────────────────
+  static CollectionReference<Map<String, dynamic>> get ubicacionesCol =>
+      _db.collection(AppCollections.ubicacionesLogistica);
+
+  static Stream<List<UbicacionLogistica>> streamUbicaciones({
+    bool soloActivas = false,
+  }) {
+    Query<Map<String, dynamic>> q = ubicacionesCol.orderBy('nombre');
+    if (soloActivas) q = q.where('activa', isEqualTo: true);
+    return q.snapshots().map(
+          (s) => s.docs.map(UbicacionLogistica.fromDoc).toList(),
+        );
+  }
+
+  static Future<DocumentReference<Map<String, dynamic>>> crearUbicacion({
+    required String nombre,
+    required String localidad,
+    required String provincia,
+    String? direccion,
+    double? lat,
+    double? lng,
+  }) async {
+    final nombreNorm = nombre.trim().toUpperCase();
+    if (nombreNorm.isEmpty) {
+      throw ArgumentError('El nombre de la ubicación no puede estar vacío.');
+    }
+    if (localidad.trim().isEmpty || provincia.trim().isEmpty) {
+      throw ArgumentError('Localidad y provincia son obligatorios.');
+    }
+    // Pre-check unicidad: el "nombre" de una ubicación es el alias
+    // operativo (ej. "Acopio Lartirigoyen — Tres Arroyos") y debe ser
+    // único para que las tarifas no muestren ambigüedad.
+    final existentes = await ubicacionesCol.get();
+    for (final d in existentes.docs) {
+      final n = (d.data()['nombre'] ?? '').toString().trim().toUpperCase();
+      if (n == nombreNorm) {
+        throw StateError('Ya existe una ubicación con ese nombre.');
+      }
+    }
+    return ubicacionesCol.add({
+      'nombre': nombreNorm,
+      'localidad': localidad.trim(),
+      'provincia': provincia.trim(),
+      if (direccion != null && direccion.trim().isNotEmpty)
+        'direccion': direccion.trim(),
+      if (lat != null) 'lat': lat,
+      if (lng != null) 'lng': lng,
+      'activa': true,
+      'creado_en': FieldValue.serverTimestamp(),
+      'creado_por': PrefsService.dni,
+    });
+  }
+
+  static Future<void> actualizarUbicacion({
+    required String id,
+    required Map<String, dynamic> cambios,
+  }) async {
+    await ubicacionesCol.doc(id).update(cambios);
+  }
+
+  // ─── TARIFAS ───────────────────────────────────────────────────────────
+  static CollectionReference<Map<String, dynamic>> get tarifasCol =>
+      _db.collection(AppCollections.tarifasLogistica);
+
+  /// Stream de tarifas. Por default ordenadas por `creado_en desc` (las
+  /// nuevas arriba). Filtros opcionales para listado / búsqueda futura.
+  static Stream<List<TarifaLogistica>> streamTarifas({
+    bool soloActivas = false,
+  }) {
+    Query<Map<String, dynamic>> q =
+        tarifasCol.orderBy('creado_en', descending: true);
+    if (soloActivas) q = q.where('activa', isEqualTo: true);
+    return q.snapshots().map(
+          (s) => s.docs.map(TarifaLogistica.fromDoc).toList(),
+        );
+  }
+
+  /// Crea una tarifa. Snapshot-ea nombres de empresa/ubicación al
+  /// momento del create — si después se renombra una empresa/ubicación,
+  /// la tarifa sigue mostrando el nombre que tenía cuando se creó (lo
+  /// mismo que hace VOLVO_ALERTAS con el chofer al disparar el evento).
+  static Future<DocumentReference<Map<String, dynamic>>> crearTarifa({
+    required TipoCargaLogistica tipoCarga,
+    String? dadorId,
+    String? dadorNombre,
+    double? porcentajeComisionDador,
+    required String empresaOrigenId,
+    required String empresaOrigenNombre,
+    required String ubicacionOrigenId,
+    required String ubicacionOrigenEtiqueta,
+    required String empresaDestinoId,
+    required String empresaDestinoNombre,
+    required String ubicacionDestinoId,
+    required String ubicacionDestinoEtiqueta,
+    required FleteLogistica flete,
+    required UnidadTarifa unidadTarifa,
+    required double tarifaReal,
+    required double tarifaChofer,
+    String? notas,
+  }) async {
+    // Validaciones de negocio:
+    if (tipoCarga == TipoCargaLogistica.terceros) {
+      if (dadorId == null || dadorId.isEmpty) {
+        throw ArgumentError('Si la carga es de TERCEROS, el dador es obligatorio.');
+      }
+    }
+    if (tarifaReal <= 0 || tarifaChofer <= 0) {
+      throw ArgumentError('Las tarifas deben ser mayores a 0.');
+    }
+    if (tarifaChofer > tarifaReal) {
+      throw ArgumentError(
+          'La tarifa del chofer no puede superar la tarifa real.');
+    }
+    if (porcentajeComisionDador != null) {
+      if (porcentajeComisionDador < 0 || porcentajeComisionDador > 100) {
+        throw ArgumentError('El porcentaje de comisión debe estar entre 0 y 100.');
+      }
+    }
+
+    return tarifasCol.add({
+      'tipo_carga': tipoCarga.codigo,
+      if (dadorId != null) 'dador_id': dadorId,
+      if (dadorNombre != null) 'dador_nombre': dadorNombre,
+      if (porcentajeComisionDador != null)
+        'porcentaje_comision_dador': porcentajeComisionDador,
+      'empresa_origen_id': empresaOrigenId,
+      'empresa_origen_nombre': empresaOrigenNombre,
+      'ubicacion_origen_id': ubicacionOrigenId,
+      'ubicacion_origen_etiqueta': ubicacionOrigenEtiqueta,
+      'empresa_destino_id': empresaDestinoId,
+      'empresa_destino_nombre': empresaDestinoNombre,
+      'ubicacion_destino_id': ubicacionDestinoId,
+      'ubicacion_destino_etiqueta': ubicacionDestinoEtiqueta,
+      'flete': flete.codigo,
+      'unidad_tarifa': unidadTarifa.codigo,
+      'tarifa_real': tarifaReal,
+      'tarifa_chofer': tarifaChofer,
+      'activa': true,
+      if (notas != null && notas.trim().isNotEmpty) 'notas': notas.trim(),
+      'vigente_desde': FieldValue.serverTimestamp(),
+      'creado_en': FieldValue.serverTimestamp(),
+      'creado_por': PrefsService.dni,
+    });
+  }
+
+  static Future<void> actualizarTarifa({
+    required String id,
+    required Map<String, dynamic> cambios,
+  }) async {
+    await tarifasCol.doc(id).update(cambios);
+  }
+}
