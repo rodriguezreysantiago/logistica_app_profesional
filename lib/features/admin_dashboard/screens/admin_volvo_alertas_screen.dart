@@ -489,13 +489,16 @@ class _AlertaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = doc.data() as Map<String, dynamic>;
-    final tipo = (data['tipo'] ?? 'DESCONOCIDO').toString();
     final severidad = (data['severidad'] ?? 'LOW').toString();
     final patente = (data['patente'] ?? '—').toString();
     final atendida = data['atendida'] == true;
     final creadoEn = data['creado_en'] as Timestamp?;
     final atendidaPor = (data['atendida_por'] ?? '').toString();
     final atendidaEn = data['atendida_en'] as Timestamp?;
+    // Etiqueta usa el doc completo para resolver subtipo cuando el
+    // tipo principal es GENERIC (SEATBELT, TELL_TALE, etc.). Sin esto
+    // todos los GENERIC se mostraban como "Evento genérico" sin info.
+    final etiqueta = etiquetaAlertaVolvoFromDoc(data);
 
     return AppCard(
       child: Padding(
@@ -509,7 +512,7 @@ class _AlertaCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    etiquetaAlertaVolvo(tipo),
+                    etiqueta,
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,

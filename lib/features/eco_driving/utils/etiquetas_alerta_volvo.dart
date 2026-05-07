@@ -35,6 +35,7 @@ const Map<String, String> _etiquetasTipoAlertaVolvo = {
   'ADBLUELEVEL_LOW': 'AdBlue bajo',
   'WITHOUT_ADBLUE': 'Sin AdBlue',
   'DRIVING_WITHOUT_BEING_LOGGED_IN': 'Conducción sin chofer identificado',
+  'SEATBELT': 'Cinturón de seguridad sin abrochar',
   'BATTERY_PACK_HIGH_DISCHARGE': 'Descarga alta de batería',
   'BATTERY_PACK_CHARGING_STATUS_CHANGE': 'Cambio en estado de carga',
 };
@@ -43,3 +44,33 @@ const Map<String, String> _etiquetasTipoAlertaVolvo = {
 /// Si el tipo no está mapeado, devuelve el código crudo (no rompe).
 String etiquetaAlertaVolvo(String tipo) =>
     _etiquetasTipoAlertaVolvo[tipo] ?? tipo;
+
+/// Devuelve la etiqueta legible considerando el subtipo cuando el `tipo`
+/// principal es `GENERIC`. La API de Volvo Vehicle Alerts envuelve varios
+/// subtipos (SEATBELT, TELL_TALE, ALERTA_FATIGA, etc.) bajo `tipo: GENERIC`
+/// con el subtipo guardado en `detalle_generic.triggerType` o
+/// `detalle_generic.type` (varía por endpoint). Sin esto, todos los
+/// GENERIC se mostraban como "Evento genérico" sin info útil para el admin.
+///
+/// - Si `tipo != GENERIC`: usa el tipo directo (mismo comportamiento que
+///   [etiquetaAlertaVolvo]).
+/// - Si `tipo == GENERIC` y hay subtipo conocido: usa el subtipo
+///   (ej. SEATBELT → "Cinturón de seguridad sin abrochar").
+/// - Si `tipo == GENERIC` sin subtipo presente: cae a "Evento genérico".
+/// - Si subtipo no está mapeado: cae al código crudo del subtipo.
+String etiquetaAlertaVolvoFromDoc(Map<String, dynamic> data) {
+  final tipo = (data['tipo'] ?? '').toString().toUpperCase();
+  if (tipo != 'GENERIC') return etiquetaAlertaVolvo(tipo);
+
+  final detalle = data['detalle_generic'];
+  String? subTipo;
+  if (detalle is Map) {
+    // Lectura defensiva: HIGH usa `triggerType`, mantenimiento `type`.
+    final tt = detalle['triggerType'];
+    final t = detalle['type'];
+    final s = (tt ?? t ?? '').toString().toUpperCase();
+    if (s.isNotEmpty) subTipo = s;
+  }
+  if (subTipo == null) return etiquetaAlertaVolvo(tipo); // "Evento genérico"
+  return _etiquetasTipoAlertaVolvo[subTipo] ?? subTipo;
+}

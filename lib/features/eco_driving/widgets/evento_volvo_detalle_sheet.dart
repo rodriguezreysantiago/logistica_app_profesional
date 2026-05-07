@@ -29,7 +29,6 @@ class EventoVolvoDetalleSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tipo = (data['tipo'] ?? '').toString().toUpperCase();
     final severidad = (data['severidad'] ?? '').toString().toUpperCase();
     final patente = (data['patente'] ?? '—').toString();
     final atendida = data['atendida'] == true;
@@ -86,7 +85,10 @@ class EventoVolvoDetalleSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      etiquetaAlertaVolvo(tipo),
+                      // Resuelve subtipo cuando el tipo es GENERIC
+                      // (SEATBELT, TELL_TALE, etc.) para evitar el
+                      // genérico "Evento genérico" que no informa nada.
+                      etiquetaAlertaVolvoFromDoc(data),
                       style: TextStyle(
                         color: _colorSeveridad(severidad),
                         fontSize: 13,
