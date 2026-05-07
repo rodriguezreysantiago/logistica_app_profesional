@@ -9,6 +9,7 @@ import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../../eco_driving/screens/admin_mapa_volvo_screen.dart';
 import '../../eco_driving/utils/etiquetas_alerta_volvo.dart';
 
 /// Pantalla "Alertas Volvo" del admin/supervisor.
@@ -165,25 +166,45 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
       title: 'Alertas Volvo',
       body: Column(
         children: [
-          // Buscador.
+          // Buscador + acceso al mapa de eventos. El "Ver en mapa"
+          // antes era un tab independiente del shell. Lo movimos acá
+          // (2026-05-07) porque conceptualmente es la misma data — el
+          // mapa muestra los mismos eventos que el tablero, solo geo-
+          // localizados — y tener dos accesos paralelos confundía.
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: TextField(
-              controller: _searchCtl,
-              decoration: InputDecoration(
-                hintText: 'Buscar por patente, tipo o VIN...',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _query.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () => _searchCtl.clear(),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtl,
+                    decoration: InputDecoration(
+                      hintText: 'Buscar por patente, tipo o VIN...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () => _searchCtl.clear(),
+                            ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                      isDense: true,
+                    ),
+                  ),
                 ),
-                isDense: true,
-              ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  icon: const Icon(Icons.map_outlined),
+                  tooltip: 'Ver en mapa',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AdminMapaVolvoScreen(),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           // Filtros visuales.

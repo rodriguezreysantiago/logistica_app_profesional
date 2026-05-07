@@ -16,7 +16,6 @@ import '../../reports/screens/admin_reports_screen.dart';
 import '../../revisions/screens/admin_revisiones_screen.dart';
 import '../../eco_driving/screens/admin_descargas_pto_screen.dart';
 import '../../eco_driving/screens/admin_eco_driving_screen.dart';
-import '../../eco_driving/screens/admin_mapa_volvo_screen.dart';
 import '../../fleet_map/screens/admin_mapa_flota_screen.dart';
 import '../../gomeria/screens/gomeria_hub_screen.dart';
 import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
@@ -143,18 +142,15 @@ class _AdminShellState extends State<AdminShell> {
       requiredCapability: Capability.verAlertasVolvo,
       build: () => const AdminDescargasPtoScreen(),
     ),
-    _ShellSection(
-      label: 'Mapa',
-      icon: Icons.map_outlined,
-      iconActive: Icons.map,
-      requiredCapability: Capability.verAlertasVolvo,
-      build: () => const AdminMapaVolvoScreen(),
-    ),
     // "Flota" muestra la posición ACTUAL de toda la flota según Sitrack
-    // (tractores Volvo + no-Volvo). Distinto del "Mapa" anterior que
-    // muestra eventos Volvo en una ventana de tiempo. Reusa la misma
-    // capability porque el acceso es el mismo nivel de admin/supervisor
-    // que ve eventos Volvo.
+    // (tractores Volvo + no-Volvo). Reusa la capability de Volvo porque
+    // el acceso es del mismo nivel admin/supervisor.
+    //
+    // El "Mapa Volvo" (eventos Volvo geo-localizados, heatmap OVERSPEED,
+    // ruta del chofer) ya NO es tab del shell. Vive como acción "Ver en
+    // mapa" dentro del tablero de Alertas — están conceptualmente
+    // ligados (el mapa muestra los mismos eventos del tablero) y antes
+    // confundía tener dos accesos paralelos.
     _ShellSection(
       label: 'Flota',
       icon: Icons.travel_explore_outlined,
