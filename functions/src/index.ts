@@ -3628,7 +3628,10 @@ const ETIQUETAS_DRIFT: Record<string, string> = {
 
 export const resumenDriftsAsignacionesDiario = onSchedule(
   {
-    schedule: "0 19 * * 1-5",
+    // 8:00 AM ART todos los días — Vecchi prefiere los resúmenes a la
+    // mañana siguiente (con el bot ya arrancado y el admin en la
+    // oficina) en lugar de la noche del día anterior.
+    schedule: "0 8 * * *",
     timeZone: "America/Argentina/Buenos_Aires",
     timeoutSeconds: 60,
     memory: "256MiB",
@@ -4163,7 +4166,10 @@ export const avisoFinJornadaNocturna = onSchedule(
 
 export const resumenExcesosJornadaDiario = onSchedule(
   {
-    schedule: "55 23 * * *",
+    // 8:00 AM ART todos los días — leemos las jornadas de AYER (lo que
+    // pasó el día anterior). Vecchi prefiere los resúmenes a la mañana
+    // siguiente cuando el bot ya está activo y la oficina ya empezó.
+    schedule: "0 8 * * *",
     timeZone: "America/Argentina/Buenos_Aires",
     timeoutSeconds: 60,
     memory: "256MiB",
@@ -4171,12 +4177,15 @@ export const resumenExcesosJornadaDiario = onSchedule(
   async () => {
     logger.info("[resumenExcesosJornadaDiario] iniciando");
 
+    // Leemos las JORNADAS_CHOFER de AYER (no de hoy). El cron corre
+    // a las 8 AM y el día calendario que nos interesa terminó hace 8h.
+    const ayer = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const fechaArt = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Argentina/Buenos_Aires",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-    }).format(new Date());
+    }).format(ayer);
 
     const snap = await db
       .collection("JORNADAS_CHOFER")
