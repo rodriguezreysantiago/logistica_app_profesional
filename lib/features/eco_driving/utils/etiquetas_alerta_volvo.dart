@@ -59,18 +59,32 @@ String etiquetaAlertaVolvo(String tipo) =>
 /// - Si `tipo == GENERIC` sin subtipo presente: cae a "Evento genérico".
 /// - Si subtipo no está mapeado: cae al código crudo del subtipo.
 String etiquetaAlertaVolvoFromDoc(Map<String, dynamic> data) {
+  final tipoResuelto = tipoAlertaVolvoFromDoc(data);
+  return _etiquetasTipoAlertaVolvo[tipoResuelto] ?? tipoResuelto;
+}
+
+/// Devuelve el CÓDIGO del tipo (no la etiqueta legible) resuelto desde
+/// el doc — útil cuando se necesita agrupar/contar eventos por tipo
+/// efectivo (no por GENERIC genérico). Para tipo == GENERIC, intenta
+/// resolver el subtipo desde `detalle_generic.triggerType` o
+/// `detalle_generic.type`. Si no hay subtipo conocido, devuelve
+/// "GENERIC" tal cual.
+///
+/// Ejemplo: un evento con `tipo: GENERIC, detalle_generic.triggerType:
+/// "SEATBELT"` devuelve `"SEATBELT"` — para que después
+/// `etiquetaAlertaVolvo("SEATBELT")` mapee a "Cinturón de seguridad
+/// sin abrochar" en lugar de quedar agrupado como "Evento genérico".
+String tipoAlertaVolvoFromDoc(Map<String, dynamic> data) {
   final tipo = (data['tipo'] ?? '').toString().toUpperCase();
-  if (tipo != 'GENERIC') return etiquetaAlertaVolvo(tipo);
+  if (tipo != 'GENERIC') return tipo;
 
   final detalle = data['detalle_generic'];
-  String? subTipo;
   if (detalle is Map) {
     // Lectura defensiva: HIGH usa `triggerType`, mantenimiento `type`.
     final tt = detalle['triggerType'];
     final t = detalle['type'];
     final s = (tt ?? t ?? '').toString().toUpperCase();
-    if (s.isNotEmpty) subTipo = s;
+    if (s.isNotEmpty) return s;
   }
-  if (subTipo == null) return etiquetaAlertaVolvo(tipo); // "Evento genérico"
-  return _etiquetasTipoAlertaVolvo[subTipo] ?? subTipo;
+  return tipo; // GENERIC sin subtipo conocido
 }

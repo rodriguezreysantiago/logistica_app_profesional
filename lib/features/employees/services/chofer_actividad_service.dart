@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../eco_driving/utils/etiquetas_alerta_volvo.dart';
 import '../../fleet_map/services/sitrack_snapshot_service.dart';
 
 /// Resumen agregado de la actividad de un chofer en una ventana de tiempo.
@@ -270,12 +271,15 @@ class ChoferActividadService {
         .fold<double>(0.0, (a, e) => a + e.value);
 
     // Eventos por severidad y tipo.
+    // Para los eventos `GENERIC`, agrupamos por el SUBTIPO real
+    // (SEATBELT, TELL_TALE, etc.) en lugar de pilarlos todos como
+    // "GENERIC" — así la lista "Por tipo" muestra el detalle útil.
     final eventosPorSeveridad = <String, int>{};
     final eventosPorTipoMap = <String, int>{};
     for (final d in eventosSnap.docs) {
       final data = d.data();
       final sev = (data['severidad'] ?? '').toString().toUpperCase();
-      final tipo = (data['tipo'] ?? '').toString().toUpperCase();
+      final tipo = tipoAlertaVolvoFromDoc(data);
       if (sev.isNotEmpty) {
         eventosPorSeveridad.update(sev, (v) => v + 1, ifAbsent: () => 1);
       }
