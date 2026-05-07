@@ -2824,6 +2824,13 @@ const VIGILADOR_DELTA_MAX_SEGUNDOS = 600;
 // poner en true y deployar.
 const AVISO_NOCTURNO_ACTIVO = false;
 
+// Throttle del aviso "pasá el iButton" (drift CHOFER_NO_IDENTIFICADO).
+// El cron sitrackPosicionPoller corre cada 5 min — sin throttle, un
+// chofer que maneja sin pasar el iButton recibe 1 mensaje cada 5 min,
+// que es spam y dispara baneo de WhatsApp. Decisión Vecchi 2026-05-07:
+// 1 mensaje cada 30 min como máximo por chofer.
+const AVISO_NO_ID_THROTTLE_SEGUNDOS = 30 * 60;
+
 const TIPOS_MANTENIMIENTO_DIRECTOS = new Set(["FUEL", "CATALYST"]);
 
 const SUBTIPOS_GENERIC_MANTENIMIENTO = new Set([
@@ -3480,8 +3487,10 @@ export const sitrackPosicionPoller = onSchedule(
 
     // ─── Avisar a choferes con drift CHOFER_NO_IDENTIFICADO ─────────
     // Best-effort: cada aviso es independiente, fallas se loguean y
-    // no abortan el ciclo. Dedup diaria via META para no spamear cada
-    // 5 min mientras el chofer no pasa el iButton.
+    // no abortan el ciclo. Throttle de 30 min por chofer en
+    // META_AVISOS_NO_ID — sin esto el cron de 5 min spamearía al chofer
+    // cada 5 min mientras siga manejando sin pasar el iButton (decisión
+    // Vecchi 2026-05-07).
     let avisosEnviados = 0;
     let avisosDedup = 0;
     for (const item of choferesParaAvisarNoId) {
@@ -3520,19 +3529,32 @@ export const sitrackPosicionPoller = onSchedule(
 
 // Encola un aviso al chofer pidiéndole que pase el iButton de Sitrack
 // para identificarse. Devuelve `true` si efectivamente encoló;
-// `false` si no pudo (chofer no existe, sin teléfono, etc).
+// `false` si no pudo (chofer no existe, sin teléfono, throttled, etc).
 //
-// Sin dedup — decisión operativa Vecchi (2026-05-07): manejar sin
-// iButton es problema serio y queremos presionar al chofer para que
-// lo pase. El cron corre cada 5 min → potencialmente recibe un
-// mensaje cada 5 min mientras siga manejando sin pasar el iButton.
-// El agrupador del bot Node.js (origen `sitrack_chofer_no_identificado`
-// agregado a ORIGENES_AGRUPABLES) junta los pendientes y los manda
-// como UN solo mensaje al enviar — eso mitiga el ruido.
+// Throttle 30 min por chofer (AVISO_NO_ID_THROTTLE_SEGUNDOS) — el cron
+// corre cada 5 min, sin throttle el chofer recibe 1 msj cada 5 min y
+// eso es spam directo (decisión Vecchi 2026-05-07). El estado del
+// throttle vive en META_AVISOS_NO_ID/{choferDni} con last_sent_at
+// (server timestamp). Si el chofer pasa el iButton antes de los 30
+// min, el cron deja de detectar drift y no encola; el throttle
+// expirado simplemente queda residual hasta el próximo drift.
 async function _encolarAvisoChoferNoIdentificado(
   patente: string,
   choferDni: string
 ): Promise<boolean> {
+  // Throttle: ¿se le envió uno hace menos de 30 min?
+  const throttleRef = db.collection("META_AVISOS_NO_ID").doc(choferDni);
+  const throttleSnap = await throttleRef.get();
+  if (throttleSnap.exists) {
+    const lastSentAt = throttleSnap.data()?.last_sent_at;
+    if (lastSentAt && typeof lastSentAt.toMillis === "function") {
+      const segundosDesde = (Date.now() - lastSentAt.toMillis()) / 1000;
+      if (segundosDesde < AVISO_NO_ID_THROTTLE_SEGUNDOS) {
+        return false;
+      }
+    }
+  }
+
   // Lookup chofer.
   const empSnap = await db.collection("EMPLEADOS").doc(choferDni).get();
   if (!empSnap.exists) {
@@ -3594,6 +3616,13 @@ async function _encolarAvisoChoferNoIdentificado(
     admin_dni: "BOT",
     admin_nombre: "Bot Sitrack",
     alert_patente: patente,
+  });
+
+  // Marcar throttle: 30 min hasta el próximo aviso a este chofer.
+  // Set con merge:false → reemplaza el doc completo, no acumulamos basura.
+  await throttleRef.set({
+    last_sent_at: FieldValue.serverTimestamp(),
+    last_patente: patente,
   });
   return true;
 }

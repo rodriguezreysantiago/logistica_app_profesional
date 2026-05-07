@@ -324,6 +324,24 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // META_AVISOS_NO_ID — throttle del aviso "pasá el iButton" (server-only)
+    // ========================================================================
+    // Doc id: dni del chofer. Guarda `last_sent_at` (server timestamp) y
+    // `last_patente`. Lo escribe el cron `sitrackPosicionPoller` después
+    // de encolar un aviso, y lo lee al inicio de cada ciclo para no
+    // mandar otro mensaje al mismo chofer dentro de los 30 min.
+    //
+    // Sin esto el chofer recibiría 1 mensaje cada 5 min mientras siga
+    // manejando sin pasar el iButton — spam directo + riesgo de baneo
+    // de WhatsApp. Decisión Vecchi 2026-05-07.
+    //
+    // Solo el server (Admin SDK) accede. Cliente bloqueado.
+
+    match /META_AVISOS_NO_ID/{doc} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
     // ASIGNACIONES_VEHICULO — log temporal de quién manejó qué unidad
     // ========================================================================
     // Cada doc representa el período en que un chofer manejó una patente.
