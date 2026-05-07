@@ -512,9 +512,15 @@ firebase deploy --only functions:loginConDni
 
 # Deploy de todas las functions del codebase
 firebase deploy --only functions
+```
 
-# Deploy de rules + functions juntos (peligroso si rules cambia: puede cortar acceso)
-firebase deploy --only firestore:rules,functions
+⚠️ **Bug conocido del filter combinado**: `firebase deploy --only firestore:rules,functions:X`
+solo deploya **el primer item silenciosamente** y termina con éxito (no
+te avisa que el segundo lo ignoró). **Siempre separar en 2 comandos**:
+
+```powershell
+firebase deploy --only firestore:rules
+firebase deploy --only functions:X
 ```
 
 ### Validación post-deploy obligatoria

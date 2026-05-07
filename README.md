@@ -56,12 +56,13 @@ logistica_app_profesional/
 │   ├── core/             # services, constants, theme
 │   ├── features/         # admin_dashboard, auth, employees, vehicles,
 │   │                     # expirations, revisions, reports, whatsapp_bot,
-│   │                     # checklist, sync_dashboard, home
+│   │                     # checklist, sync_dashboard, home, gomeria,
+│   │                     # logistica, eco_driving, fleet_map, asignaciones
 │   ├── routing/          # app_router.dart
 │   └── shared/           # widgets, utils
 ├── functions/            # Cloud Functions (TypeScript Node 22)
 ├── whatsapp-bot/         # Bot Node.js (whatsapp-web.js + firebase-admin)
-├── scripts/              # Migraciones one-shot (Python + Node)
+├── scripts/              # Migraciones one-shot (Python + Node) + release pipeline
 ├── android/, ios/, web/, windows/
 ├── firebase.json         # firebase deploy --only firestore:rules / functions
 ├── firestore.rules
@@ -81,26 +82,47 @@ logistica_app_profesional/
 
 ## Roles y permisos
 
-4 roles del sistema (custom claim `rol` en JWT) × 5 áreas (descriptivas):
+6 roles del sistema (custom claim `rol` en JWT) × 5 áreas (descriptivas):
 
 | Rol | Qué hace |
 |-----|----------|
 | `CHOFER` | Empleado de manejo. Ve sus vencimientos + su unidad asignada. |
 | `PLANTA` | Empleado sin vehículo (planta, taller, gomería). Solo vencimientos personales. |
-| `SUPERVISOR` | Mando medio. Gestiona personal/flota/vencimientos/revisiones/bot. |
+| `GOMERIA` | Especializado: solo opera el módulo Gomería (cubiertas). |
+| `SEG_HIGIENE` | Especializado: solo ve los tableros Volvo (alertas, eco-driving, descargas, mapa). |
+| `SUPERVISOR` | Mando medio. Gestiona personal/flota/vencimientos/revisiones/bot/Logística. |
 | `ADMIN` | Control total. Crea admins, cambia roles, audita. |
 
 Áreas: `MANEJO`, `ADMINISTRACION`, `PLANTA`, `TALLER`, `GOMERIA`.
 
-Las capabilities cliente viven en `lib/core/services/capabilities.dart`. Los chequeos server-side están en `firestore.rules` con helpers `isAdmin()`, `isSupervisor()`, `isAdminOrSupervisor()`.
+Las capabilities cliente viven en `lib/core/services/capabilities.dart`. Los chequeos server-side están en `firestore.rules` con helpers `isAdmin()`, `isSupervisor()`, `isAdminOrSupervisor()`, `puedeOperarGomeria()`, `puedeVerVolvoTableros()`.
 
 ## Cloud Functions
 
+Todas en `southamerica-east1`.
+
+**onCall (RPC desde el cliente)**
 - `loginConDni` — auth con DNI + password (bcrypt + rate limit + custom token con claims).
-- `auditLogWrite` — bitácora de acciones admin (whitelist server-side).
-- `volvoProxy` — proxy autenticado a Volvo Connect API.
 - `actualizarRolEmpleado` — cambio de rol que refresca custom claim + libera unidades.
-- `telemetriaSnapshotScheduled` — cron cada 6h que escribe a `TELEMETRIA_HISTORICO`.
+- `renombrarEmpleadoDni` — rename atómico de DNI con cascade a colecciones referenciadas.
+- `volvoProxy` — proxy autenticado a Volvo Connect API.
+- `auditLogWrite` — bitácora de acciones admin (whitelist server-side).
+
+**onSchedule (crons)**
+- `telemetriaSnapshotScheduled` (cada 6h) — escribe a `TELEMETRIA_HISTORICO`.
+- `volvoAlertasPoller` (cada 5 min) — poll del Vehicle Alerts API → `VOLVO_ALERTAS`.
+- `volvoScoresPoller` (04:00 ART) — poll de Group Scores API → `VOLVO_SCORES_DIARIOS`.
+- `sitrackPosicionPoller` (cada 5 min) — poll de Sitrack → `SITRACK_POSICIONES` + drift detection + aviso "pasá el iButton" con throttle 30 min.
+- `vigiladorJornadaChofer` (cada 5 min) — tracking de horas de manejo (speed > 10 km/h) → avisos a 3h45 continuo y 11h30 diario + persistencia en `JORNADAS_CHOFER`.
+- `botHealthWatchdog` (cada 15 min) — alerta si el bot WhatsApp no heartbeatea.
+- `backupFirestoreScheduled` (domingo 06:00 ART) — export semanal a `gs://coopertrans-movil-backups`.
+- `resumenDriftsAsignacionesDiario` (08:00 ART) — resumen diario de drifts al admin.
+- `resumenExcesosJornadaDiario` (08:00 ART) — resumen excesos 4h/12h al jefe Seg e Higiene.
+- `avisoFinJornadaNocturna` (23:30 ART) — flag desactivado por default.
+
+**onDocumentCreated (triggers)**
+- `onAlertaVolvoCreated` — al crear alerta Volvo, encola WhatsApp al chofer (con blacklist mantenimiento).
+- `onAlertaVolvoMantenimientoCreated` — persiste eventos de mantenimiento sin encolar (los recoge el bot 1 vez/día).
 
 Deploy:
 ```powershell
@@ -108,6 +130,8 @@ firebase deploy --only functions
 firebase deploy --only firestore:rules
 firebase deploy --only storage
 ```
+
+⚠️ **Bug conocido**: `firebase deploy --only firestore:rules,functions:X` solo deploya el primero silenciosamente. Siempre separar en 2 comandos.
 
 ## Bot WhatsApp
 
