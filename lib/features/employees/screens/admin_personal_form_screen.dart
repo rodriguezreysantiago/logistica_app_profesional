@@ -32,6 +32,7 @@ class _AdminPersonalFormScreenState
   final _apodoCtrl = TextEditingController();
   final _cuilCtrl = TextEditingController();
   final _mailCtrl = TextEditingController();
+  final _iButtonCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
 
   String _rol = AppRoles.chofer;
@@ -52,6 +53,7 @@ class _AdminPersonalFormScreenState
     _apodoCtrl.dispose();
     _cuilCtrl.dispose();
     _mailCtrl.dispose();
+    _iButtonCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
   }
@@ -99,6 +101,13 @@ class _AdminPersonalFormScreenState
             : _apodoCtrl.text.trim(),
         'CUIL': _cuilCtrl.text.trim(),
         'MAIL': _mailCtrl.text.trim().toLowerCase(),
+        // Código del iButton/tarjeta Sitrack del chofer. Opcional al
+        // alta — si no lo cargás ahora, lo sumás después desde la
+        // ficha del chofer. Se guarda en MAYÚSCULAS porque los códigos
+        // hex de iButton son uppercase (ej. "53A6B11D000000F4").
+        'IBUTTON': _iButtonCtrl.text.trim().isEmpty
+            ? null
+            : _iButtonCtrl.text.trim().toUpperCase(),
         'CONTRASEÑA': passwordHash,
         'ROL': _rol,
         'AREA': _area,
@@ -195,6 +204,17 @@ class _AdminPersonalFormScreenState
                   // El mail va tal cual lo tipea el admin (sin mayúsculas).
                   toUpperCase: false,
                   isMail: true,
+                ),
+                _FormInput(
+                  label: 'iButton Sitrack (opcional)',
+                  controller: _iButtonCtrl,
+                  icon: Icons.fingerprint,
+                  // Código de la tarjeta/iButton que identifica al chofer
+                  // en Sitrack. Lo encontrás en el portal Sitrack →
+                  // ficha del chofer → "Identificación". Ej.
+                  // "53A6B11D000000F4" (16 chars hex). Si todavía no se
+                  // lo asignaron al chofer, dejá vacío y lo cargás después.
+                  isOptional: true,
                 ),
                 _FormInput(
                   label: 'Contraseña inicial',

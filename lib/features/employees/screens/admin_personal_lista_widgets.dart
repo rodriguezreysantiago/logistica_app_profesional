@@ -407,6 +407,26 @@ class _DetalleChofer extends StatelessWidget {
             label: 'Enganche',
             actual: (data['ENGANCHE'] ?? '').toString(),
           ),
+          // iButton: código de la tarjeta Sitrack que identifica al
+          // chofer cuando sube al tractor. Se usa para cross-check con
+          // SITRACK_POSICIONES (driverDocumentNumber) — si Sitrack reporta
+          // un DNI distinto al asignado, salta drift.
+          _DatoEditableTexto(
+            etiqueta: 'IBUTTON SITRACK',
+            valor: ((data['IBUTTON'] ?? '').toString().isEmpty
+                ? '-'
+                : data['IBUTTON'].toString()),
+            // Sin formatter de mayúsculas en el widget — lo hacemos en
+            // onSave para que el admin pueda pegar el código de Sitrack
+            // tal cual viene (a veces lowercase) y se normaliza al guardar.
+            aplicarMayusculas: true,
+            onSave: (v) => EmpleadoActions.dato(
+              context,
+              dni,
+              'IBUTTON',
+              v.trim().isEmpty ? null : v.trim().toUpperCase(),
+            ),
+          ),
         ],
 
         const SizedBox(height: 30),
