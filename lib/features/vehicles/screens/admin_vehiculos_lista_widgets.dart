@@ -167,15 +167,24 @@ class _VehiculoCard extends StatelessWidget {
                     // aparece y el card queda como antes.
                     _TelemetriaCompacta(data: data),
                     const SizedBox(height: 10),
-                    // Vista rápida de vencimientos (badges compactos)
-                    Row(
+                    // Vista rápida de vencimientos (badges compactos).
+                    // Wrap para que en pantallas chicas los extintores
+                    // bajen a una segunda línea sin truncarse.
+                    Wrap(
+                      spacing: 14,
+                      runSpacing: 6,
                       children: [
                         _MiniVencimiento(
                             label: 'RTO', fecha: data['VENCIMIENTO_RTO']),
-                        const SizedBox(width: 14),
                         _MiniVencimiento(
                             label: 'Seguro',
                             fecha: data['VENCIMIENTO_SEGURO']),
+                        _MiniVencimiento(
+                            label: 'Ext. cabina',
+                            fecha: data['VENCIMIENTO_EXTINTOR_CABINA']),
+                        _MiniVencimiento(
+                            label: 'Ext. exterior',
+                            fecha: data['VENCIMIENTO_EXTINTOR_EXTERIOR']),
                       ],
                     ),
                   ],
@@ -831,8 +840,8 @@ Color _colorCombustible(double pct) {
 }
 
 /// Versión compacta de la telemetría para usar dentro del card de la lista.
-/// Una sola fila con dos chips: combustible y autonomía. Si la unidad no
-/// reporta ninguno de los dos, el widget devuelve un SizedBox vacío.
+/// Fila con chips: combustible, AdBlue, autonomía. Si la unidad no
+/// reporta ninguno, el widget devuelve un SizedBox vacío.
 class _TelemetriaCompacta extends StatelessWidget {
   final Map<String, dynamic> data;
   const _TelemetriaCompacta({required this.data});
@@ -840,24 +849,31 @@ class _TelemetriaCompacta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fuel = _toDouble(data['NIVEL_COMBUSTIBLE']);
+    final adblue = _toDouble(data['NIVEL_ADBLUE']);
     final auton = _toDouble(data['AUTONOMIA_KM']);
 
-    if (fuel == null && auton == null) {
+    if (fuel == null && adblue == null && auton == null) {
       return const SizedBox.shrink();
     }
 
     return Padding(
       padding: const EdgeInsets.only(top: 6),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
         children: [
-          if (fuel != null) ...[
+          if (fuel != null)
             _ChipTelemetria(
               icono: Icons.local_gas_station,
               color: _colorCombustible(fuel),
               texto: '${fuel.clamp(0, 100).toStringAsFixed(0)}%',
             ),
-            const SizedBox(width: 8),
-          ],
+          if (adblue != null)
+            _ChipTelemetria(
+              icono: Icons.water_drop_outlined,
+              color: _colorCombustible(adblue),
+              texto: '${adblue.clamp(0, 100).toStringAsFixed(0)}%',
+            ),
           if (auton != null)
             _ChipTelemetria(
               icono: Icons.route,
