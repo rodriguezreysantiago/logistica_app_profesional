@@ -266,12 +266,27 @@ class EmpleadoActions {
       );
     }
 
-    if (dniNuevo == null || dniNuevo.isEmpty) return;
-    if (!context.mounted) return;
+    if (dniNuevo == null || dniNuevo.isEmpty) {
+      AppFeedback.errorOn(messenger, 'No se ingresó un DNI nuevo.');
+      return;
+    }
+    // Si el contexto se desmontó (raro pero puede pasar si el sheet
+    // del chofer se cerró por algún motivo), avisamos por snackbar
+    // para que el admin no quede sin saber qué pasó.
+    if (!context.mounted) {
+      AppFeedback.errorOn(messenger,
+          'La ficha del chofer se cerró antes de poder confirmar.');
+      return;
+    }
 
     // ─── Dialog de confirmación: "se actualiza en la base de datos" ─
     final confirmar = await showDialog<bool>(
-      context: context,
+      // Usamos el navigator capturado al inicio: aunque `context` pueda
+      // estar en algún estado raro post-pop del dialog de edición, el
+      // navigator capturado es estable. El linter no puede saberlo —
+      // de ahí la supresión.
+      // ignore: use_build_context_synchronously
+      context: navigator.context,
       builder: (dCtx) => AlertDialog(
         title: const Text('Confirmar cambio de DNI'),
         content: Text(
