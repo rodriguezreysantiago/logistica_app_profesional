@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../fleet_map/services/sitrack_snapshot_service.dart';
 
 /// Resumen agregado de la actividad de un chofer en una ventana de tiempo.
 ///
@@ -72,16 +73,26 @@ class ChoferActividadResumen {
 
 class TractorUsado {
   final String patente;
-  final double kmEnPeriodo;
+
+  /// Km computados en el período. `null` si no se pudieron calcular
+  /// (ej. asignación legacy sin baseline de odómetro Sitrack).
+  final double? kmEnPeriodo;
 
   /// True si la última asignación del chofer en este tractor sigue
   /// activa (`hasta == null`).
   final bool activaActual;
 
+  /// True si el km del período es parcial — vino de odometer_inicial
+  /// más una lectura actual de Sitrack (asignación todavía abierta) en
+  /// lugar de odometer_final cerrado. Útil para que la UI muestre un
+  /// asterisco/leyenda "en curso".
+  final bool esParcial;
+
   const TractorUsado({
     required this.patente,
     required this.kmEnPeriodo,
     required this.activaActual,
+    this.esParcial = false,
   });
 }
 
@@ -163,52 +174,100 @@ class ChoferActividadService {
       asignacionesPorId[d.id] = d;
     }
 
-    // Computar km por tractor.
+    // Computar km y aglutinar tractores. Para cada asignación:
+    //   - Cerrada con telemetría completa: km = odoFin - odoIni.
+    //   - Cerrada legacy sin telemetría: tractor visible, km null,
+    //     suma a `sinTelemetria`.
+    //   - Activa con odoIni: lookup current odometer en SITRACK_POSICIONES
+    //     y computa km parcial (odoCurrent - odoIni). Marca esParcial.
+    //   - Activa sin odoIni: tractor visible, km null, suma a
+    //     `sinTelemetria`.
     int sinTelemetria = 0;
+    // Map de patente → {km computados (puede ser parcial), esActual,
+    // esParcial}. Multiple asignaciones para la misma patente en el
+    // período se suman.
     final kmPorTractor = <String, double>{};
+    final tieneAlgunaTelemetriaPorTractor = <String, bool>{};
     final ultimaActivaPorTractor = <String, bool>{};
+    final esParcialPorTractor = <String, bool>{};
+
+    final snapSvc = SitrackSnapshotService(firestore: _db);
+
     for (final d in asignacionesPorId.values) {
       final data = d.data();
-      final patente = (data['vehiculo_id'] ?? '').toString().trim().toUpperCase();
+      final patente =
+          (data['vehiculo_id'] ?? '').toString().trim().toUpperCase();
       if (patente.isEmpty) continue;
       final odoIni = (data['odometer_inicial'] as num?)?.toDouble();
       final odoFin = (data['odometer_final'] as num?)?.toDouble();
       final estaActiva = data['hasta'] == null;
 
-      // MVP: contamos solo asignaciones cerradas con telemetría completa
-      // (snapshot de Sitrack al cerrar). Las activas requieren consultar
-      // SITRACK_POSICIONES, lo agregamos en una iteración futura si vale
-      // el costo. Las cerradas legacy sin telemetría se contabilizan
-      // aparte para poder mostrarlas como "datos parciales".
-      if (odoIni != null && odoFin != null) {
-        final diff = odoFin - odoIni;
-        if (diff > 0) {
-          kmPorTractor.update(
-            patente,
-            (v) => v + diff,
-            ifAbsent: () => diff,
-          );
-        }
-      } else if (!estaActiva) {
-        // Cerrada pero sin telemetría — la contamos como "sin datos".
-        sinTelemetria++;
-      }
       if (estaActiva) {
         ultimaActivaPorTractor[patente] = true;
       }
+
+      // Cerrada con telemetría completa.
+      if (!estaActiva && odoIni != null && odoFin != null) {
+        final diff = odoFin - odoIni;
+        if (diff > 0) {
+          kmPorTractor.update(patente, (v) => v + diff, ifAbsent: () => diff);
+          tieneAlgunaTelemetriaPorTractor[patente] = true;
+        }
+        continue;
+      }
+
+      // Activa con baseline → intentar lookup actual desde Sitrack.
+      if (estaActiva && odoIni != null) {
+        final snap = await snapSvc.obtener(patente);
+        if (snap.odometer != null) {
+          final diff = snap.odometer! - odoIni;
+          if (diff > 0) {
+            kmPorTractor.update(
+              patente,
+              (v) => v + diff,
+              ifAbsent: () => diff,
+            );
+            tieneAlgunaTelemetriaPorTractor[patente] = true;
+            esParcialPorTractor[patente] = true;
+            continue;
+          }
+        }
+        // Si Sitrack no devolvió odómetro, cae al "sin telemetría".
+      }
+
+      // Sin datos suficientes — pero igualmente registramos la patente
+      // (para que aparezca en el listado) y sumamos al contador.
+      sinTelemetria++;
+      // Asegurar que el tractor figure en el listado aún sin km.
+      kmPorTractor.putIfAbsent(patente, () => 0);
     }
 
-    final tractores = kmPorTractor.entries
-        .map((e) => TractorUsado(
-              patente: e.key,
-              kmEnPeriodo: e.value,
-              activaActual: ultimaActivaPorTractor[e.key] ?? false,
-            ))
-        .toList()
-      ..sort((a, b) => b.kmEnPeriodo.compareTo(a.kmEnPeriodo));
+    // Construir lista de TractorUsado. Si un tractor solo tuvo
+    // asignaciones sin telemetría (entry creada por putIfAbsent con
+    // valor 0), kmEnPeriodo queda null para que la UI muestre "—".
+    final tractores = kmPorTractor.entries.map((e) {
+      final tieneTele = tieneAlgunaTelemetriaPorTractor[e.key] ?? false;
+      return TractorUsado(
+        patente: e.key,
+        kmEnPeriodo: tieneTele ? e.value : null,
+        activaActual: ultimaActivaPorTractor[e.key] ?? false,
+        esParcial: esParcialPorTractor[e.key] ?? false,
+      );
+    }).toList();
+    // Orden: primero los que tienen km (mayor a menor), después los
+    // sin telemetría (alfabéticamente por patente).
+    tractores.sort((a, b) {
+      final kmA = a.kmEnPeriodo;
+      final kmB = b.kmEnPeriodo;
+      if (kmA == null && kmB == null) return a.patente.compareTo(b.patente);
+      if (kmA == null) return 1;
+      if (kmB == null) return -1;
+      return kmB.compareTo(kmA);
+    });
 
-    final kmTotales =
-        kmPorTractor.values.fold<double>(0.0, (a, b) => a + b);
+    final kmTotales = kmPorTractor.entries
+        .where((e) => tieneAlgunaTelemetriaPorTractor[e.key] ?? false)
+        .fold<double>(0.0, (a, e) => a + e.value);
 
     // Eventos por severidad y tipo.
     final eventosPorSeveridad = <String, int>{};

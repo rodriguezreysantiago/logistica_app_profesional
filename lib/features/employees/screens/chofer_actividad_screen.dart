@@ -206,7 +206,8 @@ class _Resumen extends StatelessWidget {
   Widget build(BuildContext context) {
     final hayActividad = resumen.kmTotales > 0 ||
         resumen.totalEventos > 0 ||
-        resumen.tractores.isNotEmpty;
+        resumen.tractores.isNotEmpty ||
+        resumen.asignaciones > 0;
 
     if (!hayActividad) {
       return AppEmptyState(
@@ -445,6 +446,7 @@ class _TractorTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final km = tractor.kmEnPeriodo;
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -484,14 +486,32 @@ class _TractorTile extends StatelessWidget {
               ),
             ),
           const Spacer(),
-          Text(
-            '${_Resumen._formatearMiles(tractor.kmEnPeriodo)} km',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
+          if (km == null)
+            const Text(
+              '— km',
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 13,
+                fontStyle: FontStyle.italic,
+              ),
+            )
+          else ...[
+            Text(
+              '${_Resumen._formatearMiles(km)} km',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
+            if (tractor.esParcial) ...[
+              const SizedBox(width: 4),
+              const Tooltip(
+                message: 'Asignación en curso — km parcial',
+                child: Icon(Icons.history, size: 13, color: Colors.white38),
+              ),
+            ],
+          ],
         ],
       ),
     );
