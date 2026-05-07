@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
+import '../../fleet_map/services/sitrack_snapshot_service.dart';
 import '../models/asignacion_enganche.dart';
 
 /// Único punto de entrada para cambiar la asignación tractor↔enganche.
@@ -159,6 +160,27 @@ class AsignacionEngancheService {
 
     final ahora = Timestamp.now();
 
+    // === Snapshot de odómetro Sitrack del/los tractor(es) involucrado(s).
+    // El "odómetro" en ASIGNACIONES_ENGANCHE es siempre el del TRACTOR
+    // (el enganche no tiene odómetro propio — los km los acumula el
+    // tractor que lo arrastra). Best-effort: si Sitrack no contesta,
+    // queda null.
+    final snapSvc = SitrackSnapshotService(firestore: _db);
+    final snapTractorNuevoF =
+        desenganchar ? null : snapSvc.obtener(tractorNorm);
+    final snapTractorViejoF = (activaEngancheDoc != null &&
+            tractorActualEnganche != null &&
+            tractorActualEnganche.isNotEmpty &&
+            tractorActualEnganche != _sinAsignar)
+        ? snapSvc.obtener(tractorActualEnganche)
+        : null;
+    final snapTractorNuevo = snapTractorNuevoF == null
+        ? SitrackSnapshot.empty
+        : await snapTractorNuevoF;
+    final snapTractorViejo = snapTractorViejoF == null
+        ? SitrackSnapshot.empty
+        : await snapTractorViejoF;
+
     // === Crear nueva asignación primero (minimiza ventana sin asignación).
     if (!desenganchar) {
       final nuevaRef = colAsig.doc();
@@ -170,20 +192,47 @@ class AsignacionEngancheService {
         'hasta': null,
         'asignado_por_dni': asignadorLimpio,
         'asignado_por_nombre': asignadoPorNombreFinal,
+        // Snapshot del odómetro del TRACTOR al momento del enganche.
+        // Permite calcular cuántos km del tractor cubrieron las
+        // cubiertas del enganche durante este período (Fase 2 Gomería).
+        if (snapTractorNuevo.odometer != null)
+          'odometer_inicial': snapTractorNuevo.odometer,
+        if (snapTractorNuevo.reportDate != null)
+          'odometer_inicial_ts':
+              Timestamp.fromDate(snapTractorNuevo.reportDate!),
         if (motivo != null && motivo.trim().isNotEmpty)
           'motivo': motivo.trim(),
       });
     }
 
-    // === Cerrar asignación activa del enganche (si tenía).
+    // === Cerrar asignación activa del enganche (si tenía). El odómetro
+    // de cierre es el del tractor que TENÍA el enganche (el viejo).
     if (activaEngancheDoc != null) {
-      await activaEngancheDoc.reference.update({'hasta': ahora});
+      final updateClose = <String, dynamic>{'hasta': ahora};
+      if (snapTractorViejo.odometer != null) {
+        updateClose['odometer_final'] = snapTractorViejo.odometer;
+        if (snapTractorViejo.reportDate != null) {
+          updateClose['odometer_final_ts'] =
+              Timestamp.fromDate(snapTractorViejo.reportDate!);
+        }
+      }
+      await activaEngancheDoc.reference.update(updateClose);
     }
 
-    // === Cerrar asignación del tractor si tenía otro enganche.
+    // === Cerrar asignación del tractor si tenía OTRO enganche. El
+    // odómetro de cierre es el del tractor NUEVO (que es el mismo donde
+    // ese OTRO enganche estaba hasta ahora — lo estamos liberando).
     if (activaTractorDoc != null &&
         activaTractorDoc.id != activaEngancheDoc?.id) {
-      await activaTractorDoc.reference.update({'hasta': ahora});
+      final updateClose = <String, dynamic>{'hasta': ahora};
+      if (snapTractorNuevo.odometer != null) {
+        updateClose['odometer_final'] = snapTractorNuevo.odometer;
+        if (snapTractorNuevo.reportDate != null) {
+          updateClose['odometer_final_ts'] =
+              Timestamp.fromDate(snapTractorNuevo.reportDate!);
+        }
+      }
+      await activaTractorDoc.reference.update(updateClose);
     }
 
     // === Espejo en VEHICULOS.ESTADO del enganche (LIBRE / OCUPADO).

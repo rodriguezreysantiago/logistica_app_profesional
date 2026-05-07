@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/audit_log_service.dart';
+import '../../fleet_map/services/sitrack_snapshot_service.dart';
 import '../models/asignacion_vehiculo.dart';
 import 'asignacion_enganche_service.dart';
 
@@ -153,6 +154,31 @@ class AsignacionVehiculoService {
     final ahora = Timestamp.now();
     final patenteAnterior = patenteActualChofer;
 
+    // === 3.5. Snapshot de odómetro Sitrack (best-effort) ===========
+    // Leemos en paralelo el km de la patente NUEVA (para `odometer_inicial`
+    // de la asignación nueva) y de la patente VIEJA del chofer (para
+    // `odometer_final` al cerrar la activa). Si Sitrack no contesta o no
+    // hay dato, los campos quedan null — la asignación se crea/cierra
+    // igual, solo no podremos calcular km recorridos por chofer.
+    //
+    // Esto desbloquea reportes "cuántos km manejó X chofer en período Y"
+    // y, en cascada, el cálculo de km por enganche / cubierta de la
+    // Fase 2 de Gomería.
+    final snapSvc = SitrackSnapshotService(firestore: _db);
+    final snapNuevaF =
+        desvincular ? null : snapSvc.obtener(patenteNorm);
+    final snapViejaF = (activaChoferDoc != null && patenteActualChofer != null &&
+            patenteActualChofer.isNotEmpty &&
+            patenteActualChofer != _sinAsignar)
+        ? snapSvc.obtener(patenteActualChofer)
+        : null;
+    final snapNueva = snapNuevaF == null
+        ? SitrackSnapshot.empty
+        : await snapNuevaF;
+    final snapVieja = snapViejaF == null
+        ? SitrackSnapshot.empty
+        : await snapViejaF;
+
     // === 4. CREAR primero la nueva asignación (si aplica) — writes
     // secuenciales en orden que minimiza ventana de inconsistencia.
     if (!desvincular) {
@@ -165,20 +191,46 @@ class AsignacionVehiculoService {
         'hasta': null,
         'asignado_por_dni': asignadorLimpio,
         'asignado_por_nombre': asignadoPorNombreFinal,
+        // Snapshot del odómetro al alta. Si Sitrack no respondió, ambos
+        // campos quedan ausentes — el chofer arranca con baseline null.
+        if (snapNueva.odometer != null) 'odometer_inicial': snapNueva.odometer,
+        if (snapNueva.reportDate != null)
+          'odometer_inicial_ts': Timestamp.fromDate(snapNueva.reportDate!),
         if (motivo != null && motivo.trim().isNotEmpty)
           'motivo': motivo.trim(),
       });
     }
 
     // === 5. Cerrar asignación activa del chofer (si tenía).
+    // Persistimos el odómetro AL CIERRE para poder calcular km recorridos
+    // por chofer en este período.
     if (activaChoferDoc != null) {
-      await activaChoferDoc.reference.update({'hasta': ahora});
+      final updateClose = <String, dynamic>{'hasta': ahora};
+      if (snapVieja.odometer != null) {
+        updateClose['odometer_final'] = snapVieja.odometer;
+        if (snapVieja.reportDate != null) {
+          updateClose['odometer_final_ts'] =
+              Timestamp.fromDate(snapVieja.reportDate!);
+        }
+      }
+      await activaChoferDoc.reference.update(updateClose);
     }
 
     // === 6. Cerrar asignación de la patente nueva si la tenía OTRO chofer.
+    // Para ese OTRO chofer, el odómetro al cierre es el de la patente
+    // NUEVA (la que estamos asignando ahora a este chofer) — porque eso
+    // es lo que ese OTRO acababa de manejar.
     if (activaPatenteDoc != null &&
         activaPatenteDoc.id != activaChoferDoc?.id) {
-      await activaPatenteDoc.reference.update({'hasta': ahora});
+      final updateClose = <String, dynamic>{'hasta': ahora};
+      if (snapNueva.odometer != null) {
+        updateClose['odometer_final'] = snapNueva.odometer;
+        if (snapNueva.reportDate != null) {
+          updateClose['odometer_final_ts'] =
+              Timestamp.fromDate(snapNueva.reportDate!);
+        }
+      }
+      await activaPatenteDoc.reference.update(updateClose);
     }
 
     // === 7. Espejos en EMPLEADOS y VEHICULOS — best-effort. Si alguno

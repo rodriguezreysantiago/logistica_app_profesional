@@ -334,13 +334,15 @@ service cloud.firestore {
         && request.resource.data.desde is timestamp
         && request.resource.data.hasta == null;
 
-      // Actualizar: solo se permite cerrar (setear `hasta`). No se puede
-      // editar `desde`, `chofer_dni`, `vehiculo_id`, etc — el log es
-      // inmutable salvo por el cierre. Y solo si todavía estaba activa.
+      // Actualizar: se permite cerrar (setear `hasta`) y, opcionalmente,
+      // sumar el snapshot de odómetro Sitrack al cierre (para calcular
+      // km recorridos por chofer en este período). No se puede editar
+      // `desde`, `chofer_dni`, `vehiculo_id`, etc — el log es inmutable
+      // salvo por el cierre. Y solo si todavía estaba activa.
       allow update: if isAdminOrSupervisor()
         && resource.data.hasta == null
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['hasta'])
+            .hasOnly(['hasta', 'odometer_final', 'odometer_final_ts'])
         && request.resource.data.hasta is timestamp;
 
       // Borrar: nunca. Si hay que corregir un dato, se cierra y se
@@ -374,12 +376,15 @@ service cloud.firestore {
         && request.resource.data.desde is timestamp
         && request.resource.data.hasta == null;
 
-      // Actualizar: solo se permite cerrar (setear `hasta`). El log es
-      // inmutable salvo por el cierre. Y solo si todavía estaba activa.
+      // Actualizar: se permite cerrar (`hasta`) y, opcionalmente, sumar
+      // el snapshot de odómetro Sitrack del tractor al cierre (para
+      // calcular km del tractor durante el período del enganche, base
+      // del cálculo de km cubiertas Fase 2 Gomería). El log es
+      // inmutable en todo lo demás.
       allow update: if isAdminOrSupervisor()
         && resource.data.hasta == null
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['hasta'])
+            .hasOnly(['hasta', 'odometer_final', 'odometer_final_ts'])
         && request.resource.data.hasta is timestamp;
 
       // Borrar: nunca.
