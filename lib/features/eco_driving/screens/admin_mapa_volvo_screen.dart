@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../utils/etiquetas_alerta_volvo.dart';
 import '../widgets/evento_volvo_detalle_sheet.dart';
 
 /// Pantalla "Mapa Volvo" — visualización geográfica de eventos del
@@ -359,8 +360,14 @@ class _Toolbar extends StatelessWidget {
                 for (final t in tipos)
                   Padding(
                     padding: const EdgeInsets.only(right: 4),
+                    // El chip muestra la etiqueta legible (ej. "Exceso de
+                    // velocidad") pero filtra por el codigo crudo. Para
+                    // eventos GENERIC se va a ver "Evento generico" en el
+                    // chip — no podemos desambiguar por subtipo en el
+                    // filtro hasta que se haga refactor del filtro
+                    // para soportarlo (feature aparte).
                     child: _Chip(
-                      label: t,
+                      label: etiquetaAlertaVolvo(t),
                       selected: filtroTipo == t,
                       onTap: () => onTipoChange(t),
                     ),

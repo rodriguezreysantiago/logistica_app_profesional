@@ -33,8 +33,14 @@ const ORIGENES_AGRUPABLES = new Set([
 
 /**
  * Etiquetas legibles de tipos de alerta Volvo. Espejo de `ETIQUETAS_TIPO`
- * en `aviso_alertas_volvo_builder.js` y `_etiquetaTipo` del cliente
+ * en `aviso_alertas_volvo_builder.js`, `ETIQUETAS_TIPO_ALERTA` en
+ * `functions/src/index.ts` y `_etiquetasTipoAlertaVolvo` en el cliente
  * Flutter. Si aparece un tipo nuevo, cae al código crudo.
+ *
+ * Sumar SEATBELT y demás subtipos GENERIC fue regresión 2026-05-07: el
+ * agrupador agrupa por tipo y mostraba "Evento genérico" para todo lo
+ * que tenía `tipo: GENERIC` aunque el subtipo (SEATBELT, etc) fuera
+ * relevante.
  */
 const ETIQUETAS_TIPO = {
   DISTANCE_ALERT: 'Cerca del vehículo de adelante',
@@ -47,8 +53,24 @@ const ETIQUETAS_TIPO = {
   FUEL: 'Cambio anormal de combustible',
   CATALYST: 'Cambio de nivel AdBlue',
   ALARM: 'Alarma anti-robo',
+  GEOFENCE: 'Entrada/salida de geocerca',
+  SAFETY_ZONE: 'Zona de velocidad reducida',
+  TPM: 'Presión de neumático',
+  TTM: 'Temperatura de neumático',
+  AEBS: 'Frenado automático de emergencia',
+  ESP: 'Control de estabilidad',
+  DAS: 'Alerta de cansancio',
+  LKS: 'Asistente de carril',
+  LCS: 'Asistente de cambio de carril',
+  UNSAFE_LANE_CHANGE: 'Cambio de carril inseguro',
+  TACHO_OUT_OF_SCOPE_MODE_CHANGE: 'Tacógrafo fuera de servicio',
+  CARGO: 'Cambio en carga (puerta / temp)',
   ADBLUELEVEL_LOW: 'AdBlue bajo',
   WITHOUT_ADBLUE: 'Sin AdBlue',
+  DRIVING_WITHOUT_BEING_LOGGED_IN: 'Conducción sin chofer identificado',
+  SEATBELT: 'Cinturón de seguridad sin abrochar',
+  BATTERY_PACK_HIGH_DISCHARGE: 'Descarga alta de batería',
+  BATTERY_PACK_CHARGING_STATUS_CHANGE: 'Cambio en estado de carga',
 };
 
 /**
@@ -130,14 +152,20 @@ function _armarMensajeAlertHighAgrupado(docs) {
   const saludo = matchSaludo ? matchSaludo[1] : 'Hola';
 
   // Items: agrupar por patente, mostrar lista cronológica de eventos.
+  // Resolución del subtipo: si el tipo es GENERIC y el doc trae
+  // `alert_sub_tipo` (SEATBELT, TELL_TALE, etc.), agrupamos por subtipo
+  // — sino todos los GENERIC se colapsarían como "Evento genérico" sin
+  // info útil para el chofer (regresión 2026-05-07).
   const porPatente = new Map();
   for (const doc of docs) {
     const d = doc.data();
     const patente = (d.alert_patente || '?').toString();
     const tipo = (d.alert_tipo || '').toString();
+    const subTipo = (d.alert_sub_tipo || '').toString();
+    const claveTipo = (tipo === 'GENERIC' && subTipo) ? subTipo : tipo;
     const fecha = _fechaEventoDe(d);
     if (!porPatente.has(patente)) porPatente.set(patente, []);
-    porPatente.get(patente).push({ tipo, fecha });
+    porPatente.get(patente).push({ tipo: claveTipo, fecha });
   }
 
   const bloques = [...porPatente.entries()]
@@ -182,15 +210,19 @@ function _armarMensajeAlertHighAgrupado(docs) {
 
 /** "Hay alertas de mantenimiento en N tractores: ..." (al jefe de mant). */
 function _armarMensajeMantenimientoAgrupado(docs) {
-  // Para cada doc agrupar por patente.
+  // Para cada doc agrupar por patente. Igual que en alert_high: si tipo
+  // es GENERIC, usamos `alert_sub_tipo` para no colapsar TELL_TALE +
+  // SEATBELT + ADBLUELEVEL_LOW como un único "Evento genérico".
   const porPatente = new Map();
   for (const doc of docs) {
     const d = doc.data();
     const patente = (d.alert_patente || '?').toString();
     const tipo = (d.alert_tipo || '').toString();
+    const subTipo = (d.alert_sub_tipo || '').toString();
+    const claveTipo = (tipo === 'GENERIC' && subTipo) ? subTipo : tipo;
     const fecha = _fechaEventoDe(d);
     if (!porPatente.has(patente)) porPatente.set(patente, []);
-    porPatente.get(patente).push({ tipo, fecha });
+    porPatente.get(patente).push({ tipo: claveTipo, fecha });
   }
 
   const bloques = [...porPatente.entries()]

@@ -1925,6 +1925,9 @@ const ETIQUETAS_TIPO_ALERTA: Record<string, string> = {
   ADBLUELEVEL_LOW: "AdBlue bajo",
   WITHOUT_ADBLUE: "Sin AdBlue",
   DRIVING_WITHOUT_BEING_LOGGED_IN: "Conducción sin chofer identificado",
+  SEATBELT: "Cinturón de seguridad sin abrochar",
+  BATTERY_PACK_HIGH_DISCHARGE: "Descarga alta de batería",
+  BATTERY_PACK_CHARGING_STATUS_CHANGE: "Cambio en estado de carga",
 };
 
 export const onAlertaVolvoCreated = onDocumentCreated(
@@ -2061,12 +2064,18 @@ export const onAlertaVolvoCreated = onDocumentCreated(
     // siempre sabe a qué momento se refiere el aviso.
     const fechaTxt = _formatFechaArg(creadoMs);
     let etiqueta = ETIQUETAS_TIPO_ALERTA[tipo] ?? tipo;
+    // subTipoResolvido se guarda en COLA_WHATSAPP como `alert_sub_tipo`
+    // para que el agrupador del bot (agrupador.js) pueda mostrar la
+    // etiqueta correcta cuando combina varios HIGH del mismo chofer
+    // (ej: 3x "Cinturón..." en lugar de 3x "Evento genérico").
+    let subTipoResolvido: string | null = null;
     if (tipo === "GENERIC") {
       const triggerType = (
         (data.detalle_generic as Record<string, unknown> | undefined)
           ?.triggerType ?? ""
       ).toString().toUpperCase();
       if (triggerType) {
+        subTipoResolvido = triggerType;
         etiqueta =
           ETIQUETAS_TIPO_ALERTA[triggerType] ??
           `Evento genérico (${triggerType})`;
@@ -2120,6 +2129,10 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         // Metadata para auditoria / debugging.
         alert_id: event.params.alertId,
         alert_tipo: tipo,
+        // Subtipo resuelto cuando tipo === GENERIC (SEATBELT, TELL_TALE,
+        // etc). Lo usa el agrupador del bot para no colapsar todos los
+        // GENERIC en "Evento genérico" cuando agrupa varios eventos.
+        alert_sub_tipo: subTipoResolvido,
         alert_patente: patente,
         // Timestamp del evento real (no del encolado) — usado por el
         // agrupador del bot para armar el mensaje combinado con horas

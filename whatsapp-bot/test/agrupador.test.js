@@ -250,6 +250,107 @@ describe('planificarEnvioAgrupado — volvo_alert_mantenimiento NO se agrupa', (
   });
 });
 
+describe('planificarEnvioAgrupado — subTipo GENERIC (regresión 2026-05-07)', () => {
+  test('GENERIC + alert_sub_tipo SEATBELT → muestra "Cinturón..." no "Evento genérico"', async () => {
+    const dest = '12345';
+    const doc1 = fakeDoc({
+      id: 'doc1',
+      data: {
+        origen: 'volvo_alert_high',
+        destinatario_id: dest,
+        mensaje: 'Hola Juan, ...',
+        alert_patente: 'AB123CD',
+        alert_tipo: 'GENERIC',
+        alert_sub_tipo: 'SEATBELT',
+        alert_creado_en: tsHace(2 * 60 * 60 * 1000),
+      },
+    });
+    const doc2 = fakeDoc({
+      id: 'doc2',
+      data: {
+        origen: 'volvo_alert_high',
+        destinatario_id: dest,
+        mensaje: 'irrelevante',
+        alert_patente: 'AB123CD',
+        alert_tipo: 'GENERIC',
+        alert_sub_tipo: 'SEATBELT',
+        alert_creado_en: tsHace(60 * 60 * 1000),
+      },
+    });
+    const db = fakeDbConDocs([doc1, doc2]);
+    const result = await planificarEnvioAgrupado(db, doc1);
+    assert.ok(result);
+    assert.match(result.mensajeCombinado, /Cinturón/);
+    assert.match(result.mensajeCombinado, /2x Cinturón/);
+    assert.doesNotMatch(result.mensajeCombinado, /Evento genérico/);
+  });
+
+  test('GENERIC sin alert_sub_tipo → cae a "Evento genérico" (compat docs viejos)', async () => {
+    const dest = '12345';
+    const doc1 = fakeDoc({
+      id: 'doc1',
+      data: {
+        origen: 'volvo_alert_high',
+        destinatario_id: dest,
+        mensaje: 'Hola Juan, ...',
+        alert_patente: 'AB123CD',
+        alert_tipo: 'GENERIC',
+        // sin alert_sub_tipo (doc encolado pre-fix 2026-05-07)
+        alert_creado_en: tsHace(2 * 60 * 60 * 1000),
+      },
+    });
+    const doc2 = fakeDoc({
+      id: 'doc2',
+      data: {
+        origen: 'volvo_alert_high',
+        destinatario_id: dest,
+        mensaje: 'irrelevante',
+        alert_patente: 'AB123CD',
+        alert_tipo: 'GENERIC',
+        alert_creado_en: tsHace(60 * 60 * 1000),
+      },
+    });
+    const db = fakeDbConDocs([doc1, doc2]);
+    const result = await planificarEnvioAgrupado(db, doc1);
+    assert.ok(result);
+    assert.match(result.mensajeCombinado, /Evento genérico/);
+  });
+
+  test('separa por subTipo: SEATBELT y TELL_TALE no se colapsan', async () => {
+    const dest = '12345';
+    const doc1 = fakeDoc({
+      id: 'doc1',
+      data: {
+        origen: 'volvo_alert_high',
+        destinatario_id: dest,
+        mensaje: 'Hola Juan, ...',
+        alert_patente: 'AB123CD',
+        alert_tipo: 'GENERIC',
+        alert_sub_tipo: 'SEATBELT',
+        alert_creado_en: tsHace(2 * 60 * 60 * 1000),
+      },
+    });
+    const doc2 = fakeDoc({
+      id: 'doc2',
+      data: {
+        origen: 'volvo_alert_high',
+        destinatario_id: dest,
+        mensaje: 'irrelevante',
+        alert_patente: 'AB123CD',
+        alert_tipo: 'GENERIC',
+        alert_sub_tipo: 'TELL_TALE',
+        alert_creado_en: tsHace(60 * 60 * 1000),
+      },
+    });
+    const db = fakeDbConDocs([doc1, doc2]);
+    const result = await planificarEnvioAgrupado(db, doc1);
+    assert.ok(result);
+    // Ambos subtipos en líneas separadas.
+    assert.match(result.mensajeCombinado, /Cinturón/);
+    assert.match(result.mensajeCombinado, /Luz de tablero/);
+  });
+});
+
 describe('planificarEnvioAgrupado — defensas', () => {
   test('cap defensivo: > 50 docs → solo agrupa los primeros 49 otros', async () => {
     const dest = '12345';

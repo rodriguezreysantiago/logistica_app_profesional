@@ -145,8 +145,13 @@ class _AdminVolvoAlertasScreenState extends State<AdminVolvoAlertasScreen> {
         if (sev != _severidadFiltro) return false;
       }
       if (_query.isEmpty) return true;
+      // La etiqueta legible se incluye en el texto buscable para que
+      // el admin pueda tipear "cinturón", "ralentí", etc. y encontrar
+      // alertas — no solo el código crudo del API ("SEATBELT", "IDLING").
+      final etiqueta = etiquetaAlertaVolvoFromDoc(data);
       final hay = '${data['patente'] ?? ''} '
               '${data['tipo'] ?? ''} '
+              '$etiqueta '
               '${data['vin'] ?? ''} '
               '${data['severidad'] ?? ''}'
           .toUpperCase();
