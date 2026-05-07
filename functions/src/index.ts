@@ -2797,6 +2797,33 @@ function buildScoreFleetDoc(
 
 const MANTENIMIENTO_DESTINATARIO_DNI = "35244439";
 
+// DNI del jefe de Seguridad e Higiene (MOLINA ALEJANDRA). Recibe el
+// resumen diario de excesos de jornada (choferes que cruzaron 4h
+// continuas o 12h diarias).
+const SEG_HIGIENE_DESTINATARIO_DNI = "34730329";
+
+// Vigilador de jornada del chofer — parámetros operativos.
+// Decisión Vecchi 2026-05-07:
+//   - El chofer se considera "manejando" cuando speed > 10 km/h.
+//   - 15 min sin movimiento resetean el "continuo" (pausa válida).
+//   - Aviso a las 3:45h continuas (faltan 15 min para el límite 4h).
+//   - Aviso a las 11:30h totales del día (faltan 30 min para 12h).
+const VIGILADOR_UMBRAL_MOVIMIENTO_KMH = 10;
+const VIGILADOR_PAUSA_RESET_SEGUNDOS = 15 * 60;
+const VIGILADOR_CONTINUO_ALERTA_SEGUNDOS = 3 * 3600 + 45 * 60;
+const VIGILADOR_CONTINUO_LIMITE_SEGUNDOS = 4 * 3600;
+const VIGILADOR_DIARIO_ALERTA_SEGUNDOS = 11 * 3600 + 30 * 60;
+const VIGILADOR_DIARIO_LIMITE_SEGUNDOS = 12 * 3600;
+// Cap para evitar deltas locos si el cron estuvo caído mucho tiempo.
+// 10 min = 2 ciclos completos del cron de 5 min.
+const VIGILADOR_DELTA_MAX_SEGUNDOS = 600;
+
+// Aviso nocturno "fin de jornada próxima" — flag para activarlo.
+// Decisión Vecchi 2026-05-07: se deja preparado pero apagado mientras
+// el bot no opera 24x7. Cuando el bot pase a operación nocturna,
+// poner en true y deployar.
+const AVISO_NOCTURNO_ACTIVO = false;
+
 const TIPOS_MANTENIMIENTO_DIRECTOS = new Set(["FUEL", "CATALYST"]);
 
 const SUBTIPOS_GENERIC_MANTENIMIENTO = new Set([
@@ -3723,6 +3750,564 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
       driftsCount: cantidad,
       mostrados: aMostrar.length,
       restantes,
+    });
+  }
+);
+
+// ============================================================================
+// vigiladorJornadaChofer — alertas de tiempo continuo + diario de manejo
+// ============================================================================
+//
+// Cron cada 5 min que trackea el tiempo de manejo de cada chofer y
+// dispara avisos cuando se acerca al límite legal (4h continuas / 12h
+// diarias).
+//
+// Fuente de datos: SITRACK_POSICIONES, último snapshot por patente.
+// "Manejando" se define como `speed > 10 km/h` — el motor encendido en
+// pausa NO cuenta (caso real Vecchi: choferes paran a descansar pero
+// dejan el motor prendido para A/C). Una pausa de 15 min sin
+// movimiento resetea el "continuo actual" (alineado con norma de
+// tacógrafo más laxa que la Mercosur de 30 min — decisión Vecchi).
+//
+// Estado por chofer en JORNADAS_CHOFER/{dni}_{YYYY-MM-DD}:
+//   - segundos_total_dia       (acumulado del día, suma de todos los
+//                                tramos > 10 km/h).
+//   - segundos_continuo_actual (acumulado desde el último reset por
+//                                pausa válida ≥ 15 min).
+//   - segundos_pausa_actual    (tiempo seguido con speed ≤ 10 km/h).
+//   - flags de alerta enviada (para no repetir en el mismo ciclo).
+//   - flags de exceso (para el resumen diario al jefe de Seg).
+//
+// Las alertas se encolan en COLA_WHATSAPP igual que las demás. El bot
+// las procesa y manda; los pendientes del mismo origen+chofer pueden
+// agruparse via agrupador.js (no agregamos estos origenes a la lista
+// agrupable porque los avisos son distintos en contenido — uno por
+// continuo y otro por diario, máximo uno de cada por día).
+
+export const vigiladorJornadaChofer = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "America/Argentina/Buenos_Aires",
+    timeoutSeconds: 90,
+    memory: "256MiB",
+  },
+  async () => {
+    logger.info("[vigiladorJornadaChofer] iniciando");
+
+    // Leer SITRACK_POSICIONES para el snapshot actual de cada patente.
+    const snap = await db.collection("SITRACK_POSICIONES").get();
+
+    const fechaArt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+
+    const ahora = Timestamp.now();
+    let alertasContinuoEnviadas = 0;
+    let alertasDiarioEnviadas = 0;
+    let choferesEvaluados = 0;
+
+    for (const d of snap.docs) {
+      const data = d.data();
+      const driverDni = (data.driver_dni ?? "").toString().trim();
+      if (!driverDni) continue; // sin chofer identificado → no trackeable
+
+      const speed = typeof data.speed === "number" ? data.speed : 0;
+      const patente = d.id;
+
+      choferesEvaluados++;
+
+      const refJornada = db
+        .collection("JORNADAS_CHOFER")
+        .doc(`${driverDni}_${fechaArt}`);
+
+      try {
+        const result = await db.runTransaction(async (tx) => {
+          const snapJ = await tx.get(refJornada);
+          if (!snapJ.exists) {
+            // Primer poll del día para este chofer → estado inicial.
+            // No acumulamos en este poll (no hay delta), próximo sí.
+            tx.set(refJornada, {
+              chofer_dni: driverDni,
+              fecha_art: fechaArt,
+              segundos_total_dia: 0,
+              segundos_continuo_actual: 0,
+              segundos_pausa_actual: 0,
+              ultima_actualizacion_at: ahora,
+              ultima_patente: patente,
+              alerta_3_45_continua_enviada: false,
+              alerta_11_30_diaria_enviada: false,
+              alerta_3_45_continua_at: null,
+              alerta_11_30_diaria_at: null,
+              pausa_obligatoria_excedida: false,
+              jornada_diaria_excedida: false,
+              creado_en: ahora,
+            });
+            return { alertContinuo: false, alertDiario: false };
+          }
+
+          const docJ = snapJ.data() ?? {};
+
+          // Delta desde la última actualización, capeado para evitar
+          // sumar horas si el cron estuvo caído mucho tiempo.
+          const ultimaAtMs = (docJ.ultima_actualizacion_at as Timestamp)
+            .toMillis();
+          const deltaSegundosBruto = (ahora.toMillis() - ultimaAtMs) / 1000;
+          const deltaSegundos = Math.min(
+            Math.max(deltaSegundosBruto, 0),
+            VIGILADOR_DELTA_MAX_SEGUNDOS
+          );
+
+          let segundosTotalDia = (docJ.segundos_total_dia as number) ?? 0;
+          let segundosContinuoActual =
+            (docJ.segundos_continuo_actual as number) ?? 0;
+          let segundosPausaActual =
+            (docJ.segundos_pausa_actual as number) ?? 0;
+          let alerta345Enviada =
+            (docJ.alerta_3_45_continua_enviada as boolean) ?? false;
+          let alerta1130Enviada =
+            (docJ.alerta_11_30_diaria_enviada as boolean) ?? false;
+          let pausaObligatoriaExcedida =
+            (docJ.pausa_obligatoria_excedida as boolean) ?? false;
+          let jornadaDiariaExcedida =
+            (docJ.jornada_diaria_excedida as boolean) ?? false;
+
+          if (speed > VIGILADOR_UMBRAL_MOVIMIENTO_KMH) {
+            // Manejando ahora.
+            if (segundosPausaActual >= VIGILADOR_PAUSA_RESET_SEGUNDOS) {
+              // Tuvo pausa válida → reset del continuo y de la flag de
+              // alerta para que pueda dispararse de nuevo en el próximo
+              // ciclo de 4h.
+              segundosContinuoActual = 0;
+              alerta345Enviada = false;
+            }
+            segundosPausaActual = 0;
+            segundosContinuoActual += deltaSegundos;
+            segundosTotalDia += deltaSegundos;
+          } else {
+            // Parado o moviéndose lento (< umbral).
+            segundosPausaActual += deltaSegundos;
+            // segundos_continuo_actual y _total_dia NO se mueven.
+          }
+
+          // Chequear umbrales de alerta.
+          let alertContinuo = false;
+          let alertDiario = false;
+
+          if (
+            segundosContinuoActual >= VIGILADOR_CONTINUO_ALERTA_SEGUNDOS &&
+            !alerta345Enviada
+          ) {
+            alertContinuo = true;
+            alerta345Enviada = true;
+          }
+          if (segundosContinuoActual >= VIGILADOR_CONTINUO_LIMITE_SEGUNDOS) {
+            pausaObligatoriaExcedida = true;
+          }
+
+          if (
+            segundosTotalDia >= VIGILADOR_DIARIO_ALERTA_SEGUNDOS &&
+            !alerta1130Enviada
+          ) {
+            alertDiario = true;
+            alerta1130Enviada = true;
+          }
+          if (segundosTotalDia >= VIGILADOR_DIARIO_LIMITE_SEGUNDOS) {
+            jornadaDiariaExcedida = true;
+          }
+
+          tx.update(refJornada, {
+            segundos_total_dia: segundosTotalDia,
+            segundos_continuo_actual: segundosContinuoActual,
+            segundos_pausa_actual: segundosPausaActual,
+            ultima_actualizacion_at: ahora,
+            ultima_patente: patente,
+            alerta_3_45_continua_enviada: alerta345Enviada,
+            alerta_11_30_diaria_enviada: alerta1130Enviada,
+            alerta_3_45_continua_at: alertContinuo ?
+              ahora :
+              docJ.alerta_3_45_continua_at ?? null,
+            alerta_11_30_diaria_at: alertDiario ?
+              ahora :
+              docJ.alerta_11_30_diaria_at ?? null,
+            pausa_obligatoria_excedida: pausaObligatoriaExcedida,
+            jornada_diaria_excedida: jornadaDiariaExcedida,
+          });
+
+          return { alertContinuo, alertDiario };
+        });
+
+        if (result.alertContinuo) {
+          await _encolarAvisoPausaContinua(driverDni, patente);
+          alertasContinuoEnviadas++;
+        }
+        if (result.alertDiario) {
+          await _encolarAvisoLimiteDiario(driverDni, patente);
+          alertasDiarioEnviadas++;
+        }
+      } catch (e) {
+        logger.warn("[vigiladorJornadaChofer] fallo procesar chofer", {
+          driverDni,
+          patente,
+          error: (e as Error).message,
+        });
+      }
+    }
+
+    logger.info("[vigiladorJornadaChofer] OK", {
+      choferesEvaluados,
+      alertasContinuoEnviadas,
+      alertasDiarioEnviadas,
+    });
+  }
+);
+
+// Encola aviso al chofer cuando lleva 3:45h continuas de manejo.
+async function _encolarAvisoPausaContinua(
+  choferDni: string,
+  patente: string
+): Promise<void> {
+  const empSnap = await db.collection("EMPLEADOS").doc(choferDni).get();
+  if (!empSnap.exists) return;
+  const empData = empSnap.data() ?? {};
+  if (empData.ACTIVO === false) return;
+  const tel = (empData.TELEFONO ?? "").toString().trim();
+  if (!tel || tel === "-") return;
+
+  const apodo = (empData.APODO ?? "").toString().trim();
+  const nombreFull = (empData.NOMBRE ?? "").toString().trim();
+  const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+  const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+
+  const variantes = [
+    `${saludo},\n\n` +
+      "Llevás 3 horas y 45 minutos manejando. En máximo 15 min " +
+      "tenés que tomarte una pausa.\n\n" +
+      `Buscá un lugar seguro para parar el ${patente}. Después de ` +
+      "descansar, podés continuar.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}.\n\n` +
+      "Aviso: estás cerca de las 4 horas de manejo continuo. " +
+      "Tenés 15 minutos para parar.\n\n" +
+      `Buscá un lugar seguro y tomate una pausa con el ${patente} ` +
+      "antes de seguir.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+  ];
+  const mensaje = variantes[Math.floor(Math.random() * variantes.length)];
+
+  await db.collection("COLA_WHATSAPP").add({
+    telefono: tel,
+    mensaje,
+    estado: "PENDIENTE",
+    encolado_en: FieldValue.serverTimestamp(),
+    enviado_en: null,
+    error: null,
+    intentos: 0,
+    origen: "jornada_pausa_continua",
+    destinatario_coleccion: "EMPLEADOS",
+    destinatario_id: choferDni,
+    campo_base: "JORNADA",
+    admin_dni: "BOT",
+    admin_nombre: "Bot vigilador jornada",
+    alert_patente: patente,
+  });
+}
+
+// Encola aviso al chofer cuando llega a 11:30h totales del día.
+async function _encolarAvisoLimiteDiario(
+  choferDni: string,
+  patente: string
+): Promise<void> {
+  const empSnap = await db.collection("EMPLEADOS").doc(choferDni).get();
+  if (!empSnap.exists) return;
+  const empData = empSnap.data() ?? {};
+  if (empData.ACTIVO === false) return;
+  const tel = (empData.TELEFONO ?? "").toString().trim();
+  if (!tel || tel === "-") return;
+
+  const apodo = (empData.APODO ?? "").toString().trim();
+  const nombreFull = (empData.NOMBRE ?? "").toString().trim();
+  const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+  const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+
+  const variantes = [
+    `${saludo},\n\n` +
+      "Llevás 11 horas y 30 minutos de manejo en el día. En 30 min " +
+      "más vas a llegar al límite legal de 12 horas.\n\n" +
+      `Buscá un lugar seguro para parar el ${patente} y continuá ` +
+      "después de descansar.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}.\n\n` +
+      "Aviso: estás cerca del límite diario de 12 horas de manejo. " +
+      "Te quedan 30 minutos.\n\n" +
+      `Frená el ${patente} en un lugar seguro y descansá. ` +
+      "Mañana seguís.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+  ];
+  const mensaje = variantes[Math.floor(Math.random() * variantes.length)];
+
+  await db.collection("COLA_WHATSAPP").add({
+    telefono: tel,
+    mensaje,
+    estado: "PENDIENTE",
+    encolado_en: FieldValue.serverTimestamp(),
+    enviado_en: null,
+    error: null,
+    intentos: 0,
+    origen: "jornada_limite_diario",
+    destinatario_coleccion: "EMPLEADOS",
+    destinatario_id: choferDni,
+    campo_base: "JORNADA",
+    admin_dni: "BOT",
+    admin_nombre: "Bot vigilador jornada",
+    alert_patente: patente,
+  });
+}
+
+// ============================================================================
+// avisoFinJornadaNocturna — aviso 23:30 "buscá lugar para descansar"
+// ============================================================================
+//
+// Cron diario a las 23:30 ART. Avisa a todos los choferes con ignición
+// activa (manejando) que la jornada está por terminar — los choferes
+// no pueden conducir 00:00–06:00 (decisión operativa Vecchi).
+//
+// DESHABILITADO POR DEFAULT (`AVISO_NOCTURNO_ACTIVO = false`) porque el
+// bot no opera 24x7 y no tendría sentido encolar mensajes que se
+// envían al día siguiente. Cuando el bot pase a operación nocturna,
+// poner el flag en true y deployar.
+
+export const avisoFinJornadaNocturna = onSchedule(
+  {
+    schedule: "30 23 * * *",
+    timeZone: "America/Argentina/Buenos_Aires",
+    timeoutSeconds: 60,
+    memory: "256MiB",
+  },
+  async () => {
+    if (!AVISO_NOCTURNO_ACTIVO) {
+      logger.info("[avisoFinJornadaNocturna] flag apagado, skip");
+      return;
+    }
+
+    const snap = await db.collection("SITRACK_POSICIONES").get();
+    let avisados = 0;
+
+    for (const d of snap.docs) {
+      const data = d.data();
+      const ignition = data.ignition === true;
+      const driverDni = (data.driver_dni ?? "").toString().trim();
+      if (!ignition || !driverDni) continue;
+
+      const patente = d.id;
+      const empSnap = await db.collection("EMPLEADOS").doc(driverDni).get();
+      if (!empSnap.exists) continue;
+      const empData = empSnap.data() ?? {};
+      if (empData.ACTIVO === false) continue;
+      const tel = (empData.TELEFONO ?? "").toString().trim();
+      if (!tel || tel === "-") continue;
+
+      const apodo = (empData.APODO ?? "").toString().trim();
+      const nombreFull = (empData.NOMBRE ?? "").toString().trim();
+      const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+      const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+
+      const mensaje =
+        `${saludo},\n\n` +
+        "Fin de jornada próximo. A las 00:00 no podés seguir " +
+        "conduciendo (descanso obligatorio hasta las 06:00).\n\n" +
+        `Buscá un lugar seguro para parar el ${patente} ahora y ` +
+        "descansá hasta mañana.\n\n" +
+        BANNER_TESTING +
+        "_Coopertrans Móvil — Mensaje automático._";
+
+      await db.collection("COLA_WHATSAPP").add({
+        telefono: tel,
+        mensaje,
+        estado: "PENDIENTE",
+        encolado_en: FieldValue.serverTimestamp(),
+        enviado_en: null,
+        error: null,
+        intentos: 0,
+        origen: "jornada_fin_nocturna",
+        destinatario_coleccion: "EMPLEADOS",
+        destinatario_id: driverDni,
+        campo_base: "JORNADA",
+        admin_dni: "BOT",
+        admin_nombre: "Bot vigilador jornada",
+        alert_patente: patente,
+      });
+      avisados++;
+    }
+
+    logger.info("[avisoFinJornadaNocturna] OK", { avisados });
+  }
+);
+
+// ============================================================================
+// resumenExcesosJornadaDiario — al jefe de Seguridad e Higiene
+// ============================================================================
+//
+// Cron diario a las 23:55 ART. Lee JORNADAS_CHOFER del día y arma un
+// resumen de los choferes que cruzaron alguno de los límites (4h
+// continuas o 12h diarias). Va al jefe de Seg e Higiene
+// (SEG_HIGIENE_DESTINATARIO_DNI = MOLINA ALEJANDRA).
+//
+// Si no hay excesos, no se manda nada (silent log).
+
+export const resumenExcesosJornadaDiario = onSchedule(
+  {
+    schedule: "55 23 * * *",
+    timeZone: "America/Argentina/Buenos_Aires",
+    timeoutSeconds: 60,
+    memory: "256MiB",
+  },
+  async () => {
+    logger.info("[resumenExcesosJornadaDiario] iniciando");
+
+    const fechaArt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+
+    const snap = await db
+      .collection("JORNADAS_CHOFER")
+      .where("fecha_art", "==", fechaArt)
+      .get();
+
+    interface ExcesoChofer {
+      choferDni: string;
+      patente: string;
+      segundosTotal: number;
+      segundosContinuoMax: number;
+      excedio4hContinua: boolean;
+      excedio12hDiaria: boolean;
+    }
+
+    const excesos: ExcesoChofer[] = [];
+    for (const d of snap.docs) {
+      const data = d.data();
+      const excedio4h = data.pausa_obligatoria_excedida === true;
+      const excedio12h = data.jornada_diaria_excedida === true;
+      if (!excedio4h && !excedio12h) continue;
+      excesos.push({
+        choferDni: (data.chofer_dni ?? "").toString(),
+        patente: (data.ultima_patente ?? "").toString(),
+        segundosTotal: (data.segundos_total_dia as number) ?? 0,
+        segundosContinuoMax:
+          (data.segundos_continuo_actual as number) ?? 0,
+        excedio4hContinua: excedio4h,
+        excedio12hDiaria: excedio12h,
+      });
+    }
+
+    if (excesos.length === 0) {
+      logger.info("[resumenExcesosJornadaDiario] sin excesos hoy");
+      return;
+    }
+
+    // Lookup destinatario.
+    const empSnap = await db
+      .collection("EMPLEADOS")
+      .doc(SEG_HIGIENE_DESTINATARIO_DNI)
+      .get();
+    if (!empSnap.exists) {
+      logger.error(
+        "[resumenExcesosJornadaDiario] destinatario no existe en EMPLEADOS",
+        { dni: SEG_HIGIENE_DESTINATARIO_DNI }
+      );
+      return;
+    }
+    const empData = empSnap.data() ?? {};
+    const tel = (empData.TELEFONO ?? "").toString().trim();
+    if (!tel || tel === "-") {
+      logger.error(
+        "[resumenExcesosJornadaDiario] destinatario sin TELEFONO",
+        { dni: SEG_HIGIENE_DESTINATARIO_DNI }
+      );
+      return;
+    }
+
+    // Lookup nombres de los choferes (1 query por chofer, ~pocos
+    // típicamente).
+    const nombrePorDni = new Map<string, string>();
+    for (const x of excesos) {
+      try {
+        const eS = await db.collection("EMPLEADOS").doc(x.choferDni).get();
+        const n = eS.exists ?
+          (eS.data()?.NOMBRE ?? "").toString().trim() :
+          "";
+        nombrePorDni.set(x.choferDni, n);
+      } catch (_) {
+        nombrePorDni.set(x.choferDni, "");
+      }
+    }
+
+    // Formato HH:MM de un total de segundos.
+    function fmtHm(s: number): string {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return `${h}:${m.toString().padStart(2, "0")}`;
+    }
+
+    const fmtFecha = `${fechaArt.split("-").reverse().join("/")}`;
+
+    const lineas = excesos.map((x) => {
+      const nombre = nombrePorDni.get(x.choferDni) || `DNI ${x.choferDni}`;
+      const flags: string[] = [];
+      if (x.excedio4hContinua) flags.push("4h continuas");
+      if (x.excedio12hDiaria) flags.push("12h diarias");
+      return (
+        `🚛 *${x.patente || "—"}* — ${nombre} (DNI ${x.choferDni})\n` +
+        `   Total día: ${fmtHm(x.segundosTotal)} hs\n` +
+        `   Continuo máx: ${fmtHm(x.segundosContinuoMax)} hs\n` +
+        `   ⚠️ Excedió: ${flags.join(", ")}`
+      );
+    });
+
+    const apodo = (empData.APODO ?? "").toString().trim();
+    const nombreFull = (empData.NOMBRE ?? "").toString().trim();
+    const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+    const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+
+    const mensaje =
+      `${saludo},\n\n` +
+      `📋 *Resumen excesos de jornada — ${fmtFecha}*\n\n` +
+      `${excesos.length} chofer${excesos.length === 1 ? "" : "es"} ` +
+      "excedió límites de manejo:\n\n" +
+      `${lineas.join("\n\n")}\n\n` +
+      "_Datos calculados por el vigilador (Sitrack speed > 10 km/h, " +
+      "pausa válida 15 min)._\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Aviso automático._";
+
+    await db.collection("COLA_WHATSAPP").add({
+      telefono: tel,
+      mensaje,
+      estado: "PENDIENTE",
+      encolado_en: FieldValue.serverTimestamp(),
+      enviado_en: null,
+      error: null,
+      intentos: 0,
+      origen: "resumen_excesos_jornada",
+      destinatario_coleccion: "EMPLEADOS",
+      destinatario_id: SEG_HIGIENE_DESTINATARIO_DNI,
+      campo_base: "JORNADA",
+      admin_dni: "BOT",
+      admin_nombre: "Bot vigilador jornada",
+    });
+
+    logger.info("[resumenExcesosJornadaDiario] OK", {
+      excesos: excesos.length,
+      destinatario: SEG_HIGIENE_DESTINATARIO_DNI,
     });
   }
 );

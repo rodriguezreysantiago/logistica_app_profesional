@@ -306,6 +306,24 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // JORNADAS_CHOFER — tracking de horas de manejo por chofer y día
+    // ========================================================================
+    // Doc id: `{dni}_{YYYY-MM-DD}`. Lo escribe el cron
+    // `vigiladorJornadaChofer` cada 5 min con segundos acumulados de
+    // manejo (>10 km/h), continuo actual, pausa actual y flags de
+    // alertas enviadas. Resumen al jefe de Seg e Higiene a las 23:55.
+    //
+    // El cliente Flutter podría leer esto en el futuro para mostrar
+    // un dashboard "horas del día por chofer" — por ahora solo el
+    // server lo escribe. Lectura para los mismos roles que ven
+    // tableros Volvo (admin/supervisor/SEG_HIGIENE).
+
+    match /JORNADAS_CHOFER/{doc} {
+      allow read: if puedeVerVolvoTableros();
+      allow create, update, delete: if false;
+    }
+
+    // ========================================================================
     // ASIGNACIONES_VEHICULO — log temporal de quién manejó qué unidad
     // ========================================================================
     // Cada doc representa el período en que un chofer manejó una patente.
