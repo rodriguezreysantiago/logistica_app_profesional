@@ -3492,41 +3492,20 @@ export const sitrackPosicionPoller = onSchedule(
 );
 
 // Encola un aviso al chofer pidiéndole que pase el iButton de Sitrack
-// para identificarse. Devuelve `true` si efectivamente encoló (true =
-// "novedad de hoy"); `false` si la dedup ya marcó hoy como avisado.
+// para identificarse. Devuelve `true` si efectivamente encoló;
+// `false` si no pudo (chofer no existe, sin teléfono, etc).
 //
-// Dedup atómica via `.create()` en `META/dedup_chofer_no_id_{dni}_{fecha}`.
-// El cron corre cada 5 min — sin dedup, el chofer recibiría un aviso
-// cada 5 min mientras manejara sin iButton (peor que el spam original).
+// Sin dedup — decisión operativa Vecchi (2026-05-07): manejar sin
+// iButton es problema serio y queremos presionar al chofer para que
+// lo pase. El cron corre cada 5 min → potencialmente recibe un
+// mensaje cada 5 min mientras siga manejando sin pasar el iButton.
+// El agrupador del bot Node.js (origen `sitrack_chofer_no_identificado`
+// agregado a ORIGENES_AGRUPABLES) junta los pendientes y los manda
+// como UN solo mensaje al enviar — eso mitiga el ruido.
 async function _encolarAvisoChoferNoIdentificado(
   patente: string,
   choferDni: string
 ): Promise<boolean> {
-  // Dedup ID: chofer + fecha ART. No incluye patente porque si rota
-  // entre tractores en el mismo día sin pasar iButton, queremos un
-  // único aviso (el problema es el iButton, no la patente).
-  const fechaArt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-  const dedupRef = db
-    .collection("META")
-    .doc(`dedup_chofer_no_id_${choferDni}_${fechaArt}`);
-
-  try {
-    await dedupRef.create({
-      chofer_dni: choferDni,
-      fecha_art: fechaArt,
-      primer_aviso_at: FieldValue.serverTimestamp(),
-      patente_inicial: patente,
-    });
-  } catch (_) {
-    // Ya avisamos hoy a este chofer — skip silencioso.
-    return false;
-  }
-
   // Lookup chofer.
   const empSnap = await db.collection("EMPLEADOS").doc(choferDni).get();
   if (!empSnap.exists) {
@@ -3550,13 +3529,28 @@ async function _encolarAvisoChoferNoIdentificado(
   const saludoNombre = apodo || _primerNombre(nombreFull) || "";
   const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
 
-  const mensaje =
+  // Variantes para no repetir el mismo texto cada 5 min — anti-baneo
+  // de WhatsApp y para que el chofer no lo perciba como auto-spam.
+  const variantes = [
     `${saludo},\n\n` +
-    `Estás manejando el TRACTOR ${patente} pero todavía no pasaste ` +
-    "tu iButton de Sitrack hoy. Por favor pasalo apenas puedas, así " +
-    "quedan registrados los datos del recorrido.\n\n" +
-    BANNER_TESTING +
-    "_Coopertrans Móvil — Mensaje automático._";
+      `Estás manejando el TRACTOR ${patente} pero todavía no pasaste ` +
+      "tu iButton de Sitrack. Por favor pasalo apenas puedas, así " +
+      "quedan registrados los datos del recorrido.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}.\n\n` +
+      `Recordatorio: el TRACTOR ${patente} está en marcha pero ` +
+      "Sitrack no te detecta logueado. Pasá el iButton apenas puedas.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}, te avisamos desde la oficina.\n\n` +
+      `Estamos viendo que manejás el ${patente} sin haber pasado ` +
+      "el iButton de Sitrack. Necesitamos que te identifiques así " +
+      "queda el registro del viaje.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+  ];
+  const mensaje = variantes[Math.floor(Math.random() * variantes.length)];
 
   await db.collection("COLA_WHATSAPP").add({
     telefono: tel,

@@ -29,6 +29,12 @@ const ORIGENES_AGRUPABLES = new Set([
   'volvo_alert_high',
   // volvo_alert_mantenimiento ya no se encola individualmente — el cron
   // genera un único mensaje diario (cron_mantenimiento_diario).
+  // sitrack_chofer_no_identificado: el cron Sitrack encola un aviso
+  // cada 5 min mientras el chofer maneje sin pasar el iButton (sin
+  // dedup, decisión Vecchi 2026-05-07). El agrupador junta los
+  // pendientes en un único mensaje "te seguimos detectando..." para
+  // que no parezca auto-spam aunque haya muchos PENDIENTES atrás.
+  'sitrack_chofer_no_identificado',
 ]);
 
 /**
@@ -131,15 +137,58 @@ async function planificarEnvioAgrupado(db, docActual) {
   const todos = [docActual, ...otros];
 
   // Armar el mensaje según el origen.
-  const mensajeCombinado =
-    origen === 'volvo_alert_high' ?
-      _armarMensajeAlertHighAgrupado(todos) :
-      _armarMensajeMantenimientoAgrupado(todos);
+  let mensajeCombinado;
+  if (origen === 'volvo_alert_high') {
+    mensajeCombinado = _armarMensajeAlertHighAgrupado(todos);
+  } else if (origen === 'sitrack_chofer_no_identificado') {
+    mensajeCombinado = _armarMensajeChoferNoIdentificadoAgrupado(todos);
+  } else {
+    mensajeCombinado = _armarMensajeMantenimientoAgrupado(todos);
+  }
 
   return {
     mensajeCombinado,
     otrosDocsAgrupados: otros,
   };
+}
+
+/** "Hola Juan, te seguimos detectando manejando sin iButton (3 detecciones)..." */
+function _armarMensajeChoferNoIdentificadoAgrupado(docs) {
+  // Saludo del primer mensaje (todos van al mismo destinatario).
+  const primerMensaje = docs[0].data().mensaje || '';
+  const matchSaludo = primerMensaje.match(/^(Hola[^,.]*)[,.]/);
+  const saludo = matchSaludo ? matchSaludo[1] : 'Hola';
+
+  // Patentes únicas detectadas (puede ser 1 o varias si rotó tractores).
+  const patentes = new Set();
+  let ultimaFecha = null;
+  for (const doc of docs) {
+    const d = doc.data();
+    const patente = (d.alert_patente || '?').toString();
+    if (patente && patente !== '?') patentes.add(patente);
+    const fecha = _fechaEventoDe(d);
+    if (!ultimaFecha || fecha > ultimaFecha) ultimaFecha = fecha;
+  }
+
+  const horaTxt = ultimaFecha ? aLocalTime(ultimaFecha) : '';
+  const patentesArr = [...patentes];
+  const patenteStr = patentesArr.length === 0 ?
+    'el tractor' :
+    patentesArr.length === 1 ?
+      `el TRACTOR ${patentesArr[0]}` :
+      `los tractores ${patentesArr.join(', ')}`;
+
+  const cantidad = docs.length;
+  return (
+    `${saludo},\n\n` +
+    `Te detectamos ${cantidad} veces en los últimos minutos manejando ` +
+    `${patenteStr} sin pasar el iButton de Sitrack ` +
+    `(última: ${horaTxt}).\n\n` +
+    'Por favor pasalo apenas puedas, así quedan registrados los datos ' +
+    'del recorrido.\n\n' +
+    BANNER_TESTING +
+    '_Coopertrans Móvil — Mensaje automático._'
+  );
 }
 
 /** "Hola X, se detectaron N eventos en tu(s) tractor(es): ...". */
