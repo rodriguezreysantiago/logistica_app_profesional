@@ -237,15 +237,20 @@ class _DetalleChofer extends StatelessWidget {
         const Divider(color: Colors.white10),
 
         const _SectionTitle(icon: Icons.badge, label: 'Documentación personal'),
-        // DNI no es editable inline porque ES el doc id en EMPLEADOS.
-        // Cambiar el DNI requiere recrear el legajo y cascadear las
-        // referencias en otras colecciones — eso lo hace la Cloud
-        // Function `renombrarEmpleadoDni` invocada via el botón
-        // "Cambiar DNI (renombrar)" más abajo en el sheet.
-        _DatoSoloLectura(
+        // El DNI ES el doc id en EMPLEADOS. La edición visualmente es
+        // igual al resto de los campos (lápiz, dialog para tipear el
+        // valor nuevo) pero al guardar dispara `renombrarDni` — que
+        // pide confirmación + llama a la Cloud Function que recrea el
+        // legajo y cascadea las referencias en ASIGNACIONES_VEHICULO,
+        // VOLVO_ALERTAS y COLA_WHATSAPP.
+        _DatoEditableTexto(
           etiqueta: 'DNI',
           valor: dni,
-          ayuda: 'Para corregir el DNI usá "Cambiar DNI" abajo.',
+          inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
+          keyboardType: TextInputType.number,
+          aplicarMayusculas: false,
+          onSave: (v) =>
+              EmpleadoActions.renombrarDni(context, dni, dniNuevoSugerido: v),
         ),
         _DatoEditableTexto(
           etiqueta: 'CUIL',
@@ -430,12 +435,6 @@ class _DetalleChofer extends StatelessWidget {
         ],
 
         const SizedBox(height: 30),
-        // Botón "Cambiar DNI": abre dialog + Cloud Function que recrea
-        // el legajo con el DNI nuevo y cascadea las referencias. Solo
-        // ADMIN — la function valida server-side.
-        if (Capabilities.can(PrefsService.rol, Capability.cambiarRolEmpleado))
-          _BotonCambiarDni(dni: dni),
-        const SizedBox(height: 12),
         // Acción de soft-delete al final de la ficha (siempre visible
         // para que el admin pueda dar de baja / reactivar fácilmente).
         _BotonBajaReactivarEmpleado(dni: dni, data: data),
@@ -541,87 +540,6 @@ class _BotonBajaReactivarEmpleado extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Fila de solo lectura — mismo aspecto visual que `_DatoEditableTexto`
-/// pero sin el icono de edición ni el dialog. Usado para campos que NO
-/// se pueden editar inline (ej. el DNI, que es el doc id de EMPLEADOS).
-/// El subtítulo opcional explica al admin por qué no es editable y
-/// dónde está la operación correcta para cambiarlo.
-class _DatoSoloLectura extends StatelessWidget {
-  final String etiqueta;
-  final String valor;
-  final String? ayuda;
-
-  const _DatoSoloLectura({
-    required this.etiqueta,
-    required this.valor,
-    this.ayuda,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  etiqueta,
-                  style: const TextStyle(fontSize: 11, color: Colors.white38),
-                ),
-                Text(
-                  valor,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                if (ayuda != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    ayuda!,
-                    style: const TextStyle(
-                        fontSize: 11, color: Colors.white38),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const Icon(Icons.lock_outline, size: 18, color: Colors.white24),
-        ],
-      ),
-    );
-  }
-}
-
-/// Botón "Cambiar DNI (renombrar)" — invoca `EmpleadoActions.renombrarDni`
-/// que abre dialog de confirmación + dispara la Cloud Function. Solo
-/// admins lo ven (el caller del widget gatea con la capability
-/// `cambiarRolEmpleado` que coincide con el rol ADMIN).
-class _BotonCambiarDni extends StatelessWidget {
-  final String dni;
-
-  const _BotonCambiarDni({required this.dni});
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: () => EmpleadoActions.renombrarDni(context, dni),
-      icon: const Icon(Icons.swap_horiz, size: 18),
-      label: const Text('Cambiar DNI (renombrar)'),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.accentOrange,
-        side: BorderSide(color: AppColors.accentOrange.withAlpha(120)),
-        minimumSize: const Size(double.infinity, 44),
       ),
     );
   }

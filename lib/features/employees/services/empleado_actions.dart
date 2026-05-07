@@ -174,96 +174,113 @@ class EmpleadoActions {
   /// Renombra el DNI de un empleado mal cargado.
   ///
   /// El DNI es el doc id de EMPLEADOS, así que no se puede editar inline
-  /// — hay que crear un doc nuevo, cascadear las referencias en las
-  /// otras colecciones (ASIGNACIONES_VEHICULO, VOLVO_ALERTAS,
-  /// COLA_WHATSAPP) y borrar el viejo. Todo eso lo hace la Cloud
-  /// Function `renombrarEmpleadoDni`. Acá solo abrimos un dialog para
-  /// pedir el DNI nuevo y mostramos confirmación + resultado.
+  /// como un campo cualquiera — hay que crear un doc nuevo, cascadear
+  /// las referencias en otras colecciones (ASIGNACIONES_VEHICULO,
+  /// VOLVO_ALERTAS, COLA_WHATSAPP) y borrar el viejo. Todo eso lo hace
+  /// la Cloud Function `renombrarEmpleadoDni`. Acá pedimos el DNI nuevo
+  /// (si no vino ya tipeado), pedimos confirmación y disparamos.
+  ///
+  /// [dniNuevoSugerido]: si la UI ya capturó el DNI nuevo (por ejemplo
+  /// al editar el campo "DNI" inline en la ficha), saltamos el primer
+  /// dialog y vamos directo a la confirmación. Si es null, abrimos un
+  /// input dialog para pedirlo.
   ///
   /// La operación es destructiva y solo ADMIN puede ejecutarla. La rule
   /// se valida también server-side en la function.
   static Future<void> renombrarDni(
     BuildContext context,
-    String dniViejo,
-  ) async {
+    String dniViejo, {
+    String? dniNuevoSugerido,
+  }) async {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
 
-    // ─── Dialog 1: pedir el DNI nuevo ──────────────────────────────
-    final ctrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    final dniNuevo = await showDialog<String>(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        title: const Text('Cambiar DNI (renombrar)'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Cambiar el DNI implica recrear el legajo y actualizar '
-                'todas las referencias (asignaciones, alertas Volvo, '
-                'cola de WhatsApp). El chofer va a tener que volver a '
-                'loguear con el DNI nuevo.\n\n'
-                'DNI actual: $dniViejo',
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: ctrl,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
-                decoration: const InputDecoration(
-                  labelText: 'DNI nuevo',
-                  prefixIcon: Icon(Icons.badge),
+    // ─── Resolver el DNI nuevo: viene del caller o lo pedimos. ─────
+    String? dniNuevo;
+    if (dniNuevoSugerido != null) {
+      final candidato = dniNuevoSugerido.trim().replaceAll(RegExp(r'\D'), '');
+      if (candidato.length < 7 || candidato.length > 8) {
+        AppFeedback.errorOn(messenger,
+            'El DNI nuevo debe tener 7 u 8 dígitos.');
+        return;
+      }
+      if (candidato == dniViejo) {
+        // No-op limpio: el admin "confirmó" sin cambiar nada.
+        return;
+      }
+      dniNuevo = candidato;
+    } else {
+      final ctrl = TextEditingController();
+      final formKey = GlobalKey<FormState>();
+      dniNuevo = await showDialog<String>(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+          title: const Text('Cambiar DNI'),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'DNI actual: $dniViejo',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
-                validator: (v) {
-                  final t = (v ?? '').trim();
-                  if (t.length < 7 || t.length > 8) {
-                    return 'Tiene que tener 7 u 8 dígitos';
-                  }
-                  if (t == dniViejo) return 'Es igual al DNI actual';
-                  return null;
-                },
-              ),
-            ],
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: ctrl,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
+                  decoration: const InputDecoration(
+                    labelText: 'DNI nuevo',
+                    prefixIcon: Icon(Icons.badge),
+                  ),
+                  validator: (v) {
+                    final t = (v ?? '').trim();
+                    if (t.length < 7 || t.length > 8) {
+                      return 'Tiene que tener 7 u 8 dígitos';
+                    }
+                    if (t == dniViejo) return 'Es igual al DNI actual';
+                    return null;
+                  },
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dCtx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() ?? false) {
+                  Navigator.of(dCtx).pop(ctrl.text.trim());
+                }
+              },
+              child: const Text('Continuar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dCtx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState?.validate() ?? false) {
-                Navigator.of(dCtx).pop(ctrl.text.trim());
-              }
-            },
-            child: const Text('Continuar'),
-          ),
-        ],
-      ),
-    );
+      );
+    }
 
     if (dniNuevo == null || dniNuevo.isEmpty) return;
-    // Guard contra unmount mientras esperaba el dialog 1.
     if (!context.mounted) return;
 
-    // ─── Dialog 2: confirmación final ──────────────────────────────
+    // ─── Dialog de confirmación: "se actualiza en la base de datos" ─
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (dCtx) => AlertDialog(
         title: const Text('Confirmar cambio de DNI'),
         content: Text(
-          '¿Renombrar el DNI $dniViejo → $dniNuevo?\n\n'
-          'Esto NO se puede deshacer. El legajo se recrea con el DNI '
-          'nuevo y las asignaciones, alertas Volvo y mensajes pendientes '
-          'se actualizan. El historial de auditoría queda intacto (sigue '
-          'mostrando el DNI viejo en eventos pasados).',
+          '¿Cambiar el DNI de este empleado de $dniViejo a $dniNuevo?\n\n'
+          'Se va a actualizar en la base de datos: el legajo se recrea '
+          'con el DNI nuevo y se sincronizan las asignaciones, alertas '
+          'Volvo y mensajes pendientes. La operación NO se puede '
+          'deshacer y el chofer va a tener que volver a loguear con el '
+          'DNI nuevo.',
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
         actions: [
@@ -277,7 +294,7 @@ class EmpleadoActions {
               backgroundColor: AppColors.accentRed,
               foregroundColor: Colors.white,
             ),
-            child: const Text('SÍ, RENOMBRAR'),
+            child: const Text('SÍ, ACTUALIZAR'),
           ),
         ],
       ),
