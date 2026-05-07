@@ -723,9 +723,14 @@ class _DatoEditableTexto extends StatelessWidget {
             ),
           ),
           // Permite enviar con Enter sin tener que ir al botón.
+          // Importante: cerramos el dialog ANTES de llamar a onSave.
+          // Si onSave abre otro dialog (caso renombrarDni), un pop
+          // posterior se llevaría puesto a ese segundo dialog en
+          // lugar de éste — fix del 2026-05-07.
           onSubmitted: (_) {
-            onSave(transform(controller.text));
+            final v = transform(controller.text);
             Navigator.pop(dCtx);
+            onSave(v);
           },
         ),
         actions: [
@@ -735,8 +740,9 @@ class _DatoEditableTexto extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () {
-              onSave(transform(controller.text));
+              final v = transform(controller.text);
               Navigator.pop(dCtx);
+              onSave(v);
             },
             child: const Text('GUARDAR'),
           ),
