@@ -180,10 +180,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               ruta: AppRoutes.adminEstadoBot,
             ),
           const SizedBox(height: 28),
-          const Center(
+          Center(
             child: Text(
-              'v 1.0.7 — Base Operativa',
-              style: TextStyle(
+              // Lee del único string fuente de versión (AppTexts.appVersion).
+              // Antes estaba hardcodeada como "v 1.0.7" y nunca se
+              // actualizaba con los bumps de pubspec — confundía al
+              // admin que no podía saber qué binario estaba corriendo.
+              '${AppTexts.appVersion} — Base Operativa',
+              style: const TextStyle(
                 color: Colors.white24,
                 fontSize: 11,
                 letterSpacing: 1,
