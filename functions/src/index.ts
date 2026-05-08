@@ -3369,6 +3369,19 @@ export const sitrackPosicionPoller = onSchedule(
       choferDni: string;
     }> = [];
 
+    // Log temporal: dump de TODOS los campos del primer report con
+    // ignición ON. Sirve para debug del campo del chofer cuando el
+    // mismo está logueado en el panel Sitrack pero el cron no lo ve
+    // (caso reportado 2026-05-08 de Moises en AG890AL). Una vez
+    // identificado el campo correcto, sacar este log.
+    const sample = reports.find((r) => r.ignition === 1);
+    if (sample) {
+      logger.info("[sitrackPosicionPoller] sample report (debug)", {
+        keys: Object.keys(sample as Record<string, unknown>),
+        sample,
+      });
+    }
+
     for (const r of reports) {
       const patente = (r.assetId ?? "").toString().trim().toUpperCase();
       if (!patente) {
