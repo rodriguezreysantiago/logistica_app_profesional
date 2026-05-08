@@ -9,18 +9,38 @@
 // posición actual y empezar a sumar bien (con el fix que valida
 // `polled_en` y umbral 15 km/h).
 //
-// Uso (desde la raíz del repo, mismo runtime que el bot):
-//   node whatsapp-bot/scripts/resetear_jornada_chofer.js <DNI>
-//   node whatsapp-bot/scripts/resetear_jornada_chofer.js 12345678 --dry-run
+// Uso (desde la raíz del repo):
+//   node scripts/resetear_jornada_chofer.js <DNI>
+//   node scripts/resetear_jornada_chofer.js 12345678 --dry-run
 //
 // El doc se borra (delete). El cron lo recreará en el próximo ciclo
 // con segundos_total_dia=0.
-
-require("dotenv").config({ path: __dirname + "/../whatsapp-bot/.env" });
+//
+// Sin dependencias custom — usa firebase-admin de whatsapp-bot/
+// node_modules (instalado por el bot). Si el bot no está instalado,
+// correr `npm install firebase-admin` en la raíz del repo.
 
 const path = require("path");
 const fs = require("fs");
-const admin = require("firebase-admin");
+
+// Resolver firebase-admin desde whatsapp-bot/node_modules (siempre
+// instalado en multi-PC). Fallback a node_modules raíz si lo
+// instalaste a mano.
+let admin;
+try {
+  admin = require(path.join(__dirname, "..", "whatsapp-bot", "node_modules", "firebase-admin"));
+} catch (_) {
+  try {
+    admin = require("firebase-admin");
+  } catch (_) {
+    console.error(
+      "No encuentro firebase-admin. Corré desde la raíz del repo " +
+        "después de un `cd whatsapp-bot && npm install`, o " +
+        "instalalo en la raíz: `npm install firebase-admin`."
+    );
+    process.exit(1);
+  }
+}
 
 const dni = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
@@ -31,10 +51,10 @@ if (!dni || /^[^\d]/.test(dni)) {
   process.exit(1);
 }
 
-// Init Firebase Admin con service account del repo.
+// Init Firebase Admin con service account del repo (raíz, mismo
+// archivo que usa el bot y los demás scripts Python).
 const credsPath = path.resolve(
-  process.env.FIREBASE_CREDENTIALS_PATH ||
-    path.join(__dirname, "..", "serviceAccountKey.json")
+  path.join(__dirname, "..", "serviceAccountKey.json")
 );
 if (!fs.existsSync(credsPath)) {
   console.error(`No encuentro service account en ${credsPath}`);
@@ -42,7 +62,7 @@ if (!fs.existsSync(credsPath)) {
 }
 admin.initializeApp({
   credential: admin.credential.cert(require(credsPath)),
-  projectId: process.env.FIREBASE_PROJECT_ID || "coopertrans-movil",
+  projectId: "coopertrans-movil",
 });
 const db = admin.firestore();
 
