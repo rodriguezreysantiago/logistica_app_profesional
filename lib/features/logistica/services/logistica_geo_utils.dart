@@ -428,39 +428,50 @@ class LogisticaGeoUtils {
   }
 
   /// Match de patrones típicos de Google Maps en una URL string.
+  /// Probamos en orden de PRECISIÓN: el POI exacto primero
+  /// (`!3d!4d`), después el centro del viewport (`@lat,lng`), y
+  /// después los formatos viejos (q=, ll=).
+  ///
+  /// La distinción importa porque cuando un operador busca un silo
+  /// y copia el link, Google deja en `@` el centro de SU pantalla
+  /// (puede estar a 30-100m del silo) y en `!3d!4d` las coords
+  /// exactas del POI. Para puntos operativos (puerta del silo, etc)
+  /// preferimos las del POI.
   static LatLng? _extraerCoordsDeUrl(String url) {
-    // Patrón 1: `/@lat,lng,zoom` — el más común al copiar desde la
-    // barra de Google Maps (incluye link "place" y "directions").
-    final m1 = RegExp(r'/@(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
+    // Patrón 1: `!3d{lat}!4d{lng}` — POI exacto. Aparece en URLs
+    // "place" después del nombre del lugar. Es el más preciso
+    // porque Google lo setea con la coord del POI específico
+    // (puerta, puerta del establecimiento, centro del campo).
+    final m1 =
+        RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)').firstMatch(url);
     if (m1 != null) {
       final lat = double.tryParse(m1.group(1)!);
       final lng = double.tryParse(m1.group(2)!);
       if (lat != null && lng != null) return LatLng(lat, lng);
     }
 
-    // Patrón 2: `?q=lat,lng` o `&q=lat,lng` — link compartido tipo
-    // "search by coords".
-    final m2 =
-        RegExp(r'[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
+    // Patrón 2: `/@lat,lng,zoom` — centro del viewport. Útil
+    // cuando el link no es de un POI sino una zona libre.
+    final m2 = RegExp(r'/@(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
     if (m2 != null) {
       final lat = double.tryParse(m2.group(1)!);
       final lng = double.tryParse(m2.group(2)!);
       if (lat != null && lng != null) return LatLng(lat, lng);
     }
 
-    // Patrón 3: `?ll=lat,lng` — formato viejo pero todavía aparece.
+    // Patrón 3: `?q=lat,lng` o `&q=lat,lng` — link compartido tipo
+    // "search by coords".
     final m3 =
-        RegExp(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
+        RegExp(r'[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
     if (m3 != null) {
       final lat = double.tryParse(m3.group(1)!);
       final lng = double.tryParse(m3.group(2)!);
       if (lat != null && lng != null) return LatLng(lat, lng);
     }
 
-    // Patrón 4: `/!3d{lat}!4d{lng}` — formato interno de Google Maps
-    // que aparece en URLs "place" después del nombre.
+    // Patrón 4: `?ll=lat,lng` — formato viejo pero todavía aparece.
     final m4 =
-        RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)').firstMatch(url);
+        RegExp(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
     if (m4 != null) {
       final lat = double.tryParse(m4.group(1)!);
       final lng = double.tryParse(m4.group(2)!);
