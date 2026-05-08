@@ -5,7 +5,7 @@
 // admin mostraba todas las alertas como "Evento genérico" sin info.
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/features/eco_driving/utils/etiquetas_alerta_volvo.dart';
+import 'package:coopertrans_movil/features/eco_driving/utils/etiquetas_alerta_volvo.dart';
 
 void main() {
   group('etiquetaAlertaVolvo (versión simple)', () {

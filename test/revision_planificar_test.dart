@@ -16,7 +16,7 @@
 // `finalizarRevision` y no se cubren acá (delegación al SDK).
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/features/revisions/services/revision_service.dart';
+import 'package:coopertrans_movil/features/revisions/services/revision_service.dart';
 
 void main() {
   group('planificarAprobacion — datos incompletos', () {

@@ -1,11 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/features/gomeria/constants/posiciones.dart';
-import 'package:logistica_app_profesional/features/gomeria/models/cubierta.dart';
-import 'package:logistica_app_profesional/features/gomeria/models/cubierta_instalada.dart';
-import 'package:logistica_app_profesional/features/gomeria/models/cubierta_marca.dart';
-import 'package:logistica_app_profesional/features/gomeria/models/cubierta_modelo.dart';
-import 'package:logistica_app_profesional/features/gomeria/models/cubierta_recapado.dart';
+import 'package:coopertrans_movil/features/gomeria/constants/posiciones.dart';
+import 'package:coopertrans_movil/features/gomeria/models/cubierta.dart';
+import 'package:coopertrans_movil/features/gomeria/models/cubierta_instalada.dart';
+import 'package:coopertrans_movil/features/gomeria/models/cubierta_marca.dart';
+import 'package:coopertrans_movil/features/gomeria/models/cubierta_modelo.dart';
+import 'package:coopertrans_movil/features/gomeria/models/cubierta_recapado.dart';
 
 /// Tests del módulo Gomería — modelos data + constantes de posiciones.
 ///

@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/features/asignaciones/models/asignacion_enganche.dart';
+import 'package:coopertrans_movil/features/asignaciones/models/asignacion_enganche.dart';
 
 // Helper local: el test trabaja con maps + id en vez de un fake de
 // `DocumentSnapshot` (que es sealed en versiones nuevas de Firestore

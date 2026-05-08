@@ -13,8 +13,8 @@
 //   - canAny / canAll / ofRol con casos edge.
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/core/constants/app_constants.dart';
-import 'package:logistica_app_profesional/core/services/capabilities.dart';
+import 'package:coopertrans_movil/core/constants/app_constants.dart';
+import 'package:coopertrans_movil/core/services/capabilities.dart';
 
 void main() {
   group('Capabilities.can — fallback conservador (rol desconocido)', () {

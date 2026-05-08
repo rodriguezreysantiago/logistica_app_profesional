@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/shared/utils/formatters.dart';
+import 'package:coopertrans_movil/shared/utils/formatters.dart';
 
 void main() {
   group('AppFormatters.tryParseFecha', () {

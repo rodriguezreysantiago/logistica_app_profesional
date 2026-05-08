@@ -2,7 +2,7 @@
 ///
 /// Importá esto en lugar de cada widget por separado:
 /// ```
-/// import 'package:logistica_app_profesional/shared/widgets/app_widgets.dart';
+/// import 'package:coopertrans_movil/shared/widgets/app_widgets.dart';
 /// ```
 /// y vas a tener disponible:
 /// AppScaffold, AppCard, AppListPage, AppDetailSheet,

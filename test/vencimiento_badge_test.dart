@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/shared/widgets/vencimiento_badge.dart';
+import 'package:coopertrans_movil/shared/widgets/vencimiento_badge.dart';
 
 void main() {
   group('calcularEstadoVencimiento', () {

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/shared/utils/password_hasher.dart';
+import 'package:coopertrans_movil/shared/utils/password_hasher.dart';
 
 void main() {
   group('PasswordHasher', () {

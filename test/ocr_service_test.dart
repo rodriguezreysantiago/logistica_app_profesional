@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:logistica_app_profesional/shared/utils/ocr_service.dart';
+import 'package:coopertrans_movil/shared/utils/ocr_service.dart';
 
 void main() {
   group('OcrService.extraerFechaMasLejana', () {
