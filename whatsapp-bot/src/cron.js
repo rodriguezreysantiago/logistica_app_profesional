@@ -652,40 +652,54 @@ async function _runOnce(fs) {
               .where('severidad', '==', 'HIGH')
               .where('creado_en', '>=', desde)
               .get();
-            const eventos = alertasSnap.docs.map((d) => {
-              const data = d.data();
-              const patente = String(data.patente || '—').trim();
-              const tipo = String(data.tipo || '').trim();
-              // Volvo Vehicle Alerts API devuelve un solo tipo "GENERIC"
-              // que envuelve varios sub-eventos (SEATBELT, TELL_TALE,
-              // ALERTA_FATIGA, etc.). El subtipo viene en
-              // detalle_generic — pero según el endpoint puede estar
-              // como `triggerType` (alertas HIGH) o como `type`
-              // (alertas mantenimiento). Leemos ambos defensivamente.
-              // Sin esto el resumen muestra todo como "Evento genérico"
-              // sin info útil para el destinatario.
-              const subTipo = (tipo === 'GENERIC')
-                ? (
-                    String(data.detalle_generic?.triggerType ?? '').toUpperCase() ||
-                    String(data.detalle_generic?.type ?? '').toUpperCase() ||
-                    null
-                  )
-                : null;
-              const creadoEn = data.creado_en;
-              const fechaHora = creadoEn && typeof creadoEn.toDate === 'function'
-                ? creadoEn.toDate()
-                : new Date();
-              // Lookup chofer por patente (mapa ya cargado al inicio
-              // del cron). Si no hay match, dejamos null y el builder
-              // lo muestra como "patente sin chofer".
-              const chofer = choferByPatente.get(
-                patente.toUpperCase()
+            // Tipos excluidos del resumen a Seg e Higiene — son
+            // mecánicos, no de conducta. ADBLUE bajo / sin AdBlue es
+            // tema del taller, no del jefe de seguridad. Si Volvo lo
+            // marcó como HIGH (por el riesgo de derate), igual entra
+            // al resumen de mantenimiento más abajo, no a este.
+            const TIPOS_EXCLUIDOS_SEG_HIGIENE = new Set([
+              'ADBLUELEVEL_LOW',
+              'WITHOUT_ADBLUE',
+            ]);
+            const eventos = alertasSnap.docs
+              .map((d) => {
+                const data = d.data();
+                const patente = String(data.patente || '—').trim();
+                const tipo = String(data.tipo || '').trim();
+                // Volvo Vehicle Alerts API devuelve un solo tipo "GENERIC"
+                // que envuelve varios sub-eventos (SEATBELT, TELL_TALE,
+                // ALERTA_FATIGA, etc.). El subtipo viene en
+                // detalle_generic — pero según el endpoint puede estar
+                // como `triggerType` (alertas HIGH) o como `type`
+                // (alertas mantenimiento). Leemos ambos defensivamente.
+                // Sin esto el resumen muestra todo como "Evento genérico"
+                // sin info útil para el destinatario.
+                const subTipo = (tipo === 'GENERIC')
+                  ? (
+                      String(data.detalle_generic?.triggerType ?? '').toUpperCase() ||
+                      String(data.detalle_generic?.type ?? '').toUpperCase() ||
+                      null
+                    )
+                  : null;
+                const creadoEn = data.creado_en;
+                const fechaHora = creadoEn && typeof creadoEn.toDate === 'function'
+                  ? creadoEn.toDate()
+                  : new Date();
+                // Lookup chofer por patente (mapa ya cargado al inicio
+                // del cron). Si no hay match, dejamos null y el builder
+                // lo muestra como "patente sin chofer".
+                const chofer = choferByPatente.get(
+                  patente.toUpperCase()
+                );
+                const choferNombre = chofer
+                  ? aviso.resolverNombreSaludo(chofer.data)
+                  : null;
+                return { patente, tipo, subTipo, choferNombre, fechaHora };
+              })
+              .filter((ev) =>
+                !TIPOS_EXCLUIDOS_SEG_HIGIENE.has(ev.tipo) &&
+                !TIPOS_EXCLUIDOS_SEG_HIGIENE.has(ev.subTipo)
               );
-              const choferNombre = chofer
-                ? aviso.resolverNombreSaludo(chofer.data)
-                : null;
-              return { patente, tipo, subTipo, choferNombre, fechaHora };
-            });
 
             if (eventos.length === 0) {
               log.info(
