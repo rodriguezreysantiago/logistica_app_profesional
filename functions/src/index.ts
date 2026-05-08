@@ -2804,12 +2804,24 @@ const MANTENIMIENTO_DESTINATARIO_DNI = "35244439";
 const SEG_HIGIENE_DESTINATARIO_DNI = "34730329";
 
 // Vigilador de jornada del chofer — parámetros operativos.
-// Decisión Vecchi 2026-05-07:
-//   - El chofer se considera "manejando" cuando speed > 10 km/h.
+// Decisión Vecchi 2026-05-07 (umbral revisado 2026-05-08):
+//   - El chofer se considera "manejando" cuando speed > 15 km/h.
+//     Antes era 10; subido a 15 porque GPS drift de un camión parado
+//     puede reportar 11-14 km/h falsos en SITRACK, sumando tiempo
+//     erróneo. 15 km/h descarta el drift sin perder casos reales —
+//     un camión en ruta nunca va a < 20 km/h salvo en peajes y
+//     entradas a acopios (que se cuentan como pausa, no como manejo).
 //   - 15 min sin movimiento resetean el "continuo" (pausa válida).
 //   - Aviso a las 3:45h continuas (faltan 15 min para el límite 4h).
 //   - Aviso a las 11:30h totales del día (faltan 30 min para 12h).
-const VIGILADOR_UMBRAL_MOVIMIENTO_KMH = 10;
+const VIGILADOR_UMBRAL_MOVIMIENTO_KMH = 15;
+// Si el último poll de SITRACK_POSICIONES es más viejo que esto,
+// no sumamos tiempo a la jornada — el dato `speed` puede estar
+// stale (camión apagado, sin señal, poll caído). Sin esto, un
+// chofer que paró a las 23:30 con speed=80 en su último poll
+// sigue acumulando "horas manejando" hasta que vuelve a haber
+// señal. Decisión 2026-05-08.
+const VIGILADOR_POLL_STALE_SEGUNDOS = 10 * 60;
 const VIGILADOR_PAUSA_RESET_SEGUNDOS = 15 * 60;
 const VIGILADOR_CONTINUO_ALERTA_SEGUNDOS = 3 * 3600 + 45 * 60;
 const VIGILADOR_CONTINUO_LIMITE_SEGUNDOS = 4 * 3600;
@@ -3869,6 +3881,19 @@ export const vigiladorJornadaChofer = onSchedule(
       const speed = typeof data.speed === "number" ? data.speed : 0;
       const patente = d.id;
 
+      // Validar frescura del poll. Si el poller de SITRACK_POSICIONES
+      // no actualizó este doc en los últimos N min, el `speed` puede
+      // estar stale (camión apagado, sin señal, poll caído). Tratamos
+      // ese caso como "no manejando" — no sumamos delta. Sin esto un
+      // chofer que paró con speed=80 en su último poll seguía
+      // sumando horas falsas hasta que vuelva a haber señal.
+      const polledEnMs =
+        (data.polled_en as Timestamp | undefined)?.toMillis() ?? 0;
+      const polledHaceSegundos =
+        polledEnMs > 0 ? (Date.now() - polledEnMs) / 1000 : Infinity;
+      const pollStale = polledHaceSegundos > VIGILADOR_POLL_STALE_SEGUNDOS;
+      const speedEfectivo = pollStale ? 0 : speed;
+
       choferesEvaluados++;
 
       const refJornada = db
@@ -3926,7 +3951,7 @@ export const vigiladorJornadaChofer = onSchedule(
           let jornadaDiariaExcedida =
             (docJ.jornada_diaria_excedida as boolean) ?? false;
 
-          if (speed > VIGILADOR_UMBRAL_MOVIMIENTO_KMH) {
+          if (speedEfectivo > VIGILADOR_UMBRAL_MOVIMIENTO_KMH) {
             // Manejando ahora.
             if (segundosPausaActual >= VIGILADOR_PAUSA_RESET_SEGUNDOS) {
               // Tuvo pausa válida → reset del continuo y de la flag de
