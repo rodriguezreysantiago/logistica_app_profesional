@@ -551,7 +551,12 @@ class _GridKPIs extends StatelessWidget {
       crossAxisSpacing: 10,
       // Cards más anchas que altas; ratio ajustado para que el número
       // grande tenga aire sin que la card crezca demasiado en alto.
-      childAspectRatio: esDesktop ? 1.6 : 1.4,
+      // 2026-05-08: en iPhone con sublabel ("103 asignadas",
+      // "sin renovar") el ratio 1.4 daba overflow de 5-6 px porque la
+      // altura no alcanzaba para header + número + sublabel + label.
+      // Bajado a 1.3 en mobile — un poco más alto, sin sacrificar
+      // densidad visible en una pantalla.
+      childAspectRatio: esDesktop ? 1.6 : 1.3,
       children: tarjetas,
     );
   }
