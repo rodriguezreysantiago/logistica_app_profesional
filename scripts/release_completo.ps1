@@ -5,10 +5,11 @@
 # valida que el anterior haya completado antes de seguir.
 #
 # Uso:
-#   .\scripts\release_completo.ps1                 # bump patch+1+build+1
+#   .\scripts\release_completo.ps1                  # bump patch+1+build+1
 #   .\scripts\release_completo.ps1 -Version 1.2.3+45   # versión explícita
-#   .\scripts\release_completo.ps1 -SkipAndroid    # solo Windows
-#   .\scripts\release_completo.ps1 -DryRun         # muestra qué haría
+#   .\scripts\release_completo.ps1 -SkipAndroid     # solo Windows
+#   .\scripts\release_completo.ps1 -SkipLocalUpdate # no actualiza tu PC
+#   .\scripts\release_completo.ps1 -DryRun          # muestra qué haría
 #
 # Flujo:
 #   1. Verifica que el repo esté limpio (no commits perdidos).
@@ -19,7 +20,9 @@
 #   6. git push (incluye el bump y todo lo previo).
 #   7. release_app.ps1 (zip + .exe → GitHub Release, auto-update Win).
 #   8. release_android.ps1 -PlayStore (AAB para Play Console).
-#   9. Imprime instrucciones para subir el AAB a Play Console.
+#   9. Forzar update local en esta PC (cierra la app, borra
+#      VERSION.txt, lanza el launcher para que baje la nueva).
+#  10. Imprime instrucciones para subir el AAB a Play Console.
 #
 # Si querés republicar el MISMO tag (no bumpear), usá `release_app.ps1`
 # directo — ese script ya maneja la republicación.
@@ -27,6 +30,7 @@
 param(
     [string]$Version = '',
     [switch]$SkipAndroid,
+    [switch]$SkipLocalUpdate,
     [switch]$DryRun
 )
 
@@ -156,13 +160,54 @@ if (-not $SkipAndroid) {
     if ($LASTEXITCODE -ne 0) { throw "release_android.ps1 fallo" }
 }
 
-# ─── 9. Cierre + instrucciones manuales ──────────────────────────
+# ─── 9. Forzar update local en esta PC ───────────────────────────
+# Cierra la instancia abierta (si la hay) y dispara el launcher para
+# que baje la nueva versión. Sin esto, la PC del operador queda con
+# la versión vieja hasta que cierre y reabra la app — incómodo
+# después de cada release.
+if (-not $SkipLocalUpdate) {
+    Write-Host ""
+    Write-Host "[8/9] Forzando update local en esta PC..." -ForegroundColor Cyan
+
+    # 1) Matar la instancia si está corriendo. -ErrorAction
+    # SilentlyContinue para que no falle si no está abierta.
+    Stop-Process -Name 'coopertrans_movil' -Force -ErrorAction SilentlyContinue
+
+    # 2) Borrar VERSION.txt. Si no existe, no falla. El launcher al
+    # no encontrar VERSION.txt detecta "primera instalación" y baja
+    # la última desde GitHub Releases (que acabamos de publicar).
+    $verFile = Join-Path $env:ProgramData 'CoopertransMovil\VERSION.txt'
+    if (Test-Path $verFile) {
+        Remove-Item $verFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # 3) Lanzar el launcher. Detecta nueva versión, baja zip,
+    # extrae, lanza la app. El launcher usa Start-Process (no
+    # bloqueante), así que volvemos al script casi de inmediato.
+    $launcher = 'C:\Program Files\CoopertransMovil\launcher.ps1'
+    if (Test-Path $launcher) {
+        Write-Host "  Lanzando launcher (descarga la versión nueva en background)..." -ForegroundColor DarkGray
+        Start-Process powershell -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-WindowStyle', 'Minimized',
+            '-File', $launcher
+        )
+        Write-Host "  OK launcher iniciado." -ForegroundColor Green
+    } else {
+        Write-Host "  AVISO: no encuentro $launcher" -ForegroundColor Yellow
+        Write-Host "  La app no se va a actualizar automáticamente en esta PC." -ForegroundColor Yellow
+        Write-Host "  Si nunca instalaste el .exe del instalador acá, eso es esperado." -ForegroundColor DarkGray
+    }
+}
+
+# ─── 10. Cierre + instrucciones manuales que quedan ──────────────
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host "  OK RELEASE $newVersion COMPLETO" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "[8/8] Pasos manuales que quedan:" -ForegroundColor Cyan
+Write-Host "[9/9] Pasos manuales que quedan:" -ForegroundColor Cyan
 Write-Host ""
 if (-not $SkipAndroid) {
     Write-Host "  1. Subir el AAB a Play Console:" -ForegroundColor White
@@ -172,10 +217,5 @@ if (-not $SkipAndroid) {
     Write-Host "     - Pegar release notes envueltas en <es-419>...</es-419>" -ForegroundColor DarkGray
     Write-Host ""
 }
-Write-Host "  2. Forzar update local en tu PC:" -ForegroundColor White
-Write-Host "     Stop-Process -Name 'coopertrans_movil' -Force -ErrorAction SilentlyContinue" -ForegroundColor DarkGray
-Write-Host "     Remove-Item `"`$env:ProgramData\CoopertransMovil\VERSION.txt`" -Force -ErrorAction SilentlyContinue" -ForegroundColor DarkGray
-Write-Host "     & `"C:\Program Files\CoopertransMovil\launcher.ps1`"" -ForegroundColor DarkGray
-Write-Host ""
-Write-Host "  3. Las otras PCs Windows toman el update solas al abrir el icono." -ForegroundColor White
+Write-Host "  2. Las otras PCs Windows toman el update solas al abrir el icono." -ForegroundColor White
 Write-Host ""
