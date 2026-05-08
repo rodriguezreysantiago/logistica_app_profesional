@@ -2840,11 +2840,11 @@ const AVISO_NO_ID_THROTTLE_SEGUNDOS = 30 * 60;
 // encolar, y el bot borra los expirados sin enviar (decisión Vecchi
 // 2026-05-08). Los resúmenes diarios y vencimientos NO usan TTL —
 // llegan cuando llegan.
-const TTL_PAUSA_CONTINUA_MIN = 60;       // 3h45 chofer
-const TTL_LIMITE_DIARIO_MIN = 120;       // 11h30 chofer
-const TTL_FIN_NOCTURNO_MIN = 60;         // 23:30 chofer (cuando se active)
-const TTL_VOLVO_MANEJO_MIN = 120;        // OVERSPEED, IDLING, HARSH, PTO
-const TTL_PASA_IBUTTON_MIN = 30;         // CHOFER_NO_IDENTIFICADO Sitrack
+const TTL_PAUSA_CONTINUA_MIN = 60; // 3h45 chofer
+const TTL_LIMITE_DIARIO_MIN = 120; // 11h30 chofer
+const TTL_FIN_NOCTURNO_MIN = 60; // 23:30 chofer (cuando se active)
+const TTL_VOLVO_MANEJO_MIN = 120; // OVERSPEED, IDLING, HARSH, PTO
+const TTL_PASA_IBUTTON_MIN = 30; // CHOFER_NO_IDENTIFICADO Sitrack
 
 function _expiraEnMinutos(minutos: number): Timestamp {
   return Timestamp.fromMillis(Date.now() + minutos * 60 * 1000);
