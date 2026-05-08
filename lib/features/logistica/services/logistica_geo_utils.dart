@@ -58,8 +58,14 @@ class GeoRuta {
 class LogisticaGeoUtils {
   LogisticaGeoUtils._();
 
-  // Cliente Dio dedicado. Nominatim exige User-Agent identificable.
-  static final Dio _dio = Dio(
+  // Token Mapbox via --dart-define=MAPBOX_TOKEN=pk.... Si no está
+  // seteado, los métodos de búsqueda/reverso caen automáticamente a
+  // Nominatim (gratis pero menos preciso para silos rurales AR).
+  static const String _mapboxToken = String.fromEnvironment('MAPBOX_TOKEN');
+  static bool get _tieneMapbox => _mapboxToken.isNotEmpty;
+
+  // Cliente Dio dedicado para Nominatim (fallback gratis).
+  static final Dio _dioNominatim = Dio(
     BaseOptions(
       baseUrl: 'https://nominatim.openstreetmap.org',
       headers: {
@@ -75,14 +81,57 @@ class LogisticaGeoUtils {
     ),
   );
 
-  /// Busca lugares por texto. Filtra a Argentina + límite 8 resultados
-  /// (suficiente para que el operador encuentre lo que busca sin
-  /// scroll). Caller debe handlear errores de red — si falla, no hay
-  /// fallback (el operador puede usar lat/lng manuales).
+  // Cliente para Mapbox Geocoding API. Solo se inicializa lazy si hay
+  // token configurado. 100K req/mes free, después USD 0.75/1000.
+  static final Dio _dioMapbox = Dio(
+    BaseOptions(
+      baseUrl: 'https://api.mapbox.com',
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+    ),
+  );
+
+  /// Busca lugares por texto. Si MAPBOX_TOKEN está configurado usa
+  /// Mapbox Geocoding (más preciso para silos / direcciones rurales
+  /// AR); sino fallback a Nominatim. En ambos casos limitado a
+  /// Argentina + máximo 8 resultados.
   static Future<List<GeoLugar>> buscar(String query) async {
     final q = query.trim();
     if (q.isEmpty) return [];
-    final res = await _dio.get<List<dynamic>>(
+    if (_tieneMapbox) {
+      try {
+        return await _buscarMapbox(q);
+      } catch (_) {
+        // Si Mapbox falla (rate limit, key inválida, sin red),
+        // intentamos con Nominatim como segunda chance. Mejor algo
+        // que nada para el operador.
+      }
+    }
+    return _buscarNominatim(q);
+  }
+
+  static Future<List<GeoLugar>> _buscarMapbox(String q) async {
+    // Endpoint legacy v5 — más estable y barato que v6 search-box.
+    // bbox de Argentina para filtrar resultados (-73.6,-55.0,-53.6,-21.8).
+    final res = await _dioMapbox.get<Map<String, dynamic>>(
+      '/geocoding/v5/mapbox.places/$q.json',
+      queryParameters: {
+        'access_token': _mapboxToken,
+        'country': 'ar',
+        'limit': 8,
+        'language': 'es',
+        'types': 'place,locality,neighborhood,address,poi',
+      },
+    );
+    final features = res.data?['features'] as List<dynamic>? ?? [];
+    return features
+        .map((f) => _parseMapboxFeature(f as Map<String, dynamic>))
+        .whereType<GeoLugar>()
+        .toList();
+  }
+
+  static Future<List<GeoLugar>> _buscarNominatim(String q) async {
+    final res = await _dioNominatim.get<List<dynamic>>(
       '/search',
       queryParameters: {
         'q': q,
@@ -93,16 +142,46 @@ class LogisticaGeoUtils {
       },
     );
     final data = res.data ?? [];
-    return data.map((raw) => _parseSearchHit(raw as Map<String, dynamic>))
+    return data
+        .map((raw) => _parseSearchHit(raw as Map<String, dynamic>))
         .whereType<GeoLugar>()
         .toList();
   }
 
   /// Reverse geocoding: dado un punto, devuelve localidad/provincia/
-  /// dirección si Nominatim los conoce. Se usa al confirmar un punto
-  /// en el picker para autocompletar campos del form.
+  /// dirección. Mapbox > Nominatim si hay token.
   static Future<GeoLugar?> reverso(LatLng punto) async {
-    final res = await _dio.get<Map<String, dynamic>>(
+    if (_tieneMapbox) {
+      try {
+        return await _reversoMapbox(punto);
+      } catch (_) {
+        // fallback a Nominatim
+      }
+    }
+    return _reversoNominatim(punto);
+  }
+
+  static Future<GeoLugar?> _reversoMapbox(LatLng punto) async {
+    final res = await _dioMapbox.get<Map<String, dynamic>>(
+      '/geocoding/v5/mapbox.places/'
+      '${punto.longitude.toStringAsFixed(6)},'
+      '${punto.latitude.toStringAsFixed(6)}.json',
+      queryParameters: {
+        'access_token': _mapboxToken,
+        'language': 'es',
+        'types': 'place,locality,neighborhood,address',
+      },
+    );
+    final features = res.data?['features'] as List<dynamic>? ?? [];
+    if (features.isEmpty) return null;
+    return _parseMapboxFeature(
+      features.first as Map<String, dynamic>,
+      fallbackPunto: punto,
+    );
+  }
+
+  static Future<GeoLugar?> _reversoNominatim(LatLng punto) async {
+    final res = await _dioNominatim.get<Map<String, dynamic>>(
       '/reverse',
       queryParameters: {
         'lat': punto.latitude.toStringAsFixed(6),
@@ -115,6 +194,53 @@ class LogisticaGeoUtils {
     final data = res.data;
     if (data == null) return null;
     return _parseSearchHit(data, fallbackPunto: punto);
+  }
+
+  static GeoLugar? _parseMapboxFeature(
+    Map<String, dynamic> raw, {
+    LatLng? fallbackPunto,
+  }) {
+    final center = raw['center'] as List<dynamic>?;
+    LatLng? punto;
+    if (center != null && center.length >= 2) {
+      // Mapbox devuelve [lon, lat] (estilo GeoJSON).
+      punto = LatLng(
+        (center[1] as num).toDouble(),
+        (center[0] as num).toDouble(),
+      );
+    } else {
+      punto = fallbackPunto;
+    }
+    if (punto == null) return null;
+    // Mapbox da el contexto (jerarquía de lugares) en raw['context'].
+    final ctx = (raw['context'] as List<dynamic>?) ?? const [];
+    String? localidad;
+    String? provincia;
+    for (final c in ctx) {
+      final m = c as Map<String, dynamic>;
+      final id = (m['id'] ?? '').toString();
+      final text = m['text']?.toString();
+      if (id.startsWith('place.') || id.startsWith('locality.')) {
+        localidad ??= text;
+      } else if (id.startsWith('region.')) {
+        provincia ??= text;
+      }
+    }
+    // Si el feature mismo es un lugar, considerarlo como localidad.
+    final placeType =
+        (raw['place_type'] as List<dynamic>?)?.cast<String>() ?? const [];
+    if (placeType.contains('place') || placeType.contains('locality')) {
+      localidad ??= raw['text']?.toString();
+    }
+    return GeoLugar(
+      displayName: raw['place_name']?.toString() ?? raw['text']?.toString() ?? '',
+      punto: punto,
+      localidad: localidad,
+      provincia: provincia,
+      direccion: placeType.contains('address')
+          ? raw['place_name']?.toString()
+          : null,
+    );
   }
 
   static GeoLugar? _parseSearchHit(

@@ -8,6 +8,7 @@ import '../../../shared/widgets/dato_editable.dart';
 import '../models/ubicacion_logistica.dart';
 import '../services/logistica_service.dart';
 import '../widgets/acciones_navegacion_sheet.dart';
+import '../widgets/mini_mapa_thumbnail.dart';
 import '../widgets/ubicacion_map_picker.dart';
 
 /// ABM de ubicaciones físicas (puntos de carga / descarga). Reusable
@@ -82,7 +83,15 @@ class _CardUbicacion extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
         children: [
-          Icon(Icons.place, color: color, size: 28),
+          // Thumbnail del mapa si tiene coords; sino ícono genérico.
+          if (ubicacion.lat != null && ubicacion.lng != null)
+            MiniMapaThumbnail(
+              lat: ubicacion.lat!,
+              lng: ubicacion.lng!,
+              size: 56,
+            )
+          else
+            Icon(Icons.place, color: color, size: 28),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
