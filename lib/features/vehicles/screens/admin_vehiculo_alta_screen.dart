@@ -162,6 +162,22 @@ class _AdminVehiculoAltaScreenState
                       _tipo = val;
                       // Limpiamos el VIN si cambia a un acoplado
                       if (val != 'TRACTOR') _vinCtrl.clear();
+                      // Marca: para TRACTOR Vecchi opera 100% VOLVO;
+                      // para acoplados (BATEA, TOLVA, BIVUELCO,
+                      // TANQUE) la marca varía — dejamos el campo
+                      // editable y limpiamos el default VOLVO si se
+                      // cambia desde TRACTOR. Si vuelve a TRACTOR
+                      // restauramos el default.
+                      if (val == 'TRACTOR') {
+                        if (_marcaCtrl.text.trim().isEmpty) {
+                          _marcaCtrl.text = 'VOLVO';
+                        }
+                      } else {
+                        if (_marcaCtrl.text.trim().toUpperCase() ==
+                            'VOLVO') {
+                          _marcaCtrl.clear();
+                        }
+                      }
                     });
                   },
                 ),
@@ -170,7 +186,9 @@ class _AdminVehiculoAltaScreenState
                   label: 'Marca',
                   controller: _marcaCtrl,
                   icon: Icons.factory,
-                  readOnly: true,
+                  // TRACTOR es siempre VOLVO en la flota Vecchi (read
+                  // only); para acoplados la marca es libre.
+                  readOnly: _tipo == 'TRACTOR',
                 ),
                 _VInput(
                   label: 'Modelo',
