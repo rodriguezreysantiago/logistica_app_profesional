@@ -66,6 +66,29 @@ class AdminVencimientosMenuScreen extends StatelessWidget {
             colorIcono: AppColors.accentTeal,
             ruta: '/vencimientos_acoplados',
           ),
+          // ─── ABM por empresa empleadora ───
+          // Visualmente separado: arriba son auditorías por persona /
+          // unidad; este es ABM de docs comunes a todos los empleados de
+          // una misma razón social (Póliza ART y Formulario 931).
+          Padding(
+            padding: EdgeInsets.fromLTRB(20, 24, 16, 8),
+            child: Text(
+              'POR EMPRESA EMPLEADORA',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: AppColors.accentBlue,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+          _MenuTile(
+            titulo: 'EMPRESAS Y SEGUROS',
+            subtitulo: 'Póliza ART y Formulario 931 por razón social',
+            icono: Icons.business_outlined,
+            colorIcono: AppColors.accentBlue,
+            ruta: AppRoutes.adminEmpresasEmpleadoras,
+          ),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 25, vertical: 30),
             child: Divider(color: Colors.white10),
