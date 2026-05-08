@@ -224,7 +224,7 @@ class _LogisticaTarifaFormScreenState
           const SizedBox(height: 16),
           const _SeccionTitulo(numero: 2, texto: 'Origen'),
           _SelectorEmpresa(
-            etiqueta: 'Empresa origen',
+            etiqueta: 'Origen',
             valor: _empOrigen,
             soloTipo: TipoEmpresaLogistica.cliente,
             onChange: (e) => setState(() => _empOrigen = e),
@@ -240,7 +240,7 @@ class _LogisticaTarifaFormScreenState
           const SizedBox(height: 16),
           const _SeccionTitulo(numero: 3, texto: 'Destino'),
           _SelectorEmpresa(
-            etiqueta: 'Empresa destino',
+            etiqueta: 'Destino',
             valor: _empDestino,
             soloTipo: TipoEmpresaLogistica.cliente,
             onChange: (e) => setState(() => _empDestino = e),
