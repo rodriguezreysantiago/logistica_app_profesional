@@ -28,6 +28,7 @@ import '../features/gomeria/screens/gomeria_unidad_detalle_screen.dart';
 import '../features/gomeria/screens/gomeria_unidades_lista_screen.dart';
 import '../features/logistica/screens/logistica_empresas_screen.dart';
 import '../features/logistica/screens/logistica_hub_screen.dart';
+import '../features/logistica/screens/logistica_mapa_tarifas_screen.dart';
 import '../features/logistica/screens/logistica_tarifa_form_screen.dart';
 import '../features/logistica/screens/logistica_tarifas_screen.dart';
 import '../features/logistica/screens/logistica_ubicaciones_screen.dart';
@@ -364,6 +365,11 @@ class AppRouter {
         final tarifaId = args?['tarifaId'] as String?;
         return _buildRoute(
           _protegerAdmin(LogisticaTarifaFormScreen(tarifaId: tarifaId)),
+          settings,
+        );
+      case AppRoutes.adminLogisticaMapaTarifas:
+        return _buildRoute(
+          _protegerAdmin(const LogisticaMapaTarifasScreen()),
           settings,
         );
 

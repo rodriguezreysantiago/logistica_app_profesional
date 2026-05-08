@@ -48,6 +48,7 @@
   static const String adminLogisticaUbicaciones = '/admin_logistica_ubicaciones';
   static const String adminLogisticaTarifas = '/admin_logistica_tarifas';
   static const String adminLogisticaTarifaForm = '/admin_logistica_tarifa_form';
+  static const String adminLogisticaMapaTarifas = '/admin_logistica_mapa_tarifas';
 
 
   // Auditorías

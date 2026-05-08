@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/tarifa_logistica.dart';
+import '../models/ubicacion_logistica.dart';
+import '../services/logistica_geo_utils.dart';
 import '../services/logistica_service.dart';
 
 /// Lista de tarifas con buscador. Cada tarifa = una "ruta con precio"
@@ -45,39 +48,56 @@ class _LogisticaTarifasScreenState extends State<LogisticaTarifasScreen> {
             onCambioActivas: (v) => setState(() => _soloActivas = v),
           ),
           Expanded(
-            child: StreamBuilder<List<TarifaLogistica>>(
-              stream: LogisticaService.streamTarifas(
-                soloActivas: _soloActivas,
-              ),
-              builder: (ctx, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snap.hasError) {
-                  return AppEmptyState(
-                    icon: Icons.error_outline,
-                    title: 'Error cargando la lista',
-                    subtitle: snap.error.toString(),
-                  );
-                }
-                final all = snap.data ?? const [];
-                final filtradas = _aplicarFiltro(all, _filtro);
-                if (filtradas.isEmpty) {
-                  return AppEmptyState(
-                    icon: Icons.price_change_outlined,
-                    title: all.isEmpty
-                        ? 'Sin tarifas cargadas'
-                        : 'Sin coincidencias',
-                    subtitle: all.isEmpty
-                        ? 'Tocá + para armar la primera tarifa.'
-                        : 'Probá con otro texto o limpiá el filtro.',
-                  );
-                }
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
-                  itemCount: filtradas.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) => _CardTarifa(tarifa: filtradas[i]),
+            // Stream externo: catálogo de ubicaciones. El interno
+            // (tarifas) lo combina por id para mostrar distancia
+            // geodésica en el card cuando ambas ubicaciones tienen
+            // coords. Ubicaciones cambian poco (chico, no causa
+            // jitter visual).
+            child: StreamBuilder<List<UbicacionLogistica>>(
+              stream: LogisticaService.streamUbicaciones(),
+              builder: (ctx, ubicSnap) {
+                final ubicacionesPorId = {
+                  for (final u in (ubicSnap.data ?? const <UbicacionLogistica>[]))
+                    u.id: u,
+                };
+                return StreamBuilder<List<TarifaLogistica>>(
+                  stream: LogisticaService.streamTarifas(
+                    soloActivas: _soloActivas,
+                  ),
+                  builder: (ctx, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snap.hasError) {
+                      return AppEmptyState(
+                        icon: Icons.error_outline,
+                        title: 'Error cargando la lista',
+                        subtitle: snap.error.toString(),
+                      );
+                    }
+                    final all = snap.data ?? const [];
+                    final filtradas = _aplicarFiltro(all, _filtro);
+                    if (filtradas.isEmpty) {
+                      return AppEmptyState(
+                        icon: Icons.price_change_outlined,
+                        title: all.isEmpty
+                            ? 'Sin tarifas cargadas'
+                            : 'Sin coincidencias',
+                        subtitle: all.isEmpty
+                            ? 'Tocá + para armar la primera tarifa.'
+                            : 'Probá con otro texto o limpiá el filtro.',
+                      );
+                    }
+                    return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
+                      itemCount: filtradas.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) => _CardTarifa(
+                        tarifa: filtradas[i],
+                        ubicacionesPorId: ubicacionesPorId,
+                      ),
+                    );
+                  },
                 );
               },
             ),
@@ -148,7 +168,24 @@ class _BarraFiltros extends StatelessWidget {
 
 class _CardTarifa extends StatelessWidget {
   final TarifaLogistica tarifa;
-  const _CardTarifa({required this.tarifa});
+  final Map<String, UbicacionLogistica> ubicacionesPorId;
+  const _CardTarifa({
+    required this.tarifa,
+    this.ubicacionesPorId = const {},
+  });
+
+  /// Distancia geodésica origen→destino en km, o null si alguna de
+  /// las dos ubicaciones no está cargada o no tiene coords.
+  double? get _distanciaKm {
+    final o = ubicacionesPorId[tarifa.ubicacionOrigenId];
+    final d = ubicacionesPorId[tarifa.ubicacionDestinoId];
+    if (o?.lat == null || o?.lng == null) return null;
+    if (d?.lat == null || d?.lng == null) return null;
+    return LogisticaGeoUtils.distanciaKm(
+      LatLng(o!.lat!, o.lng!),
+      LatLng(d!.lat!, d.lng!),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -193,7 +230,7 @@ class _CardTarifa extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           // Línea 2: origen → destino
-          _RutaOrigenDestino(tarifa: tarifa),
+          _RutaOrigenDestino(tarifa: tarifa, distanciaKm: _distanciaKm),
           const SizedBox(height: 10),
           // Línea 3: tarifas
           _TarifasMontos(tarifa: tarifa),
@@ -226,7 +263,8 @@ class _CardTarifa extends StatelessWidget {
 
 class _RutaOrigenDestino extends StatelessWidget {
   final TarifaLogistica tarifa;
-  const _RutaOrigenDestino({required this.tarifa});
+  final double? distanciaKm;
+  const _RutaOrigenDestino({required this.tarifa, this.distanciaKm});
 
   @override
   Widget build(BuildContext context) {
@@ -241,10 +279,26 @@ class _RutaOrigenDestino extends StatelessWidget {
             color: AppColors.accentBlue,
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8),
-          child: Icon(Icons.arrow_forward,
-              color: Colors.white38, size: 18),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.arrow_forward,
+                  color: Colors.white38, size: 18),
+              if (distanciaKm != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  '${distanciaKm!.toStringAsFixed(0)} km',
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
         Expanded(
           child: _Punto(

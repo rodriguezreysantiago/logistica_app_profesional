@@ -58,6 +58,13 @@ class LogisticaHubScreen extends StatelessWidget {
                   ruta: AppRoutes.adminLogisticaUbicaciones,
                 ),
                 _HubTile(
+                  titulo: 'MAPA',
+                  subtitulo: 'Vista geográfica de las tarifas',
+                  icono: Icons.map_outlined,
+                  color: AppColors.accentAmber,
+                  ruta: AppRoutes.adminLogisticaMapaTarifas,
+                ),
+                _HubTile(
                   titulo: 'VIAJES',
                   subtitulo: 'Próximamente',
                   icono: Icons.route_outlined,
