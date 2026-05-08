@@ -19,8 +19,15 @@ class MapConstants {
 
   /// URL de tiles. Carto Voyager — más nítida que OSM raw, gratis.
   /// Subdomains a/b/c/d distribuyen las requests.
+  ///
+  /// Nota: el path correcto es `rastertiles/voyager/`, NO solo
+  /// `voyager/`. La versión sin `rastertiles/` devuelve 404 silencioso
+  /// — flutter_map no muestra tiles y el mapa queda en blanco aunque
+  /// los markers/clusters sigan renderizando. Bug detectado
+  /// 2026-05-08 después de que TODOS los mapas de la app aparecieran
+  /// vacíos.
   static const String tileUrl =
-      'https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}.png';
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
 
   /// Subdomains para `TileLayer.subdomains`.
   static const List<String> tileSubdomains = ['a', 'b', 'c', 'd'];
