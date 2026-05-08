@@ -2396,6 +2396,7 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
+        expira_en: _expiraEnMinutos(TTL_VOLVO_MANEJO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -2830,6 +2831,24 @@ const AVISO_NOCTURNO_ACTIVO = false;
 // que es spam y dispara baneo de WhatsApp. Decisión Vecchi 2026-05-07:
 // 1 mensaje cada 30 min como máximo por chofer.
 const AVISO_NO_ID_THROTTLE_SEGUNDOS = 30 * 60;
+
+// TTL de avisos tiempo-sensibles en COLA_WHATSAPP. Si el bot está
+// apagado por horas (fines de semana, mantenimiento, multi-PC sin
+// arrancar), al volver procesa todo lo pendiente — incluso avisos
+// que ya perdieron sentido (ej. "te quedan 15 min para parar"
+// llegando 14 horas después). Solución: setear `expira_en` al
+// encolar, y el bot borra los expirados sin enviar (decisión Vecchi
+// 2026-05-08). Los resúmenes diarios y vencimientos NO usan TTL —
+// llegan cuando llegan.
+const TTL_PAUSA_CONTINUA_MIN = 60;       // 3h45 chofer
+const TTL_LIMITE_DIARIO_MIN = 120;       // 11h30 chofer
+const TTL_FIN_NOCTURNO_MIN = 60;         // 23:30 chofer (cuando se active)
+const TTL_VOLVO_MANEJO_MIN = 120;        // OVERSPEED, IDLING, HARSH, PTO
+const TTL_PASA_IBUTTON_MIN = 30;         // CHOFER_NO_IDENTIFICADO Sitrack
+
+function _expiraEnMinutos(minutos: number): Timestamp {
+  return Timestamp.fromMillis(Date.now() + minutos * 60 * 1000);
+}
 
 const TIPOS_MANTENIMIENTO_DIRECTOS = new Set(["FUEL", "CATALYST"]);
 
@@ -3606,6 +3625,7 @@ async function _encolarAvisoChoferNoIdentificado(
     mensaje,
     estado: "PENDIENTE",
     encolado_en: FieldValue.serverTimestamp(),
+    expira_en: _expiraEnMinutos(TTL_PASA_IBUTTON_MIN),
     enviado_en: null,
     error: null,
     intentos: 0,
@@ -4036,6 +4056,7 @@ async function _encolarAvisoPausaContinua(
     mensaje,
     estado: "PENDIENTE",
     encolado_en: FieldValue.serverTimestamp(),
+    expira_en: _expiraEnMinutos(TTL_PAUSA_CONTINUA_MIN),
     enviado_en: null,
     error: null,
     intentos: 0,
@@ -4089,6 +4110,7 @@ async function _encolarAvisoLimiteDiario(
     mensaje,
     estado: "PENDIENTE",
     encolado_en: FieldValue.serverTimestamp(),
+    expira_en: _expiraEnMinutos(TTL_LIMITE_DIARIO_MIN),
     enviado_en: null,
     error: null,
     intentos: 0,
@@ -4164,6 +4186,7 @@ export const avisoFinJornadaNocturna = onSchedule(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
+        expira_en: _expiraEnMinutos(TTL_FIN_NOCTURNO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,

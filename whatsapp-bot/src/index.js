@@ -313,6 +313,35 @@ async function procesarSiguiente() {
       return;
     }
 
+    // ─── Validación: aviso expirado ───
+    // Algunos avisos son tiempo-sensibles (vigilador de jornada, eventos
+    // Volvo de manejo en vivo, "pasá el iButton"). Cloud Functions setea
+    // `expira_en` al encolarlos. Si el bot estuvo apagado y procesa la
+    // cola horas después, esos avisos ya no tienen sentido (ej. "te
+    // quedan 15 min para parar" llegando 14 horas después). Se borran
+    // sin enviar — los resúmenes diarios y vencimientos NO tienen
+    // expira_en y siguen al margen de este filtro. Decisión Vecchi
+    // 2026-05-08.
+    if (
+      data.expira_en &&
+      typeof data.expira_en.toMillis === 'function' &&
+      data.expira_en.toMillis() < Date.now()
+    ) {
+      const segundosVencido = Math.floor(
+        (Date.now() - data.expira_en.toMillis()) / 1000
+      );
+      log.info(
+        `${docId}: aviso EXPIRADO (origen=${data.origen}, ` +
+          `vencido hace ${segundosVencido}s); borrando de la cola.`
+      );
+      try {
+        await docRef.delete();
+      } catch (e) {
+        log.warn(`No se pudo borrar ${docId} expirado: ${e.message}`);
+      }
+      return;
+    }
+
     if (!enHorarioHabil()) {
       log.info(`Fuera de horario hábil. ${docId} queda PENDIENTE para que el polling lo reintente.`);
       return;

@@ -124,12 +124,38 @@ async function planificarEnvioAgrupado(db, docActual) {
     .where('encolado_en', '>=', cutoff)
     .get();
 
-  // Filtrar el actual (no agruparse a sí mismo) y los > 50 docs (cap
-  // defensivo — si algún día hay un bug y se acumulan miles, no
-  // pretendemos armar un mensaje de WhatsApp de 50000 chars).
-  const otros = snap.docs
-    .filter((d) => d.id !== docActual.id)
-    .slice(0, 49);
+  // Filtrar el actual (no agruparse a sí mismo).
+  // Filtrar también los expirados: tienen `expira_en` ya pasado y NO
+  // los queremos meter en el mensaje agrupado (ya no tienen sentido).
+  // Los borramos aprovechando el barrido — fire-and-forget para no
+  // bloquear el flujo del bot. Decisión Vecchi 2026-05-08.
+  const ahoraMs = Date.now();
+  const todosCandidatos = snap.docs.filter((d) => d.id !== docActual.id);
+  const expirados = [];
+  const vivos = [];
+  for (const d of todosCandidatos) {
+    const data = d.data();
+    const expiraEn = data.expira_en;
+    if (
+      expiraEn &&
+      typeof expiraEn.toMillis === 'function' &&
+      expiraEn.toMillis() < ahoraMs
+    ) {
+      expirados.push(d);
+    } else {
+      vivos.push(d);
+    }
+  }
+  // Borrar expirados en background (no awaiteamos; si falla alguno,
+  // queda como PENDIENTE y el processor lo va a borrar al pasar).
+  for (const d of expirados) {
+    d.ref.delete().catch(() => {
+      // best-effort, los logs los hace el processor en su pasada.
+    });
+  }
+  // Cap defensivo > 50 docs — si algún día hay un bug y se acumulan
+  // miles, no armamos un mensaje de WhatsApp de 50000 chars.
+  const otros = vivos.slice(0, 49);
 
   if (otros.length === 0) return null;
 
