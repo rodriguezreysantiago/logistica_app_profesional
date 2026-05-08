@@ -809,9 +809,17 @@ Visible en el README — muestra el estado del último run del CI sobre `main`. 
 
 ---
 
-## Decommission del proyecto legacy `logisticaapp-e539a`
+## Decommission del proyecto legacy `logisticaapp-e539a` — ✅ EJECUTADO 2026-05-08
 
-El 2026-05-02 migramos del proyecto Firebase original `logisticaapp-e539a` al nuevo `coopertrans-movil`. El proyecto viejo quedó **frozen** (sin tráfico activo) como red de seguridad mientras validamos que el nuevo se banca todo. Esta sección documenta cómo bajarlo de forma definitiva una vez cumplida la ventana de validación.
+El 2026-05-02 migramos del proyecto Firebase original `logisticaapp-e539a` al nuevo `coopertrans-movil`. El proyecto viejo quedó **frozen** (sin tráfico activo) como red de seguridad mientras validamos que el nuevo se banca todo.
+
+**Decommission ejecutado el 2026-05-08** vía Firebase / GCP Console (Shut down). Se hizo SIN backup final del proyecto viejo — decisión explícita: toda la data viva ya estaba en `coopertrans-movil` desde la migración 2026-05-02 y los avisos / cron / app llevan 6 días operando contra el proyecto nuevo sin observaciones. El proyecto entró en estado `DELETE_REQUESTED` con grace period de 30 días — recuperable hasta ~2026-06-07 desde [GCP Console → IAM → Manage Resources → "Show deleted resources"](https://console.cloud.google.com/cloud-resource-manager). Después de esa fecha, irrecuperable.
+
+> **Nota**: ejecutado 25 días antes de la ventana sugerida (≥ 2026-06-02). Decisión consciente del owner — sin observaciones operativas pendientes en el proyecto nuevo y sin necesidad evidente de la red de seguridad. Si en el grace period (30 días desde 2026-05-08) aparece un caso que requiere consultar el proyecto viejo, restaurar desde GCP Console.
+
+La sección de abajo queda como referencia histórica del procedimiento (NO ejecutar de nuevo).
+
+---
 
 ### ¿Cuándo es seguro proceder?
 

@@ -1060,6 +1060,22 @@ Lección documentada en `project_pendientes_post_migracion.md`: para releases si
 #### 6.17.7 Memoria + docs
 Actualizados: `MEMORY.md` (index), `project_alertas_y_resumenes_whatsapp.md` (filtro ADBLUE + cron Giagante + watchdog daily), `project_pendientes_post_migracion.md` (cierre de la sesión + lecciones aprendidas), `ESTADO_PROYECTO.md` (esta sección). Nuevo: `project_empresas_empleadoras.md`. Sync automático a Drive vía claudesync hook.
 
+### 6.18 Decommission del proyecto legacy `logisticaapp-e539a` — 2026-05-08
+
+Ejecutado vía Firebase / GCP Console (Shut down) **25 días antes** de la ventana de validación sugerida (≥ 2026-06-02). Decisión explícita del owner: la data viva ya está en `coopertrans-movil` desde la migración 2026-05-02 y la app + bot + cron llevan 6 días operando contra el proyecto nuevo sin observaciones — no había necesidad evidente de mantener la red de seguridad.
+
+**Sin backup final del proyecto viejo** (decisión explícita — ya está todo replicado en el proyecto nuevo).
+
+El proyecto quedó en estado `DELETE_REQUESTED` con grace period de 30 días: **recuperable hasta ~2026-06-07** desde [GCP Console → IAM & Admin → Manage Resources → "Show deleted resources"](https://console.cloud.google.com/cloud-resource-manager). Pasada esa fecha, **irrecuperable**.
+
+**Auditoría previa OK**: `auditar_referencias_proyecto_viejo.ps1` salió con 0 hits en código activo (28 hits en archivos históricos esperados — README/RUNBOOK/script de auditoría / commits viejos).
+
+**Bucket de backups del proyecto viejo** (`gs://logisticaapp-backups`): se borra automáticamente con el proyecto cuando termine el grace period.
+
+`RUNBOOK.md` sección "Decommission del proyecto legacy" marcada como DECOMMISSIONED — queda como referencia histórica del procedimiento.
+
+`project_pendientes_post_migracion.md` actualizado para sacar el ítem del roadmap.
+
 ## 7. Pendientes / roadmap
 
 ### Migración Firebase Auth (branch `feature/firebase-auth`) — ✅ COMPLETADA 2026-04-29
