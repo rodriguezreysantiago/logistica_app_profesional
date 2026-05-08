@@ -82,6 +82,35 @@ class LogisticaService {
     await empresasCol.doc(id).update(cambios);
   }
 
+  /// Setea la lista completa de productos de una empresa. Lista
+  /// vacía → borra el campo productos (no queda lista vacía en
+  /// Firestore para mantener docs livianos).
+  static Future<void> setProductosDeEmpresa({
+    required String id,
+    required List<String> productos,
+  }) async {
+    final cambios = <String, dynamic>{};
+    if (productos.isEmpty) {
+      cambios['productos'] = FieldValue.delete();
+    } else {
+      // Trim + dedup case-insensitive (manteniendo grafía del
+      // primer ingreso). Útil si el operador agrega "Soja" y
+      // después "SOJA" — guardamos solo la primera grafía.
+      final seen = <String>{};
+      final limpios = <String>[];
+      for (final p in productos) {
+        final t = p.trim();
+        if (t.isEmpty) continue;
+        final key = t.toUpperCase();
+        if (seen.contains(key)) continue;
+        seen.add(key);
+        limpios.add(t);
+      }
+      cambios['productos'] = limpios;
+    }
+    await empresasCol.doc(id).update(cambios);
+  }
+
   // ─── UBICACIONES ───────────────────────────────────────────────────────
   static CollectionReference<Map<String, dynamic>> get ubicacionesCol =>
       _db.collection(AppCollections.ubicacionesLogistica);
@@ -103,8 +132,8 @@ class LogisticaService {
     String? direccion,
     double? lat,
     double? lng,
-    String? empresaId,
-    String? empresaNombre,
+    List<String> empresaIds = const [],
+    List<String> empresaNombres = const [],
   }) async {
     final nombreNorm = nombre.trim().toUpperCase();
     if (nombreNorm.isEmpty) {
@@ -112,6 +141,10 @@ class LogisticaService {
     }
     if (localidad.trim().isEmpty || provincia.trim().isEmpty) {
       throw ArgumentError('Localidad y provincia son obligatorios.');
+    }
+    if (empresaIds.length != empresaNombres.length) {
+      throw ArgumentError(
+          'empresaIds y empresaNombres deben tener la misma longitud.');
     }
     // Pre-check unicidad: el "nombre" de una ubicación es el alias
     // operativo (ej. "Acopio Lartirigoyen — Tres Arroyos") y debe ser
@@ -131,13 +164,40 @@ class LogisticaService {
         'direccion': direccion.trim(),
       if (lat != null) 'lat': lat,
       if (lng != null) 'lng': lng,
-      if (empresaId != null && empresaId.isNotEmpty) 'empresa_id': empresaId,
-      if (empresaNombre != null && empresaNombre.isNotEmpty)
-        'empresa_nombre': empresaNombre,
+      if (empresaIds.isNotEmpty) 'empresa_ids': empresaIds,
+      if (empresaNombres.isNotEmpty) 'empresa_nombres': empresaNombres,
       'activa': true,
       'creado_en': FieldValue.serverTimestamp(),
       'creado_por': PrefsService.dni,
     });
+  }
+
+  /// Reescribe la lista completa de empresas asociadas a una ubicación.
+  /// Acepta listas vacías para "quitar todas las empresas". Borra los
+  /// campos legacy (`empresa_id`/`empresa_nombre`) si existían.
+  static Future<void> setEmpresasDeUbicacion({
+    required String id,
+    required List<String> empresaIds,
+    required List<String> empresaNombres,
+  }) async {
+    if (empresaIds.length != empresaNombres.length) {
+      throw ArgumentError(
+          'empresaIds y empresaNombres deben tener la misma longitud.');
+    }
+    final cambios = <String, dynamic>{
+      // Borrar campos legacy si los tenía — el modelo de M:N
+      // reemplaza al singular.
+      'empresa_id': FieldValue.delete(),
+      'empresa_nombre': FieldValue.delete(),
+    };
+    if (empresaIds.isEmpty) {
+      cambios['empresa_ids'] = FieldValue.delete();
+      cambios['empresa_nombres'] = FieldValue.delete();
+    } else {
+      cambios['empresa_ids'] = empresaIds;
+      cambios['empresa_nombres'] = empresaNombres;
+    }
+    await ubicacionesCol.doc(id).update(cambios);
   }
 
   static Future<void> actualizarUbicacion({
@@ -185,6 +245,7 @@ class LogisticaService {
     required UnidadTarifa unidadTarifa,
     required double tarifaReal,
     required double tarifaChofer,
+    String? producto,
     String? notas,
   }) async {
     // Validaciones de negocio:
@@ -224,6 +285,8 @@ class LogisticaService {
       'unidad_tarifa': unidadTarifa.codigo,
       'tarifa_real': tarifaReal,
       'tarifa_chofer': tarifaChofer,
+      if (producto != null && producto.trim().isNotEmpty)
+        'producto': producto.trim(),
       'activa': true,
       if (notas != null && notas.trim().isNotEmpty) 'notas': notas.trim(),
       'vigente_desde': FieldValue.serverTimestamp(),

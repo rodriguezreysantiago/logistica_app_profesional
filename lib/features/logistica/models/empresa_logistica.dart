@@ -37,6 +37,12 @@ class EmpresaLogistica {
   final TipoEmpresaLogistica tipo;
   final String? cuit;
   final String? contacto;
+  /// Productos que la empresa carga / despacha. Strings libres
+  /// porque cada empresa los nombra a su manera ("Urea granulada",
+  /// "Soja", "Aceite crudo"). Tarifas opcionalmente apuntan a un
+  /// producto específico — la misma ruta puede tener tarifa distinta
+  /// según el producto que se transporta.
+  final List<String> productos;
   final bool activa;
   final DateTime? creadoEn;
   final String? creadoPor;
@@ -48,6 +54,7 @@ class EmpresaLogistica {
     required this.tipo,
     this.cuit,
     this.contacto,
+    this.productos = const [],
     this.activa = true,
     this.creadoEn,
     this.creadoPor,
@@ -80,6 +87,12 @@ class EmpresaLogistica {
       contacto: (d['contacto'] as String?)?.trim().isEmpty ?? true
           ? null
           : (d['contacto'] as String).trim(),
+      productos: (d['productos'] is List)
+          ? (d['productos'] as List)
+              .map((p) => p?.toString().trim() ?? '')
+              .where((s) => s.isNotEmpty)
+              .toList()
+          : const [],
       activa: d['activa'] != false,
       creadoEn: (d['creado_en'] as Timestamp?)?.toDate(),
       creadoPor: d['creado_por']?.toString(),
@@ -101,6 +114,7 @@ class EmpresaLogistica {
       'tipo': tipo.codigo,
       if (cuit != null) 'cuit': cuit,
       if (contacto != null) 'contacto': contacto,
+      if (productos.isNotEmpty) 'productos': productos,
       'activa': activa,
       if (creadoPor != null) 'creado_por': creadoPor,
     };

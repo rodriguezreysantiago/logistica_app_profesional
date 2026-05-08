@@ -27,11 +27,14 @@
 #   - direccion:      opcional, vacío → no se setea el campo
 #   - lat:            opcional, debe estar entre -90 y 90
 #   - lng:            opcional, debe estar entre -180 y 180
-#   - empresa_nombre: opcional, busca la empresa por nombre (case-
-#                     insensitive) en EMPRESAS_LOGISTICA. Si no la
-#                     encuentra, error (no se carga la fila — primero
-#                     cargá la empresa). Si está vacío, ubicación queda
-#                     "huérfana" sin empresa asociada.
+#   - empresa_nombre: opcional, una o varias empresas separadas por
+#                     "|" (pipe). Cada una se busca por nombre (case-
+#                     insensitive) en EMPRESAS_LOGISTICA. Si no se
+#                     encuentra alguna, error (no se carga la fila —
+#                     primero cargá las empresas). Si está vacío, la
+#                     ubicación queda "huérfana" sin empresa asociada.
+#                     Ej: "CARGILL|BUNGE|COFCO" para una ubicación
+#                     compartida (puerto, terminal).
 #
 # Si lat o lng está pero no el otro, error (no se carga la fila).
 
@@ -182,21 +185,32 @@ def main():
 
         direccion = (row.get("direccion") or "").strip() or None
 
-        # Lookup empresa opcional. Si vino nombre_empresa pero no
-        # matchea ninguna en el catálogo, error (mejor abortar la
-        # fila que perder la asociación).
+        # Lookup empresas opcional. Una o varias separadas por "|".
+        # Si alguna no matchea, error de fila — mejor abortar que
+        # crear una ubicación con asociaciones incompletas.
         empresa_nombre_csv = (row.get("empresa_nombre") or "").strip()
-        empresa_id = None
-        empresa_nombre_snapshot = None
+        empresa_ids = []
+        empresa_nombres_snapshot = []
         if empresa_nombre_csv:
-            match = empresas.get(empresa_nombre_csv.upper())
-            if match is None:
-                print(f"❌ Fila {nro_fila}: empresa "
-                      f"'{empresa_nombre_csv}' no existe en EMPRESAS_LOGISTICA. "
-                      f"Cargala primero o dejá el campo vacío.")
+            faltantes = []
+            for raw in empresa_nombre_csv.split("|"):
+                nombre = raw.strip()
+                if not nombre:
+                    continue
+                match = empresas.get(nombre.upper())
+                if match is None:
+                    faltantes.append(nombre)
+                else:
+                    eid, enombre = match
+                    if eid not in empresa_ids:
+                        empresa_ids.append(eid)
+                        empresa_nombres_snapshot.append(enombre)
+            if faltantes:
+                print(f"❌ Fila {nro_fila}: empresa(s) "
+                      f"{faltantes} no existe(n) en EMPRESAS_LOGISTICA. "
+                      f"Cargala(s) primero o sacala(s) del campo.")
                 errores += 1
                 continue
-            empresa_id, empresa_nombre_snapshot = match
 
         doc = {
             "nombre": nombre_norm,
@@ -212,9 +226,9 @@ def main():
             doc["lat"] = lat
         if lng is not None:
             doc["lng"] = lng
-        if empresa_id:
-            doc["empresa_id"] = empresa_id
-            doc["empresa_nombre"] = empresa_nombre_snapshot
+        if empresa_ids:
+            doc["empresa_ids"] = empresa_ids
+            doc["empresa_nombres"] = empresa_nombres_snapshot
 
         a_crear.append((nombre_norm, doc))
         # Sumamos al set para que duplicados dentro del mismo CSV
@@ -236,7 +250,11 @@ def main():
         print("🧪 DRY-RUN: no se escribió nada. Los a crear son:")
         for nombre, doc in a_crear[:20]:
             coords = f"({doc.get('lat')},{doc.get('lng')})" if "lat" in doc else "(sin coords)"
-            empresa = f" → {doc['empresa_nombre']}" if "empresa_nombre" in doc else ""
+            empresa = (
+                f" → {' · '.join(doc['empresa_nombres'])}"
+                if "empresa_nombres" in doc
+                else ""
+            )
             print(f"   - {nombre} | {doc['localidad']}, {doc['provincia']} {coords}{empresa}")
         if len(a_crear) > 20:
             print(f"   ... y {len(a_crear) - 20} más")

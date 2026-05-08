@@ -318,6 +318,11 @@ class _EditarEmpresaSheet extends StatelessWidget {
                     v.trim().isEmpty ? null : v.trim(),
                   ),
                 ),
+                const SizedBox(height: 12),
+                _BloqueProductos(
+                  empresaId: empresa.id,
+                  productos: empresa.productos,
+                ),
               ],
             ),
           ),
@@ -487,6 +492,150 @@ class _Chip extends StatelessWidget {
           color: Colors.white70,
           fontSize: 11,
         ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// BLOQUE DE PRODUCTOS — chips con cada producto + botón "+ Agregar"
+// que abre un dialog con TextField. Tap en X de un chip lo borra.
+// Persiste con setProductosDeEmpresa (lista completa, dedup
+// case-insensitive en el service).
+// =============================================================================
+
+class _BloqueProductos extends StatelessWidget {
+  final String empresaId;
+  final List<String> productos;
+
+  const _BloqueProductos({
+    required this.empresaId,
+    required this.productos,
+  });
+
+  Future<void> _agregar(BuildContext context) async {
+    final nuevo = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final ctrl = TextEditingController();
+        return AlertDialog(
+          backgroundColor: AppColors.background,
+          title: const Text('Agregar producto'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Nombre del producto',
+              hintText: 'Ej. Urea granulada',
+            ),
+            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCELAR'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('AGREGAR'),
+            ),
+          ],
+        );
+      },
+    );
+    if (nuevo == null || nuevo.isEmpty) return;
+    final nueva = [...productos, nuevo];
+    await LogisticaService.setProductosDeEmpresa(
+      id: empresaId,
+      productos: nueva,
+    );
+  }
+
+  Future<void> _quitar(int index) async {
+    final nueva = List<String>.from(productos);
+    nueva.removeAt(index);
+    await LogisticaService.setProductosDeEmpresa(
+      id: empresaId,
+      productos: nueva,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.inventory_2_outlined,
+                  color: AppColors.accentAmber, size: 16),
+              SizedBox(width: 6),
+              Text(
+                'PRODUCTOS QUE CARGA',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (productos.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                'Sin productos cargados',
+                style: TextStyle(color: Colors.white38, fontSize: 13),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: List.generate(productos.length, (i) {
+                return Chip(
+                  label: Text(
+                    productos[i],
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                    ),
+                  ),
+                  backgroundColor:
+                      AppColors.accentAmber.withValues(alpha: 0.2),
+                  side: BorderSide(
+                    color: AppColors.accentAmber.withValues(alpha: 0.5),
+                  ),
+                  deleteIcon: const Icon(Icons.close, size: 14),
+                  deleteIconColor: Colors.white70,
+                  onDeleted: () => _quitar(i),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize:
+                      MaterialTapTargetSize.shrinkWrap,
+                );
+              }),
+            ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => _agregar(context),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('AGREGAR PRODUCTO'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.accentAmber,
+              side: const BorderSide(color: AppColors.accentAmber),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+            ),
+          ),
+        ],
       ),
     );
   }

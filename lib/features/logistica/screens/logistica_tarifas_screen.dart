@@ -228,6 +228,27 @@ class _CardTarifa extends StatelessWidget {
                 ),
             ],
           ),
+          if (tarifa.producto != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.inventory_2_outlined,
+                    color: AppColors.accentAmber, size: 14),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    tarifa.producto!,
+                    style: const TextStyle(
+                      color: AppColors.accentAmber,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 10),
           // Línea 2: origen → destino
           _RutaOrigenDestino(tarifa: tarifa, ods: _ods),

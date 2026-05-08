@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
@@ -111,7 +110,7 @@ class _CardUbicacion extends StatelessWidget {
                         : TextDecoration.lineThrough,
                   ),
                 ),
-                if (ubicacion.empresaNombre != null) ...[
+                if (ubicacion.empresaNombres.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Row(
                     children: [
@@ -120,7 +119,7 @@ class _CardUbicacion extends StatelessWidget {
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
-                          ubicacion.empresaNombre!,
+                          ubicacion.etiquetaEmpresas,
                           style: const TextStyle(
                             color: AppColors.accentBlue,
                             fontSize: 11,
@@ -326,23 +325,17 @@ class _EditarUbicacionSheetState extends State<_EditarUbicacionSheet> {
                   valor: _ubicacion.nombre,
                   onSave: (v) => _setCampo('nombre', v),
                 ),
-                // Selector de empresa "dueña" — tap abre el mismo
-                // bottom sheet de búsqueda que en el alta. Permite
-                // limpiar (quedar sin empresa).
-                _DatoEditableEmpresa(
-                  empresaActualNombre: _ubicacion.empresaNombre,
-                  onSeleccionar: (e) async {
-                    await LogisticaService.actualizarUbicacion(
+                // Empresas que USAN esta ubicación. Una ubicación
+                // puede tener varias (ej. Puerto de Quequén = CARGILL
+                // + BUNGE + COFCO). Tap → bottom sheet con multi-select.
+                _MultiEmpresaUbicacion(
+                  empresaIds: _ubicacion.empresaIds,
+                  empresaNombres: _ubicacion.empresaNombres,
+                  onCambio: (ids, nombres) async {
+                    await LogisticaService.setEmpresasDeUbicacion(
                       id: _ubicacion.id,
-                      cambios: e == null
-                          ? {
-                              'empresa_id': FieldValue.delete(),
-                              'empresa_nombre': FieldValue.delete(),
-                            }
-                          : {
-                              'empresa_id': e.id,
-                              'empresa_nombre': e.nombre,
-                            },
+                      empresaIds: ids,
+                      empresaNombres: nombres,
                     );
                     if (mounted) {
                       setState(() {
@@ -354,8 +347,8 @@ class _EditarUbicacionSheetState extends State<_EditarUbicacionSheet> {
                           direccion: _ubicacion.direccion,
                           lat: _ubicacion.lat,
                           lng: _ubicacion.lng,
-                          empresaId: e?.id,
-                          empresaNombre: e?.nombre,
+                          empresaIds: ids,
+                          empresaNombres: nombres,
                           activa: _ubicacion.activa,
                         );
                       });
@@ -499,7 +492,9 @@ class _AltaUbicacionDialogState extends State<_AltaUbicacionDialog> {
   final _direccionCtrl = TextEditingController();
   final _latCtrl = TextEditingController();
   final _lngCtrl = TextEditingController();
-  EmpresaLogistica? _empresa;
+  // Empresas que usan esta ubicación (M:N). Lista vacía permitida —
+  // el operador puede asociar después desde la edición inline.
+  final List<EmpresaLogistica> _empresas = [];
   bool _guardando = false;
   String? _error;
 
@@ -569,12 +564,29 @@ class _AltaUbicacionDialogState extends State<_AltaUbicacionDialog> {
                 ),
               ),
               const SizedBox(height: 8),
-              // Selector de empresa "dueña" del lugar físico. Opcional —
-              // ubicaciones genéricas (no asociadas) siguen funcionando.
-              // Tap → bottom sheet con buscador de empresas activas.
-              _SelectorEmpresaUbicacion(
-                empresa: _empresa,
-                onCambio: (e) => setState(() => _empresa = e),
+              // Empresas que USAN esta ubicación. Multi-select —
+              // una misma ubicación física la pueden compartir varias
+              // empresas (ej. Puerto de Quequén = CARGILL + BUNGE +
+              // COFCO). Opcional: si se deja vacío, queda sin
+              // asociar y el operador la edita después.
+              _MultiEmpresaUbicacion(
+                empresaIds: _empresas.map((e) => e.id).toList(),
+                empresaNombres: _empresas.map((e) => e.nombre).toList(),
+                onCambio: (ids, nombres) {
+                  setState(() {
+                    _empresas
+                      ..clear()
+                      ..addAll(
+                        ids.asMap().entries.map(
+                          (entry) => EmpresaLogistica(
+                            id: entry.value,
+                            nombre: nombres[entry.key],
+                            tipo: TipoEmpresaLogistica.cliente,
+                          ),
+                        ),
+                      );
+                  });
+                },
               ),
               const SizedBox(height: 8),
               TextField(
@@ -743,8 +755,8 @@ class _AltaUbicacionDialogState extends State<_AltaUbicacionDialog> {
             : _direccionCtrl.text.trim(),
         lat: lat,
         lng: lng,
-        empresaId: _empresa?.id,
-        empresaNombre: _empresa?.nombre,
+        empresaIds: _empresas.map((e) => e.id).toList(),
+        empresaNombres: _empresas.map((e) => e.nombre).toList(),
       );
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -757,174 +769,182 @@ class _AltaUbicacionDialogState extends State<_AltaUbicacionDialog> {
 }
 
 // =============================================================================
-// SELECTOR DE EMPRESA — usado en el alta (state local) y en la
-// edición inline (write inmediato). Abre un bottom sheet con buscador
-// de empresas activas.
+// MULTI-SELECTOR DE EMPRESAS — una ubicación física puede ser usada
+// por varias empresas (ej. Puerto de Quequén = CARGILL + BUNGE +
+// COFCO). Muestra chips con cada empresa asociada + botón "+" para
+// abrir un bottom sheet con buscador y multi-select (checkboxes).
 // =============================================================================
 
-class _SelectorEmpresaUbicacion extends StatelessWidget {
-  final EmpresaLogistica? empresa;
-  final ValueChanged<EmpresaLogistica?> onCambio;
+class _MultiEmpresaUbicacion extends StatelessWidget {
+  final List<String> empresaIds;
+  final List<String> empresaNombres;
+  final void Function(List<String> ids, List<String> nombres) onCambio;
 
-  const _SelectorEmpresaUbicacion({
-    required this.empresa,
+  const _MultiEmpresaUbicacion({
+    required this.empresaIds,
+    required this.empresaNombres,
     required this.onCambio,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () async {
-        final res = await _abrirSelector(context, empresa);
-        if (res == null) return; // dismiss sin elegir
-        onCambio(res.empresa); // res.empresa puede ser null = "limpiar"
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.white24),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.business_outlined,
-                color: Colors.white54, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'EMPRESA DUEÑA (OPCIONAL)',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    empresa?.nombre ?? 'Sin empresa asignada',
-                    style: TextStyle(
-                      color: empresa == null ? Colors.white38 : Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.business_outlined,
+                  color: AppColors.accentBlue, size: 16),
+              SizedBox(width: 6),
+              Text(
+                'EMPRESAS QUE USAN ESTA UBICACIÓN',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (empresaNombres.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                'Sin empresas asignadas',
+                style: TextStyle(color: Colors.white38, fontSize: 13),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: List.generate(empresaIds.length, (i) {
+                final nombre = i < empresaNombres.length
+                    ? empresaNombres[i]
+                    : empresaIds[i];
+                return Chip(
+                  label: Text(
+                    nombre,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  backgroundColor:
+                      AppColors.accentBlue.withValues(alpha: 0.25),
+                  side: BorderSide(
+                    color: AppColors.accentBlue.withValues(alpha: 0.6),
+                  ),
+                  deleteIcon: const Icon(Icons.close, size: 14),
+                  deleteIconColor: Colors.white70,
+                  onDeleted: () {
+                    final newIds = List<String>.from(empresaIds);
+                    final newNombres = List<String>.from(empresaNombres);
+                    newIds.removeAt(i);
+                    newNombres.removeAt(i);
+                    onCambio(newIds, newNombres);
+                  },
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize:
+                      MaterialTapTargetSize.shrinkWrap,
+                );
+              }),
             ),
-            const Icon(Icons.chevron_right, color: Colors.white38),
-          ],
-        ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final res = await _abrirMultiSelect(context, empresaIds);
+              if (res == null) return;
+              onCambio(res.ids, res.nombres);
+            },
+            icon: const Icon(Icons.add, size: 16),
+            label: Text(
+              empresaIds.isEmpty
+                  ? 'AGREGAR EMPRESA'
+                  : 'EDITAR EMPRESAS',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.accentBlue,
+              side: const BorderSide(color: AppColors.accentBlue),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _DatoEditableEmpresa extends StatelessWidget {
-  final String? empresaActualNombre;
-  final ValueChanged<EmpresaLogistica?> onSeleccionar;
-
-  const _DatoEditableEmpresa({
-    required this.empresaActualNombre,
-    required this.onSeleccionar,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () async {
-        final res = await _abrirSelector(context, null);
-        if (res == null) return;
-        onSeleccionar(res.empresa);
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.business_outlined, color: Colors.white54),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'EMPRESA DUEÑA',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    empresaActualNombre ?? 'Sin empresa asignada',
-                    style: TextStyle(
-                      color: empresaActualNombre == null
-                          ? Colors.white38
-                          : Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.edit_outlined,
-                color: Colors.white38, size: 18),
-          ],
-        ),
-      ),
-    );
-  }
+class _MultiEmpresaResultado {
+  final List<String> ids;
+  final List<String> nombres;
+  const _MultiEmpresaResultado(this.ids, this.nombres);
 }
 
-class _SelectorEmpresaResultado {
-  /// La empresa elegida. Si es null, el usuario tocó "QUITAR EMPRESA"
-  /// — diferente de cancelar el sheet (que devuelve null directamente).
-  final EmpresaLogistica? empresa;
-  const _SelectorEmpresaResultado(this.empresa);
-}
-
-Future<_SelectorEmpresaResultado?> _abrirSelector(
+Future<_MultiEmpresaResultado?> _abrirMultiSelect(
   BuildContext context,
-  EmpresaLogistica? actual,
+  List<String> seleccionadosIniciales,
 ) {
-  return showModalBottomSheet<_SelectorEmpresaResultado>(
+  return showModalBottomSheet<_MultiEmpresaResultado>(
     context: context,
     backgroundColor: AppColors.background,
     isScrollControlled: true,
-    builder: (_) => _BottomSheetSelectorEmpresa(actual: actual),
+    builder: (_) =>
+        _BottomSheetMultiEmpresa(seleccionadosIniciales: seleccionadosIniciales),
   );
 }
 
-class _BottomSheetSelectorEmpresa extends StatefulWidget {
-  final EmpresaLogistica? actual;
-  const _BottomSheetSelectorEmpresa({this.actual});
+class _BottomSheetMultiEmpresa extends StatefulWidget {
+  final List<String> seleccionadosIniciales;
+  const _BottomSheetMultiEmpresa({
+    required this.seleccionadosIniciales,
+  });
 
   @override
-  State<_BottomSheetSelectorEmpresa> createState() =>
-      _BottomSheetSelectorEmpresaState();
+  State<_BottomSheetMultiEmpresa> createState() =>
+      _BottomSheetMultiEmpresaState();
 }
 
-class _BottomSheetSelectorEmpresaState
-    extends State<_BottomSheetSelectorEmpresa> {
+class _BottomSheetMultiEmpresaState extends State<_BottomSheetMultiEmpresa> {
   String _filtro = '';
+  late Set<String> _seleccionados;
+
+  @override
+  void initState() {
+    super.initState();
+    _seleccionados = widget.seleccionadosIniciales.toSet();
+  }
+
+  void _confirmar(List<EmpresaLogistica> todasLasEmpresas) {
+    // Mantener orden estable: usar el orden alfabético de
+    // todasLasEmpresas filtrado por seleccionados, así si el operador
+    // re-abre el sheet la lista no se reordena raro.
+    final ids = <String>[];
+    final nombres = <String>[];
+    for (final e in todasLasEmpresas) {
+      if (_seleccionados.contains(e.id)) {
+        ids.add(e.id);
+        nombres.add(e.nombre);
+      }
+    }
+    Navigator.pop(context, _MultiEmpresaResultado(ids, nombres));
+  }
 
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.7,
+      initialChildSize: 0.8,
       maxChildSize: 0.95,
       minChildSize: 0.4,
       builder: (ctx, controller) => Column(
@@ -944,12 +964,14 @@ class _BottomSheetSelectorEmpresaState
               children: [
                 Icon(Icons.business_outlined, color: AppColors.accentBlue),
                 SizedBox(width: 10),
-                Text(
-                  'Asignar empresa dueña',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Text(
+                    'Empresas que usan esta ubicación',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -968,30 +990,12 @@ class _BottomSheetSelectorEmpresaState
               ),
             ),
           ),
-          // Botón "QUITAR" — solo si la ubicación tenía empresa antes.
-          // Devuelve resultado con empresa=null para que el caller la
-          // limpie del documento.
-          if (widget.actual != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: OutlinedButton.icon(
-                onPressed: () => Navigator.pop(
-                  context,
-                  const _SelectorEmpresaResultado(null),
-                ),
-                icon: const Icon(Icons.link_off, size: 16),
-                label: const Text('QUITAR EMPRESA ASIGNADA'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.accentRed,
-                  side: const BorderSide(color: AppColors.accentRed),
-                ),
-              ),
-            ),
           Expanded(
             child: StreamBuilder<List<EmpresaLogistica>>(
               stream: LogisticaService.streamEmpresas(soloActivas: true),
               builder: (ctx, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
+                if (snap.connectionState == ConnectionState.waiting &&
+                    !snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snap.hasError) {
@@ -1001,88 +1005,132 @@ class _BottomSheetSelectorEmpresaState
                     subtitle: snap.error.toString(),
                   );
                 }
-                final all = snap.data ?? const [];
+                final all = snap.data ?? const <EmpresaLogistica>[];
                 final f = _filtro.trim().toUpperCase();
                 final items = f.isEmpty
                     ? all
                     : all
                         .where((e) =>
                             e.nombre.toUpperCase().contains(f) ||
-                            (e.apodo ?? '')
-                                .toUpperCase()
-                                .contains(f))
+                            (e.apodo ?? '').toUpperCase().contains(f))
                         .toList();
                 if (items.isEmpty) {
                   return const AppEmptyState(
                     icon: Icons.business_outlined,
                     title: 'Sin empresas',
-                    subtitle: 'Cargá una empresa primero desde el catálogo.',
+                    subtitle:
+                        'Cargá una empresa primero desde el catálogo.',
                   );
                 }
-                return ListView.separated(
-                  controller: controller,
-                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 4),
-                  itemBuilder: (_, i) {
-                    final e = items[i];
-                    return AppCard(
-                      onTap: () => Navigator.pop(
-                        context,
-                        _SelectorEmpresaResultado(e),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.business,
-                              color: AppColors.accentBlue, size: 20),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                return Column(
+                  children: [
+                    Expanded(
+                      child: ListView.separated(
+                        controller: controller,
+                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 4),
+                        itemBuilder: (_, i) {
+                          final e = items[i];
+                          final marcada = _seleccionados.contains(e.id);
+                          return AppCard(
+                            onTap: () {
+                              setState(() {
+                                if (marcada) {
+                                  _seleccionados.remove(e.id);
+                                } else {
+                                  _seleccionados.add(e.id);
+                                }
+                              });
+                            },
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            child: Row(
                               children: [
-                                Text(
-                                  e.etiquetaPrincipal,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                Checkbox(
+                                  value: marcada,
+                                  onChanged: (v) {
+                                    setState(() {
+                                      if (v == true) {
+                                        _seleccionados.add(e.id);
+                                      } else {
+                                        _seleccionados.remove(e.id);
+                                      }
+                                    });
+                                  },
+                                  activeColor: AppColors.accentBlue,
                                 ),
-                                if (e.etiquetaSecundaria != null)
-                                  Padding(
-                                    padding:
-                                        const EdgeInsets.only(top: 2),
-                                    child: Text(
-                                      e.etiquetaSecundaria!,
-                                      style: const TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 11,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        e.etiquetaPrincipal,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    e.tipo.etiqueta,
-                                    style: const TextStyle(
-                                      color: Colors.white38,
-                                      fontSize: 10,
-                                    ),
+                                      if (e.etiquetaSecundaria != null)
+                                        Text(
+                                          e.etiquetaSecundaria!,
+                                          style: const TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
+                                Text(
+                                  e.tipo.etiqueta,
+                                  style: const TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
                               ],
                             ),
+                          );
+                        },
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      color: Colors.black26,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('CANCELAR'),
+                            ),
                           ),
-                          if (widget.actual?.id == e.id)
-                            const Icon(Icons.check,
-                                color: AppColors.accentGreen),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => _confirmar(all),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.accentBlue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 12),
+                              ),
+                              child: Text(
+                                _seleccionados.isEmpty
+                                    ? 'GUARDAR (SIN EMPRESAS)'
+                                    : 'GUARDAR ${_seleccionados.length}',
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 );
               },
             ),
@@ -1092,3 +1140,4 @@ class _BottomSheetSelectorEmpresaState
     );
   }
 }
+

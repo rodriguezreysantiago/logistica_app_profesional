@@ -53,6 +53,10 @@ class _LogisticaTarifaFormScreenState
   final _tarifaRealCtrl = TextEditingController();
   final _tarifaChoferCtrl = TextEditingController();
   final _notasCtrl = TextEditingController();
+  /// Producto que se transporta. Opcional — null = tarifa "general"
+  /// para esa ruta. Lista de opciones viene del catálogo de productos
+  /// de la empresa origen seleccionada.
+  String? _producto;
 
   // ─── Estado de carga ───
   bool _cargando = true;
@@ -96,6 +100,7 @@ class _LogisticaTarifaFormScreenState
             t.porcentajeComisionDador!.toStringAsFixed(1);
       }
       _notasCtrl.text = t.notas ?? '';
+      _producto = t.producto;
 
       // Resolver referencias a empresas/ubicaciones por id (para mostrar
       // los dropdowns con la opción seleccionada). Si el doc fue
@@ -253,6 +258,19 @@ class _LogisticaTarifaFormScreenState
             filtroEmpresaId: _empDestino?.id,
             onChange: (u) => setState(() => _ubicDestino = u),
           ),
+
+          // ─── PRODUCTO (opcional) ─────────────────────────────────
+          // La misma ruta puede tener tarifas distintas según el
+          // producto que se transporta. Las opciones vienen del
+          // catálogo de productos de la empresa origen.
+          if (_empOrigen != null && _empOrigen!.productos.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _SelectorProducto(
+              productos: _empOrigen!.productos,
+              valor: _producto,
+              onChange: (p) => setState(() => _producto = p),
+            ),
+          ],
 
           // ─── 4. MODALIDAD ───────────────────────────────────────────
           const SizedBox(height: 16),
@@ -539,6 +557,7 @@ class _LogisticaTarifaFormScreenState
           unidadTarifa: _unidad,
           tarifaReal: tarifaReal,
           tarifaChofer: tarifaChofer,
+          producto: _producto,
           notas: _notasCtrl.text,
         );
       }
@@ -900,9 +919,15 @@ class _ListaSelectorUbicacionState extends State<_ListaSelectorUbicacion> {
                 final all = snap.data ?? const [];
                 // Filtrar por empresa si el caller pasó filtroEmpresaId
                 // y el usuario NO toggleó "Mostrar todas".
+                // M:N: una ubicación puede pertenecer a varias
+                // empresas. Filtrar por array-contains client-side
+                // (el catálogo es chico, no vale la pena un índice
+                // Firestore para esto).
                 final items = (widget.filtroEmpresaId != null && !_mostrarTodas)
-                    ? all.where((u) =>
-                        u.empresaId == widget.filtroEmpresaId).toList()
+                    ? all
+                        .where((u) =>
+                            u.empresaIds.contains(widget.filtroEmpresaId))
+                        .toList()
                     : all;
                 if (items.isEmpty) {
                   if (widget.filtroEmpresaId != null && !_mostrarTodas) {
@@ -1020,6 +1045,87 @@ class _SeccionTitulo extends StatelessWidget {
               letterSpacing: 1.3,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// SELECTOR DE PRODUCTO — dropdown de los productos de la empresa
+// origen (opcional). Si no se elige ninguno, la tarifa es "general"
+// para esa ruta sin distinguir producto.
+// =============================================================================
+
+class _SelectorProducto extends StatelessWidget {
+  final List<String> productos;
+  final String? valor;
+  final ValueChanged<String?> onChange;
+
+  const _SelectorProducto({
+    required this.productos,
+    required this.valor,
+    required this.onChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.inventory_2_outlined,
+                  color: AppColors.accentAmber, size: 16),
+              SizedBox(width: 6),
+              Text(
+                'PRODUCTO (OPCIONAL)',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              ChoiceChip(
+                label: const Text('Sin especificar'),
+                selected: valor == null,
+                onSelected: (v) {
+                  if (v) onChange(null);
+                },
+                selectedColor:
+                    AppColors.accentAmber.withValues(alpha: 0.4),
+              ),
+              ...productos.map(
+                (p) => ChoiceChip(
+                  label: Text(p),
+                  selected: valor == p,
+                  onSelected: (v) {
+                    if (v) onChange(p);
+                  },
+                  selectedColor:
+                      AppColors.accentAmber.withValues(alpha: 0.4),
+                ),
+              ),
+            ],
+          ),
+          if (valor == null)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'Tarifa general para esta ruta (cualquier producto).',
+                style: TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+            ),
         ],
       ),
     );

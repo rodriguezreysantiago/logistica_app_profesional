@@ -101,6 +101,12 @@ class TarifaLogistica {
   final UnidadTarifa unidadTarifa;
   final double tarifaReal;
   final double tarifaChofer;
+  /// Producto que se transporta (snapshot del nombre del catálogo de
+  /// productos de la empresa origen). Opcional — si dos productos
+  /// distintos cobran lo mismo, una sola tarifa cubre ambos sin
+  /// especificar este campo. Si difiere, son tarifas distintas con
+  /// `producto` distinto. Decisión Vecchi 2026-05-08.
+  final String? producto;
   final DateTime? vigenteDesde;
   final bool activa;
   final String? notas;
@@ -125,6 +131,7 @@ class TarifaLogistica {
     required this.unidadTarifa,
     required this.tarifaReal,
     required this.tarifaChofer,
+    this.producto,
     this.vigenteDesde,
     this.activa = true,
     this.notas,
@@ -159,6 +166,9 @@ class TarifaLogistica {
       unidadTarifa: UnidadTarifa.fromCodigo(d['unidad_tarifa']?.toString()),
       tarifaReal: (d['tarifa_real'] as num?)?.toDouble() ?? 0,
       tarifaChofer: (d['tarifa_chofer'] as num?)?.toDouble() ?? 0,
+      producto: (d['producto'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (d['producto'] as String).trim(),
       vigenteDesde: (d['vigente_desde'] as Timestamp?)?.toDate(),
       activa: d['activa'] != false,
       notas: (d['notas'] as String?)?.trim().isEmpty ?? true
@@ -193,6 +203,7 @@ class TarifaLogistica {
       'unidad_tarifa': unidadTarifa.codigo,
       'tarifa_real': tarifaReal,
       'tarifa_chofer': tarifaChofer,
+      if (producto != null) 'producto': producto,
       'activa': activa,
       if (notas != null) 'notas': notas,
       if (creadoPor != null) 'creado_por': creadoPor,
