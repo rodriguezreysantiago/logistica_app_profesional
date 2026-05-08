@@ -279,6 +279,12 @@ class _EditarEmpresaSheet extends StatelessWidget {
                 DatoEditableTexto(
                   etiqueta: 'Apodo / nombre comercial (opcional)',
                   valor: empresa.apodo ?? '',
+                  // El apodo conserva la grafía como se conoce
+                  // comercialmente ("Lartirigoyen", no "LARTIRIGOYEN").
+                  // Sin esto el DatoEditableTexto convierte a UPPER
+                  // por default, lo que no encaja con un nombre
+                  // comercial / de fantasía.
+                  aplicarMayusculas: false,
                   onSave: (v) => setCampo(
                     'apodo',
                     v.trim().isEmpty ? null : v.trim(),
