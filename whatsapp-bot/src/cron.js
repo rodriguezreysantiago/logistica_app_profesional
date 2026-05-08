@@ -19,6 +19,7 @@ const { enHorarioHabil, normalizarTelefonoAWid } = require('./humano');
 const aviso = require('./aviso_builder');
 const avisoService = require('./aviso_service_builder');
 const avisoAlertasVolvo = require('./aviso_alertas_volvo_builder');
+const avisoVencProx = require('./aviso_vencimientos_proximos_builder');
 const hist = require('./historico');
 const health = require('./health');
 const fs = require('./firestore');
@@ -907,6 +908,223 @@ async function _runOnce(fs) {
     } else {
       log.debug(
         'ALERTAS_RESUMEN_DESTINATARIO_DNI no configurado. Skip mantenimiento diario.'
+      );
+    }
+
+    // ─── Vencimientos próximos (≤7 días) — al encargado de documentación ─
+    // 1 mensaje por día consolidado con TODO lo que vence en los
+    // próximos 7 días: legajo de cada chofer, papeles de cada unidad,
+    // y los 4 docs de cada empresa empleadora (Póliza ART, F. 931,
+    // SCVO, Libre deuda sindical). Si no hay nada en los 3 universos,
+    // no se manda mensaje (silencio = nada que reportar).
+    //
+    // Destinatario configurable por env var para que rotar al
+    // encargado no requiera cambios de código (mismo patrón que
+    // SERVICE_DESTINATARIO_DNI).
+    const dniDocumentacion = process.env.DOCUMENTACION_DESTINATARIO_DNI;
+    if (dniDocumentacion) {
+      const yaEnviadoVencProx = await hist.yaSeEnvioVencimientosProximos(
+        db,
+        dniDocumentacion
+      );
+      if (yaEnviadoVencProx) {
+        log.debug(
+          `Vencimientos próximos ya enviados hoy a ${dniDocumentacion}, skip.`
+        );
+      } else {
+        const empDoc = await _obtenerDestinatarioConsolidado(
+          db,
+          dniDocumentacion,
+          empleadosByDni
+        );
+        if (!empDoc) {
+          log.warn(
+            `DOCUMENTACION_DESTINATARIO_DNI=${dniDocumentacion} no existe en EMPLEADOS. ` +
+              `Resumen de vencimientos próximos no se envía hoy.`
+          );
+        } else {
+          const telDocRaw = empDoc.data.TELEFONO;
+          const telDoc = normalizarTelefonoAWid(telDocRaw)
+            ? String(telDocRaw).trim()
+            : null;
+          if (!telDoc) {
+            log.warn(
+              `Destinatario documentación ${dniDocumentacion} sin TELEFONO válido. ` +
+                `Resumen de vencimientos próximos no se envía hoy.`
+            );
+          } else {
+            // Etiquetas de los 4 docs por empresa — réplica de
+            // AppDocsEmpresa (cliente Flutter). En el resumen al
+            // encargado de documentación usamos la etiqueta TÉCNICA
+            // (SCVO, no "Seguro de Vida") porque es la persona que
+            // habla con la aseguradora / RR.HH.
+            const DOCS_EMPRESA = [
+              { etiqueta: 'Póliza ART', campoFecha: 'VENCIMIENTO_POLIZA_ART' },
+              { etiqueta: 'Formulario 931', campoFecha: 'VENCIMIENTO_FORMULARIO_931' },
+              { etiqueta: 'SCVO', campoFecha: 'VENCIMIENTO_SCVO' },
+              {
+                etiqueta: 'Libre deuda sindical',
+                campoFecha: 'VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL',
+              },
+            ];
+
+            const itemsPersonal = [];
+            for (const [, emp] of empleadosByDni) {
+              const data = emp.data;
+              // Skip empleados dados de baja.
+              if (data.ACTIVO === false) continue;
+              const nombre =
+                aviso.resolverNombreSaludo(data) ||
+                String(data.NOMBRE || '').trim() ||
+                emp.id;
+              for (const [etiqueta, campoBase] of Object.entries(DOCS_EMPLEADO)) {
+                const fechaStr = aIsoLocal(data[`VENCIMIENTO_${campoBase}`]);
+                const dias = calcularDiasRestantes(fechaStr);
+                if (dias == null) continue;
+                if (dias < 0 || dias > 7) continue;
+                itemsPersonal.push({ chofer: nombre, etiqueta, fecha: fechaStr, dias });
+              }
+            }
+
+            const itemsVehiculos = [];
+            // Reusamos el snapshot de VEHICULOS que ya cargó el cron
+            // arriba (línea ~306) para vencimientos por unidad — evita
+            // doble query.
+            for (const vDoc of vehiculosSnap.docs) {
+              const v = vDoc.data();
+              if (v.ACTIVO === false) continue;
+              const tipo = String(v.TIPO || '').toUpperCase();
+              const specs = DOCS_VEHICULO[tipo];
+              if (!specs) continue;
+              const patente = vDoc.id;
+              for (const spec of specs) {
+                const fechaStr = aIsoLocal(v[spec.campoFecha]);
+                const dias = calcularDiasRestantes(fechaStr);
+                if (dias == null) continue;
+                if (dias < 0 || dias > 7) continue;
+                itemsVehiculos.push({
+                  patente,
+                  tipoUnidad: tipo,
+                  etiqueta: spec.etiqueta,
+                  fecha: fechaStr,
+                  dias,
+                });
+              }
+            }
+
+            const itemsEmpresas = [];
+            try {
+              const empresasSnap = await db
+                .collection('EMPRESAS_EMPLEADORAS')
+                .get();
+              for (const eDoc of empresasSnap.docs) {
+                const data = eDoc.data();
+                const nombreEmpresa =
+                  String(data.nombre || '').trim() || `CUIT ${eDoc.id}`;
+                for (const docSpec of DOCS_EMPRESA) {
+                  const fechaStr = aIsoLocal(data[docSpec.campoFecha]);
+                  const dias = calcularDiasRestantes(fechaStr);
+                  if (dias == null) continue;
+                  if (dias < 0 || dias > 7) continue;
+                  itemsEmpresas.push({
+                    empresa: nombreEmpresa,
+                    etiqueta: docSpec.etiqueta,
+                    fecha: fechaStr,
+                    dias,
+                  });
+                }
+              }
+            } catch (e) {
+              log.warn(
+                `EMPRESAS_EMPLEADORAS no se pudo leer (${e.message}). ` +
+                  `Sigo con personal/vehículos.`
+              );
+            }
+
+            const totalItems =
+              itemsPersonal.length + itemsVehiculos.length + itemsEmpresas.length;
+
+            const mensajeVencProx = avisoVencProx.buildResumenVencimientosProximos({
+              destinatarioNombre: aviso.resolverNombreSaludo(empDoc.data),
+              itemsPersonal,
+              itemsVehiculos,
+              itemsEmpresas,
+            });
+
+            if (!mensajeVencProx) {
+              log.info(
+                `Vencimientos próximos: 0 items en próximos 7 días, no se envía.`
+              );
+              await hist.registrarVencimientosProximos(db, dniDocumentacion, {
+                cantidadItems: 0,
+                colaDocId: null,
+              });
+            } else {
+              try {
+                const colaRef = await db.collection(fs.COLECCION).add({
+                  telefono: telDoc,
+                  mensaje: mensajeVencProx,
+                  estado: fs.ESTADO.pendiente,
+                  encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                  enviado_en: null,
+                  error: null,
+                  intentos: 0,
+                  origen: 'cron_vencimientos_proximos_diario',
+                  destinatario_coleccion: 'EMPLEADOS',
+                  destinatario_id: dniDocumentacion,
+                  campo_base: 'VENCIMIENTOS_PROXIMOS_DIARIO',
+                  admin_dni: 'BOT',
+                  admin_nombre: 'Bot automatico',
+                  items_agrupados: [
+                    ...itemsPersonal.map((it) => ({
+                      tipoDoc: it.etiqueta,
+                      campoBase: 'VENC_PERSONAL',
+                      coleccion: 'EMPLEADOS',
+                      docId: it.chofer,
+                      fecha: it.fecha,
+                      dias: it.dias,
+                    })),
+                    ...itemsVehiculos.map((it) => ({
+                      tipoDoc: it.etiqueta,
+                      campoBase: 'VENC_VEHICULO',
+                      coleccion: 'VEHICULOS',
+                      docId: it.patente,
+                      fecha: it.fecha,
+                      dias: it.dias,
+                    })),
+                    ...itemsEmpresas.map((it) => ({
+                      tipoDoc: it.etiqueta,
+                      campoBase: 'VENC_EMPRESA',
+                      coleccion: 'EMPRESAS_EMPLEADORAS',
+                      docId: it.empresa,
+                      fecha: it.fecha,
+                      dias: it.dias,
+                    })),
+                  ],
+                });
+                await hist.registrarVencimientosProximos(db, dniDocumentacion, {
+                  cantidadItems: totalItems,
+                  colaDocId: colaRef.id,
+                });
+                stats.encolados++;
+                log.info(
+                  `+ Encolado VENCIMIENTOS PRÓXIMOS: ${dniDocumentacion} ` +
+                    `(${itemsPersonal.length} personal, ${itemsVehiculos.length} unidades, ` +
+                    `${itemsEmpresas.length} empresas) -> ${colaRef.id}`
+                );
+              } catch (e) {
+                stats.errores++;
+                log.error(
+                  `No se pudo encolar resumen vencimientos próximos: ${e.message}`
+                );
+              }
+            }
+          }
+        }
+      }
+    } else {
+      log.debug(
+        'DOCUMENTACION_DESTINATARIO_DNI no configurado. Skip resumen vencimientos próximos.'
       );
     }
 

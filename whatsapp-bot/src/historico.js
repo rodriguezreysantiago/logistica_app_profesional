@@ -303,6 +303,29 @@ async function registrarMantenimientoDiario(db, dniDestinatario, meta) {
 }
 
 /**
+ * Para el resumen DIARIO de vencimientos próximos (próximos 7 días)
+ * que va al encargado de documentación. Cubre choferes, vehículos y
+ * docs por empresa empleadora. Idempotencia por día + DNI destinatario.
+ */
+async function yaSeEnvioVencimientosProximos(db, dniDestinatario) {
+  const id = `venc_proximos_${_fechaHoyIso()}_${dniDestinatario}`;
+  const doc = await db.collection(COLECCION).doc(id).get();
+  return doc.exists;
+}
+
+async function registrarVencimientosProximos(db, dniDestinatario, meta) {
+  const id = `venc_proximos_${_fechaHoyIso()}_${dniDestinatario}`;
+  await db.collection(COLECCION).doc(id).set({
+    tipo: 'vencimientos_proximos_diario',
+    destinatario_dni: dniDestinatario,
+    fecha: _fechaHoyIso(),
+    cantidad_items: meta?.cantidadItems || 0,
+    cola_doc_id: meta?.colaDocId || null,
+    creado_en: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+/**
  * Limpia docs viejos de AVISOS_AUTOMATICOS_HISTORICO.
  *
  * Borra los docs con `creado_en` anterior a `diasMin` días atrás
@@ -363,9 +386,11 @@ module.exports = {
   yaSeEnvioServiceDiario,
   yaSeEnvioAlertasResumen,
   yaSeEnvioMantenimientoDiario,
+  yaSeEnvioVencimientosProximos,
   registrar,
   registrarServiceDiario,
   registrarAlertasResumen,
   registrarMantenimientoDiario,
+  registrarVencimientosProximos,
   limpiarObsoletos,
 };
