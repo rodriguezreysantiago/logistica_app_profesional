@@ -14,9 +14,16 @@ const { esFeriado, descripcionFeriado } = require('./feriados_ar');
  * Devuelve `true` si el momento actual está dentro de la ventana hábil
  * configurada para enviar mensajes automáticos.
  *
- * Reglas hardcodeadas (configurables vía .env):
- *   - **Días**: lunes a viernes (skip sábado y domingo).
- *   - **Horas**: 8 a 20 (`WORKING_HOURS_START` y `WORKING_HOURS_END`).
+ * Reglas (configurables vía .env):
+ *   - **Lunes a viernes**: ventana `WORKING_HOURS_START` a
+ *     `WORKING_HOURS_END` (default 8 a 20). Para mandar hasta las
+ *     23:59 setear `WORKING_HOURS_END=24`.
+ *   - **Sábado**: si `WORKING_HOURS_SAT_END > 0`, ventana
+ *     `WORKING_HOURS_SAT_START` a `WORKING_HOURS_SAT_END`. Default
+ *     ambos en 0 → sábado NO manda.
+ *   - **Domingo**: nunca manda (señal de bot demasiado obvia).
+ *   - **Feriados nacionales AR**: nunca manda (lista hardcodeada en
+ *     `feriados_ar.js`). Aplica también si el feriado cae sábado.
  *   - **Zona horaria**: `WORKING_TIMEZONE`, default
  *     `America/Argentina/Buenos_Aires`.
  *
@@ -25,17 +32,21 @@ const { esFeriado, descripcionFeriado } = require('./feriados_ar');
  * en otra TZ (cloud, contenedor, PC con reloj cambiado, etc.). Sin
  * la TZ explícita, los avisos pueden salir a las 3 AM hora real.
  *
- * Para cambiar el horario, editá `whatsapp-bot/.env`:
+ * Configuración operativa Vecchi 2026-05-08:
  *   WORKING_HOURS_START=8
- *   WORKING_HOURS_END=20
+ *   WORKING_HOURS_END=24
+ *   WORKING_HOURS_SAT_START=8
+ *   WORKING_HOURS_SAT_END=12
  *   WORKING_TIMEZONE=America/Argentina/Buenos_Aires
- *
- * Para incluir sábado/domingo (no recomendado, llama spam attention
- * en WhatsApp), hay que comentar el `if (esFinDeSemana)` adentro.
  */
 function enHorarioHabil(now = new Date()) {
   const inicio = parseInt(process.env.WORKING_HOURS_START || '8', 10);
   const fin = parseInt(process.env.WORKING_HOURS_END || '20', 10);
+  const satInicio = parseInt(
+    process.env.WORKING_HOURS_SAT_START || '0',
+    10
+  );
+  const satFin = parseInt(process.env.WORKING_HOURS_SAT_END || '0', 10);
   const tz =
     process.env.WORKING_TIMEZONE || 'America/Argentina/Buenos_Aires';
 
@@ -56,14 +67,24 @@ function enHorarioHabil(now = new Date()) {
   let hora = parseInt(horaStr, 10);
   if (hora === 24) hora = 0;
 
-  // Skip sábado y domingo.
-  const esFinDeSemana = weekday === 'Sat' || weekday === 'Sun';
-  if (esFinDeSemana) return false;
+  // Domingo: skip duro (no configurable — mandar domingo es señal
+  // obvia de bot y dispara baneo de WhatsApp).
+  if (weekday === 'Sun') return false;
 
-  // Skip feriados nacionales obligatorios de Argentina (lista hardcoded
-  // en feriados_ar.js, ver para mantenimiento anual).
+  // Feriados nacionales obligatorios de Argentina: skip antes que
+  // cualquier ventana horaria. Aplica también si el feriado cae
+  // sábado. Lista hardcodeada en feriados_ar.js (mantener anualmente).
   if (esFeriado(now)) return false;
 
+  // Sábado: ventana propia. Si WORKING_HOURS_SAT_END no está seteado
+  // (o queda en 0 por compatibilidad con configs viejas), sábado NO
+  // manda — preserva el comportamiento histórico del bot.
+  if (weekday === 'Sat') {
+    if (satFin <= 0) return false;
+    return hora >= satInicio && hora < satFin;
+  }
+
+  // Lunes a viernes: ventana normal.
   return hora >= inicio && hora < fin;
 }
 
