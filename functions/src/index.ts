@@ -3235,7 +3235,9 @@ export const resumenBotDiario = onSchedule(
       (empSnap.data()?.TELEFONO ?? "").toString().trim() :
       "";
     if (!tel) {
-      logger.error("[resumenBotDiario] admin sin TELEFONO", {adminDni});
+      logger.error("[resumenBotDiario] admin sin TELEFONO", {
+        adminDni,
+      });
       return;
     }
 
@@ -3596,9 +3598,9 @@ export const sitrackPosicionPoller = onSchedule(
         .toUpperCase()
         .split(/\s+/)
         .filter((t) => t.length > 1);
-      const nombreAsignacion = asignacion
-        ? asignacion.choferNombre.toUpperCase()
-        : "";
+      const nombreAsignacion = asignacion ?
+        asignacion.choferNombre.toUpperCase() :
+        "";
       const matchPorNombre =
         !!asignacion &&
         tokensSitrack.length > 0 &&
