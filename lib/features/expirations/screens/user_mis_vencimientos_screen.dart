@@ -81,6 +81,45 @@ class _UserMisVencimientosScreenState
         ));
       });
 
+      // Sumamos también los docs a nivel EMPRESA (Póliza ART + F.931).
+      // El chofer no los edita, pero sí queremos avisarle del
+      // vencimiento — si la empresa no renueva, le repercute en su
+      // legajo igual.
+      final cuit = AppEmpresasEmpleadoras.cuitDeStringEmpresa(
+          (data['EMPRESA'] ?? '').toString());
+      if (cuit != null && cuit.isNotEmpty) {
+        try {
+          final empSnap = await FirebaseFirestore.instance
+              .collection(AppCollections.empresasEmpleadoras)
+              .doc(cuit)
+              .get();
+          final empData = empSnap.data();
+          if (empData != null) {
+            const docsEmpresa = <String, ({String etiqueta, String campo})>{
+              AppDocsEmpresa.sufijoPolizaArt: (
+                etiqueta: AppDocsEmpresa.etiquetaPolizaArt,
+                campo: AppDocsEmpresa.campoFechaPolizaArt,
+              ),
+              AppDocsEmpresa.sufijoForm931: (
+                etiqueta: AppDocsEmpresa.etiquetaForm931,
+                campo: AppDocsEmpresa.campoFechaForm931,
+              ),
+            };
+            for (final entry in docsEmpresa.entries) {
+              final fechaStr = empData[entry.value.campo]?.toString();
+              if (fechaStr == null || fechaStr.isEmpty) continue;
+              final fecha = AppFormatters.tryParseFecha(fechaStr);
+              if (fecha == null || fecha.isBefore(hoy)) continue;
+              avisos.add(VencimientoAviso(
+                fecha: fecha,
+                tipoDoc: entry.value.etiqueta,
+                campoBase: entry.key,
+              ));
+            }
+          }
+        } catch (_) {/* best-effort, no rompe la pantalla */}
+      }
+
       await NotificationService.cancelarTodosLosRecordatorios();
       if (avisos.isNotEmpty) {
         await NotificationService.agendarRecordatoriosVencimientos(avisos);
@@ -442,19 +481,24 @@ class _UserMisVencimientosScreenState
               const SizedBox(height: 20),
 
               const _SectionHeader('COBERTURAS LABORALES'),
-              _CardVencimientoUser(
-                titulo: 'Certificado ART',
-                fecha: data['VENCIMIENTO_ART'],
-                campo: 'VENCIMIENTO_ART',
-                urlArchivo: data['ARCHIVO_ART'],
-                idDoc: widget.dniUser,
-                onUpload: () => _iniciarTramite(
-                  etiqueta: 'ART',
-                  campo: 'VENCIMIENTO_ART',
-                  idDoc: widget.dniUser,
-                  coleccion: 'EMPLEADOS',
-                  nombreUsuario: nombreChofer,
-                ),
+              // Póliza ART y Formulario 931 son a NIVEL EMPRESA — el
+              // mismo PDF lo comparten todos los empleados de Vecchi
+              // Ariel o de Sucesión Vecchi Carlos. El admin los carga
+              // una sola vez desde la pantalla "Empresas y seguros".
+              // Acá el chofer solo lo VE (read-only).
+              _CardVencimientoEmpresa(
+                titulo: AppDocsEmpresa.etiquetaPolizaArt,
+                cuitEmpresa: AppEmpresasEmpleadoras.cuitDeStringEmpresa(
+                    (data['EMPRESA'] ?? '').toString()),
+                campoFecha: AppDocsEmpresa.campoFechaPolizaArt,
+                campoUrl: AppDocsEmpresa.campoArchivoPolizaArt,
+              ),
+              _CardVencimientoEmpresa(
+                titulo: AppDocsEmpresa.etiquetaForm931,
+                cuitEmpresa: AppEmpresasEmpleadoras.cuitDeStringEmpresa(
+                    (data['EMPRESA'] ?? '').toString()),
+                campoFecha: AppDocsEmpresa.campoFechaForm931,
+                campoUrl: AppDocsEmpresa.campoArchivoForm931,
               ),
               const SizedBox(height: 20),
 

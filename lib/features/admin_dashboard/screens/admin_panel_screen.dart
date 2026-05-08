@@ -136,6 +136,14 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
               color: AppColors.accentGreen,
               ruta: '/admin_vencimientos_menu',
             ),
+          if (Capabilities.can(PrefsService.rol, Capability.verVencimientos))
+            const _AdminTile(
+              titulo: 'EMPRESAS Y SEGUROS',
+              subtitulo: 'Póliza ART y Formulario 931 por empresa',
+              icono: Icons.business_outlined,
+              color: AppColors.accentBlue,
+              ruta: AppRoutes.adminEmpresasEmpleadoras,
+            ),
           if (Capabilities.can(PrefsService.rol, Capability.verLogistica))
             const _AdminTile(
               titulo: 'LOGÍSTICA',

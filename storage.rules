@@ -95,6 +95,17 @@ service firebase.storage {
     }
 
     // ========================================================================
+    // EMPRESAS_EMPLEADORAS — Póliza ART y F.931 a nivel empresa
+    // ========================================================================
+    // Path: EMPRESAS_EMPLEADORAS/{cuit}/{archivo}
+    // Lectura: cualquier signedIn (cada empleado ve los docs de su
+    // empresa en MIS VENCIMIENTOS, read-only). Escritura: solo admin.
+    match /EMPRESAS_EMPLEADORAS/{cuit}/{archivo=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
     // EMPLEADOS_DOCS / VEHICULOS_DOCS — auditoría (sube al guardar)
     // ========================================================================
 

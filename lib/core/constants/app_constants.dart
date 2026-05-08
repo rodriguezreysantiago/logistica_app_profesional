@@ -50,6 +50,12 @@
   static const String adminLogisticaTarifaForm = '/admin_logistica_tarifa_form';
   static const String adminLogisticaMapaTarifas = '/admin_logistica_mapa_tarifas';
 
+  /// ABM de docs por empresa empleadora (Póliza ART + Formulario 931).
+  /// Admin/Supervisor: una sola pantalla con tarjeta por empresa, cada
+  /// una con sus 2 documentos editables. Los empleados ven los archivos
+  /// y vencimientos en su MIS VENCIMIENTOS, read-only.
+  static const String adminEmpresasEmpleadoras = '/admin_empresas_empleadoras';
+
 
   // Auditorías
   static const String vencimientosChoferes = '/vencimientos_choferes';
@@ -244,6 +250,108 @@ class AppCollections {
   /// (`activa=false`) y se crea una nueva con `vigente_desde=now`. Así
   /// los reportes históricos siguen mostrando el precio que aplicaba.
   static const String tarifasLogistica = 'TARIFAS_LOGISTICA';
+
+  // ─── Empresas empleadoras (2026-05-08) ───
+  /// Empresas que figuran como empleador del personal (Vecchi Ariel y
+  /// Vecchi Graciela S.R.L. + Sucesión de Vecchi Carlos Luis). Doc id:
+  /// CUIT (formato `XX-XXXXXXXX-X`). Cada doc guarda los documentos
+  /// laborales que son COMUNES a todos los empleados de esa empresa
+  /// (Póliza ART + Formulario 931). El empleado los ve read-only desde
+  /// MIS VENCIMIENTOS; el admin los actualiza una vez por empresa y
+  /// queda reflejado en todos los empleados que figuran ahí.
+  ///
+  /// Por qué docId = CUIT (y no slug del nombre): es estable, único, y
+  /// sale parseable directo del campo `EMPRESA` que ya guardamos en
+  /// EMPLEADOS (formato `'NOMBRE: (CUIT)'`).
+  static const String empresasEmpleadoras = 'EMPRESAS_EMPLEADORAS';
+}
+
+/// Documentos laborales que viven a NIVEL EMPRESA (no por empleado).
+/// Estos son comunes a todos los empleados de la misma empresa: la
+/// Póliza ART y el Formulario 931 los emite la empresa, no el empleado.
+///
+/// Guardados en `EMPRESAS_EMPLEADORAS/{cuit}` con la misma convención
+/// de campos que los docs de empleado: `VENCIMIENTO_<sufijo>` para la
+/// fecha y `ARCHIVO_<sufijo>` para la URL del PDF en Storage.
+class AppDocsEmpresa {
+  AppDocsEmpresa._();
+
+  static const String etiquetaPolizaArt = 'Póliza ART';
+  static const String sufijoPolizaArt = 'POLIZA_ART';
+  static const String campoFechaPolizaArt = 'VENCIMIENTO_POLIZA_ART';
+  static const String campoArchivoPolizaArt = 'ARCHIVO_POLIZA_ART';
+
+  static const String etiquetaForm931 = 'Formulario 931';
+  static const String sufijoForm931 = 'FORMULARIO_931';
+  static const String campoFechaForm931 = 'VENCIMIENTO_FORMULARIO_931';
+  static const String campoArchivoForm931 = 'ARCHIVO_FORMULARIO_931';
+}
+
+/// Catálogo hardcoded de las 2 empresas empleadoras de Vecchi (2026-05-08).
+///
+/// El campo `EMPRESA` en EMPLEADOS guarda el string "completo"
+/// (`'NOMBRE: (CUIT)'`) para mantener la UX del dropdown como estaba.
+/// Para resolver de empleado a doc de empresa usamos el CUIT extraído
+/// con [cuitDeStringEmpresa] como docId en EMPRESAS_EMPLEADORAS.
+///
+/// Si Vecchi suma una tercera empresa empleadora, agregar acá +
+/// seedear el doc desde la pantalla admin.
+class AppEmpresasEmpleadoras {
+  AppEmpresasEmpleadoras._();
+
+  /// Vecchi Ariel y Vecchi Graciela S.R.L.
+  static const String cuitVecchiAriel = '30-70910015-3';
+
+  /// Sucesión de Vecchi Carlos Luis.
+  static const String cuitVecchiCarlos = '20-08569424-4';
+
+  /// Catálogo (orden estable: el dropdown del form de personal usa
+  /// estos mismos labels). Si cambiás un label acá, no afecta la
+  /// resolución a doc de empresa porque va por CUIT.
+  static const List<EmpresaEmpleadoraInfo> catalogo = [
+    EmpresaEmpleadoraInfo(
+      cuit: cuitVecchiAriel,
+      label: 'VECCHI ARIEL Y VECCHI GRACIELA S.R.L: ($cuitVecchiAriel)',
+      nombre: 'Vecchi Ariel y Vecchi Graciela S.R.L.',
+    ),
+    EmpresaEmpleadoraInfo(
+      cuit: cuitVecchiCarlos,
+      label: 'SUCESION DE VECCHI CARLOS LUIS: ($cuitVecchiCarlos)',
+      nombre: 'Sucesión de Vecchi Carlos Luis',
+    ),
+  ];
+
+  /// Extrae el CUIT del string `EMPRESA` que se guarda en cada doc de
+  /// EMPLEADOS — formato esperado: `'NOMBRE: (XX-XXXXXXXX-X)'`.
+  /// Devuelve `null` si no matchea (empleado sin empresa, o empresa
+  /// vieja sin CUIT). Robusto a paréntesis sobrantes y a acentos.
+  static String? cuitDeStringEmpresa(String? raw) {
+    if (raw == null) return null;
+    final m = RegExp(r'(\d{2}-\d{8}-\d)').firstMatch(raw);
+    return m?.group(1);
+  }
+
+  /// Devuelve el `EmpresaEmpleadoraInfo` cuyo CUIT matchea.
+  static EmpresaEmpleadoraInfo? infoPorCuit(String? cuit) {
+    if (cuit == null) return null;
+    for (final e in catalogo) {
+      if (e.cuit == cuit) return e;
+    }
+    return null;
+  }
+}
+
+/// Info estática de una empresa empleadora (CUIT + label visible).
+class EmpresaEmpleadoraInfo {
+  final String cuit;
+  final String label;
+  final String nombre;
+
+  const EmpresaEmpleadoraInfo({
+    required this.cuit,
+    required this.label,
+    required this.nombre,
+  });
 }
 
 class AppRoles {

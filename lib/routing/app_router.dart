@@ -48,6 +48,8 @@ import '../features/expirations/screens/admin_vencimientos_chasis_screen.dart';
 import '../features/expirations/screens/admin_vencimientos_acoplados_screen.dart';
 import '../features/expirations/screens/admin_vencimientos_calendario_screen.dart';
 
+import '../features/empresas_empleadoras/screens/admin_empresas_empleadoras_screen.dart';
+
 class AppRouter {
   AppRouter._();
 
@@ -163,6 +165,12 @@ class AppRouter {
       case AppRoutes.adminVencimientosMenu:
         return _buildRoute(
           _protegerAdmin(const AdminVencimientosMenuScreen()),
+          settings,
+        );
+
+      case AppRoutes.adminEmpresasEmpleadoras:
+        return _buildRoute(
+          _protegerAdmin(const AdminEmpresasEmpleadorasScreen()),
           settings,
         );
 

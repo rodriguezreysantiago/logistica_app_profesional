@@ -37,14 +37,14 @@ class _AdminPersonalFormScreenState
 
   String _rol = AppRoles.chofer;
   String _area = AppAreas.manejo;
-  String _empresa =
-      'VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)';
+  // Catálogo único en `AppEmpresasEmpleadoras.catalogo` — el campo
+  // `EMPRESA` se sigue guardando como string completo (`label`) para
+  // no romper compat con docs existentes.
+  String _empresa = AppEmpresasEmpleadoras.catalogo.first.label;
   bool _guardando = false;
 
-  static const _empresas = [
-    'VECCHI ARIEL Y VECCHI GRACIELA S.R.L: (30-70910015-3)',
-    'SUCESION DE VECCHI CARLOS LUIS: (20-08569424-4)',
-  ];
+  static List<String> get _empresas =>
+      AppEmpresasEmpleadoras.catalogo.map((e) => e.label).toList();
 
   @override
   void dispose() {

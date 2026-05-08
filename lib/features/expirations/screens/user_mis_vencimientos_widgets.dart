@@ -144,6 +144,130 @@ class _BotonUpload extends StatelessWidget {
   }
 }
 
+/// Variante READ-ONLY de [_CardVencimientoUser] — usada para los
+/// documentos que viven a nivel EMPRESA empleadora (Póliza ART + F.931).
+/// El chofer solo ve la fecha y abre el PDF; no puede subir archivo
+/// nuevo ni iniciar trámite (esos docs los carga el admin una sola vez
+/// desde la pantalla "Empresas y seguros" y se reflejan acá automático).
+///
+/// Si el chofer no tiene empresa o la empresa no carga el doc todavía,
+/// muestra "Pendiente — consultar a la oficina" en gris y deshabilita
+/// el tap.
+class _CardVencimientoEmpresa extends StatelessWidget {
+  final String titulo;
+  final String? cuitEmpresa;
+  final String campoFecha;
+  final String campoUrl;
+
+  const _CardVencimientoEmpresa({
+    required this.titulo,
+    required this.cuitEmpresa,
+    required this.campoFecha,
+    required this.campoUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (cuitEmpresa == null || cuitEmpresa!.isEmpty) {
+      return _placeholderSinEmpresa();
+    }
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection(AppCollections.empresasEmpleadoras)
+          .doc(cuitEmpresa)
+          .snapshots(),
+      builder: (context, snap) {
+        final data = snap.data?.data() ?? const <String, dynamic>{};
+        final fecha = data[campoFecha];
+        final url = data[campoUrl]?.toString();
+        final tieneArchivo =
+            url != null && url.isNotEmpty && url != '-';
+
+        return AppCard(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              AppFileThumbnail(
+                url: url,
+                tituloVisor: titulo,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      titulo,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      tieneArchivo || fecha != null
+                          ? 'Vence: ${AppFormatters.formatearFecha(fecha)}'
+                          : 'Pendiente — consultar a la oficina',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: tieneArchivo || fecha != null
+                            ? Colors.white60
+                            : Colors.white38,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              VencimientoBadge(fecha: fecha),
+              const SizedBox(width: 8),
+              // Sin botón upload — el chofer no edita estos docs.
+              // Lock icon visible para que se entienda que es view-only.
+              const Icon(Icons.lock_outline,
+                  color: Colors.white24, size: 18),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _placeholderSinEmpresa() {
+    return AppCard(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              color: Colors.white38, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'No tenés empresa cargada — consultá a la oficina.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CardInformativa extends StatelessWidget {
   final String mensaje;
   const _CardInformativa(this.mensaje);

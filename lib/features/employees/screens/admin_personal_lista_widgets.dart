@@ -374,20 +374,10 @@ class _DetalleChofer extends StatelessWidget {
 
         const Divider(color: Colors.white10),
         const _SectionTitle(icon: Icons.work, label: 'Seguros y aportes'),
-        _FilaVencimiento(
-          dni: dni,
-          etiqueta: 'ART',
-          campoFecha: 'VENCIMIENTO_ART',
-          campoUrl: 'ARCHIVO_ART',
-          data: data,
-        ),
-        _FilaVencimiento(
-          dni: dni,
-          etiqueta: 'F. 931',
-          campoFecha: 'VENCIMIENTO_931',
-          campoUrl: 'ARCHIVO_931',
-          data: data,
-        ),
+        // Póliza ART y Formulario 931 son a NIVEL EMPRESA — un mismo
+        // PDF para todos los empleados de la misma razón social. Se
+        // editan desde la pantalla "Empresas y seguros" (admin panel),
+        // no por empleado. El chofer los ve en MIS VENCIMIENTOS read-only.
         _FilaVencimiento(
           dni: dni,
           etiqueta: 'SEGURO VIDA',

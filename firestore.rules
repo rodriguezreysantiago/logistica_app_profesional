@@ -375,6 +375,25 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // EMPRESAS_EMPLEADORAS — Póliza ART y F.931 a nivel empresa
+    // ========================================================================
+    // Una entrada por empresa empleadora del personal (Vecchi Ariel,
+    // Sucesión Vecchi Carlos). DocId = CUIT. Guarda el PDF + la fecha de
+    // cada documento laboral que es COMÚN a todos los empleados de esa
+    // razón social — la Póliza ART y el Formulario 931 son por empresa,
+    // no por persona.
+    //
+    // Lectura: cualquier usuario autenticado, así el chofer ve los docs
+    // de su empresa en MIS VENCIMIENTOS (read-only).
+    // Escritura: admin/supervisor (los mismos que ya manejan personal y
+    // vencimientos). NO permitimos delete — es histórico.
+    match /EMPRESAS_EMPLEADORAS/{cuit} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdminOrSupervisor();
+      allow delete: if false;
+    }
+
+    // ========================================================================
     // ASIGNACIONES_VEHICULO — log temporal de quién manejó qué unidad
     // ========================================================================
     // Cada doc representa el período en que un chofer manejó una patente.
