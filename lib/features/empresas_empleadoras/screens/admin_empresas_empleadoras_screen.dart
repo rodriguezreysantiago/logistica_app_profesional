@@ -125,6 +125,22 @@ class _CardEmpresa extends StatelessWidget {
                 campoUrl: AppDocsEmpresa.campoArchivoForm931,
                 data: data,
               ),
+              const Divider(color: Colors.white10, height: 8),
+              _FilaDocEmpresa(
+                cuit: info.cuit,
+                etiqueta: AppDocsEmpresa.etiquetaScvoAdmin,
+                campoFecha: AppDocsEmpresa.campoFechaScvo,
+                campoUrl: AppDocsEmpresa.campoArchivoScvo,
+                data: data,
+              ),
+              const Divider(color: Colors.white10, height: 8),
+              _FilaDocEmpresa(
+                cuit: info.cuit,
+                etiqueta: AppDocsEmpresa.etiquetaCuotaSindical,
+                campoFecha: AppDocsEmpresa.campoFechaCuotaSindical,
+                campoUrl: AppDocsEmpresa.campoArchivoCuotaSindical,
+                data: data,
+              ),
             ],
           );
         },

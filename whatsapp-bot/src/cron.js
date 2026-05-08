@@ -30,20 +30,19 @@ const INTERVALO_SERVICE_KM = 50000;
 // Documentos auditados de EMPLEADOS — replica del listado en
 // `lib/core/constants/vencimientos_config.dart` (AppDocsEmpleado.etiquetas).
 //
-// 2026-05-08: ART y F. 931 SE SACARON. Esos docs ahora viven a nivel
-// empresa empleadora (EMPRESAS_EMPLEADORAS/{cuit}) — son comunes a
-// todos los empleados de la misma razón social. Mandar WhatsApp al
-// chofer porque la empresa no renovó su Póliza ART es ruido (el
+// 2026-05-08: ART, F. 931, Seguro de Vida (SCVO) y pago de cuota
+// sindical SE SACARON. Esos docs ahora viven a nivel empresa
+// empleadora (EMPRESAS_EMPLEADORAS/{cuit}) — son comunes a todos los
+// empleados de la misma razón social. Mandar WhatsApp al chofer
+// porque la empresa no renovó alguno de esos papeles es ruido (el
 // chofer no puede hacer nada). Si en el futuro se quiere avisar a
-// la oficina cuando una Póliza ART por empresa está por vencer, esa
-// notificación va por otro canal (consolidada al admin/RR.HH.), no
-// individualizada al chofer.
+// la oficina cuando uno por empresa está por vencer, esa notificación
+// va por otro canal (consolidada al admin/RR.HH.), no individualizada
+// al chofer.
 const DOCS_EMPLEADO = {
   'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
   Preocupacional: 'PREOCUPACIONAL',
   'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
-  'Seguro de Vida': 'SEGURO_DE_VIDA',
-  Sindicato: 'LIBRE_DE_DEUDA_SINDICAL',
 };
 
 // Vencimientos auditados de VEHICULOS por tipo. Replica de

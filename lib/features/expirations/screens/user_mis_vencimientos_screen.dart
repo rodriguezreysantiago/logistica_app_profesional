@@ -448,11 +448,12 @@ class _UserMisVencimientosScreenState
               const SizedBox(height: 20),
 
               const _SectionHeader('COBERTURAS LABORALES'),
-              // Póliza ART y Formulario 931 son a NIVEL EMPRESA — el
-              // mismo PDF lo comparten todos los empleados de Vecchi
-              // Ariel o de Sucesión Vecchi Carlos. El admin los carga
-              // una sola vez desde la pantalla "Empresas y seguros".
-              // Acá el chofer solo lo VE (read-only).
+              // Estos 4 docs son a NIVEL EMPRESA — el mismo PDF lo
+              // comparten todos los empleados de Vecchi Ariel o de
+              // Sucesión Vecchi Carlos. El admin los carga una sola
+              // vez desde la pantalla "Empresas y seguros". Acá el
+              // chofer solo los VE (read-only). SCVO se rotula como
+              // "Seguro de Vida" porque es como lo conocen los choferes.
               _CardVencimientoEmpresa(
                 titulo: AppDocsEmpresa.etiquetaPolizaArt,
                 cuitEmpresa: AppEmpresasEmpleadoras.cuitDeStringEmpresa(
@@ -466,6 +467,20 @@ class _UserMisVencimientosScreenState
                     (data['EMPRESA'] ?? '').toString()),
                 campoFecha: AppDocsEmpresa.campoFechaForm931,
                 campoUrl: AppDocsEmpresa.campoArchivoForm931,
+              ),
+              _CardVencimientoEmpresa(
+                titulo: AppDocsEmpresa.etiquetaScvoChofer,
+                cuitEmpresa: AppEmpresasEmpleadoras.cuitDeStringEmpresa(
+                    (data['EMPRESA'] ?? '').toString()),
+                campoFecha: AppDocsEmpresa.campoFechaScvo,
+                campoUrl: AppDocsEmpresa.campoArchivoScvo,
+              ),
+              _CardVencimientoEmpresa(
+                titulo: AppDocsEmpresa.etiquetaCuotaSindical,
+                cuitEmpresa: AppEmpresasEmpleadoras.cuitDeStringEmpresa(
+                    (data['EMPRESA'] ?? '').toString()),
+                campoFecha: AppDocsEmpresa.campoFechaCuotaSindical,
+                campoUrl: AppDocsEmpresa.campoArchivoCuotaSindical,
               ),
               const SizedBox(height: 20),
 

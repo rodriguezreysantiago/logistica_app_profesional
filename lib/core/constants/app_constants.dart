@@ -267,12 +267,20 @@ class AppCollections {
 }
 
 /// Documentos laborales que viven a NIVEL EMPRESA (no por empleado).
-/// Estos son comunes a todos los empleados de la misma empresa: la
-/// Póliza ART y el Formulario 931 los emite la empresa, no el empleado.
+/// Estos son comunes a todos los empleados de la misma empresa:
+/// Póliza ART, Formulario 931, Seguro Colectivo de Vida Obligatorio y
+/// el comprobante de pago de cuota sindical los emite/paga la empresa,
+/// no cada empleado.
 ///
 /// Guardados en `EMPRESAS_EMPLEADORAS/{cuit}` con la misma convención
 /// de campos que los docs de empleado: `VENCIMIENTO_<sufijo>` para la
 /// fecha y `ARCHIVO_<sufijo>` para la URL del PDF en Storage.
+///
+/// Nota sobre `etiqueta...Admin` vs `etiqueta...Chofer`: SCVO se
+/// muestra al admin con el nombre técnico (lo identifica el RR.HH. /
+/// estudio contable) pero al chofer con el nombre coloquial ("Seguro
+/// de Vida", que es como lo conocen). Para los demás docs ambas
+/// etiquetas coinciden.
 class AppDocsEmpresa {
   AppDocsEmpresa._();
 
@@ -285,6 +293,21 @@ class AppDocsEmpresa {
   static const String sufijoForm931 = 'FORMULARIO_931';
   static const String campoFechaForm931 = 'VENCIMIENTO_FORMULARIO_931';
   static const String campoArchivoForm931 = 'ARCHIVO_FORMULARIO_931';
+
+  /// Seguro Colectivo de Vida Obligatorio (mismo doc, distinto label
+  /// según el contexto — admin lo ve "SCVO", chofer "Seguro de Vida").
+  static const String etiquetaScvoAdmin = 'SCVO';
+  static const String etiquetaScvoChofer = 'Seguro de Vida';
+  static const String sufijoScvo = 'SCVO';
+  static const String campoFechaScvo = 'VENCIMIENTO_SCVO';
+  static const String campoArchivoScvo = 'ARCHIVO_SCVO';
+
+  /// Comprobante de pago de cuota sindical de la empresa al sindicato
+  /// (Camioneros u otro). Mismo label en ambos contextos.
+  static const String etiquetaCuotaSindical = 'Pago de cuota sindical';
+  static const String sufijoCuotaSindical = 'CUOTA_SINDICAL';
+  static const String campoFechaCuotaSindical = 'VENCIMIENTO_CUOTA_SINDICAL';
+  static const String campoArchivoCuotaSindical = 'ARCHIVO_CUOTA_SINDICAL';
 }
 
 /// Catálogo hardcoded de las 2 empresas empleadoras de Vecchi (2026-05-08).

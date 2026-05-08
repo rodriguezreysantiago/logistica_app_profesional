@@ -372,19 +372,12 @@ class _DetalleChofer extends StatelessWidget {
           data: data,
         ),
 
-        const Divider(color: Colors.white10),
-        const _SectionTitle(icon: Icons.work, label: 'Seguros y aportes'),
-        // Póliza ART y Formulario 931 son a NIVEL EMPRESA — un mismo
-        // PDF para todos los empleados de la misma razón social. Se
-        // editan desde la pantalla "Empresas y seguros" (admin panel),
-        // no por empleado. El chofer los ve en MIS VENCIMIENTOS read-only.
-        _FilaVencimiento(
-          dni: dni,
-          etiqueta: 'SEGURO VIDA',
-          campoFecha: 'VENCIMIENTO_SEGURO_DE_VIDA',
-          campoUrl: 'ARCHIVO_SEGURO_DE_VIDA',
-          data: data,
-        ),
+        // Sección "Seguros y aportes" eliminada (2026-05-08): los 4
+        // docs que vivían acá (Póliza ART, F. 931, Seguro de Vida y
+        // pago de cuota sindical) pasaron a nivel empresa empleadora.
+        // Se editan desde "Vencimientos → EMPRESAS Y SEGUROS" del panel
+        // admin y se reflejan en todos los empleados de esa razón
+        // social automáticamente.
 
         if (esDeManejo) ...[
           const Divider(color: Colors.white10),

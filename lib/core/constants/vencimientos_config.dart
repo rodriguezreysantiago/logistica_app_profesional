@@ -114,18 +114,17 @@ class AppDocsEmpleado {
 
   /// Mapa `etiqueta visible -> sufijo del campo Firestore`.
   ///
-  /// Nota (2026-05-08): ART y F. 931 SE SACARON de acá. Esos docs son
-  /// COMUNES a todos los empleados de la misma empresa empleadora —
-  /// ahora viven en `EMPRESAS_EMPLEADORAS/{cuit}` (ver
-  /// `AppDocsEmpresa`). Las pantallas admin (auditoría, calendario,
-  /// KPIs) que iteran este mapa dejaron de tratarlos como per-empleado;
-  /// para mostrarlos a nivel empresa, ver la pantalla "Empresas y
-  /// seguros" del panel admin.
+  /// Nota (2026-05-08): los 4 docs laborales (ART, F. 931, Seguro de
+  /// Vida y cuota sindical) SE SACARON de acá. Son COMUNES a todos
+  /// los empleados de la misma empresa empleadora — ahora viven en
+  /// `EMPRESAS_EMPLEADORAS/{cuit}` (ver `AppDocsEmpresa`). Las
+  /// pantallas admin (auditoría, calendario, KPIs) que iteran este
+  /// mapa dejaron de tratarlos como per-empleado; para mostrarlos a
+  /// nivel empresa, ver la pantalla "Empresas y seguros" del panel
+  /// admin (Vencimientos → EMPRESAS Y SEGUROS).
   static const Map<String, String> etiquetas = {
     'Licencia de Conducir': 'LICENCIA_DE_CONDUCIR',
     'Preocupacional': 'PREOCUPACIONAL',
     'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
-    'Seguro de Vida': 'SEGURO_DE_VIDA',
-    'Sindicato': 'LIBRE_DE_DEUDA_SINDICAL',
   };
 }
