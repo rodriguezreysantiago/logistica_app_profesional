@@ -3369,19 +3369,6 @@ export const sitrackPosicionPoller = onSchedule(
       choferDni: string;
     }> = [];
 
-    // Log temporal: dump de TODOS los campos del primer report con
-    // ignición ON. Sirve para debug del campo del chofer cuando el
-    // mismo está logueado en el panel Sitrack pero el cron no lo ve
-    // (caso reportado 2026-05-08 de Moises en AG890AL). Una vez
-    // identificado el campo correcto, sacar este log.
-    const sample = reports.find((r) => r.ignition === 1);
-    if (sample) {
-      logger.info("[sitrackPosicionPoller] sample report (debug)", {
-        keys: Object.keys(sample as Record<string, unknown>),
-        sample,
-      });
-    }
-
     for (const r of reports) {
       const patente = (r.assetId ?? "").toString().trim().toUpperCase();
       if (!patente) {
@@ -3432,7 +3419,7 @@ export const sitrackPosicionPoller = onSchedule(
       const driverApellido = (r.driverLastName ?? "").toString().trim();
 
       // ─── Drift detection ─────────────────────────────────────────
-      // Comparamos el DNI físico (Sitrack) vs el asignado por el
+      // Comparamos el chofer físico (Sitrack) vs el asignado por el
       // sistema. Casos:
       //   - SIN_ASIGNACION: Sitrack reporta chofer pero el sistema
       //     no tiene a nadie asignado a esa patente. Alguien manejando
@@ -3440,16 +3427,44 @@ export const sitrackPosicionPoller = onSchedule(
       //   - CHOFER_DISTINTO: Ambos lados reportan, pero los DNIs no
       //     coinciden. Falta actualizar la asignación.
       //   - CHOFER_NO_IDENTIFICADO: ignición ON, hay asignación, pero
-      //     Sitrack no reporta DNI — el chofer subió sin pasar el
-      //     iButton. Si ignición OFF, no es drift (tractor parado).
+      //     Sitrack no reporta DNI ni nombre que matchee — el chofer
+      //     subió sin pasar el iButton. Si ignición OFF, no es drift
+      //     (tractor parado).
+      //
+      // Sitrack a veces NO manda `driverDocumentNumber` aunque el
+      // chofer SÍ esté logueado físicamente con el iButton (caso real
+      // 2026-05-08 con Moises en AG890AL: Sitrack mandaba `driverName`
+      // y `driverLastName` con sus datos pero `driverDocumentNumber`
+      // vacío). En esos casos hacemos fallback de match por nombre
+      // contra la asignación — si coincide, el chofer está
+      // identificado igual.
       const ignitionOn = r.ignition === 1;
       const asignacion = asignacionesPorPatente.get(patente);
+
+      // Match por nombre: concatena driverNombre + driverApellido en
+      // ambos órdenes (Sitrack a veces invierte los campos) y compara
+      // con asignacion.choferNombre. Match si el nombre asignado
+      // contiene TODOS los tokens del nombre del iButton (case y
+      // acentos insensitive). Permite que "OSCAR MOISES PEZOA" en
+      // asignación matchee con iButton "PEZOA" + "OSCAR MOISES".
+      const tokensSitrack = `${driverNombre} ${driverApellido}`
+        .toUpperCase()
+        .split(/\s+/)
+        .filter((t) => t.length > 1);
+      const nombreAsignacion = asignacion
+        ? asignacion.choferNombre.toUpperCase()
+        : "";
+      const matchPorNombre =
+        !!asignacion &&
+        tokensSitrack.length > 0 &&
+        tokensSitrack.every((t) => nombreAsignacion.includes(t));
+
       let driftTipo: string | null = null;
       if (driverDni && !asignacion) {
         driftTipo = "SIN_ASIGNACION";
       } else if (driverDni && asignacion && asignacion.choferDni !== driverDni) {
         driftTipo = "CHOFER_DISTINTO";
-      } else if (!driverDni && asignacion && ignitionOn) {
+      } else if (!driverDni && asignacion && ignitionOn && !matchPorNombre) {
         driftTipo = "CHOFER_NO_IDENTIFICADO";
         // Recolectamos para enviar aviso al chofer asignado después
         // del batch commit. La dedup se hace en
