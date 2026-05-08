@@ -146,6 +146,97 @@ class _UbicacionMapPickerState extends State<UbicacionMapPicker> {
     _mapCtl.move(lugar.punto, 13);
   }
 
+  /// Pide al operador pegar un link de Google Maps. Parsea las
+  /// coordenadas del link y centra el mapa ahí. Útil para puntos
+  /// rurales que no aparecen en la búsqueda nativa (Mapbox / Nominatim
+  /// los suelen tener mal o falta de POI). Workflow típico:
+  ///   1. Operador busca el silo en Google Maps web (https://maps.google.com)
+  ///   2. Click derecho sobre el pin → "Compartir ubicación" o copiar URL
+  ///   3. Pega el link en este dialog
+  ///   4. App extrae lat/lng y centra el mapa
+  Future<void> _pegarLinkGoogleMaps() async {
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final ctrl = TextEditingController();
+        return AlertDialog(
+          backgroundColor: AppColors.background,
+          title: const Text('Pegar link de Google Maps'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Buscá el lugar en Google Maps web, copiá el enlace y pegalo acá. Se extraen automáticamente las coordenadas.',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'URL de Google Maps',
+                    hintText:
+                        'https://maps.app.goo.gl/... o https://www.google.com/maps/...',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Acepta links largos (con @lat,lng) y links cortos (maps.app.goo.gl).',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCELAR'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('USAR ESTE LINK'),
+            ),
+          ],
+        );
+      },
+    );
+    if (url == null || url.isEmpty) return;
+    if (!mounted) return;
+    setState(() => _confirmando = true);
+    try {
+      final punto = await LogisticaGeoUtils.parsearUrlGoogleMaps(url);
+      if (!mounted) return;
+      setState(() => _confirmando = false);
+      if (punto == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No pude extraer las coordenadas del link. '
+              'Probá con un link distinto (busca el lugar y compartí el link).',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
+      setState(() => _puntoCentral = punto);
+      _mapCtl.move(punto, 16);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _confirmando = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo procesar el link: $e'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   /// Pide permiso de GPS al usuario (si hace falta), captura la
   /// ubicación actual y centra el mapa ahí. Para Android/iOS — en
   /// Windows desktop el plugin geolocator devuelve error porque no
@@ -443,17 +534,33 @@ class _UbicacionMapPickerState extends State<UbicacionMapPicker> {
                   );
                 }),
                 const SizedBox(height: 8),
-                // GPS — solo tiene sentido en Android/iOS. En Windows
-                // mostramos el botón pero al taparlo da feedback de
-                // "no soportado" para que el operador entienda y
-                // use el buscador o coords manuales.
-                TextButton.icon(
-                  onPressed: _confirmando ? null : _usarMiUbicacion,
-                  icon: const Icon(Icons.my_location, size: 18),
-                  label: const Text('USAR MI UBICACIÓN'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.accentTeal,
-                  ),
+                // 2 atajos: GPS (solo mobile) + pegar link de Google
+                // Maps. El segundo es la salvación para puntos rurales
+                // que Mapbox / Nominatim no encuentran — el operador
+                // los busca en Google Maps web, copia el link, y la
+                // app extrae las coords.
+                Wrap(
+                  alignment: WrapAlignment.spaceEvenly,
+                  spacing: 8,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _confirmando ? null : _usarMiUbicacion,
+                      icon: const Icon(Icons.my_location, size: 18),
+                      label: const Text('USAR MI UBICACIÓN'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.accentTeal,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed:
+                          _confirmando ? null : _pegarLinkGoogleMaps,
+                      icon: const Icon(Icons.link, size: 18),
+                      label: const Text('PEGAR LINK GOOGLE MAPS'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.accentBlue,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Row(

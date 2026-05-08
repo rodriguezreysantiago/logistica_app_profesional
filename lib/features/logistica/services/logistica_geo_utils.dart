@@ -361,4 +361,112 @@ class LogisticaGeoUtils {
   static void invalidarCacheRutas() {
     _cacheRutas.clear();
   }
+
+  // ─── Parseo de URLs de Google Maps ───────────────────────────────
+
+  /// Extrae lat/lng de una URL de Google Maps. Soporta:
+  ///   - URLs largas con `@lat,lng,zoom`:
+  ///     https://www.google.com/maps/place/X/@-38.379,-60.275,17z/...
+  ///     https://www.google.com/maps/@-38.379,-60.275,15z
+  ///   - URLs con `q=lat,lng`:
+  ///     https://www.google.com/maps?q=-38.379,-60.275
+  ///   - URLs con `ll=lat,lng`:
+  ///     https://maps.google.com/?ll=-38.379,-60.275
+  ///   - URLs cortas (maps.app.goo.gl, goo.gl/maps): hacen un GET
+  ///     para seguir el redirect y parsean la URL final.
+  ///
+  /// Devuelve null si la URL no tiene coordenadas reconocibles.
+  /// Caller debe handlear errores de red en URLs cortas.
+  static Future<LatLng?> parsearUrlGoogleMaps(String url) async {
+    final urlTrim = url.trim();
+    if (urlTrim.isEmpty) return null;
+
+    // 1) Match directo en la URL pegada — funciona para links largos
+    // copiados desde la barra de Google Maps.
+    final coordsDirectas = _extraerCoordsDeUrl(urlTrim);
+    if (coordsDirectas != null) return coordsDirectas;
+
+    // 2) URL corta (maps.app.goo.gl o goo.gl/maps): seguir redirect.
+    if (urlTrim.contains('maps.app.goo.gl') ||
+        urlTrim.contains('goo.gl/maps') ||
+        urlTrim.contains('g.co/kgs')) {
+      try {
+        // followRedirects: false para capturar la Location header.
+        // Algunos shortlinks redirigen 2-3 veces — Dio sigue todos los
+        // por default, así que tomamos la URL final del response.
+        final res = await Dio()
+            .get<dynamic>(
+              urlTrim,
+              options: Options(
+                followRedirects: true,
+                validateStatus: (s) => s != null && s < 400,
+                receiveTimeout: const Duration(seconds: 10),
+              ),
+            );
+        // Probar primero la URL final (tras redirects).
+        final urlFinal =
+            res.realUri.toString();
+        final coordsResolved = _extraerCoordsDeUrl(urlFinal);
+        if (coordsResolved != null) return coordsResolved;
+        // Fallback: a veces las coords vienen en el body HTML del
+        // redirect en `,@-38.379,-60.275,` o similar.
+        final body = res.data?.toString() ?? '';
+        final m = RegExp(r'[\?&!@]?(?:-?\d+\.\d+),(-?\d+\.\d+)')
+            .firstMatch(body);
+        if (m != null) {
+          final lat = double.tryParse(m.group(0)!.split(',')[0]
+              .replaceAll(RegExp(r'[^\-0-9.]'), ''));
+          final lng = double.tryParse(m.group(1)!);
+          if (lat != null && lng != null) return LatLng(lat, lng);
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  /// Match de patrones típicos de Google Maps en una URL string.
+  static LatLng? _extraerCoordsDeUrl(String url) {
+    // Patrón 1: `/@lat,lng,zoom` — el más común al copiar desde la
+    // barra de Google Maps (incluye link "place" y "directions").
+    final m1 = RegExp(r'/@(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
+    if (m1 != null) {
+      final lat = double.tryParse(m1.group(1)!);
+      final lng = double.tryParse(m1.group(2)!);
+      if (lat != null && lng != null) return LatLng(lat, lng);
+    }
+
+    // Patrón 2: `?q=lat,lng` o `&q=lat,lng` — link compartido tipo
+    // "search by coords".
+    final m2 =
+        RegExp(r'[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
+    if (m2 != null) {
+      final lat = double.tryParse(m2.group(1)!);
+      final lng = double.tryParse(m2.group(2)!);
+      if (lat != null && lng != null) return LatLng(lat, lng);
+    }
+
+    // Patrón 3: `?ll=lat,lng` — formato viejo pero todavía aparece.
+    final m3 =
+        RegExp(r'[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url);
+    if (m3 != null) {
+      final lat = double.tryParse(m3.group(1)!);
+      final lng = double.tryParse(m3.group(2)!);
+      if (lat != null && lng != null) return LatLng(lat, lng);
+    }
+
+    // Patrón 4: `/!3d{lat}!4d{lng}` — formato interno de Google Maps
+    // que aparece en URLs "place" después del nombre.
+    final m4 =
+        RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)').firstMatch(url);
+    if (m4 != null) {
+      final lat = double.tryParse(m4.group(1)!);
+      final lng = double.tryParse(m4.group(2)!);
+      if (lat != null && lng != null) return LatLng(lat, lng);
+    }
+
+    return null;
+  }
 }
