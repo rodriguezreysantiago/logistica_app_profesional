@@ -592,13 +592,24 @@ class _SelectorEmpresa extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  valor?.nombre ?? 'Seleccionar...',
+                  valor?.etiquetaPrincipal ?? 'Seleccionar...',
                   style: TextStyle(
                     color: valor == null ? Colors.white38 : Colors.white,
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                if (valor?.etiquetaSecundaria != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      valor!.etiquetaSecundaria!,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -692,13 +703,29 @@ class _ListaSelectorEmpresa extends StatelessWidget {
                               color: AppColors.accentBlue),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: Text(
-                              e.nombre,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  e.etiquetaPrincipal,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                if (e.etiquetaSecundaria != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Text(
+                                      e.etiquetaSecundaria!,
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                           const Icon(Icons.chevron_right,

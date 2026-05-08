@@ -24,9 +24,16 @@ enum TipoEmpresaLogistica {
 
 /// Empresa con la que Vecchi opera. Reusable: una misma empresa puede
 /// figurar como origen, destino o dador en distintas tarifas.
+///
+/// `nombre` es la razón social formal (ej. "ACOPIO LARTIRIGOYEN SRL").
+/// `apodo` es el nombre comercial / de fantasía con que se la conoce
+/// día a día (ej. "Lartirigoyen"). Cuando hay apodo, el operador lo
+/// reconoce más rápido — la UI muestra apodo en primer plano y
+/// nombre en gris debajo. El apodo es opcional.
 class EmpresaLogistica {
   final String id;
   final String nombre;
+  final String? apodo;
   final TipoEmpresaLogistica tipo;
   final String? cuit;
   final String? contacto;
@@ -37,6 +44,7 @@ class EmpresaLogistica {
   const EmpresaLogistica({
     required this.id,
     required this.nombre,
+    this.apodo,
     required this.tipo,
     this.cuit,
     this.contacto,
@@ -45,6 +53,16 @@ class EmpresaLogistica {
     this.creadoPor,
   });
 
+  /// Texto principal a mostrar al operador. Apodo si existe, sino
+  /// el nombre formal. Útil en cards y selectores.
+  String get etiquetaPrincipal => apodo?.isNotEmpty == true ? apodo! : nombre;
+
+  /// Texto secundario (subtítulo). Devuelve el nombre formal si hay
+  /// apodo (porque el principal ya muestra el apodo), o null si no
+  /// hay apodo (no hace falta repetir el nombre).
+  String? get etiquetaSecundaria =>
+      apodo?.isNotEmpty == true ? nombre : null;
+
   /// Construye una empresa desde el id + map de datos. Permite usar
   /// tanto el resultado de un stream (`QueryDocumentSnapshot`) como una
   /// lectura puntual (`DocumentSnapshot.data()`).
@@ -52,6 +70,9 @@ class EmpresaLogistica {
     return EmpresaLogistica(
       id: id,
       nombre: (d['nombre'] ?? '').toString(),
+      apodo: (d['apodo'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (d['apodo'] as String).trim(),
       tipo: TipoEmpresaLogistica.fromCodigo(d['tipo']?.toString()),
       cuit: (d['cuit'] as String?)?.trim().isEmpty ?? true
           ? null
@@ -76,6 +97,7 @@ class EmpresaLogistica {
   Map<String, dynamic> toMap() {
     return {
       'nombre': nombre,
+      if (apodo != null) 'apodo': apodo,
       'tipo': tipo.codigo,
       if (cuit != null) 'cuit': cuit,
       if (contacto != null) 'contacto': contacto,

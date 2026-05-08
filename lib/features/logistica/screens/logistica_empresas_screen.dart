@@ -130,16 +130,36 @@ class _CardEmpresa extends StatelessWidget {
               Icon(Icons.business, color: color),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  empresa.nombre,
-                  style: TextStyle(
-                    color: empresa.activa ? Colors.white : Colors.white38,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    decoration: empresa.activa
-                        ? TextDecoration.none
-                        : TextDecoration.lineThrough,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      empresa.etiquetaPrincipal,
+                      style: TextStyle(
+                        color: empresa.activa ? Colors.white : Colors.white38,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        decoration: empresa.activa
+                            ? TextDecoration.none
+                            : TextDecoration.lineThrough,
+                      ),
+                    ),
+                    if (empresa.etiquetaSecundaria != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        empresa.etiquetaSecundaria!,
+                        style: TextStyle(
+                          color: empresa.activa
+                              ? Colors.white54
+                              : Colors.white24,
+                          fontSize: 12,
+                          decoration: empresa.activa
+                              ? TextDecoration.none
+                              : TextDecoration.lineThrough,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               Switch(
@@ -218,13 +238,29 @@ class _EditarEmpresaSheet extends StatelessWidget {
                 const Icon(Icons.business, color: AppColors.accentBlue),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    empresa.nombre,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        empresa.etiquetaPrincipal,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (empresa.etiquetaSecundaria != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            empresa.etiquetaSecundaria!,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
@@ -236,9 +272,17 @@ class _EditarEmpresaSheet extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               children: [
                 DatoEditableTexto(
-                  etiqueta: 'Nombre',
+                  etiqueta: 'Nombre (razón social)',
                   valor: empresa.nombre,
                   onSave: (v) => setCampo('nombre', v),
+                ),
+                DatoEditableTexto(
+                  etiqueta: 'Apodo / nombre comercial (opcional)',
+                  valor: empresa.apodo ?? '',
+                  onSave: (v) => setCampo(
+                    'apodo',
+                    v.trim().isEmpty ? null : v.trim(),
+                  ),
                 ),
                 DatoEditableEnum(
                   etiqueta: 'Tipo',
@@ -291,6 +335,7 @@ class _AltaEmpresaDialog extends StatefulWidget {
 
 class _AltaEmpresaDialogState extends State<_AltaEmpresaDialog> {
   final _nombreCtrl = TextEditingController();
+  final _apodoCtrl = TextEditingController();
   final _cuitCtrl = TextEditingController();
   final _contactoCtrl = TextEditingController();
   bool _guardando = false;
@@ -299,6 +344,7 @@ class _AltaEmpresaDialogState extends State<_AltaEmpresaDialog> {
   @override
   void dispose() {
     _nombreCtrl.dispose();
+    _apodoCtrl.dispose();
     _cuitCtrl.dispose();
     _contactoCtrl.dispose();
     super.dispose();
@@ -324,8 +370,16 @@ class _AltaEmpresaDialogState extends State<_AltaEmpresaDialog> {
               autofocus: true,
               textCapitalization: TextCapitalization.characters,
               decoration: const InputDecoration(
-                labelText: 'Nombre *',
-                hintText: 'Ej. CARGILL',
+                labelText: 'Nombre / razón social *',
+                hintText: 'Ej. ACOPIO LARTIRIGOYEN SRL',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _apodoCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Apodo / nombre comercial (opcional)',
+                hintText: 'Ej. Lartirigoyen',
               ),
             ),
             const SizedBox(height: 8),
@@ -388,6 +442,7 @@ class _AltaEmpresaDialogState extends State<_AltaEmpresaDialog> {
       await LogisticaService.crearEmpresa(
         nombre: nombre,
         tipo: widget.tipo,
+        apodo: _apodoCtrl.text.trim().isEmpty ? null : _apodoCtrl.text.trim(),
         cuit: _cuitCtrl.text.trim().isEmpty ? null : _cuitCtrl.text.trim(),
         contacto: _contactoCtrl.text.trim().isEmpty
             ? null

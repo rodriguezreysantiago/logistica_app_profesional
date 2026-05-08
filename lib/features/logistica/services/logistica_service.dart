@@ -43,6 +43,7 @@ class LogisticaService {
   static Future<DocumentReference<Map<String, dynamic>>> crearEmpresa({
     required String nombre,
     required TipoEmpresaLogistica tipo,
+    String? apodo,
     String? cuit,
     String? contacto,
   }) async {
@@ -60,8 +61,10 @@ class LogisticaService {
         throw StateError('Ya existe una empresa con ese nombre.');
       }
     }
+    final apodoTrim = apodo?.trim() ?? '';
     return empresasCol.add({
       'nombre': nombreNorm,
+      if (apodoTrim.isNotEmpty) 'apodo': apodoTrim,
       'tipo': tipo.codigo,
       if (cuit != null && cuit.trim().isNotEmpty) 'cuit': cuit.trim(),
       if (contacto != null && contacto.trim().isNotEmpty)
