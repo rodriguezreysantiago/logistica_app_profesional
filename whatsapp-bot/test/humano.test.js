@@ -10,7 +10,7 @@ process.env.TZ = 'America/Argentina/Buenos_Aires';
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
-const { normalizarTelefonoAWid } = require('../src/humano');
+const { normalizarTelefonoAWid, partirMensajeLargo } = require('../src/humano');
 
 describe('normalizarTelefonoAWid — formatos validos', () => {
   test('numero AR tipico con +549 movil y espacios → wid limpio', () => {
@@ -125,5 +125,79 @@ describe('normalizarTelefonoAWid — proteccion contra inputs raros', () => {
       normalizarTelefonoAWid([5492914567890]),
       '5492914567890@c.us'
     );
+  });
+});
+
+// ============================================================================
+// partirMensajeLargo — splitting anti-baneo
+// ============================================================================
+// Crítico: si esto se rompe, los resúmenes muy largos de Alejandra (Volvo
+// HIGH con 4 tipos forzados sumados hoy) pueden pasar 4096 chars y
+// disparar baneo de WhatsApp. Tests cubren los casos modales: cabe en
+// uno, parte en varios, bloque solo > maxChars (split duro), input vacío.
+
+describe('partirMensajeLargo — casos típicos', () => {
+  test('texto corto cabe en una sola parte (sin marcador)', () => {
+    const partes = partirMensajeLargo('Hola, este es un mensaje corto.');
+    assert.strictEqual(partes.length, 1);
+    assert.strictEqual(partes[0], 'Hola, este es un mensaje corto.');
+    // Sin marcador "(parte 1/1)" cuando es uno solo.
+    assert.doesNotMatch(partes[0], /\(parte/);
+  });
+
+  test('texto vacío devuelve un array de 1 string vacío', () => {
+    const partes = partirMensajeLargo('');
+    assert.strictEqual(partes.length, 1);
+    assert.strictEqual(partes[0], '');
+  });
+
+  test('null/undefined no rompe (defensivo)', () => {
+    assert.deepStrictEqual(partirMensajeLargo(null), ['']);
+    assert.deepStrictEqual(partirMensajeLargo(undefined), ['']);
+  });
+
+  test('texto largo se parte por bloques (\n\n) preservando formato', () => {
+    // Construir un texto > 100 chars con bloques separados.
+    const bloque = 'Esto es un bloque de aproximadamente 50 caracteres aaa';
+    const texto = [bloque, bloque, bloque, bloque, bloque].join('\n\n');
+    // Forzar maxChars chico para que parta sí o sí.
+    const partes = partirMensajeLargo(texto, 100);
+    assert.ok(partes.length >= 2, 'debe partirse en al menos 2');
+    // Cada parte tiene marcador (parte i/N).
+    partes.forEach((p, i) => {
+      assert.match(p, new RegExp(`\(parte ${i + 1}/${partes.length}\)`));
+    });
+    // Re-ensamblar: sin los marcadores, los bloques siguen ahí.
+    const reconstruido = partes
+      .map((p) => p.replace(/^\(parte \d+\/\d+\)\n/, ''))
+      .join('\n\n');
+    assert.match(reconstruido, /Esto es un bloque/);
+  });
+
+  test('bloque único > maxChars se parte con split duro', () => {
+    const texto = 'A'.repeat(500);
+    const partes = partirMensajeLargo(texto, 100);
+    assert.ok(partes.length >= 5, 'debe partir un bloque solo grande');
+    // Cada parte tiene marcador y respeta el cap.
+    partes.forEach((p) => {
+      const sinMarcador = p.replace(/^\(parte \d+\/\d+\)\n/, '');
+      assert.ok(
+        sinMarcador.length <= 100,
+        `parte excede maxChars: ${sinMarcador.length}`
+      );
+    });
+  });
+
+  test('texto exactamente en maxChars NO se parte', () => {
+    const texto = 'X'.repeat(100);
+    const partes = partirMensajeLargo(texto, 100);
+    assert.strictEqual(partes.length, 1);
+    assert.doesNotMatch(partes[0], /\(parte/);
+  });
+
+  test('default maxChars es 3500 (no parte resúmenes razonables)', () => {
+    const texto = 'X'.repeat(3000);
+    const partes = partirMensajeLargo(texto);
+    assert.strictEqual(partes.length, 1);
   });
 });

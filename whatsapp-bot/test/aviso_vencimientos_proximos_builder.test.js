@@ -12,24 +12,29 @@ const {
   buildResumenVencimientosProximos,
 } = require('../src/aviso_vencimientos_proximos_builder');
 
-test('silencio cuando no hay items en ningún universo → null', () => {
+// Decisión Santiago 2026-05-09: el contrato cambió de "devolver null
+// cuando no hay items" a "siempre devolver mensaje 'sin novedades'".
+// El silencio era ambiguo — confirmar con un mensaje elimina la duda.
+test('sin items en ningún universo → mensaje "sin novedades"', () => {
   const m = buildResumenVencimientosProximos({
     destinatarioNombre: 'Guillermo',
     itemsPersonal: [],
     itemsVehiculos: [],
     itemsEmpresas: [],
   });
-  assert.equal(m, null);
+  assert.match(m, /Sin vencimientos en los próximos 7 días/);
+  assert.match(m, /Hola Guillermo/);
 });
 
-test('soporta arrays nulos/undefined → null', () => {
+test('soporta arrays nulos/undefined sin romperse', () => {
   const m = buildResumenVencimientosProximos({
     destinatarioNombre: null,
     itemsPersonal: undefined,
     itemsVehiculos: null,
     itemsEmpresas: undefined,
   });
-  assert.equal(m, null);
+  assert.match(m, /Sin vencimientos en los próximos 7 días/);
+  assert.match(m, /^Hola\./m);
 });
 
 test('mensaje incluye saludo, fecha del día y total cuando hay items', () => {

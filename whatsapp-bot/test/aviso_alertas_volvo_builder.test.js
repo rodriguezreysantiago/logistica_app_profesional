@@ -103,8 +103,15 @@ describe('buildResumenDiario — GENERIC con subTipo', () => {
 });
 
 describe('buildResumenDiario — sin eventos / saludo', () => {
-  test('eventos vacíos → null', () => {
-    assert.equal(buildResumenDiario({ destinatarioNombre: 'X', eventos: [] }), null);
+  // Decisión Santiago 2026-05-09: el contrato cambió de "devolver null
+  // cuando no hay eventos" a "siempre devolver mensaje (con cuerpo
+  // 'sin novedades' cuando vacío)". El silencio era ambiguo —
+  // confirmar con un mensaje elimina la duda "¿no había nada o falló
+  // el cron?".
+  test('eventos vacíos → mensaje "sin novedades" (no null)', () => {
+    const msg = buildResumenDiario({ destinatarioNombre: 'X', eventos: [] });
+    assert.match(msg, /Sin eventos críticos en las últimas 24h/);
+    assert.match(msg, /Hola X/);
   });
 
   test('saludo usa el nombre cuando viene', () => {
