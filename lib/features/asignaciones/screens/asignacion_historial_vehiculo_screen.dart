@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/asignacion_vehiculo.dart';
 import '../services/asignacion_vehiculo_service.dart';
@@ -22,7 +22,6 @@ class AsignacionHistorialVehiculoScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final servicio = AsignacionVehiculoService();
-    final fmtFecha = DateFormat('dd/MM/yyyy HH:mm');
 
     return AppScaffold(
       title: 'Historial · $patente',
@@ -59,7 +58,6 @@ class AsignacionHistorialVehiculoScreen extends StatelessWidget {
             itemCount: items.length,
             itemBuilder: (_, i) => _AsignacionCard(
               asignacion: items[i],
-              fmtFecha: fmtFecha,
             ),
           );
         },
@@ -70,11 +68,9 @@ class AsignacionHistorialVehiculoScreen extends StatelessWidget {
 
 class _AsignacionCard extends StatelessWidget {
   final AsignacionVehiculo asignacion;
-  final DateFormat fmtFecha;
 
   const _AsignacionCard({
     required this.asignacion,
-    required this.fmtFecha,
   });
 
   @override
@@ -135,12 +131,12 @@ class _AsignacionCard extends StatelessWidget {
           const SizedBox(height: 8),
           _Linea(
             label: 'Desde',
-            valor: fmtFecha.format(asignacion.desde),
+            valor: AppFormatters.formatearFechaHoraSinSegundos(asignacion.desde),
           ),
           _Linea(
             label: 'Hasta',
             valor: asignacion.hasta != null
-                ? fmtFecha.format(asignacion.hasta!)
+                ? AppFormatters.formatearFechaHoraSinSegundos(asignacion.hasta!)
                 : '— en curso —',
           ),
           _Linea(

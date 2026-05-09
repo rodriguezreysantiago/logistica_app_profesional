@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../asignaciones/models/asignacion_vehiculo.dart';
 import '../../asignaciones/services/asignacion_vehiculo_service.dart';
 import '../models/volvo_score_diario.dart';
@@ -149,7 +149,6 @@ class _ContenidoDrilldown extends StatelessWidget {
             docsConScore.length;
 
     final subScoresProm = _promediarSubscores(docs);
-    final fmtFecha = DateFormat('dd/MM');
 
     return ListView(
       controller: scrollCtrl,
@@ -165,7 +164,6 @@ class _ContenidoDrilldown extends StatelessWidget {
           return _FilaDia(
             doc: d,
             asignacion: asig,
-            fmt: fmtFecha,
           );
         }),
         const SizedBox(height: 20),
@@ -315,12 +313,10 @@ class _Seccion extends StatelessWidget {
 class _FilaDia extends StatelessWidget {
   final VolvoScoreDiario doc;
   final AsignacionVehiculo? asignacion;
-  final DateFormat fmt;
 
   const _FilaDia({
     required this.doc,
     required this.asignacion,
-    required this.fmt,
   });
 
   @override
@@ -348,7 +344,7 @@ class _FilaDia extends StatelessWidget {
           SizedBox(
             width: 50,
             child: Text(
-              fmt.format(doc.fechaTs),
+              AppFormatters.formatearFechaCorta(doc.fechaTs),
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),

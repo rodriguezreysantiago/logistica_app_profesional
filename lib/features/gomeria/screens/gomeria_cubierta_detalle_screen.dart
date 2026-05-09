@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/formatters.dart';
@@ -226,7 +225,6 @@ class _InstalacionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('dd-MM-yyyy', 'es_AR');
     final pos = i.posicionTipada;
     final etiquetaPos = pos?.etiqueta ?? i.posicion;
     return Container(
@@ -271,8 +269,8 @@ class _InstalacionTile extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             i.hasta == null
-                ? 'Desde ${fmt.format(i.desde)}'
-                : '${fmt.format(i.desde)} → ${fmt.format(i.hasta!)}',
+                ? 'Desde ${AppFormatters.formatearFecha(i.desde)}'
+                : '${AppFormatters.formatearFecha(i.desde)} → ${AppFormatters.formatearFecha(i.hasta!)}',
             style: const TextStyle(color: Colors.white60, fontSize: 11),
           ),
           const SizedBox(height: 4),
@@ -324,7 +322,6 @@ class _RecapadoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('dd-MM-yyyy', 'es_AR');
     final cerrado = r.fechaRetorno != null;
     final color = !cerrado
         ? AppColors.accentTeal
@@ -369,8 +366,8 @@ class _RecapadoTile extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             cerrado
-                ? '${fmt.format(r.fechaEnvio)} → ${fmt.format(r.fechaRetorno!)} (${r.diasEnRecapado()} días)'
-                : 'Enviada ${fmt.format(r.fechaEnvio)} (${r.diasEnRecapado()} días)',
+                ? '${AppFormatters.formatearFecha(r.fechaEnvio)} → ${AppFormatters.formatearFecha(r.fechaRetorno!)} (${r.diasEnRecapado()} días)'
+                : 'Enviada ${AppFormatters.formatearFecha(r.fechaEnvio)} (${r.diasEnRecapado()} días)',
             style: const TextStyle(color: Colors.white60, fontSize: 11),
           ),
           if (r.costo != null) ...[

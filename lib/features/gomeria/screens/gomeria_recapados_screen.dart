@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/prefs_service.dart';
@@ -248,7 +247,6 @@ class _RecapadoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('dd-MM-yyyy', 'es_AR');
     final color = !cerrado
         ? AppColors.accentTeal
         : r.resultado == ResultadoRecapado.recibida
@@ -303,8 +301,8 @@ class _RecapadoTile extends StatelessWidget {
           ),
           Text(
             cerrado
-                ? '${fmt.format(r.fechaEnvio)} → ${fmt.format(r.fechaRetorno!)} (${r.diasEnRecapado()} días)'
-                : 'Para vida ${r.vidaRecapado} · enviada ${fmt.format(r.fechaEnvio)}',
+                ? '${AppFormatters.formatearFecha(r.fechaEnvio)} → ${AppFormatters.formatearFecha(r.fechaRetorno!)} (${r.diasEnRecapado()} días)'
+                : 'Para vida ${r.vidaRecapado} · enviada ${AppFormatters.formatearFecha(r.fechaEnvio)}',
             style: const TextStyle(color: Colors.white60, fontSize: 11),
           ),
           if (r.costo != null) ...[
