@@ -56,6 +56,11 @@ const _state = {
   // se llama enviadosUltimaHora() se descartan los > 1h. Cap defensivo
   // de 200 entries por si hay un bug y se llena.
   timestampsUltimaHora: [],
+  // Detección de cola creciendo: timestamp cuando la cola pasó arriba
+  // del umbral. Si se mantiene > N min, alertamos al admin. Reset
+  // cuando vuelve por debajo.
+  colaCrecienteDesde: null,
+  colaCrecienteAlertada: false,
 };
 
 function _hoyIso() {
@@ -355,6 +360,125 @@ async function escribirHeartbeat() {
   };
 
   await _db.collection('BOT_HEALTH').doc('main').set(doc, { merge: true });
+
+  // Verificar si la cola está creciendo de forma anormal y alertar al
+  // admin (best-effort — si falla la alerta, no rompemos el heartbeat).
+  try {
+    await _verificarColaCreciente(cola);
+  } catch (e) {
+    log.warn(`Verificación cola creciente falló: ${e.message}`);
+  }
+}
+
+/**
+ * Detecta si la cola pendiente lleva > UMBRAL docs por > MINUTOS_SOSTENIDOS
+ * minutos seguidos. En ese caso encola un mensaje de alerta al admin.
+ *
+ * Diferencia con el watchdog (`botHealthWatchdog` Cloud Function): el
+ * watchdog detecta CAÍDAS del bot (heartbeat stale). Esto detecta
+ * "bot vivo pero procesando muy lento" — escenario distinto que un
+ * watchdog basado en heartbeat no captura.
+ *
+ * Configuración via .env:
+ *   - COLA_CRECIENTE_ALERT_DNI: DNI del destinatario. Sin esta var,
+ *     el check es no-op (no se alerta).
+ *   - COLA_CRECIENTE_UMBRAL: pendientes > este número (default 50).
+ *   - COLA_CRECIENTE_MIN_SOSTENIDO: minutos sostenidos arriba (default 30).
+ *
+ * Idempotencia: una vez alertado en este episodio, no spamea hasta
+ * que la cola vuelva a bajar del umbral (`colaCrecienteAlertada` flag).
+ */
+async function _verificarColaCreciente(cola) {
+  const dniAlert = process.env.COLA_CRECIENTE_ALERT_DNI;
+  if (!dniAlert) return;
+
+  const threshold = parseInt(process.env.COLA_CRECIENTE_UMBRAL || '50', 10);
+  const sustainedMin = parseInt(
+    process.env.COLA_CRECIENTE_MIN_SOSTENIDO || '30', 10
+  );
+
+  if (cola.pendientes <= threshold) {
+    // Cola sana — resetear estado para que un próximo episodio
+    // alerte de nuevo.
+    if (_state.colaCrecienteDesde) {
+      log.info(
+        `Cola volvió a estado sano (${cola.pendientes} ≤ ${threshold}).`
+      );
+    }
+    _state.colaCrecienteDesde = null;
+    _state.colaCrecienteAlertada = false;
+    return;
+  }
+
+  // Cola arriba del umbral.
+  if (!_state.colaCrecienteDesde) {
+    _state.colaCrecienteDesde = new Date();
+    log.warn(
+      `Cola arriba del umbral (${cola.pendientes} > ${threshold}). ` +
+      `Si se mantiene ${sustainedMin} min, alerto al admin.`
+    );
+    return;
+  }
+  if (_state.colaCrecienteAlertada) return;
+
+  const minutosArriba =
+    (Date.now() - _state.colaCrecienteDesde.getTime()) / 60000;
+  if (minutosArriba < sustainedMin) return;
+
+  // Pasó el umbral por suficiente tiempo — encolar alerta.
+  try {
+    await _encolarAlertaColaCreciente(
+      dniAlert,
+      cola.pendientes,
+      Math.round(minutosArriba)
+    );
+    _state.colaCrecienteAlertada = true;
+  } catch (e) {
+    log.warn(
+      `No se pudo encolar alerta cola creciente a ${dniAlert}: ${e.message}`
+    );
+  }
+}
+
+async function _encolarAlertaColaCreciente(dni, pendientes, minutos) {
+  const empSnap = await _db.collection('EMPLEADOS').doc(dni).get();
+  if (!empSnap.exists) {
+    log.warn(`COLA_CRECIENTE_ALERT_DNI=${dni} no existe en EMPLEADOS.`);
+    return;
+  }
+  const data = empSnap.data() || {};
+  const tel = String(data.TELEFONO || '').trim();
+  if (!tel) {
+    log.warn(`Destinatario alerta cola ${dni} sin TELEFONO.`);
+    return;
+  }
+  await _db.collection(_fs.COLECCION).add({
+    telefono: tel,
+    mensaje:
+      `🚨 *Alerta del bot — cola creciente*\n\n` +
+      `Hay ${pendientes} mensajes pendientes en la cola (sostenido por ` +
+      `~${minutos} min). El bot está vivo pero procesando lento.\n\n` +
+      `Posibles causas:\n` +
+      `   • Ráfaga de eventos Volvo / vencimientos.\n` +
+      `   • Rate limit de WhatsApp activo.\n` +
+      `   • Bot ↔ Firestore con latencia alta.\n\n` +
+      `Mandá /estado al bot por WhatsApp para más info.`,
+    estado: _fs.ESTADO.pendiente,
+    encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+    enviado_en: null,
+    error: null,
+    intentos: 0,
+    origen: 'health_alert_cola_creciente',
+    destinatario_coleccion: 'EMPLEADOS',
+    destinatario_id: dni,
+    campo_base: 'COLA_CRECIENTE',
+    admin_dni: 'BOT',
+    admin_nombre: 'Bot health',
+  });
+  log.warn(
+    `🚨 Alerta cola creciente encolada para ${dni} ` +
+    `(pendientes=${pendientes}, ${minutos} min sostenido).`
+  );
 }
 
 /**

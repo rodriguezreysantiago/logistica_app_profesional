@@ -114,6 +114,9 @@ async function manejarSiEsComando(msg, contextos) {
       case '/forzar-cron':
         await _comandoForzarCron(msg, contextos);
         break;
+      case '/test-aviso':
+        await _comandoTestAviso(msg, contextos, args);
+        break;
       case '/ayuda':
       case '/help':
         await _comandoAyuda(msg);
@@ -227,9 +230,73 @@ async function _comandoAyuda(msg) {
     '/pausar [dur]    → pausar envíos. Ej: /pausar 24h',
     '/reanudar        → reanudar envíos.',
     '/forzar-cron     → correr el cron ahora.',
+    '/test-aviso DNI  → mandar un mensaje de prueba al DNI indicado.',
     '/ayuda           → este mensaje.',
   ].join('\n');
   await msg.reply(txt);
+}
+
+/**
+ * Encola un mensaje de prueba al DNI indicado. Útil para verificar que
+ * un destinatario nuevo (ej. recién agregado a alguna env var de
+ * resumen) recibe correctamente antes de cambiar configuración.
+ *
+ * Uso: /test-aviso 12345678
+ *
+ * Lo encola en COLA_WHATSAPP igual que cualquier otro mensaje — pasa
+ * por el flujo normal (rate limit, horario hábil, dedup, splitting).
+ */
+async function _comandoTestAviso(msg, { db, fs }, args) {
+  const dni = (args[0] || '').replace(/\D+/g, '');
+  if (!dni) {
+    await msg.reply(
+      'Uso: /test-aviso <DNI>\nEj: /test-aviso 12345678'
+    );
+    return;
+  }
+  const empSnap = await db.collection('EMPLEADOS').doc(dni).get();
+  if (!empSnap.exists) {
+    await msg.reply(`No encontré un empleado con DNI ${dni} en EMPLEADOS.`);
+    return;
+  }
+  const data = empSnap.data() || {};
+  const tel = String(data.TELEFONO || '').trim();
+  if (!tel) {
+    await msg.reply(`El empleado ${dni} no tiene TELEFONO cargado.`);
+    return;
+  }
+  const nombre = String(data.NOMBRE || dni).trim();
+
+  const admin = require('firebase-admin');
+  const ahora = new Date().toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+  });
+  const colaRef = await db.collection(fs.COLECCION).add({
+    telefono: tel,
+    mensaje:
+      `🔧 *Mensaje de prueba — Coopertrans Móvil*\n\n` +
+      `Este es un mensaje de prueba para verificar que recibís ` +
+      `correctamente las notificaciones del bot.\n\n` +
+      `Disparado: ${ahora} ART.\n\n` +
+      `Si ves este mensaje, el canal está OK. No hay que responder.`,
+    estado: fs.ESTADO.pendiente,
+    encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+    enviado_en: null,
+    error: null,
+    intentos: 0,
+    origen: 'comando_test_aviso',
+    destinatario_coleccion: 'EMPLEADOS',
+    destinatario_id: dni,
+    campo_base: 'TEST_AVISO',
+    admin_dni: 'BOT',
+    admin_nombre: 'Bot test-aviso',
+  });
+
+  await msg.reply(
+    `✓ Mensaje de prueba encolado para ${nombre} (DNI ${dni}, tel ${tel}).\n` +
+    `Doc cola: ${colaRef.id}\n\n` +
+    `Si está fuera de horario hábil, se envía cuando reabra la ventana.`
+  );
 }
 
 module.exports = {

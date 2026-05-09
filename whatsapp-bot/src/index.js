@@ -71,6 +71,7 @@ const {
   delayAleatorioMs,
   sleep,
   normalizarTelefonoAWid,
+  partirMensajeLargo,
 } = require('./humano');
 const { aLocalDateTime } = require('./fechas');
 
@@ -411,6 +412,32 @@ async function procesarSiguiente() {
       return;
     }
 
+    // Dedup pre-envío: si en los últimos 5 min ya se envió el MISMO
+    // texto al MISMO número, no reenviar. Defensa contra:
+    //  - Bugs que doble-encolan (race entre cron y Cloud Function que
+    //    encola el mismo aviso por 2 caminos).
+    //  - Reintento manual del admin (forzar-cron) cuando ya se mandó.
+    //  - Documents huérfanos que se reagregan al recuperar Firestore.
+    // Si match: marcar como ENVIADO con flag dedup_skipped + dedup_de
+    // (referencia al doc original). NO se manda — el destinatario ya
+    // recibió el contenido en los últimos minutos. Mantiene
+    // consistencia con el resto del flow (ENVIADO en lugar de un
+    // estado nuevo SKIPPED que requeriría cambios en queries).
+    const dupId = await _esEnvioDuplicado(db, fs, data);
+    if (dupId) {
+      await docRef.update({
+        estado: fs.ESTADO.enviado,
+        enviado_en: admin.firestore.FieldValue.serverTimestamp(),
+        dedup_de: dupId,
+        dedup_skipped: true,
+      });
+      log.warn(
+        `${docId}: dedup-skipped (mismo texto a ${data.telefono} ` +
+        `en últimos 5 min, original ${dupId}).`
+      );
+      return;
+    }
+
     // Agrupación al envío (consumer-side). Si este doc es de un origen
     // agrupable (volvo_alert_high / volvo_alert_mantenimiento) y hay
     // otros pendientes para el mismo destinatario, los combinamos en
@@ -439,7 +466,31 @@ async function procesarSiguiente() {
     log.info(`→ Enviando ${docId} a ${data.telefono} en ${Math.round(delay / 1000)}s...`);
     await sleep(delay);
 
-    const waMessageId = await wa.enviarMensaje(wid, mensajeFinal);
+    // Splitting anti-baneo: WhatsApp puede flaggear mensajes > ~4096
+    // chars como spam o rechazarlos. Si el resumen es muy largo (típico
+    // del resumen Volvo HIGH a Alejandra cuando hay día con muchos
+    // eventos), partimos en chunks de hasta 3500 chars con marcador
+    // "(parte i/N)" y delay anti-flood entre envíos. El waMessageId que
+    // guardamos es el del PRIMER chunk — el que el chofer ve como
+    // "principal" si responde con quote.
+    const partes = partirMensajeLargo(mensajeFinal);
+    let waMessageId = null;
+    for (let i = 0; i < partes.length; i++) {
+      if (i > 0) {
+        // 2-3s entre partes: tiempo realista de un humano que escribió
+        // el siguiente chunk. Sin esto, WhatsApp ve N mensajes idénticos
+        // de tiempo en milisegundos = patrón de bot.
+        await sleep(2000 + Math.floor(Math.random() * 1000));
+      }
+      const id = await wa.enviarMensaje(wid, partes[i]);
+      if (i === 0) waMessageId = id;
+    }
+    if (partes.length > 1) {
+      log.info(
+        `  ${docId}: mensaje partido en ${partes.length} chunks ` +
+        `(${mensajeFinal.length} chars total)`
+      );
+    }
     await fs.marcarEnviado(docRef, { waMessageId });
 
     // Marcar los docs agrupados como ENVIADO con `agrupado_en` apuntando
@@ -497,6 +548,43 @@ async function procesarSiguiente() {
 // con reintentos sincrónicos. El polling normal (cada 15s) toma el
 // relevo. 0 = nunca falló (no hay corte activo).
 let _despachoFalloErrorReciente = 0;
+
+/**
+ * Detecta si en los últimos `ventanaMin` minutos ya se envió el mismo
+ * mensaje al mismo número. Devuelve el doc id del duplicado o `null`
+ * si no hay match.
+ *
+ * Filtro Firestore: telefono + estado=ENVIADO + enviado_en >= cutoff.
+ * El match exacto del campo `mensaje` se hace client-side porque
+ * Firestore no indexa textos largos eficientemente. La cantidad
+ * típica de docs traídos por la query es chica (< 20).
+ */
+async function _esEnvioDuplicado(db, fs, data, ventanaMin = 5) {
+  if (!data || !data.telefono || !data.mensaje) return null;
+  const desde = admin.firestore.Timestamp.fromMillis(
+    Date.now() - ventanaMin * 60 * 1000
+  );
+  let snap;
+  try {
+    snap = await db
+      .collection(fs.COLECCION)
+      .where('telefono', '==', data.telefono)
+      .where('estado', '==', fs.ESTADO.enviado)
+      .where('enviado_en', '>=', desde)
+      .limit(20)
+      .get();
+  } catch (e) {
+    // Si Firestore falla, el dedup no debe romper el envío. Loguear
+    // y seguir — peor caso es un mensaje duplicado, no fatal.
+    log.warn(`Dedup query falló: ${e.message}`);
+    return null;
+  }
+  for (const d of snap.docs) {
+    const msg = d.data().mensaje;
+    if (msg && msg === data.mensaje) return d.id;
+  }
+  return null;
+}
 
 // ─── Polling de COLA_WHATSAPP ───────────────────────────────────────
 let _pollingTimer = null;

@@ -272,7 +272,8 @@ async function _enviarAcuseSiCorresponde(db, wa, msg, chofer) {
   }
 
   // Variantes anti-baneo (si dos choferes responden seguido, los
-  // mensajes salen distintos).
+  // mensajes salen distintos). Mínimo 6 alineado con el estándar de
+  // los demás mensajes individuales (decisión 2026-05-09).
   const variantes = [
     'Recibí tu mensaje. Soy un sistema automático — para cualquier ' +
       'gestión o consulta, comunicate con la oficina.',
@@ -280,6 +281,13 @@ async function _enviarAcuseSiCorresponde(db, wa, msg, chofer) {
       'necesitás algo, comunicate directo con la oficina.',
     'Recibido. Este es un canal automático — para gestiones ' +
       'comunicate con la oficina.',
+    'Tu mensaje me llegó. Te aviso que soy un canal automático ' +
+      '— cualquier consulta o gestión la maneja la oficina directo.',
+    'Hola. Llegó tu mensaje, pero soy un sistema automático y no ' +
+      'puedo gestionar nada por acá. Comunicate con la oficina.',
+    'Listo, recibí lo que me mandaste. Acordate que esto es un ' +
+      'sistema automático — para resolver cualquier tema, hablá con ' +
+      'la oficina.',
   ];
   const texto = variantes[Math.floor(Math.random() * variantes.length)];
 

@@ -135,10 +135,74 @@ function normalizarTelefonoAWid(telefono) {
   return `${digitos}@c.us`;
 }
 
+/**
+ * Parte un mensaje muy largo en múltiples chunks para evitar que
+ * WhatsApp lo flagee como spam.
+ *
+ * WhatsApp soporta técnicamente hasta 65536 caracteres por mensaje,
+ * pero en la práctica mensajes > 4096 chars empiezan a aumentar el
+ * scoring anti-spam. Más allá de 8000-10000 directamente los rechaza.
+ * El umbral por default (3500) deja margen.
+ *
+ * Estrategia:
+ *  1. Si el texto cabe en `maxChars`, devolver array de 1 elemento.
+ *  2. Sino, partir por bloques separados por doble salto de línea
+ *     (preserva formato visual del resumen — cada bloque queda
+ *     completo en su parte).
+ *  3. Si un bloque solo es > maxChars (caso patológico, no debería
+ *     ocurrir con resúmenes), se hace split duro por chars.
+ *  4. Cuando hay > 1 parte, prepender "(parte i/N)" para que el
+ *     destinatario sepa que falta más.
+ *
+ * El caller debe esperar ~2s entre cada send para no parecer flood.
+ *
+ * @param {string} texto       — mensaje completo
+ * @param {number} maxChars    — umbral por chunk (default 3500)
+ * @returns {string[]} 1 o más partes listas para enviar
+ */
+function partirMensajeLargo(texto, maxChars = 3500) {
+  const t = String(texto || '');
+  if (t.length <= maxChars) return [t];
+
+  // Paso 1: agrupar bloques separados por '\n\n' sin pasar el cap.
+  const bloques = t.split('\n\n');
+  const grupos = [];
+  let actual = '';
+  for (const b of bloques) {
+    if (actual === '') {
+      actual = b;
+    } else if (actual.length + 2 + b.length <= maxChars) {
+      actual += '\n\n' + b;
+    } else {
+      grupos.push(actual);
+      actual = b;
+    }
+  }
+  if (actual) grupos.push(actual);
+
+  // Paso 2: defensa por si un bloque solo es > maxChars (caso raro).
+  const partes = [];
+  for (const g of grupos) {
+    if (g.length <= maxChars) {
+      partes.push(g);
+    } else {
+      for (let i = 0; i < g.length; i += maxChars) {
+        partes.push(g.slice(i, i + maxChars));
+      }
+    }
+  }
+
+  // Paso 3: prepender marcador (parte i/N) si > 1.
+  if (partes.length === 1) return partes;
+  const total = partes.length;
+  return partes.map((p, i) => `(parte ${i + 1}/${total})\n${p}`);
+}
+
 module.exports = {
   enHorarioHabil,
   feriadoHoy,
   delayAleatorioMs,
   sleep,
   normalizarTelefonoAWid,
+  partirMensajeLargo,
 };
