@@ -734,29 +734,19 @@ async function _runOnce(fs) {
                 return false;
               });
 
-            if (eventos.length === 0) {
-              log.info(
-                `Resumen alertas Volvo: 0 eventos HIGH en ultimas 24h, ` +
-                  `no se envia mensaje.`
-              );
-              // Marcamos en historico igual para que no se chequee mil
-              // veces en el mismo dia. Idempotencia diaria preservada.
-              await hist.registrarAlertasResumen(db, dniAlertasResumen, {
-                cantidadEventos: 0,
-                colaDocId: null,
-              });
-            } else {
+            // Encolamos SIEMPRE el resumen — el builder devuelve
+            // mensaje "sin novedades" cuando eventos.length === 0
+            // (decisión Santiago 2026-05-09: silencio es ambiguo).
+            {
               const apodoAlertas = aviso.resolverNombreSaludo(empAlertas.data);
               const mensajeAlertas = avisoAlertasVolvo.buildResumenDiario({
                 destinatarioNombre: apodoAlertas,
                 eventos,
               });
               if (!mensajeAlertas) {
-                // No deberia pasar (eventos.length > 0 garantiza que el
-                // builder devuelve string), pero defensivo.
+                // Defensivo: el builder siempre debería devolver un string.
                 log.warn(
-                  `Builder de resumen alertas devolvio null con ${eventos.length} ` +
-                    `eventos. Skip.`
+                  `Builder de resumen alertas devolvio null inesperadamente. Skip.`
                 );
               } else {
                 try {
@@ -914,14 +904,14 @@ async function _runOnce(fs) {
               eventos: eventosMant,
             });
 
+            // Encolamos SIEMPRE — el builder devuelve mensaje
+            // "sin novedades" si eventosMant.length === 0 (decisión
+            // Santiago 2026-05-09: silencio es ambiguo).
             if (!mensajeMant) {
-              log.info(
-                `Mantenimiento diario: 0 eventos en últimas 24h, no se envía.`
+              // Defensivo: el builder siempre debería devolver string.
+              log.warn(
+                `Builder mantenimiento devolvio null inesperadamente. Skip.`
               );
-              await hist.registrarMantenimientoDiario(db, dniMantenimiento, {
-                cantidadEventos: 0,
-                colaDocId: null,
-              });
             } else {
               try {
                 const colaRef = await db.collection(fs.COLECCION).add({
@@ -1112,14 +1102,14 @@ async function _runOnce(fs) {
               itemsEmpresas,
             });
 
+            // Encolamos SIEMPRE — el builder devuelve mensaje
+            // "sin novedades" si no hay items (decisión Santiago
+            // 2026-05-09: silencio es ambiguo).
             if (!mensajeVencProx) {
-              log.info(
-                `Vencimientos próximos: 0 items en próximos 7 días, no se envía.`
+              // Defensivo: el builder siempre debería devolver string.
+              log.warn(
+                `Builder vencimientos próximos devolvio null inesperadamente. Skip.`
               );
-              await hist.registrarVencimientosProximos(db, dniDocumentacion, {
-                cantidadItems: 0,
-                colaDocId: null,
-              });
             } else {
               try {
                 const colaRef = await db.collection(fs.COLECCION).add({

@@ -3214,20 +3214,6 @@ export const resumenBotDiario = onSchedule(
       .orderBy("detectadoEn", "asc")
       .get();
 
-    if (evSnap.empty) {
-      logger.info("[resumenBotDiario] sin eventos en últimas 24h, no se envía");
-      // Marcamos histórico igual para no chequear mil veces el mismo día.
-      await histRef.set({
-        tipo: "bot_resumen_diario",
-        destinatario_dni: MANTENIMIENTO_DESTINATARIO_DNI,
-        fecha: hoyKey,
-        cantidad_eventos: 0,
-        cola_doc_id: null,
-        creado_en: FieldValue.serverTimestamp(),
-      });
-      return;
-    }
-
     // Lookup destinatario.
     const adminDni = MANTENIMIENTO_DESTINATARIO_DNI;
     const empSnap = await db.collection("EMPLEADOS").doc(adminDni).get();
@@ -3238,6 +3224,44 @@ export const resumenBotDiario = onSchedule(
       logger.error("[resumenBotDiario] admin sin TELEFONO", {
         adminDni,
       });
+      return;
+    }
+
+    // Sin eventos: mandamos "todo OK" igual (decisión Santiago
+    // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
+    // corrió y el bot estuvo sano las últimas 24h).
+    if (evSnap.empty) {
+      const fechaTxt = _formatFechaArg(Date.now());
+      const mensajeOk =
+        `🤖 *Resumen del bot — ${fechaTxt}*\n\n` +
+        `✅ Sin caídas ni eventos en las últimas 24 h.\n\n` +
+        BANNER_TESTING +
+        "_Si dejaras de recibir este resumen a las 8 AM, " +
+        "verificá que la Cloud Function `resumenBotDiario` esté activa._";
+      const colaRef = await db.collection("COLA_WHATSAPP").add({
+        telefono: tel,
+        mensaje: mensajeOk,
+        estado: "PENDIENTE",
+        encolado_en: FieldValue.serverTimestamp(),
+        enviado_en: null,
+        error: null,
+        intentos: 0,
+        origen: "cron_bot_resumen_diario",
+        destinatario_coleccion: "EMPLEADOS",
+        destinatario_id: adminDni,
+        campo_base: "BOT_RESUMEN_DIARIO",
+        admin_dni: "BOT",
+        admin_nombre: "Bot watchdog",
+      });
+      await histRef.set({
+        tipo: "bot_resumen_diario",
+        destinatario_dni: MANTENIMIENTO_DESTINATARIO_DNI,
+        fecha: hoyKey,
+        cantidad_eventos: 0,
+        cola_doc_id: colaRef.id,
+        creado_en: FieldValue.serverTimestamp(),
+      });
+      logger.info("[resumenBotDiario] OK (sin eventos)", { colaDocId: colaRef.id });
       return;
     }
 
@@ -3907,11 +3931,6 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
         return tipo.length > 0;
       });
 
-    if (drifts.length === 0) {
-      logger.info("[resumenDriftsAsignacionesDiario] sin drifts hoy, no se encola");
-      return;
-    }
-
     // ─── Lookup teléfono del admin ─────────────────────────────────
     const adminDni = MANTENIMIENTO_DESTINATARIO_DNI;
     const empSnap = await db.collection("EMPLEADOS").doc(adminDni).get();
@@ -3928,6 +3947,36 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
 
     // ─── Armar mensaje ─────────────────────────────────────────────
     const fechaTxt = _formatFechaArg(Date.now());
+
+    // Sin drifts: mandamos "todo OK" igual (decisión Santiago
+    // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
+    // corrió y todas las asignaciones están alineadas con el chofer
+    // físico que reporta Sitrack).
+    if (drifts.length === 0) {
+      const mensajeOk =
+        `📋 *Resumen drifts asignaciones — ${fechaTxt}*\n\n` +
+        `✅ Sin drifts: todas las asignaciones coinciden con el ` +
+        `chofer físico de Sitrack.\n\n` +
+        BANNER_TESTING +
+        "_Coopertrans Móvil — Aviso automático._";
+      await db.collection("COLA_WHATSAPP").add({
+        telefono: tel,
+        mensaje: mensajeOk,
+        estado: "PENDIENTE",
+        encolado_en: FieldValue.serverTimestamp(),
+        enviado_en: null,
+        error: null,
+        intentos: 0,
+        origen: "resumen_drifts_asignaciones",
+        destinatario_coleccion: "EMPLEADOS",
+        destinatario_id: adminDni,
+        campo_base: "DRIFTS_ASIGNACIONES_DIARIO",
+        admin_dni: "BOT",
+        admin_nombre: "Bot resumen diario",
+      });
+      logger.info("[resumenDriftsAsignacionesDiario] OK (sin drifts)");
+      return;
+    }
 
     // Conteo por tipo (para el header).
     const conteoPorTipo: Record<string, number> = {};
@@ -4546,11 +4595,6 @@ export const resumenExcesosJornadaDiario = onSchedule(
       });
     }
 
-    if (excesos.length === 0) {
-      logger.info("[resumenExcesosJornadaDiario] sin excesos hoy");
-      return;
-    }
-
     // Lookup destinatario.
     const empSnap = await db
       .collection("EMPLEADOS")
@@ -4570,6 +4614,41 @@ export const resumenExcesosJornadaDiario = onSchedule(
         "[resumenExcesosJornadaDiario] destinatario sin TELEFONO",
         { dni: SEG_HIGIENE_DESTINATARIO_DNI }
       );
+      return;
+    }
+
+    // Sin excesos: mandamos "todo OK" igual (decisión Santiago
+    // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
+    // corrió y ningún chofer cruzó los límites de jornada ayer).
+    if (excesos.length === 0) {
+      const fmtFechaOk = `${fechaArt.split("-").reverse().join("/")}`;
+      const apodo = (empData.APODO ?? "").toString().trim();
+      const nombreFull = (empData.NOMBRE ?? "").toString().trim();
+      const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+      const saludoOk = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+      const mensajeOk =
+        `${saludoOk},\n\n` +
+        `📋 *Resumen excesos de jornada — ${fmtFechaOk}*\n\n` +
+        `✅ Sin excesos: ningún chofer cruzó las 4 h continuas ` +
+        `ni las 12 h diarias ayer.\n\n` +
+        BANNER_TESTING +
+        "_Coopertrans Móvil — Aviso automático._";
+      await db.collection("COLA_WHATSAPP").add({
+        telefono: tel,
+        mensaje: mensajeOk,
+        estado: "PENDIENTE",
+        encolado_en: FieldValue.serverTimestamp(),
+        enviado_en: null,
+        error: null,
+        intentos: 0,
+        origen: "resumen_excesos_jornada",
+        destinatario_coleccion: "EMPLEADOS",
+        destinatario_id: SEG_HIGIENE_DESTINATARIO_DNI,
+        campo_base: "EXCESOS_JORNADA_DIARIO",
+        admin_dni: "BOT",
+        admin_nombre: "Bot resumen diario",
+      });
+      logger.info("[resumenExcesosJornadaDiario] OK (sin excesos)");
       return;
     }
 

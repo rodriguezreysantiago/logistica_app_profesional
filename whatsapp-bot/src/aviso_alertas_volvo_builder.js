@@ -78,20 +78,31 @@ const ETIQUETAS_TIPO = {
  *   eventos (caller decide no encolar).
  */
 function buildResumenDiario({ destinatarioNombre, eventos }) {
-  if (!Array.isArray(eventos) || eventos.length === 0) {
-    return null;
-  }
-
+  const eventosArr = Array.isArray(eventos) ? eventos : [];
   const nombre = destinatarioNombre
     ? String(destinatarioNombre).replace(/\s+/g, ' ').trim().slice(0, 40)
     : null;
   const saludo = nombre ? `Hola ${nombre}` : 'Hola';
 
+  // Sin eventos: mandamos mensaje "todo OK" igual. Decisión Santiago
+  // 2026-05-09: el silencio es ambiguo (¿no había nada o falló el
+  // cron?). Confirmar con un mensaje cierra esa duda.
+  if (eventosArr.length === 0) {
+    const fechaTxt = aDdMmYyyyLocal(new Date());
+    return (
+      `${saludo}.\n\n` +
+      `📊 Resumen diario — Alertas HIGH (${fechaTxt})\n\n` +
+      `✅ Sin eventos críticos en las últimas 24h.\n\n` +
+      `${FIRMA}`
+    );
+  }
+  // A partir de acá, eventosArr.length > 0.
+
   // Agrupamos por patente para que cada unidad ocupe un bloque visual
   // y dentro listamos los eventos cronologicamente. Ordenamos las
   // patentes alfabeticamente para consistencia entre dias.
   const porPatente = new Map();
-  for (const ev of eventos) {
+  for (const ev of eventosArr) {
     const key = String(ev.patente || '—').trim().toUpperCase();
     if (!porPatente.has(key)) porPatente.set(key, []);
     porPatente.get(key).push(ev);
@@ -137,7 +148,7 @@ function buildResumenDiario({ destinatarioNombre, eventos }) {
     return `${titulo}\n${lineas.join('\n')}`;
   });
 
-  const cantidad = eventos.length;
+  const cantidad = eventosArr.length;
   const titulo =
     cantidad === 1
       ? '1 evento crítico en las últimas 24h:'
@@ -169,15 +180,27 @@ function buildResumenDiario({ destinatarioNombre, eventos }) {
  * @returns {string|null}
  */
 function buildResumenMantenimientoDiario({ destinatarioNombre, eventos }) {
-  if (!Array.isArray(eventos) || eventos.length === 0) return null;
-
+  const eventosArr = Array.isArray(eventos) ? eventos : [];
   const nombre = destinatarioNombre
     ? String(destinatarioNombre).replace(/\s+/g, ' ').trim().slice(0, 40)
     : null;
   const saludo = nombre ? `Hola ${nombre}` : 'Hola';
+  const fecha = aDdMmYyyyLocal(new Date());
+
+  // Sin alertas: mandamos mensaje "todo OK" igual (decisión Santiago
+  // 2026-05-09: silencio = ambiguo; un mensaje confirma que el cron
+  // corrió y no hubo nada para reportar).
+  if (eventosArr.length === 0) {
+    return (
+      `${saludo}.\n\n` +
+      `🔧 Resumen diario — Alertas de mantenimiento (${fecha})\n\n` +
+      `✅ Sin alertas mecánicas en las últimas 24h.\n\n` +
+      `${FIRMA}`
+    );
+  }
 
   const porPatente = new Map();
-  for (const ev of eventos) {
+  for (const ev of eventosArr) {
     const key = String(ev.patente || '—').trim().toUpperCase();
     if (!porPatente.has(key)) porPatente.set(key, []);
     porPatente.get(key).push(ev);
@@ -211,8 +234,7 @@ function buildResumenMantenimientoDiario({ destinatarioNombre, eventos }) {
     return `${titulo}\n${lineas.join('\n')}`;
   });
 
-  const cantidad = eventos.length;
-  const fecha = aDdMmYyyyLocal(new Date());
+  const cantidad = eventosArr.length;
   return (
     `${saludo}.\n\n` +
     `🔧 Resumen diario — Alertas de mantenimiento (${fecha})\n\n` +

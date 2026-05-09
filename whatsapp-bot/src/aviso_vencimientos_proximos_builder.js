@@ -71,16 +71,23 @@ function buildResumenVencimientosProximos({
   const vehiculos = Array.isArray(itemsVehiculos) ? itemsVehiculos : [];
   const empresas = Array.isArray(itemsEmpresas) ? itemsEmpresas : [];
 
-  if (personal.length === 0 && vehiculos.length === 0 && empresas.length === 0) {
-    return null;
-  }
-
   const nombre = destinatarioNombre
     ? String(destinatarioNombre).replace(/\s+/g, ' ').trim().slice(0, 40)
     : null;
   const saludo = nombre ? `Hola ${nombre}` : 'Hola';
-
   const fecha = aDdMmYyyyLocal(new Date());
+
+  if (personal.length === 0 && vehiculos.length === 0 && empresas.length === 0) {
+    // Sin items: mandamos "todo OK" igual (decisión Santiago 2026-05-09:
+    // silencio = ambiguo; un mensaje confirma que el cron corrió y no
+    // hay vencimientos próximos).
+    return (
+      `${saludo}.\n\n` +
+      `📋 Resumen vencimientos próximos (${fecha})\n\n` +
+      `✅ Sin vencimientos en los próximos 7 días.\n\n` +
+      `${FIRMA}`
+    );
+  }
   const total = personal.length + vehiculos.length + empresas.length;
   const tituloTotal =
     total === 1
