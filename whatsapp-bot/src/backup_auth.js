@@ -156,9 +156,41 @@ async function _ejecutarBackup() {
 }
 
 /**
- * Comprime una carpeta entera a un Buffer en memoria. Sin escribir a
- * disco temporal — más rápido, no deja archivos sueltos si el bot
- * crashea, y `.wwebjs_auth/` típicamente es < 50 MB.
+ * Patrones glob de carpetas/archivos a EXCLUIR del backup. Son caches
+ * volátiles del Chromium embebido (whatsapp-web.js usa puppeteer
+ * por debajo) que:
+ *   1. Están locked por el navegador mientras el bot corre — el zip
+ *      tira EBUSY al intentar leerlos (bug detectado 2026-05-09).
+ *   2. NO son necesarios para recovery — Chromium los regenera en
+ *      el próximo arranque. Solo necesitamos persistir el estado
+ *      de auth (Cookies, Local Storage, IndexedDB, Session Storage).
+ *
+ * Si en algún futuro la sesión no recovery con estos excludes,
+ * agregar más a la lista. Mejor zip incompleto que crash diario.
+ */
+const EXCLUDES_BACKUP = [
+  '**/Cache/**',
+  '**/Cache_Data/**',
+  '**/Code Cache/**',
+  '**/GPUCache/**',
+  '**/ShaderCache/**',
+  '**/GraphiteDawnCache/**',
+  '**/component_crx_cache/**',
+  '**/optimization_guide_*/**',
+  '**/Service Worker/CacheStorage/**',
+  '**/Service Worker/ScriptCache/**',
+];
+
+/**
+ * Comprime una carpeta a un Buffer en memoria, excluyendo caches
+ * volátiles que están locked y no son necesarios para recovery.
+ *
+ * Sin escribir a disco temporal — más rápido, no deja archivos sueltos
+ * si el bot crashea, y `.wwebjs_auth/` típicamente queda en < 30 MB
+ * después de los excludes.
+ *
+ * Usa `archive.glob` con `ignore` en lugar de `archive.directory`
+ * para poder filtrar. `nodir: true` evita meter directorios vacíos.
  */
 function _comprimirCarpeta(archiver, carpeta) {
   return new Promise((resolve, reject) => {
@@ -167,14 +199,20 @@ function _comprimirCarpeta(archiver, carpeta) {
 
     archive.on('data', (chunk) => chunks.push(chunk));
     archive.on('warning', (e) => {
-      // Avisos no fatales (ej. archivo borrado mientras se zipeaba).
+      // Avisos no fatales (ej. archivo borrado mientras se zipeaba,
+      // o archivo locked que igual queremos saltar). Los logueamos
+      // a debug para que no llenen el log normal.
       log.debug(`archiver warning: ${e.message}`);
     });
     archive.on('error', (e) => reject(e));
     archive.on('end', () => resolve(Buffer.concat(chunks)));
 
-    // Incluir todo el contenido manteniendo estructura relativa.
-    archive.directory(carpeta, false);
+    archive.glob('**/*', {
+      cwd: carpeta,
+      dot: true, // incluye archivos/carpetas que empiezan con `.`
+      nodir: true, // no agregar entradas de directorios vacíos
+      ignore: EXCLUDES_BACKUP,
+    });
     archive.finalize();
   });
 }
