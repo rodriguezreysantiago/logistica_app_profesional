@@ -387,15 +387,23 @@ async function yaSeEnvioVencEmpresasAdmin(db, dniDestinatario) {
 }
 
 async function registrarVencEmpresasAdmin(db, dniDestinatario, meta) {
+  const { ref, data } = prepararRegistroVencEmpresasAdmin(db, dniDestinatario, meta);
+  await ref.set(data);
+}
+
+function prepararRegistroVencEmpresasAdmin(db, dniDestinatario, meta) {
   const id = `venc_empresas_admin_${_fechaHoyIso()}_${dniDestinatario}`;
-  await db.collection(COLECCION).doc(id).set({
-    tipo: 'venc_empresas_admin_diario',
-    destinatario_dni: dniDestinatario,
-    fecha: _fechaHoyIso(),
-    cantidad_items: meta?.cantidadItems || 0,
-    cola_doc_id: meta?.colaDocId || null,
-    creado_en: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  return {
+    ref: db.collection(COLECCION).doc(id),
+    data: {
+      tipo: 'venc_empresas_admin_diario',
+      destinatario_dni: dniDestinatario,
+      fecha: _fechaHoyIso(),
+      cantidad_items: meta?.cantidadItems || 0,
+      cola_doc_id: meta?.colaDocId || null,
+      creado_en: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  };
 }
 
 /**
@@ -474,5 +482,6 @@ module.exports = {
   prepararRegistroAlertasResumen,
   prepararRegistroMantenimientoDiario,
   prepararRegistroVencimientosProximos,
+  prepararRegistroVencEmpresasAdmin,
   limpiarObsoletos,
 };

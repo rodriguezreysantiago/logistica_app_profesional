@@ -1319,18 +1319,20 @@ async function _runOnce(fs) {
               );
             }
 
+            // Encolamos SIEMPRE (decisión Santiago 2026-05-09: silencio
+            // = ambiguo). Cuando items.length === 0 mandamos mensaje
+            // "todo OK" igual.
+            const apodoAdmin = aviso.resolverNombreSaludo(empAdmin.data);
+            const saludo = apodoAdmin ? `Hola ${apodoAdmin}` : 'Hola';
+            let mensajeAdmin;
             if (items.length === 0) {
-              log.info(
-                'Aviso docs empresa al admin: 0 items en próximos 30 días, no se envía.'
-              );
-              await hist.registrarVencEmpresasAdmin(db, dniAdminEmpresas, {
-                cantidadItems: 0,
-                colaDocId: null,
-              });
+              mensajeAdmin =
+                `${saludo}.\n\n` +
+                `📋 *Aviso temprano — docs por empresa (próximos 30 días)*\n\n` +
+                `✅ Sin documentos próximos a vencer en los próximos 30 días.\n\n` +
+                BANNER_TESTING +
+                '_Coopertrans Móvil — Aviso automático._';
             } else {
-              // Mensaje inline (no merece builder dedicado por ahora).
-              const apodoAdmin = aviso.resolverNombreSaludo(empAdmin.data);
-              const saludo = apodoAdmin ? `Hola ${apodoAdmin}` : 'Hola';
               items.sort((a, b) => a.dias - b.dias);
               const porEmpresa = new Map();
               for (const it of items) {
@@ -1353,7 +1355,7 @@ async function _runOnce(fs) {
                   return `🏢 *${empresa}*\n${lineas.join('\n')}`;
                 });
 
-              const mensajeAdmin =
+              mensajeAdmin =
                 `${saludo}.\n\n` +
                 `📋 *Aviso temprano — docs por empresa próximos a vencer (≤30 días)*\n\n` +
                 `${items.length === 1 ? '1 documento' : `${items.length} documentos`} ` +
@@ -1363,44 +1365,50 @@ async function _runOnce(fs) {
                 '_Coordiná con Giagante (encargado de documentación) la renovación. ' +
                 'Vos lo recibís 30 días antes; Giagante recibe el detalle final cuando ' +
                 'queden 7 días._';
+            }
 
-              try {
-                const colaRef = await db.collection(fs.COLECCION).add({
-                  telefono: telAdmin,
-                  mensaje: mensajeAdmin,
-                  estado: fs.ESTADO.pendiente,
-                  encolado_en: admin.firestore.FieldValue.serverTimestamp(),
-                  enviado_en: null,
-                  error: null,
-                  intentos: 0,
-                  origen: 'cron_venc_empresas_admin_diario',
-                  destinatario_coleccion: 'EMPLEADOS',
-                  destinatario_id: dniAdminEmpresas,
-                  campo_base: 'VENC_EMPRESAS_ADMIN_DIARIO',
-                  admin_dni: 'BOT',
-                  admin_nombre: 'Bot automatico',
-                  items_agrupados: items.map((it) => ({
-                    tipoDoc: it.etiqueta,
-                    campoBase: 'VENC_EMPRESA_ADMIN',
-                    coleccion: 'EMPRESAS_EMPLEADORAS',
-                    docId: it.empresa,
-                    fecha: it.fecha,
-                    dias: it.dias,
-                  })),
-                });
-                await hist.registrarVencEmpresasAdmin(db, dniAdminEmpresas, {
+            try {
+              // Atómico: encolar + idempotencia en un mismo batch.
+              const colaRef = db.collection(fs.COLECCION).doc();
+              const batch = db.batch();
+              batch.set(colaRef, {
+                telefono: telAdmin,
+                mensaje: mensajeAdmin,
+                estado: fs.ESTADO.pendiente,
+                encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                enviado_en: null,
+                error: null,
+                intentos: 0,
+                origen: 'cron_venc_empresas_admin_diario',
+                destinatario_coleccion: 'EMPLEADOS',
+                destinatario_id: dniAdminEmpresas,
+                campo_base: 'VENC_EMPRESAS_ADMIN_DIARIO',
+                admin_dni: 'BOT',
+                admin_nombre: 'Bot automatico',
+                items_agrupados: items.map((it) => ({
+                  tipoDoc: it.etiqueta,
+                  campoBase: 'VENC_EMPRESA_ADMIN',
+                  coleccion: 'EMPRESAS_EMPLEADORAS',
+                  docId: it.empresa,
+                  fecha: it.fecha,
+                  dias: it.dias,
+                })),
+              });
+              const regE = hist.prepararRegistroVencEmpresasAdmin(
+                db, dniAdminEmpresas, {
                   cantidadItems: items.length,
                   colaDocId: colaRef.id,
                 });
-                stats.encolados++;
-                log.info(
-                  `+ Encolado VENC EMPRESAS ADMIN: ${dniAdminEmpresas} ` +
-                    `(${items.length} items) -> ${colaRef.id}`
-                );
-              } catch (e) {
-                stats.errores++;
-                log.error(`No se pudo encolar aviso docs empresa admin: ${e.message}`);
-              }
+              batch.set(regE.ref, regE.data);
+              await batch.commit();
+              stats.encolados++;
+              log.info(
+                `+ Encolado VENC EMPRESAS ADMIN: ${dniAdminEmpresas} ` +
+                  `(${items.length} items) -> ${colaRef.id}`
+              );
+            } catch (e) {
+              stats.errores++;
+              log.error(`No se pudo encolar aviso docs empresa admin: ${e.message}`);
             }
           }
         }
