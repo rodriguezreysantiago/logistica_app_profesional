@@ -79,6 +79,8 @@ class _CardVencimientoUser extends StatelessWidget {
                   children: [
                     Text(
                       titulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
@@ -90,6 +92,8 @@ class _CardVencimientoUser extends StatelessWidget {
                       enRevision
                           ? 'Validación pendiente...'
                           : 'Vence: ${AppFormatters.formatearFecha(fecha)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 11,
                         color: enRevision
@@ -199,6 +203,8 @@ class _CardVencimientoEmpresa extends StatelessWidget {
                   children: [
                     Text(
                       titulo,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
@@ -210,6 +216,8 @@ class _CardVencimientoEmpresa extends StatelessWidget {
                       tieneArchivo || fecha != null
                           ? 'Vence: ${AppFormatters.formatearFecha(fecha)}'
                           : 'Pendiente — consultar a la oficina',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 11,
                         color: tieneArchivo || fecha != null

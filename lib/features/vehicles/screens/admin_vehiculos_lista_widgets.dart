@@ -453,6 +453,8 @@ class _DetalleVehiculo extends StatelessWidget {
                         .join(' ')
                         .toUpperCase()
                         .ifEmpty('SIN DATOS'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -462,6 +464,8 @@ class _DetalleVehiculo extends StatelessWidget {
                   if (anioInt > 0)
                     Text(
                       'Año $anioInt',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           color: Colors.white54, fontSize: 12),
                     ),
@@ -948,46 +952,65 @@ class _PanelTelemetria extends StatelessWidget {
         border: Border.all(color: AppColors.accentGreen.withAlpha(40)),
       ),
       child: hayTelemetria
-          ? Row(
-              children: [
-                Expanded(
-                  child: _CeldaTelemetria(
-                    icono: Icons.speed,
-                    color: AppColors.accentGreen,
-                    valor: km != null
-                        ? AppFormatters.formatearKilometraje(km)
-                        : '—',
-                    unidad: 'km',
-                    etiqueta: 'ODÓMETRO',
-                  ),
-                ),
-                if (fuel != null)
-                  Expanded(
-                    child: _CeldaPorcentaje(
-                      porcentaje: fuel,
-                      icono: Icons.local_gas_station,
-                      etiqueta: 'COMBUSTIBLE',
-                    ),
-                  ),
-                if (adblue != null)
-                  Expanded(
-                    child: _CeldaPorcentaje(
-                      porcentaje: adblue,
-                      icono: Icons.water_drop_outlined,
-                      etiqueta: 'ADBLUE',
-                    ),
-                  ),
-                if (auton != null)
-                  Expanded(
+          // Hasta 4 celdas (ODÓMETRO, COMBUSTIBLE, ADBLUE, AUTONOMÍA).
+          // En desktop/tablet entran en una sola fila; en mobile (< 400 dp)
+          // 4 Expanded daban ~83 dp por celda y los valores como
+          // "350.000 km" overflow. Wrap + width fijo de 50%-spacing
+          // garantiza 2x2 en mobile sin que se corte nada.
+          ? LayoutBuilder(
+              builder: (ctx, constraints) {
+                final celdaWidth = constraints.maxWidth >= 480
+                    ? (constraints.maxWidth / 4) - 8
+                    : (constraints.maxWidth / 2) - 8;
+                final celdas = <Widget>[
+                  SizedBox(
+                    width: celdaWidth,
                     child: _CeldaTelemetria(
-                      icono: Icons.route,
-                      color: AppColors.accentCyan,
-                      valor: auton.toStringAsFixed(0),
+                      icono: Icons.speed,
+                      color: AppColors.accentGreen,
+                      valor: km != null
+                          ? AppFormatters.formatearKilometraje(km)
+                          : '—',
                       unidad: 'km',
-                      etiqueta: 'AUTONOMÍA',
+                      etiqueta: 'ODÓMETRO',
                     ),
                   ),
-              ],
+                  if (fuel != null)
+                    SizedBox(
+                      width: celdaWidth,
+                      child: _CeldaPorcentaje(
+                        porcentaje: fuel,
+                        icono: Icons.local_gas_station,
+                        etiqueta: 'COMBUSTIBLE',
+                      ),
+                    ),
+                  if (adblue != null)
+                    SizedBox(
+                      width: celdaWidth,
+                      child: _CeldaPorcentaje(
+                        porcentaje: adblue,
+                        icono: Icons.water_drop_outlined,
+                        etiqueta: 'ADBLUE',
+                      ),
+                    ),
+                  if (auton != null)
+                    SizedBox(
+                      width: celdaWidth,
+                      child: _CeldaTelemetria(
+                        icono: Icons.route,
+                        color: AppColors.accentCyan,
+                        valor: auton.toStringAsFixed(0),
+                        unidad: 'km',
+                        etiqueta: 'AUTONOMÍA',
+                      ),
+                    ),
+                ];
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 12,
+                  children: celdas,
+                );
+              },
             )
           // Fallback: igual que antes para unidades sin combustible/autonomía.
           : Row(
@@ -1173,9 +1196,13 @@ class _VencimientoRow extends StatelessWidget {
             AppFileThumbnail(url: url, tituloVisor: tituloVisor),
             const SizedBox(width: 12),
             SizedBox(
-              width: 90,
+              // 90 → 110 para acomodar etiquetas largas tipo
+              // "EXTINTOR EXTERIOR" o "INSPECCIÓN TÉCNICA" en mobile.
+              width: 110,
               child: Text(
                 etiqueta,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Colors.white54,
                   fontSize: 11,
@@ -1186,6 +1213,8 @@ class _VencimientoRow extends StatelessWidget {
             Expanded(
               child: Text(
                 tieneFecha ? AppFormatters.formatearFecha(fecha) : '—',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontSize: 12),
               ),
             ),
@@ -1228,6 +1257,10 @@ class _DatoEditableEmpresa extends StatelessWidget {
       ),
       subtitle: Text(
         valor.isEmpty ? '—' : valor,
+        // Razón social larga ("VECCHI ARIEL Y VECCHI GRACIELA S.R.L: …")
+        // se cortaba feo en mobile. 2 líneas + ellipsis para prolijidad.
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.bold,

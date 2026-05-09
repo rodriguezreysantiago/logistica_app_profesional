@@ -91,18 +91,26 @@ class _EmpleadoCard extends StatelessWidget {
                       const Icon(Icons.local_shipping,
                           size: 11, color: Colors.white38),
                       const SizedBox(width: 4),
-                      Text(
-                        tractor,
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 11),
+                      Flexible(
+                        child: Text(
+                          tractor,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 11),
+                        ),
                       ),
                       const SizedBox(width: 12),
                       const Icon(Icons.link, size: 11, color: Colors.white38),
                       const SizedBox(width: 4),
-                      Text(
-                        enganche,
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 11),
+                      Flexible(
+                        child: Text(
+                          enganche,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 11),
+                        ),
                       ),
                     ],
                   )
@@ -112,10 +120,14 @@ class _EmpleadoCard extends StatelessWidget {
                       const Icon(Icons.factory_outlined,
                           size: 11, color: Colors.white38),
                       const SizedBox(width: 4),
-                      Text(
-                        AppAreas.etiquetas[area] ?? area,
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 11),
+                      Flexible(
+                        child: Text(
+                          AppAreas.etiquetas[area] ?? area,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 11),
+                        ),
                       ),
                     ],
                   ),
@@ -795,6 +807,11 @@ class _DatoEditableEmpresa extends StatelessWidget {
       ),
       subtitle: Text(
         valor,
+        // Razón social larga ("VECCHI ARIEL Y VECCHI GRACIELA S.R.L: …")
+        // se cortaba feo en mobile sin guard. 2 líneas + ellipsis para
+        // que se vea prolijo y no rompa layout del ListTile.
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 12, color: Colors.white),
       ),
       trailing: const Icon(Icons.business_center,
@@ -958,6 +975,8 @@ class _FilaVencimiento extends StatelessWidget {
                 children: [
                   Text(
                     etiqueta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         color: Colors.white54, fontSize: 11),
                   ),
@@ -966,6 +985,8 @@ class _FilaVencimiento extends StatelessWidget {
                     tieneFecha
                         ? AppFormatters.formatearFecha(fecha)
                         : 'Sin fecha',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -1010,8 +1031,12 @@ class _AsignacionUnidad extends StatelessWidget {
         campo == 'VEHICULO' ? Icons.local_shipping : Icons.link,
         color: tieneAsignacion ? AppColors.accentGreen : Colors.white24,
       ),
-      title: Text('$label: ${tieneAsignacion ? actual : "—"}',
-          style: const TextStyle(color: Colors.white, fontSize: 14)),
+      title: Text(
+        '$label: ${tieneAsignacion ? actual : "—"}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+      ),
       trailing:
           const Icon(Icons.sync_alt, size: 20, color: AppColors.accentGreen),
       onTap: () => EmpleadoActions.unidad(context, dni, campo, actual),

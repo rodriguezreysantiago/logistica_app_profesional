@@ -41,7 +41,12 @@ class GomeriaHubScreen extends StatelessWidget {
               crossAxisCount: 2,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
-              childAspectRatio: 1.4,
+              // Ratio 1.1 + Flexible/maxLines en los textos abajo:
+              // mismo patrón ya aplicado a admin_panel KPIs. iOS suma
+              // ~6 px de line-height de Cupertino que el ratio fijo no
+              // compensa. Con 1.1 hay margen sólido, y los textos
+              // ellipsizan si por algún motivo siguen sin entrar.
+              childAspectRatio: 1.1,
               children: const [
                 _HubTile(
                   titulo: 'UNIDADES',
@@ -105,27 +110,34 @@ class _HubTile extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Icon(icono, size: 36, color: color),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                titulo,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  titulo,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitulo,
-                style: const TextStyle(
-                  color: Colors.white60,
-                  fontSize: 12,
+                const SizedBox(height: 4),
+                Text(
+                  subtitulo,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 12,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -212,6 +224,8 @@ class _AlertasFinDeVida extends StatelessWidget {
                         children: [
                           Text(
                             etiqueta.toUpperCase(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: color,
                               fontSize: 12,
@@ -345,6 +359,8 @@ class _AlertasSheet extends StatelessWidget {
                           children: [
                             Text(
                               '${a.instalada.cubiertaCodigo} · ${a.instalada.unidadId}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 14,
@@ -354,6 +370,8 @@ class _AlertasSheet extends StatelessWidget {
                             const SizedBox(height: 2),
                             Text(
                               pos?.etiqueta ?? a.instalada.posicion,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                   color: Colors.white70, fontSize: 12),
                             ),
@@ -361,6 +379,8 @@ class _AlertasSheet extends StatelessWidget {
                               const SizedBox(height: 2),
                               Text(
                                 a.instalada.modeloEtiqueta!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                     color: Colors.white60, fontSize: 11),
                               ),
