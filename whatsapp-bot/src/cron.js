@@ -1238,16 +1238,17 @@ async function _runOnce(fs) {
     }
 
     // ─── Aviso temprano al admin de docs por EMPRESA empleadora ──────
-    // Umbral 30 días (más amplio que el de Giagante de 7) — el admin
-    // necesita aviso temprano para coordinar la renovación con
-    // contabilidad / RR.HH. antes de que se vuelva urgente.
+    // Umbral 30 días (más amplio que el de Giagante de 7) — pensado
+    // para que el admin coordine la renovación con contabilidad /
+    // RR.HH. antes de que se vuelva urgente.
     //
-    // Reusa `MANTENIMIENTO_DESTINATARIO_DNI` que apunta al admin
-    // (hardcoded en functions/src/index.ts = 35244439 = Santiago).
-    // Si querés cambiarlo, env var `EMPRESA_DOCS_ADMIN_DNI`
-    // tiene prioridad. Si ninguno está seteado, skip.
+    // Decisión Santiago 2026-05-09: NO le sirve recibirlo a él.
+    // El cron queda DESACTIVADO por default (env var
+    // `EMPRESA_DOCS_ADMIN_DNI` sin valor → skip). Si más adelante
+    // se decide darle este aviso a alguien, setear la env var con
+    // su DNI y el cron lo enviará.
     const dniAdminEmpresas =
-      process.env.EMPRESA_DOCS_ADMIN_DNI || '35244439';
+      process.env.EMPRESA_DOCS_ADMIN_DNI || '';
     if (dniAdminEmpresas) {
       const yaEnviadoEmp = await hist.yaSeEnvioVencEmpresasAdmin(
         db,
