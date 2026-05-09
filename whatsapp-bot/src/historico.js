@@ -207,16 +207,32 @@ async function yaSeEnvioServiceMaxUrgencia(db, params) {
  * auditoría: cuándo se generó, qué doc de COLA_WHATSAPP creó, etc.
  */
 async function registrar(db, params, colaDocId) {
+  const { ref, data } = prepararRegistro(db, params, colaDocId);
+  await ref.set(data);
+}
+
+/**
+ * Versión batch-friendly de `registrar`: devuelve `{ref, data}` para
+ * que el caller los sume a un `db.batch()` propio. Útil para
+ * atomizar el `add` a COLA_WHATSAPP con el registro de idempotencia
+ * — sin esto, si el bot crashea entre las 2 escrituras, el aviso
+ * queda encolado pero sin marcar histórico → próximo ciclo lo
+ * re-encola (duplicado).
+ */
+function prepararRegistro(db, params, colaDocId) {
   const id = buildId(params);
-  await db.collection(COLECCION).doc(id).set({
-    coleccion: params.coleccion,
-    doc_id: params.docId,
-    campo_base: params.campoBase,
-    urgencia: params.urgencia,
-    fecha_vencimiento: params.fechaVenc,
-    cola_doc_id: colaDocId,
-    creado_en: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  return {
+    ref: db.collection(COLECCION).doc(id),
+    data: {
+      coleccion: params.coleccion,
+      doc_id: params.docId,
+      campo_base: params.campoBase,
+      urgencia: params.urgencia,
+      fecha_vencimiento: params.fechaVenc,
+      cola_doc_id: colaDocId,
+      creado_en: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  };
 }
 
 /**
@@ -239,15 +255,23 @@ async function yaSeEnvioServiceDiario(db, dniDestinatario) {
  * despues de encolar exitosamente el mensaje.
  */
 async function registrarServiceDiario(db, dniDestinatario, meta) {
+  const { ref, data } = prepararRegistroServiceDiario(db, dniDestinatario, meta);
+  await ref.set(data);
+}
+
+function prepararRegistroServiceDiario(db, dniDestinatario, meta) {
   const id = `service_diario_${_fechaHoyIso()}_${dniDestinatario}`;
-  await db.collection(COLECCION).doc(id).set({
-    tipo: 'service_diario',
-    destinatario_dni: dniDestinatario,
-    fecha: _fechaHoyIso(),
-    cantidad_tractores: meta?.cantidadTractores || 0,
-    cola_doc_id: meta?.colaDocId || null,
-    creado_en: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  return {
+    ref: db.collection(COLECCION).doc(id),
+    data: {
+      tipo: 'service_diario',
+      destinatario_dni: dniDestinatario,
+      fecha: _fechaHoyIso(),
+      cantidad_tractores: meta?.cantidadTractores || 0,
+      cola_doc_id: meta?.colaDocId || null,
+      creado_en: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  };
 }
 
 /**
@@ -268,15 +292,23 @@ async function yaSeEnvioAlertasResumen(db, dniDestinatario) {
  * de encolar exitosamente el mensaje en COLA_WHATSAPP.
  */
 async function registrarAlertasResumen(db, dniDestinatario, meta) {
+  const { ref, data } = prepararRegistroAlertasResumen(db, dniDestinatario, meta);
+  await ref.set(data);
+}
+
+function prepararRegistroAlertasResumen(db, dniDestinatario, meta) {
   const id = `alertas_resumen_${_fechaHoyIso()}_${dniDestinatario}`;
-  await db.collection(COLECCION).doc(id).set({
-    tipo: 'alertas_volvo_resumen',
-    destinatario_dni: dniDestinatario,
-    fecha: _fechaHoyIso(),
-    cantidad_eventos: meta?.cantidadEventos || 0,
-    cola_doc_id: meta?.colaDocId || null,
-    creado_en: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  return {
+    ref: db.collection(COLECCION).doc(id),
+    data: {
+      tipo: 'alertas_volvo_resumen',
+      destinatario_dni: dniDestinatario,
+      fecha: _fechaHoyIso(),
+      cantidad_eventos: meta?.cantidadEventos || 0,
+      cola_doc_id: meta?.colaDocId || null,
+      creado_en: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  };
 }
 
 /**
@@ -291,15 +323,23 @@ async function yaSeEnvioMantenimientoDiario(db, dniDestinatario) {
 }
 
 async function registrarMantenimientoDiario(db, dniDestinatario, meta) {
+  const { ref, data } = prepararRegistroMantenimientoDiario(db, dniDestinatario, meta);
+  await ref.set(data);
+}
+
+function prepararRegistroMantenimientoDiario(db, dniDestinatario, meta) {
   const id = `mantenimiento_diario_${_fechaHoyIso()}_${dniDestinatario}`;
-  await db.collection(COLECCION).doc(id).set({
-    tipo: 'mantenimiento_diario',
-    destinatario_dni: dniDestinatario,
-    fecha: _fechaHoyIso(),
-    cantidad_eventos: meta?.cantidadEventos || 0,
-    cola_doc_id: meta?.colaDocId || null,
-    creado_en: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  return {
+    ref: db.collection(COLECCION).doc(id),
+    data: {
+      tipo: 'mantenimiento_diario',
+      destinatario_dni: dniDestinatario,
+      fecha: _fechaHoyIso(),
+      cantidad_eventos: meta?.cantidadEventos || 0,
+      cola_doc_id: meta?.colaDocId || null,
+      creado_en: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  };
 }
 
 /**
@@ -314,15 +354,23 @@ async function yaSeEnvioVencimientosProximos(db, dniDestinatario) {
 }
 
 async function registrarVencimientosProximos(db, dniDestinatario, meta) {
+  const { ref, data } = prepararRegistroVencimientosProximos(db, dniDestinatario, meta);
+  await ref.set(data);
+}
+
+function prepararRegistroVencimientosProximos(db, dniDestinatario, meta) {
   const id = `venc_proximos_${_fechaHoyIso()}_${dniDestinatario}`;
-  await db.collection(COLECCION).doc(id).set({
-    tipo: 'vencimientos_proximos_diario',
-    destinatario_dni: dniDestinatario,
-    fecha: _fechaHoyIso(),
-    cantidad_items: meta?.cantidadItems || 0,
-    cola_doc_id: meta?.colaDocId || null,
-    creado_en: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  return {
+    ref: db.collection(COLECCION).doc(id),
+    data: {
+      tipo: 'vencimientos_proximos_diario',
+      destinatario_dni: dniDestinatario,
+      fecha: _fechaHoyIso(),
+      cantidad_items: meta?.cantidadItems || 0,
+      cola_doc_id: meta?.colaDocId || null,
+      creado_en: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  };
 }
 
 /**
@@ -419,5 +467,12 @@ module.exports = {
   registrarMantenimientoDiario,
   registrarVencimientosProximos,
   registrarVencEmpresasAdmin,
+  // Variantes batch-friendly: devuelven {ref, data} para sumar a un
+  // db.batch() del caller. Útil para atomizar add+registrar.
+  prepararRegistro,
+  prepararRegistroServiceDiario,
+  prepararRegistroAlertasResumen,
+  prepararRegistroMantenimientoDiario,
+  prepararRegistroVencimientosProximos,
   limpiarObsoletos,
 };

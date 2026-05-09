@@ -480,9 +480,15 @@ async function _runOnce(fs) {
         stats.agrupados++;
       }
 
-      // Encolar UN solo doc en COLA_WHATSAPP.
+      // Encolar UN solo doc en COLA_WHATSAPP + registrar idempotencia
+      // ATÓMICAMENTE en un mismo batch. Antes hacía add() y después
+      // un loop de registrar() — si el bot crashea en el medio, queda
+      // encolado pero sin marcar histórico → próximo ciclo lo
+      // re-encola (duplicado al chofer).
       try {
-        const colaRef = await db.collection(fs.COLECCION).add({
+        const colaRef = db.collection(fs.COLECCION).doc();
+        const batch = db.batch();
+        batch.set(colaRef, {
           telefono,
           mensaje,
           estado: fs.ESTADO.pendiente,
@@ -515,8 +521,10 @@ async function _runOnce(fs) {
         // individualmente, así si mañana se suma un papel nuevo solo
         // ese se va a re-encolar — los demás ya están "marcados").
         for (const item of items) {
-          await hist.registrar(db, item.params, colaRef.id);
+          const reg = hist.prepararRegistro(db, item.params, colaRef.id);
+          batch.set(reg.ref, reg.data);
         }
+        await batch.commit();
 
         stats.encolados++;
         if (items.length === 1) {
@@ -570,7 +578,10 @@ async function _runOnce(fs) {
               tractores: tractoresConUrgencia,
             });
             try {
-              const colaRef = await db.collection(fs.COLECCION).add({
+              // Atómico: encolar + idempotencia en un mismo batch.
+              const colaRef = db.collection(fs.COLECCION).doc();
+              const batch = db.batch();
+              batch.set(colaRef, {
                 telefono: telefonoDest,
                 mensaje: mensajeService,
                 estado: fs.ESTADO.pendiente,
@@ -599,10 +610,13 @@ async function _runOnce(fs) {
                     }))
                   : null,
               });
-              await hist.registrarServiceDiario(db, dniDestinatarioService, {
-                cantidadTractores: tractoresConUrgencia.length,
-                colaDocId: colaRef.id,
-              });
+              const regS = hist.prepararRegistroServiceDiario(
+                db, dniDestinatarioService, {
+                  cantidadTractores: tractoresConUrgencia.length,
+                  colaDocId: colaRef.id,
+                });
+              batch.set(regS.ref, regS.data);
+              await batch.commit();
               stats.encolados++;
               log.info(
                 `+ Encolado SERVICE DIARIO: ${dniDestinatarioService} ` +
@@ -776,7 +790,10 @@ async function _runOnce(fs) {
                 );
               } else {
                 try {
-                  const colaRef = await db.collection(fs.COLECCION).add({
+                  // Atómico: encolar + idempotencia en un mismo batch.
+                  const colaRef = db.collection(fs.COLECCION).doc();
+                  const batch = db.batch();
+                  batch.set(colaRef, {
                     telefono: telAlertas,
                     mensaje: mensajeAlertas,
                     estado: fs.ESTADO.pendiente,
@@ -800,10 +817,13 @@ async function _runOnce(fs) {
                       chofer: e.choferNombre,
                     })),
                   });
-                  await hist.registrarAlertasResumen(db, dniAlertasResumen, {
-                    cantidadEventos: eventos.length,
-                    colaDocId: colaRef.id,
-                  });
+                  const regA = hist.prepararRegistroAlertasResumen(
+                    db, dniAlertasResumen, {
+                      cantidadEventos: eventos.length,
+                      colaDocId: colaRef.id,
+                    });
+                  batch.set(regA.ref, regA.data);
+                  await batch.commit();
                   stats.encolados++;
                   log.info(
                     `+ Encolado RESUMEN ALERTAS VOLVO: ${dniAlertasResumen} ` +
@@ -940,7 +960,10 @@ async function _runOnce(fs) {
               );
             } else {
               try {
-                const colaRef = await db.collection(fs.COLECCION).add({
+                // Atómico: encolar + idempotencia en un mismo batch.
+                const colaRef = db.collection(fs.COLECCION).doc();
+                const batch = db.batch();
+                batch.set(colaRef, {
                   telefono: telMant,
                   mensaje: mensajeMant,
                   estado: fs.ESTADO.pendiente,
@@ -965,10 +988,13 @@ async function _runOnce(fs) {
                     chofer: e.choferNombre,
                   })),
                 });
-                await hist.registrarMantenimientoDiario(db, dniMantenimiento, {
-                  cantidadEventos: eventosMant.length,
-                  colaDocId: colaRef.id,
-                });
+                const regM = hist.prepararRegistroMantenimientoDiario(
+                  db, dniMantenimiento, {
+                    cantidadEventos: eventosMant.length,
+                    colaDocId: colaRef.id,
+                  });
+                batch.set(regM.ref, regM.data);
+                await batch.commit();
                 stats.encolados++;
                 log.info(
                   `+ Encolado MANTENIMIENTO DIARIO: ${dniMantenimiento} ` +
@@ -1138,7 +1164,10 @@ async function _runOnce(fs) {
               );
             } else {
               try {
-                const colaRef = await db.collection(fs.COLECCION).add({
+                // Atómico: encolar + idempotencia en un mismo batch.
+                const colaRef = db.collection(fs.COLECCION).doc();
+                const batch = db.batch();
+                batch.set(colaRef, {
                   telefono: telDoc,
                   mensaje: mensajeVencProx,
                   estado: fs.ESTADO.pendiente,
@@ -1179,10 +1208,13 @@ async function _runOnce(fs) {
                     })),
                   ],
                 });
-                await hist.registrarVencimientosProximos(db, dniDocumentacion, {
-                  cantidadItems: totalItems,
-                  colaDocId: colaRef.id,
-                });
+                const regV = hist.prepararRegistroVencimientosProximos(
+                  db, dniDocumentacion, {
+                    cantidadItems: totalItems,
+                    colaDocId: colaRef.id,
+                  });
+                batch.set(regV.ref, regV.data);
+                await batch.commit();
                 stats.encolados++;
                 log.info(
                   `+ Encolado VENCIMIENTOS PRÓXIMOS: ${dniDocumentacion} ` +
