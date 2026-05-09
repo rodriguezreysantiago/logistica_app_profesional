@@ -1392,19 +1392,32 @@ class GomeriaService {
   /// por varios tractores en su vida (cambia el tractor que lo arrastra
   /// pero la cubierta sigue ahí). Por cada asignación
   /// tractor↔enganche que solapa con la vida de la cubierta, sumamos
-  /// los km del tractor durante esa asignación.
+  /// los km del tractor durante el sub-período en que el enganche
+  /// estuvo enganchado a ese tractor Y la cubierta estuvo instalada.
   ///
-  /// **Versión MVP**: solo cuenta las asignaciones COMPLETAMENTE
-  /// contenidas dentro de `[instalado, retirado]`. Las que solapan
-  /// parcial al inicio o al final se ignoran (subestimación). Para
-  /// el caso típico (cubierta instalada 6+ meses, asignación de
-  /// enganche cambia esporádicamente), la mayoría de asignaciones
-  /// caen dentro o son legacy sin telemetría — el sub-conteo es
-  /// menor que el error de imputarlo a otro lado.
+  /// Tipos de overlap entre la asignación y `[instalado, retirado]`:
+  /// 1. **Contenida** (`desde ≥ instalado` y `hasta ≤ retirado`): los
+  ///    km son `odometer_final − odometer_inicial` directo. Esos
+  ///    snapshots se persisten en `ASIGNACIONES_ENGANCHE` por
+  ///    `AsignacionEngancheService` al abrir/cerrar la asignación.
+  /// 2. **Parcial inicial** (`desde < instalado`): la asignación
+  ///    arrancó antes que la cubierta. El odómetro al inicio del
+  ///    overlap es el del tractor el día de instalación de la cubierta
+  ///    — lo sacamos de un snapshot diario en `TELEMETRIA_HISTORICO`
+  ///    (la function `telemetriaSnapshotScheduled` la popula cada 6h).
+  /// 3. **Parcial final** (`hasta > retirado` o `hasta == null`): la
+  ///    asignación termina después o sigue activa. El odómetro al fin
+  ///    del overlap es el del tractor el día de retiro — `TELEMETRIA_HISTORICO`.
+  /// 4. **Parcial doble** (empezó antes Y termina después): los dos
+  ///    extremos vienen de `TELEMETRIA_HISTORICO`.
   ///
-  /// Asignaciones SIN `odometer_inicial`/`odometer_final` (legacy
-  /// previas a Fase 2 Sitrack) se skipean. La cuenta queda incompleta
-  /// para esas — documentado en el log al cliente.
+  /// Si para una asignación parcial no hay snapshot disponible (tractor
+  /// sin Volvo activo, function falló ese día) buscamos hasta ±7 días.
+  /// Si tampoco aparece, esa asignación se cuenta como sin-datos y NO
+  /// se prorratea — preferimos subestimar antes que estimar mal.
+  ///
+  /// Devuelve `null` solo si no se pudo contar NADA (cero asignaciones
+  /// con datos), para distinguir "no pude calcular" de "0 km reales".
   Future<double?> _calcularKmCubiertaEnganche({
     required String engancheId,
     required Timestamp instalado,
@@ -1412,9 +1425,9 @@ class GomeriaService {
   }) async {
     // Query: asignaciones del enganche que arrancaron antes del retiro
     // (cualquiera que pueda solapar). El filtro fino (descartar las que
-    // terminaron antes de la instalación, las parciales) lo hacemos
-    // client-side — Firestore no permite dos rangos de inequality en
-    // campos distintos sin armar índices compuestos para cada caso.
+    // terminaron antes de la instalación) lo hacemos client-side —
+    // Firestore no permite dos rangos de inequality en campos distintos
+    // sin armar índices compuestos para cada caso.
     final snap = await _db
         .collection(AppCollections.asignacionesEnganche)
         .where('enganche_id', isEqualTo: engancheId)
@@ -1423,55 +1436,105 @@ class GomeriaService {
 
     double total = 0;
     int contadas = 0;
-    int skippedSinTelemetria = 0;
-    int skippedParciales = 0;
+    int skippedSinDatos = 0;
 
     for (final d in snap.docs) {
       final data = d.data();
       final desde = data['desde'] as Timestamp?;
       final hasta = data['hasta'] as Timestamp?; // null = activa
+      final tractorId = data['tractor_id']?.toString();
       final odoIni = (data['odometer_inicial'] as num?)?.toDouble();
       final odoFin = (data['odometer_final'] as num?)?.toDouble();
 
       if (desde == null) continue;
+      if (tractorId == null || tractorId.isEmpty) continue;
 
       // Asignación que terminó antes de la instalación de la cubierta:
       // no aplica.
       if (hasta != null && hasta.compareTo(instalado) <= 0) continue;
 
-      // MVP: solo contamos asignaciones COMPLETAMENTE contenidas en el
-      // intervalo. `desde >= instalado` y `hasta <= retirado` (con la
-      // interpretación de `hasta == null` = activa = se extiende más
-      // allá del retiro de la cubierta — eso lo skipea como parcial).
       final empezoAntes = desde.compareTo(instalado) < 0;
       final terminaDespues = hasta == null || hasta.compareTo(retirado) > 0;
-      if (empezoAntes || terminaDespues) {
-        skippedParciales++;
+
+      // Resolver odómetro al inicio del overlap.
+      final double? odoOverlapIni = empezoAntes
+          ? await _odometroTractorEnFecha(tractorId, instalado.toDate())
+          : odoIni;
+
+      // Resolver odómetro al fin del overlap.
+      final double? odoOverlapFin = terminaDespues
+          ? await _odometroTractorEnFecha(tractorId, retirado.toDate())
+          : odoFin;
+
+      if (odoOverlapIni == null || odoOverlapFin == null) {
+        skippedSinDatos++;
         continue;
       }
 
-      if (odoIni == null || odoFin == null) {
-        skippedSinTelemetria++;
-        continue;
-      }
-
-      final diff = odoFin - odoIni;
+      final diff = odoOverlapFin - odoOverlapIni;
       // Si el odómetro retrocedió (sync raro / reset manual / cambio
-      // de equipo Sitrack), no contamos km negativos — sería peor que
-      // cero por la sustracción.
+      // de equipo Sitrack / snapshot post-overlap menor que pre-overlap
+      // por error de telemetría), no contamos km negativos.
       if (diff > 0) {
         total += diff;
         contadas++;
       }
     }
 
-    // Si no contamos NADA (sin asignaciones dentro del rango con
-    // telemetría), devolvemos null en lugar de 0 para distinguir "no
-    // pude calcular" de "manejó pero hizo 0 km".
-    if (contadas == 0 &&
-        (skippedSinTelemetria > 0 || skippedParciales > 0)) {
+    if (contadas == 0 && skippedSinDatos > 0) {
       return null;
     }
     return total;
+  }
+
+  /// Lee el odómetro del tractor desde `TELEMETRIA_HISTORICO` para el
+  /// día indicado. Doc id = `{patente}_{YYYY-MM-DD}` con la fecha en
+  /// hora local del cliente (que en operación es ART, alineado con el
+  /// formato que escribe `telemetriaSnapshotScheduled` con timezone
+  /// `America/Argentina/Buenos_Aires`).
+  ///
+  /// Si no hay snapshot para el día exacto, busca hasta ±[ventanaDias]
+  /// días alternando hacia atrás (más probable que existan: el
+  /// snapshot es del día anterior si el tractor no operó hoy) y hacia
+  /// adelante. El odómetro casi no varía en 1-2 días — fallback razonable.
+  ///
+  /// Devuelve `null` si no encuentra snapshot en la ventana, lo cual el
+  /// llamador interpreta como "asignación sin datos" y la skipea.
+  Future<double?> _odometroTractorEnFecha(
+    String tractorId,
+    DateTime fecha, {
+    int ventanaDias = 7,
+  }) async {
+    for (var offset = 0; offset <= ventanaDias; offset++) {
+      final candidatas = offset == 0
+          ? <DateTime>[fecha]
+          : <DateTime>[
+              fecha.subtract(Duration(days: offset)),
+              fecha.add(Duration(days: offset)),
+            ];
+      for (final f in candidatas) {
+        final docId = _telemetriaDocId(tractorId, f);
+        final snap = await _db
+            .collection(AppCollections.telemetriaHistorico)
+            .doc(docId)
+            .get();
+        if (!snap.exists) continue;
+        final km = (snap.data()?['km'] as num?)?.toDouble();
+        if (km != null && km > 0) return km;
+      }
+    }
+    return null;
+  }
+
+  /// Doc id de `TELEMETRIA_HISTORICO`: `{patente}_{YYYY-MM-DD}` con la
+  /// fecha en hora local. La function scheduled escribe con timezone
+  /// ART explícito; el cliente Flutter en operación corre en ART local
+  /// del SO, así que `.toLocal()` da el mismo día.
+  static String _telemetriaDocId(String patente, DateTime fecha) {
+    final f = fecha.toLocal();
+    final y = f.year.toString().padLeft(4, '0');
+    final m = f.month.toString().padLeft(2, '0');
+    final d = f.day.toString().padLeft(2, '0');
+    return '${patente}_$y-$m-$d';
   }
 }
