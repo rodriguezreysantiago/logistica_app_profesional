@@ -551,12 +551,14 @@ class _GridKPIs extends StatelessWidget {
       crossAxisSpacing: 10,
       // Cards más anchas que altas; ratio ajustado para que el número
       // grande tenga aire sin que la card crezca demasiado en alto.
-      // 2026-05-08: en iPhone con sublabel ("103 asignadas",
-      // "sin renovar") el ratio 1.4 daba overflow de 5-6 px porque la
-      // altura no alcanzaba para header + número + sublabel + label.
-      // Bajado a 1.3 en mobile — un poco más alto, sin sacrificar
-      // densidad visible en una pantalla.
-      childAspectRatio: esDesktop ? 1.6 : 1.3,
+      //
+      // Historial:
+      // - 2026-05-08: 1.4 → 1.3 (overflow 5-6 px en iPhone con sublabel).
+      // - 2026-05-09: 1.3 → 1.1 + Flexible/FittedBox (el line-height de
+      //   iOS suma ~6 px en cards con sublabel y aún se zafaba en
+      //   iPhone 16 Pro). El fix combina ratio menor + el contenido
+      //   ahora cede cuando el alto disponible no alcanza.
+      childAspectRatio: esDesktop ? 1.6 : 1.1,
       children: tarjetas,
     );
   }
@@ -590,6 +592,15 @@ class _KpiCard extends StatelessWidget {
         ? () => Navigator.pushNamed(context, ruta!)
         : null;
 
+    // Layout defensivo contra overflow en iOS:
+    // - El bloque central (valor + sublabel) va dentro de Flexible para
+    //   que ceda altura si la card es ajustada. mainAxisSize: min lo
+    //   mantiene compacto cuando hay aire de sobra (el spaceBetween
+    //   externo igual lo posiciona en el medio visual).
+    // - El Text del valor va en FittedBox(scaleDown) — si por alguna
+    //   combinación de fontSize + line-height no entra, se achica en
+    //   lugar de overflowing.
+    // - El label inferior va en Flexible — si falta alto, ellipsiza.
     return AppCard(
       onTap: tap,
       padding: const EdgeInsets.all(14),
@@ -615,39 +626,50 @@ class _KpiCard extends StatelessWidget {
                     color: Colors.white54, size: 14),
             ],
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                valor,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 30,
-                  fontWeight: FontWeight.bold,
-                  height: 1,
-                ),
-              ),
-              if (sublabel != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  sublabel!,
-                  style: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 10,
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    valor,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                      height: 1,
+                    ),
                   ),
                 ),
+                if (sublabel != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    sublabel!,
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 10,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ],
-            ],
-          ),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
             ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          ),
+          Flexible(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
