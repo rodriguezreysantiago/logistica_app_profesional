@@ -260,6 +260,24 @@ class AppCollections {
   /// los reportes históricos siguen mostrando el precio que aplicaba.
   static const String tarifasLogistica = 'TARIFAS_LOGISTICA';
 
+  /// Viajes — ejecución y liquidación. 1 doc por viaje real (carga →
+  /// descarga). Refiere a `tarifasLogistica` (con snapshot de los
+  /// precios al momento del viaje, para que cambios futuros no
+  /// rompan reportes históricos). Incluye:
+  ///   - Datos de la operación: chofer, vehículo, fechas carga/descarga.
+  ///   - Cálculos: monto Vecchi, monto chofer (sin redondeo y
+  ///     redondeado a múltiplo de 5), comisión chofer (18% default).
+  ///   - Adelanto al chofer (monto + fecha + observación).
+  ///   - Gastos extraordinarios reembolsables al chofer (peajes,
+  ///     combustible, comida) — suman a la liquidación final.
+  ///   - Estado: PROGRAMADO / EN_CURSO / COMPLETADO / CANCELADO /
+  ///     POSTERGADO. Soft-delete con `activo: false`.
+  ///   - Comprobante de remito firmado en Storage (al cargar descarga).
+  /// RBAC: admin + supervisor. NO se expone al chofer (decisión
+  /// Santiago 2026-05-09 — info delicada como tarifas, comisiones,
+  /// liquidaciones).
+  static const String viajesLogistica = 'VIAJES_LOGISTICA';
+
   // ─── Empresas empleadoras (2026-05-08) ───
   /// Empresas que figuran como empleador del personal (Vecchi Ariel y
   /// Vecchi Graciela S.R.L. + Sucesión de Vecchi Carlos Luis). Doc id:

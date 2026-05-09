@@ -384,6 +384,22 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // VIAJES_LOGISTICA — ejecución y liquidación de viajes
+    // ========================================================================
+    // 1 doc por viaje real (carga → descarga). Refiere a TARIFAS_LOGISTICA
+    // con snapshot. Incluye datos delicados: tarifas, comisiones,
+    // adelantos, gastos, liquidación al chofer. NO se expone al chofer
+    // (decisión Santiago 2026-05-09).
+    //
+    // Soft-delete via `activo: false`. NO permitimos `delete` para
+    // preservar histórico — si el operador se equivoca, desactiva.
+
+    match /VIAJES_LOGISTICA/{doc} {
+      allow read, create, update: if isAdminOrSupervisor();
+      allow delete: if false;
+    }
+
+    // ========================================================================
     // EMPRESAS_EMPLEADORAS — Póliza ART y F.931 a nivel empresa
     // ========================================================================
     // Una entrada por empresa empleadora del personal (Vecchi Ariel,

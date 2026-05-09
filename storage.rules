@@ -34,6 +34,12 @@ service firebase.storage {
       return isSignedIn() && request.auth.token.rol == 'ADMIN';
     }
 
+    function isAdminOrSupervisor() {
+      return isSignedIn()
+        && (request.auth.token.rol == 'ADMIN'
+            || request.auth.token.rol == 'SUPERVISOR');
+    }
+
     // ========================================================================
     // RESPUESTAS_BOT — solo el bot sube (Admin SDK), admin las lee
     // ========================================================================
@@ -135,6 +141,22 @@ service firebase.storage {
       //  - tamano <= 10 MB. Suficiente para PDFs y fotos HD; por
       //    encima de eso es ruido (videos, scanners no comprimidos).
       allow write: if isSignedIn()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|application/pdf');
+    }
+
+    // ========================================================================
+    // RemitosViaje — comprobantes firmados de remitos (módulo Logística)
+    // ========================================================================
+    // Path: RemitosViaje/{viajeId}_{ts}.{ext}
+    // Lectura/escritura: admin + supervisor. NO se expone al chofer
+    // (decisión Santiago 2026-05-09 — info delicada del módulo).
+    // Validaciones del upload:
+    //   - contentType: image/* o application/pdf.
+    //   - tamaño ≤ 10 MB (mismo cap que REVISIONES).
+    match /RemitosViaje/{archivo=**} {
+      allow read: if isAdminOrSupervisor();
+      allow write: if isAdminOrSupervisor()
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*|application/pdf');
     }
