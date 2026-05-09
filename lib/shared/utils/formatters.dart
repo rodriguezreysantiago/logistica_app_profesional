@@ -235,6 +235,37 @@ class AppFormatters {
         '${two(l.hour)}:${two(l.minute)}:${two(l.second)}';
   }
 
+  /// `DD/MM/YYYY HH:mm` (sin segundos) en hora local. Útil para
+  /// columnas de tabla / detalles donde los segundos son ruido.
+  static String formatearFechaHoraSinSegundos(DateTime? fecha) {
+    if (fecha == null) return '—';
+    final l = fecha.isUtc ? fecha.toLocal() : fecha;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(l.day)}/${two(l.month)}/${l.year} '
+        '${two(l.hour)}:${two(l.minute)}';
+  }
+
+  /// `DD/MM HH:mm` (sin año, sin segundos) en hora local. Para timelines,
+  /// últimas sincronizaciones, eventos del día. Cuando la fecha es
+  /// reciente (mismo año) el año es ruido y este formato deja más
+  /// espacio horizontal para otros campos.
+  static String formatearFechaHoraCorta(DateTime? fecha) {
+    if (fecha == null) return '—';
+    final l = fecha.isUtc ? fecha.toLocal() : fecha;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(l.day)}/${two(l.month)} '
+        '${two(l.hour)}:${two(l.minute)}';
+  }
+
+  /// `DD/MM` (sin año, sin hora) en hora local. Para chips de fecha
+  /// del día corriente o histogramas por día.
+  static String formatearFechaCorta(DateTime? fecha) {
+    if (fecha == null) return '—';
+    final l = fecha.isUtc ? fecha.toLocal() : fecha;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(l.day)}/${two(l.month)}';
+  }
+
   // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
   //
   // Devuelve `null` cuando no se pudo parsear la fecha (input vacío,

@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/formatters.dart';
 import 'excel_utils.dart' as xu;
 import 'report_save_helper.dart';
 
@@ -344,7 +345,6 @@ class ReportConsumoService {
       // Sin header informativo arriba — el admin aplica AutoFilter
       // (Ctrl+Shift+L) directamente sobre la fila 0 y filtra/ordena
       // como cualquier tabla. El rango se ve en el nombre del archivo.
-      final fmt = DateFormat('dd/MM/yyyy');
 
       // Cabeceras dinámicas en fila 0 — datos desde fila 1.
       final titulos = <String>[];
@@ -414,7 +414,7 @@ class ReportConsumoService {
           ),
           messenger: messenger,
           textoCompartir: '⛽ Reporte de consumo de combustible — '
-              '${fmt.format(desde)} a ${fmt.format(hasta)}',
+              '${AppFormatters.formatearFecha(desde)} a ${AppFormatters.formatearFecha(hasta)}',
         );
       }
     } catch (e) {
@@ -714,7 +714,7 @@ class _FilaConsumo {
       if (ts.isNotEmpty) {
         final dt = DateTime.tryParse(ts);
         if (dt != null) {
-          ultimaSync = DateFormat('dd/MM HH:mm').format(dt.toLocal());
+          ultimaSync = AppFormatters.formatearFechaHoraCorta(dt);
         }
       }
     }
@@ -778,7 +778,6 @@ class _BotonRangoFecha extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('dd/MM/yyyy');
     return InkWell(
       borderRadius: BorderRadius.circular(10),
       onTap: () async {
@@ -833,7 +832,7 @@ class _BotonRangoFecha extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${fmt.format(desde)}  a  ${fmt.format(hasta)}',
+                    '${AppFormatters.formatearFecha(desde)}  a  ${AppFormatters.formatearFecha(hasta)}',
                     style: const TextStyle(
                       color: AppColors.accentGreen,
                       fontWeight: FontWeight.bold,
@@ -884,7 +883,6 @@ class _WarningHistoricoLimitado extends StatelessWidget {
         if (!desdeSeleccionado.isBefore(fechaMin)) {
           return const SizedBox.shrink();
         }
-        final fmt = DateFormat('dd/MM/yyyy');
         return Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Container(
@@ -902,8 +900,8 @@ class _WarningHistoricoLimitado extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'El histórico de telemetría arranca el ${fmt.format(fechaMin)}. '
-                    'Los días anteriores al ${fmt.format(fechaMin)} no van a tener '
+                    'El histórico de telemetría arranca el ${AppFormatters.formatearFecha(fechaMin)}. '
+                    'Los días anteriores al ${AppFormatters.formatearFecha(fechaMin)} no van a tener '
                     'data en el reporte (se reportan como "(acum.)" o vacíos).',
                     style: const TextStyle(
                       color: AppColors.accentOrange,

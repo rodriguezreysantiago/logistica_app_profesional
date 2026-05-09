@@ -3,11 +3,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as ex;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/formatters.dart';
 import 'excel_utils.dart' as xu;
 import 'report_save_helper.dart';
 
@@ -168,8 +168,8 @@ class ReportChecklistService {
 
         var fechaStr = '-';
         if (data['FECHA'] != null) {
-          fechaStr =
-              DateFormat('dd/MM/yyyy').format((data['FECHA'] as Timestamp).toDate());
+          fechaStr = AppFormatters.formatearFecha(
+              (data['FECHA'] as Timestamp).toDate());
         }
         final patente = (data['DOMINIO'] ?? '').toString();
         final tipo = (data['TIPO'] ?? '').toString();
@@ -201,7 +201,7 @@ class ReportChecklistService {
           nombreDefault: ReportSaveHelper.nombreUnico('Novedades'),
           messenger: messenger,
           textoCompartir: '📋 Reporte de Novedades — Coopertrans Móvil\n'
-              'Generado el ${DateFormat('dd/MM HH:mm').format(DateTime.now())}',
+              'Generado el ${AppFormatters.formatearFechaHoraCorta(DateTime.now())}',
         );
       }
     } catch (e) {

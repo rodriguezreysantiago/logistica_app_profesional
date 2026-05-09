@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Pantalla "Descargas por unidad" — lista de eventos PTO (toma de fuerza)
@@ -366,7 +366,6 @@ class _EventoPtoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('dd/MM/yyyy HH:mm');
     final creado = (data['creado_en'] as Timestamp?)?.toDate();
     final patente = (data['patente'] ?? '—').toString();
     final choferNombre = (data['chofer_nombre'] ?? '').toString();
@@ -407,7 +406,7 @@ class _EventoPtoCard extends StatelessWidget {
               const Spacer(),
               if (creado != null)
                 Text(
-                  fmt.format(creado),
+                  AppFormatters.formatearFechaHoraSinSegundos(creado),
                   style: const TextStyle(
                       color: Colors.white54, fontSize: 11),
                 ),

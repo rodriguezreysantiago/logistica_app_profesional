@@ -343,8 +343,7 @@ class _ItemCola extends StatelessWidget {
 
   static String _formatTs(dynamic ts, {String prefijo = ''}) {
     if (ts is! Timestamp) return prefijo;
-    final dt = ts.toDate().toLocal();
-    final txt = DateFormat('dd/MM HH:mm').format(dt);
+    final txt = AppFormatters.formatearFechaHoraCorta(ts.toDate());
     return prefijo.isEmpty ? txt : '$prefijo $txt';
   }
 }

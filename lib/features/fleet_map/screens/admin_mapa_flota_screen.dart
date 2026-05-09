@@ -2,13 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
-import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/constants/map_constants.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Pantalla "Mapa flota en vivo" del admin.
@@ -603,7 +603,6 @@ class _DetalleSheet extends StatelessWidget {
     final driftTipo = (data['drift_tipo'] ?? '').toString();
     final asignacionDni = (data['asignacion_dni'] ?? '').toString();
     final asignacionNombre = (data['asignacion_nombre'] ?? '').toString();
-    final fmt = DateFormat('dd/MM HH:mm');
 
     final choferTexto = driverDni.isEmpty
         ? '— (sin identificar)'
@@ -701,13 +700,13 @@ class _DetalleSheet extends StatelessWidget {
           _TelemetriaVolvoFila(patente: patente),
           _Fila(
             label: 'Último reporte',
-            valor: reportTs == null ? '—' : fmt.format(reportTs),
+            valor: AppFormatters.formatearFechaHoraCorta(reportTs),
             icono: Icons.update,
           ),
           if (ignitionTs != null)
             _Fila(
               label: 'Ignición desde',
-              valor: fmt.format(ignitionTs),
+              valor: AppFormatters.formatearFechaHoraCorta(ignitionTs),
             ),
           if (eventName.isNotEmpty)
             _Fila(

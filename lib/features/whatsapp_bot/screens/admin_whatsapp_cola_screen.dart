@@ -1,9 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/phone_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../services/whatsapp_cola_service.dart';

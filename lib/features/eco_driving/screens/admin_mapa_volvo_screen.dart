@@ -1,12 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/constants/map_constants.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../utils/etiquetas_alerta_volvo.dart';
 import '../widgets/evento_volvo_detalle_sheet.dart';
@@ -737,5 +737,5 @@ class _Mapa extends StatelessWidget {
 // Exportado para reuso en el bottom sheet del detalle.
 String formatearFechaHoraEvento(Timestamp? ts) {
   if (ts == null) return '—';
-  return DateFormat('dd/MM HH:mm').format(ts.toDate());
+  return AppFormatters.formatearFechaHoraCorta(ts.toDate());
 }

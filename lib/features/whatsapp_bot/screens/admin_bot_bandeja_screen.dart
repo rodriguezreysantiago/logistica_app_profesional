@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 
 /// Bandeja de respuestas que el bot recibió pero no pudo asociar
@@ -233,7 +233,7 @@ class _ItemAmbiguo extends StatelessWidget {
 
   String _formatTs(dynamic ts) {
     if (ts is! Timestamp) return '';
-    return DateFormat('dd/MM HH:mm').format(ts.toDate().toLocal());
+    return AppFormatters.formatearFechaHoraCorta(ts.toDate());
   }
 
   @override

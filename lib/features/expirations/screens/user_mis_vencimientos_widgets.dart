@@ -418,7 +418,7 @@ class _AccesoChecklist extends StatelessWidget {
           final fechaDoc =
               (snap.data!.docs.first['FECHA'] as Timestamp).toDate().toLocal();
           mensaje =
-              'Control realizado (${DateFormat('dd/MM').format(fechaDoc)})';
+              'Control realizado (${AppFormatters.formatearFechaCorta(fechaDoc)})';
           icono = Icons.check_circle;
         } else if (dia > 15) {
           color = AppColors.accentRed;
