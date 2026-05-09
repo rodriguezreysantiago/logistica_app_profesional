@@ -678,14 +678,27 @@ async function _runOnce(fs) {
               'TELL_TALE',
             ]);
             // Tipos que SIEMPRE entran al resumen aunque la severidad
-            // que les ponga Volvo no sea HIGH. Son eventos críticos
-            // de seguridad activa que el Jefe Seg e Higiene tiene que
-            // ver siempre (decisión Santiago 2026-05-09):
+            // que les ponga Volvo no sea HIGH. Son eventos relevantes
+            // para seguimiento de manejo y seguridad activa que el
+            // Jefe Seg e Higiene tiene que ver siempre.
+            //
+            // Decisión Santiago 2026-05-09 (round 1):
             // - AEBS: Frenado automático de emergencia.
             // - ESP: Control de estabilidad.
+            //
+            // Decisión Santiago 2026-05-09 (round 2 — seguimiento más
+            // estricto del manejo, eventos típicamente MEDIUM):
+            // - DISTANCE_ALERT: Cerca del vehículo de adelante.
+            // - UNSAFE_LANE_CHANGE: Cambio de carril inseguro.
+            // - LKS: Asistente de carril (salida del carril).
+            // - LCS: Asistente de cambio de carril.
             const TIPOS_FORZADOS_SEG_HIGIENE = new Set([
               'AEBS',
               'ESP',
+              'DISTANCE_ALERT',
+              'UNSAFE_LANE_CHANGE',
+              'LKS',
+              'LCS',
             ]);
             const eventos = alertasSnap.docs
               .map((d) => {
