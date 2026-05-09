@@ -785,15 +785,35 @@ async function _runOnce(fs) {
       }
     }
 
-    // ─── Mantenimiento diario consolidado (1 msg/día al admin) ────────
-    // Mismo patrón que cron_alertas_volvo_diario pero para eventos de
-    // mantenimiento: FUEL, CATALYST, y GENERIC con sub-tipo TELL_TALE /
-    // ADBLUELEVEL_LOW / WITHOUT_ADBLUE. La Cloud Function
-    // onAlertaVolvoMantenimientoCreated ya NO encola en COLA_WHATSAPP —
-    // solo persiste en VOLVO_ALERTAS. Este bloque del cron los recoge una
-    // vez por día y arma UN solo mensaje consolidado para el admin.
-    const TIPOS_MANT_DIRECTOS = new Set(['FUEL', 'CATALYST']);
-    const SUBTIPOS_MANT_GENERIC = new Set(['TELL_TALE', 'ADBLUELEVEL_LOW', 'WITHOUT_ADBLUE']);
+    // ─── Mantenimiento diario consolidado (1 msg/día al Jefe Mant) ───
+    // Eventos mecánicos consolidados en UN solo mensaje al Jefe Mant
+    // (Emmanuel, vía ALERTAS_RESUMEN_DESTINATARIO_DNI).
+    //
+    // Tipos incluidos (decisión Santiago 2026-05-09):
+    // - TELL_TALE — luz de tablero encendida.
+    // - TPM — presión de neumático fuera de rango.
+    // - TTM — temperatura de neumático fuera de rango.
+    // - TACHO_OUT_OF_SCOPE_MODE_CHANGE — tacógrafo fuera de servicio.
+    //
+    // Excluidos a propósito (los manejaba antes este resumen, sacados
+    // por decisión 2026-05-09): FUEL, CATALYST, ADBLUELEVEL_LOW,
+    // WITHOUT_ADBLUE. Esos quedan visibles solo en el tablero de la app
+    // — el Jefe Mant decidió que son ruido para el resumen diario.
+    //
+    // Volvo emite los tipos directamente o como `tipo: GENERIC` con el
+    // subtipo en `detalle_generic.type`. Cubrimos ambos casos sumando
+    // los mismos tipos en SUBTIPOS_MANT_GENERIC.
+    const TIPOS_MANT_DIRECTOS = new Set([
+      'TPM',
+      'TTM',
+      'TACHO_OUT_OF_SCOPE_MODE_CHANGE',
+    ]);
+    const SUBTIPOS_MANT_GENERIC = new Set([
+      'TELL_TALE',
+      'TPM',
+      'TTM',
+      'TACHO_OUT_OF_SCOPE_MODE_CHANGE',
+    ]);
 
     const dniMantenimiento = process.env.ALERTAS_RESUMEN_DESTINATARIO_DNI;
     if (dniMantenimiento) {
