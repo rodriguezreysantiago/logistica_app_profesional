@@ -25,6 +25,13 @@ const health = require('./health');
 const fs = require('./firestore');
 const { aIsoLocal } = require('./fechas');
 
+// Banner que se muestra al final de los mensajes mientras la app esté
+// en etapa de prueba. Espejo del que cada builder define localmente —
+// duplicado acá para los avisos inline que no usan builder dedicado.
+const BANNER_TESTING =
+  '⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. ' +
+  'No tomes el contenido al 100%.\n\n';
+
 // Intervalo entre services programados de tractores Volvo, en KM.
 const INTERVALO_SERVICE_KM = 50000;
 
@@ -1126,6 +1133,176 @@ async function _runOnce(fs) {
       log.debug(
         'DOCUMENTACION_DESTINATARIO_DNI no configurado. Skip resumen vencimientos próximos.'
       );
+    }
+
+    // ─── Aviso temprano al admin de docs por EMPRESA empleadora ──────
+    // Umbral 30 días (más amplio que el de Giagante de 7) — el admin
+    // necesita aviso temprano para coordinar la renovación con
+    // contabilidad / RR.HH. antes de que se vuelva urgente.
+    //
+    // Reusa `MANTENIMIENTO_DESTINATARIO_DNI` que apunta al admin
+    // (hardcoded en functions/src/index.ts = 35244439 = Santiago).
+    // Si querés cambiarlo, env var `EMPRESA_DOCS_ADMIN_DNI`
+    // tiene prioridad. Si ninguno está seteado, skip.
+    const dniAdminEmpresas =
+      process.env.EMPRESA_DOCS_ADMIN_DNI || '35244439';
+    if (dniAdminEmpresas) {
+      const yaEnviadoEmp = await hist.yaSeEnvioVencEmpresasAdmin(
+        db,
+        dniAdminEmpresas
+      );
+      if (yaEnviadoEmp) {
+        log.debug(
+          `Aviso docs empresa al admin ya enviado hoy a ${dniAdminEmpresas}, skip.`
+        );
+      } else {
+        const empAdmin = await _obtenerDestinatarioConsolidado(
+          db,
+          dniAdminEmpresas,
+          empleadosByDni
+        );
+        if (!empAdmin) {
+          log.warn(
+            `Admin docs empresa DNI=${dniAdminEmpresas} no existe en EMPLEADOS. ` +
+              `Aviso no se envía hoy.`
+          );
+        } else {
+          const telAdmin = normalizarTelefonoAWid(empAdmin.data.TELEFONO)
+            ? String(empAdmin.data.TELEFONO).trim()
+            : null;
+          if (!telAdmin) {
+            log.warn(
+              `Admin docs empresa ${dniAdminEmpresas} sin TELEFONO válido. ` +
+                `Aviso no se envía hoy.`
+            );
+          } else {
+            const DOCS_EMPRESA = [
+              {etiqueta: 'Póliza ART', campoFecha: 'VENCIMIENTO_POLIZA_ART'},
+              {etiqueta: 'Formulario 931', campoFecha: 'VENCIMIENTO_FORMULARIO_931'},
+              {etiqueta: 'SCVO', campoFecha: 'VENCIMIENTO_SCVO'},
+              {
+                etiqueta: 'Libre deuda sindical',
+                campoFecha: 'VENCIMIENTO_LIBRE_DE_DEUDA_SINDICAL',
+              },
+            ];
+
+            const items = [];
+            try {
+              const empSnap = await db
+                .collection('EMPRESAS_EMPLEADORAS')
+                .get();
+              for (const eDoc of empSnap.docs) {
+                const data = eDoc.data();
+                const nombreEmpresa =
+                  String(data.nombre || '').trim() || `CUIT ${eDoc.id}`;
+                for (const docSpec of DOCS_EMPRESA) {
+                  const fechaStr = aIsoLocal(data[docSpec.campoFecha]);
+                  const dias = calcularDiasRestantes(fechaStr);
+                  if (dias == null) continue;
+                  // Umbral 30 días — aviso temprano. Incluye vencidos
+                  // (dias < 0) para que el admin no se entere tarde
+                  // si Giagante no actuó.
+                  if (dias > 30) continue;
+                  items.push({
+                    empresa: nombreEmpresa,
+                    etiqueta: docSpec.etiqueta,
+                    fecha: fechaStr,
+                    dias,
+                  });
+                }
+              }
+            } catch (e) {
+              log.warn(
+                `EMPRESAS_EMPLEADORAS no se pudo leer (${e.message}). Skip aviso admin.`
+              );
+            }
+
+            if (items.length === 0) {
+              log.info(
+                'Aviso docs empresa al admin: 0 items en próximos 30 días, no se envía.'
+              );
+              await hist.registrarVencEmpresasAdmin(db, dniAdminEmpresas, {
+                cantidadItems: 0,
+                colaDocId: null,
+              });
+            } else {
+              // Mensaje inline (no merece builder dedicado por ahora).
+              const apodoAdmin = aviso.resolverNombreSaludo(empAdmin.data);
+              const saludo = apodoAdmin ? `Hola ${apodoAdmin}` : 'Hola';
+              items.sort((a, b) => a.dias - b.dias);
+              const porEmpresa = new Map();
+              for (const it of items) {
+                if (!porEmpresa.has(it.empresa)) porEmpresa.set(it.empresa, []);
+                porEmpresa.get(it.empresa).push(it);
+              }
+              const bloques = [...porEmpresa.entries()]
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([empresa, list]) => {
+                  const lineas = list.map((it) => {
+                    const etiq = it.dias < 0
+                      ? `vencido hace ${-it.dias} d`
+                      : it.dias === 0
+                        ? 'vence hoy'
+                        : it.dias === 1
+                          ? 'vence mañana'
+                          : `en ${it.dias} días`;
+                    return `   • ${it.etiqueta} — ${it.fecha} (${etiq})`;
+                  });
+                  return `🏢 *${empresa}*\n${lineas.join('\n')}`;
+                });
+
+              const mensajeAdmin =
+                `${saludo}.\n\n` +
+                `📋 *Aviso temprano — docs por empresa próximos a vencer (≤30 días)*\n\n` +
+                `${items.length === 1 ? '1 documento' : `${items.length} documentos`} ` +
+                `requieren atención de la oficina:\n\n` +
+                `${bloques.join('\n\n')}\n\n` +
+                BANNER_TESTING +
+                '_Coordiná con Giagante (encargado de documentación) la renovación. ' +
+                'Vos lo recibís 30 días antes; Giagante recibe el detalle final cuando ' +
+                'queden 7 días._';
+
+              try {
+                const colaRef = await db.collection(fs.COLECCION).add({
+                  telefono: telAdmin,
+                  mensaje: mensajeAdmin,
+                  estado: fs.ESTADO.pendiente,
+                  encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                  enviado_en: null,
+                  error: null,
+                  intentos: 0,
+                  origen: 'cron_venc_empresas_admin_diario',
+                  destinatario_coleccion: 'EMPLEADOS',
+                  destinatario_id: dniAdminEmpresas,
+                  campo_base: 'VENC_EMPRESAS_ADMIN_DIARIO',
+                  admin_dni: 'BOT',
+                  admin_nombre: 'Bot automatico',
+                  items_agrupados: items.map((it) => ({
+                    tipoDoc: it.etiqueta,
+                    campoBase: 'VENC_EMPRESA_ADMIN',
+                    coleccion: 'EMPRESAS_EMPLEADORAS',
+                    docId: it.empresa,
+                    fecha: it.fecha,
+                    dias: it.dias,
+                  })),
+                });
+                await hist.registrarVencEmpresasAdmin(db, dniAdminEmpresas, {
+                  cantidadItems: items.length,
+                  colaDocId: colaRef.id,
+                });
+                stats.encolados++;
+                log.info(
+                  `+ Encolado VENC EMPRESAS ADMIN: ${dniAdminEmpresas} ` +
+                    `(${items.length} items) -> ${colaRef.id}`
+                );
+              } catch (e) {
+                stats.errores++;
+                log.error(`No se pudo encolar aviso docs empresa admin: ${e.message}`);
+              }
+            }
+          }
+        }
+      }
     }
 
     log.info(

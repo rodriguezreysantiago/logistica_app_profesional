@@ -10,9 +10,9 @@
 #
 # Convención: pubspec usa MAJOR.MINOR.PATCH+BUILD (ej. 1.0.8+16). Cada
 # bump del patch incrementa también el build (1.0.8+16 → 1.0.9+17).
-# El "appVersion" en el constant queda como `v MAJOR.MINOR.<build+6>`
-# (legacy del proyecto: el build "visible" para el usuario va un par
-# adelante del semver patch — ver historial de pubspec).
+# El "appVersion" en el constant coincide 1:1 con el patch del pubspec
+# (`v MAJOR.MINOR.PATCH`). Antes había un offset legacy `patch + 6`
+# que generaba mismatch entre pubspec y UI; sacado 2026-05-08.
 
 param(
     [string]$Version = '',
@@ -56,10 +56,10 @@ $nMinor = [int]$matches[2]
 $nPatch = [int]$matches[3]
 $nBuild = [int]$matches[4]
 
-# Calculo del appVersion visible: legacy del proyecto va patch + 6
-# (ej. pubspec 1.0.8 -> appVersion v 1.0.14). Si esto no encaja con tu
-# convención preferida, cambialo acá.
-$appVer = "v $nMajor.$nMinor.$($nPatch + 6)"
+# appVersion visible coincide 1:1 con el patch del pubspec
+# (decisión 2026-05-08: sacar el offset legacy que históricamente
+# era `patch + 6` y generaba mismatch entre pubspec y UI).
+$appVer = "v $nMajor.$nMinor.$nPatch"
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan

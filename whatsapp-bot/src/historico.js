@@ -326,6 +326,31 @@ async function registrarVencimientosProximos(db, dniDestinatario, meta) {
 }
 
 /**
+ * Para el aviso DIARIO al admin de docs por EMPRESA empleadora que
+ * vencen en próximos 30 días. Umbral más amplio que el de
+ * vencimientos_proximos (7 días, va a Giagante) — Santiago necesita
+ * aviso temprano para coordinar con Giagante antes de que sea urgente.
+ * Idempotencia por día + DNI destinatario.
+ */
+async function yaSeEnvioVencEmpresasAdmin(db, dniDestinatario) {
+  const id = `venc_empresas_admin_${_fechaHoyIso()}_${dniDestinatario}`;
+  const doc = await db.collection(COLECCION).doc(id).get();
+  return doc.exists;
+}
+
+async function registrarVencEmpresasAdmin(db, dniDestinatario, meta) {
+  const id = `venc_empresas_admin_${_fechaHoyIso()}_${dniDestinatario}`;
+  await db.collection(COLECCION).doc(id).set({
+    tipo: 'venc_empresas_admin_diario',
+    destinatario_dni: dniDestinatario,
+    fecha: _fechaHoyIso(),
+    cantidad_items: meta?.cantidadItems || 0,
+    cola_doc_id: meta?.colaDocId || null,
+    creado_en: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+/**
  * Limpia docs viejos de AVISOS_AUTOMATICOS_HISTORICO.
  *
  * Borra los docs con `creado_en` anterior a `diasMin` días atrás
@@ -387,10 +412,12 @@ module.exports = {
   yaSeEnvioAlertasResumen,
   yaSeEnvioMantenimientoDiario,
   yaSeEnvioVencimientosProximos,
+  yaSeEnvioVencEmpresasAdmin,
   registrar,
   registrarServiceDiario,
   registrarAlertasResumen,
   registrarMantenimientoDiario,
   registrarVencimientosProximos,
+  registrarVencEmpresasAdmin,
   limpiarObsoletos,
 };
