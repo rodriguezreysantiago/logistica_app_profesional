@@ -56,4 +56,40 @@ if [ $copiados -gt 0 ]; then
     echo "claudesync: $copiados doc(s) backupeados a Drive ($DRIVE_PATH)."
 fi
 
+# ─── Sync memoria del agent (fuera del repo) ─────────────────────────
+# La memoria de Claude Code vive en `~/.claude/projects/<slug>/memory/`
+# (paths absolutos por máquina). NO está en git, entonces el hook
+# normal de "copiar docs del repo" no la cubre — antes había que
+# copiarla a mano al final de cada sesión.
+#
+# Solución (2026-05-11): cada post-commit detecta la carpeta de memoria
+# del proyecto actual y la espeja en `$DRIVE_PATH/claude-memory/`.
+# Como el commit dispara el hook, cualquier edit de memoria que no
+# venga acompañado de un commit del repo NO se sincroniza — pero en
+# la práctica las edits de memoria casi siempre van junto a cambios
+# del código, así que el cubrimiento es alto.
+#
+# Best-effort igual que el bloque anterior: si la memoria local no
+# existe, salimos en silencio.
+
+# Convención del slug que usa Claude Code para nombrar la carpeta:
+# se reemplazan `:`, `/`, espacios y `_` por `-` en el path absoluto
+# del repo. Ej.: `C:/Users/Colo Logistica/coopertrans_movil`
+# → `C--Users-Colo-Logistica-coopertrans-movil`.
+PROJECT_SLUG=$(echo "$REPO_ROOT" | sed 's/[:/ _]/-/g')
+MEMORY_LOCAL="$HOME/.claude/projects/$PROJECT_SLUG/memory"
+
+if [ -d "$MEMORY_LOCAL" ]; then
+    MEMORY_DST="$DRIVE_PATH/claude-memory"
+    mkdir -p "$MEMORY_DST"
+    # `cp -uv` solo copia si source es más nueva (-u) y emite una
+    # línea por copia (-v) que podemos contar para reportar.
+    # Las líneas que NO son de copia (errors, etc.) van a stderr
+    # — capturamos solo stdout para el contador.
+    mem_count=$(cp -uv "$MEMORY_LOCAL"/*.md "$MEMORY_DST/" 2>/dev/null | wc -l)
+    if [ "$mem_count" -gt 0 ]; then
+        echo "claudesync: $mem_count archivo(s) de memoria del agent sincronizados a Drive."
+    fi
+fi
+
 exit 0

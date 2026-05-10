@@ -168,8 +168,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: _login,
                       ),
                       const SizedBox(height: 25),
+                      // Versión leída de AppTexts.appVersion (sincronizada
+                      // por bump_version.ps1 con pubspec + main.cpp en
+                      // cada release). Antes era 'v2.0.26' hardcoded
+                      // (de 4 versiones atrás) — quedaba stale en cada
+                      // bump, confundía a los testers que pensaban
+                      // estar en una versión vieja.
                       const Text(
-                        'v2.0.26 — Bahía Blanca, Argentina',
+                        '${AppTexts.appVersion} — Bahía Blanca, Argentina',
                         style: TextStyle(
                           color: Colors.white24,
                           fontSize: 10,
