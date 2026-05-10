@@ -191,6 +191,19 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // STATS — agregaciones server-side para el dashboard
+    // ========================================================================
+    //
+    // Solo escribe la scheduled function `recomputeDashboardStats`
+    // (cada 5 min) vía Admin SDK. El cliente lee `STATS/dashboard` para
+    // pintar los KPIs (~177 docs antes, 1 doc ahora). Lectura abierta a
+    // admin + supervisor (mismos roles que ven el panel).
+    match /STATS/{doc} {
+      allow read: if isAdminOrSupervisor();
+      allow write: if false;
+    }
+
+    // ========================================================================
     // AVISOS_AUTOMATICOS_HISTORICO — idempotencia del cron del bot
     // ========================================================================
 

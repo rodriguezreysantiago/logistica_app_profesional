@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/constants/vencimientos_config.dart';
 import '../../../core/services/capabilities.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
@@ -29,39 +28,24 @@ class AdminPanelScreen extends StatefulWidget {
 }
 
 class _AdminPanelScreenState extends State<AdminPanelScreen> {
-  late final Stream<QuerySnapshot> _empleadosStream;
-  late final Stream<QuerySnapshot> _vehiculosStream;
-  late final Stream<QuerySnapshot> _revisionesStream;
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _statsStream;
 
   @override
   void initState() {
     super.initState();
-    final db = FirebaseFirestore.instance;
-    // .limit(5000) defensivo en empleados/vehículos: la flota Vecchi
-    // tiene ~50 empleados + ~127 vehículos, lejos del cap. El cap
-    // explícito previene el caso accidente (un import malformado, una
-    // duplicación masiva por bug) — preferible degradación parcial a
-    // que el dashboard timeoutee bajando 100k docs al cliente.
-    _empleadosStream =
-        db.collection(AppCollections.empleados).limit(5000).snapshots();
-    _vehiculosStream =
-        db.collection(AppCollections.vehiculos).limit(5000).snapshots();
-    // REVISIONES: las aprobadas/rechazadas se BORRAN del collection
-    // (no soft-delete), asi que en condiciones normales solo hay
-    // pendientes. Igual sumamos limit(50) como defensa: si en el
-    // futuro se decide guardar historico, el contador no se infla
-    // ni el snapshot push baja miles de docs en cada cambio.
+    // STATS/dashboard lo mantiene la Cloud Function `recomputeDashboardStats`
+    // (cada 5 min). Antes traíamos las 3 colecciones enteras (EMPLEADOS,
+    // VEHICULOS, REVISIONES) y calculábamos KPIs O(N×M) client-side. Ahora
+    // leemos UN solo doc — escala constante con el tamaño de la flota.
     //
-    // DEUDA TECNICA (escalabilidad a 1000+ empleados/vehiculos):
-    // _empleadosStream y _vehiculosStream traen la coleccion entera.
-    // Los KPIs recalculan O(N x M) en cada snapshot push. Hasta ~500
-    // docs es aceptable; arriba conviene migrar a aggregate stats
-    // server-side: una collection STATS/dashboard con contadores
-    // mantenidos por trigger Cloud Function en cambios de
-    // EMPLEADOS/VEHICULOS/REVISIONES. La app lee 1 doc en lugar
-    // de N+M+R. Postergado hasta que el dimensionamiento lo amerite —
-    // el .limit(5000) actual nos da 10x growth headroom.
-    _revisionesStream = db.collection(AppCollections.revisiones).limit(50).snapshots();
+    // Stale máx 5 min, totalmente aceptable para un dashboard administrativo
+    // (admin no monitorea cambios en tiempo real). Si nunca se ejecutó la
+    // function (primera vez post-deploy), el doc no existe y el cliente
+    // muestra "—" hasta el primer ciclo (~5 min).
+    _statsStream = FirebaseFirestore.instance
+        .collection('STATS')
+        .doc('dashboard')
+        .snapshots();
     // El listener de notificaciones push para revisiones nuevas vive
     // en AdminShell (durante toda la sesion admin), no aca. Si lo
     // duplicaramos en este State, el admin recibiria 2 push identicas
@@ -78,23 +62,12 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           const _Saludo(),
           const SizedBox(height: 16),
           // ------- KPIs en vivo -------
-          StreamBuilder<QuerySnapshot>(
-            stream: _empleadosStream,
-            builder: (ctx, snapEmp) => StreamBuilder<QuerySnapshot>(
-              stream: _vehiculosStream,
-              builder: (ctx, snapVeh) => StreamBuilder<QuerySnapshot>(
-                stream: _revisionesStream,
-                builder: (ctx, snapRev) {
-                  final stats = _Stats.from(
-                    empleados: snapEmp.data,
-                    vehiculos: snapVeh.data,
-                    revisiones: snapRev.data,
-                    docsEmpleado: AppDocsEmpleado.etiquetas,
-                  );
-                  return _GridKPIs(stats: stats);
-                },
-              ),
-            ),
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: _statsStream,
+            builder: (ctx, snap) {
+              final stats = _Stats.fromDoc(snap.data?.data());
+              return _GridKPIs(stats: stats);
+            },
           ),
           const SizedBox(height: 24),
           // ------- Accesos directos (legacy) -------
@@ -368,8 +341,12 @@ class _SeccionLabel extends StatelessWidget {
 // CÁLCULO DE MÉTRICAS
 // =============================================================================
 
-/// Estadísticas agregadas que pinta el dashboard. Inmutable; se calcula
-/// una vez por frame combinando los 3 snapshots.
+/// Estadísticas agregadas que pinta el dashboard. Inmutable; se hidrata
+/// desde el doc `STATS/dashboard` que mantiene la Cloud Function
+/// `recomputeDashboardStats` (cada 5 min). Antes se calculaba
+/// client-side iterando 3 colecciones; el cálculo se movió a server-side
+/// para que escale con flotas grandes y para que N admins simultáneos no
+/// repitan el mismo cómputo en sus respectivos clientes.
 class _Stats {
   final int choferesActivos;
   final int unidadesTotal;
@@ -379,8 +356,10 @@ class _Stats {
   final int proximos7;
   final int proximos30;
 
-  /// `true` mientras alguno de los streams todavía no tiene su primer
-  /// snapshot — sirve para mostrar placeholders en lugar de "0" mentiroso.
+  /// `true` mientras el snapshot de `STATS/dashboard` no llegó todavía,
+  /// o el doc no existe (primera vez después del deploy, antes del
+  /// primer ciclo de la function). Sirve para mostrar placeholders en
+  /// lugar de "0" mentiroso.
   final bool cargando;
 
   const _Stats({
@@ -394,15 +373,12 @@ class _Stats {
     required this.cargando,
   });
 
-  factory _Stats.from({
-    required QuerySnapshot? empleados,
-    required QuerySnapshot? vehiculos,
-    required QuerySnapshot? revisiones,
-    required Map<String, String> docsEmpleado,
-  }) {
-    final cargando =
-        empleados == null || vehiculos == null || revisiones == null;
-    if (cargando) {
+  /// Hidrata desde el doc `STATS/dashboard`. Si el doc no existe o no
+  /// llegó todavía, devuelve placeholders en estado `cargando`. Lectura
+  /// defensiva con `?? 0` por si el shape del doc cambia y le falta un
+  /// campo nuevo (mejor mostrar 0 que crashear).
+  factory _Stats.fromDoc(Map<String, dynamic>? data) {
+    if (data == null) {
       return const _Stats(
         choferesActivos: 0,
         unidadesTotal: 0,
@@ -414,69 +390,16 @@ class _Stats {
         cargando: true,
       );
     }
-
-    int activos = 0;
-    int vencidos = 0;
-    int prox7 = 0;
-    int prox30 = 0;
-
-    void contarFecha(String? fechaStr) {
-      if (fechaStr == null || fechaStr.isEmpty) return;
-      final dias = AppFormatters.calcularDiasRestantes(fechaStr);
-      // Fecha cargada pero no parseable -> contamos como vencido (peor
-      // caso). Hasta hace poco devolvia sentinel 999 y se silenciaba
-      // en el dashboard; ahora se ve y el admin la encuentra abriendo
-      // la pantalla de auditoria correspondiente.
-      if (dias == null || dias < 0) {
-        vencidos++;
-      } else if (dias <= 7) {
-        prox7++;
-      } else if (dias <= 30) {
-        prox30++;
-      }
-    }
-
-    // Empleados — KPI "choferes activos" y vencimientos personales son
-    // ambas métricas DE MANEJO. Admins/supervisores/planta no manejan
-    // ni tienen vencimientos profesionales (licencia, ART, psicofísico),
-    // así que los filtramos para no contaminar el dashboard.
-    for (final doc in empleados.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      // Soft-delete: empleados dados de baja no cuentan en KPIs.
-      if (!AppActivo.esActivo(data)) continue;
-      final rol = AppRoles.normalizar(data['ROL']?.toString());
-      if (!AppRoles.tieneVehiculo(rol)) continue;
-      final estado = (data['estado_cuenta'] ?? 'ACTIVO').toString();
-      if (estado.toUpperCase() == 'ACTIVO') activos++;
-      for (final campoBase in docsEmpleado.values) {
-        contarFecha(data['VENCIMIENTO_$campoBase']?.toString());
-      }
-    }
-
-    // Vehículos
-    int unidadesAsignadas = 0;
-    for (final doc in vehiculos.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      // Soft-delete: vehiculos dados de baja no cuentan en KPIs.
-      if (!AppActivo.esActivo(data)) continue;
-      final estado = (data['ESTADO'] ?? '').toString().toUpperCase();
-      if (estado == 'OCUPADO' || estado == 'ASIGNADO') {
-        unidadesAsignadas++;
-      }
-      final tipo = (data['TIPO'] ?? '').toString();
-      for (final spec in AppVencimientos.forTipo(tipo)) {
-        contarFecha(data[spec.campoFecha]?.toString());
-      }
-    }
-
+    int asInt(dynamic v) =>
+        v is num ? v.toInt() : (v is String ? int.tryParse(v) ?? 0 : 0);
     return _Stats(
-      choferesActivos: activos,
-      unidadesTotal: vehiculos.docs.length,
-      unidadesAsignadas: unidadesAsignadas,
-      revisionesPendientes: revisiones.docs.length,
-      vencidos: vencidos,
-      proximos7: prox7,
-      proximos30: prox30,
+      choferesActivos: asInt(data['choferes_activos']),
+      unidadesTotal: asInt(data['unidades_total']),
+      unidadesAsignadas: asInt(data['unidades_asignadas']),
+      revisionesPendientes: asInt(data['revisiones_pendientes']),
+      vencidos: asInt(data['vencidos']),
+      proximos7: asInt(data['proximos_7']),
+      proximos30: asInt(data['proximos_30']),
       cargando: false,
     );
   }
