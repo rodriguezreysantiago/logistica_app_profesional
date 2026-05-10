@@ -10,21 +10,18 @@ import '../constants/posiciones.dart';
 import '../models/cubierta.dart';
 import '../models/cubierta_instalada.dart';
 import '../services/gomeria_service.dart';
+import '../widgets/esquema_unidad_view.dart';
 
 /// Pantalla detalle de una unidad — el corazón del flujo del operador
-/// de gomería. Muestra el layout de posiciones de la unidad (10 para
-/// tractor, 12 para enganche) agrupado por eje. Cada posición se
-/// renderiza como un tile que indica si está ocupada (con qué cubierta,
-/// modelo, vida y % de vida útil consumida) o vacía. Tap en posición →
-/// dialog de acciones contextual.
+/// de gomería. Muestra un esquema visual de la unidad desde arriba
+/// (CustomPainter en `EsquemaUnidadView`) con cada cubierta en su
+/// posición física real, color según % vida útil consumida y patrón
+/// interno distinto entre dirección (chevrons) y tracción (tacos). Tap
+/// en cubierta → dialog de acciones contextual.
 ///
 /// Para tractor mostramos también el odómetro actual (KM_ACTUAL del
 /// vehículo) en la cabecera y se usa para calcular el % de vida en vivo
 /// de cada cubierta instalada.
-///
-/// El layout es texto/tile (no CustomPainter visual). En tracción dual
-/// las dos ruedas internas se dibujan pegadas y separadas de las
-/// externas con un gap para reflejar la geometría física desde arriba.
 class GomeriaUnidadDetalleScreen extends StatefulWidget {
   final String unidadId;
   final TipoUnidadCubierta unidadTipo;
@@ -50,20 +47,13 @@ class _GomeriaUnidadDetalleScreenState
 
   @override
   Widget build(BuildContext context) {
-    final posiciones = posicionesParaUnidad(widget.unidadTipo);
-    // Agrupamos por eje para renderizar fila por fila (más cercano al
-    // layout físico desde arriba: eje 1 al frente, eje 3 al fondo).
-    final porEje = <int, List<PosicionCubierta>>{};
-    for (final p in posiciones) {
-      porEje.putIfAbsent(p.eje, () => []).add(p);
-    }
-    final ejesOrdenados = porEje.keys.toList()..sort();
+    final cantPosiciones = posicionesParaUnidad(widget.unidadTipo).length;
 
     return AppScaffold(
       title: widget.unidadId,
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         // Stream del vehículo: necesario para mostrar el KM_ACTUAL en
-        // cabecera y para que cada tile calcule su % de vida útil
+        // cabecera y para que cada cubierta calcule su % de vida útil
         // consumida en vivo (KM_ACTUAL - km_unidad_al_instalar).
         stream: FirebaseFirestore.instance
             .collection(AppCollections.vehiculos)
@@ -93,23 +83,17 @@ class _GomeriaUnidadDetalleScreenState
                       tipoVehiculo: widget.tipoVehiculo,
                       modelo: widget.modelo,
                       cantInstaladas: activas.length,
-                      cantPosiciones: posiciones.length,
+                      cantPosiciones: cantPosiciones,
                       kmActual: kmActual,
                     ),
                     const SizedBox(height: 16),
-                    for (final eje in ejesOrdenados) ...[
-                      _EjeHeader(
-                          eje: eje, posiciones: porEje[eje]!),
-                      const SizedBox(height: 8),
-                      _GridEje(
-                        posiciones: porEje[eje]!,
-                        instaladas: mapa,
-                        kmActualUnidad: kmActual,
-                        onTap: (p) =>
-                            _onTapPosicion(context, p, mapa[p.codigo]),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
+                    EsquemaUnidadView(
+                      tipo: widget.unidadTipo,
+                      instaladas: mapa,
+                      kmActualUnidad: kmActual,
+                      onTapPosicion: (p) =>
+                          _onTapPosicion(context, p, mapa[p.codigo]),
+                    ),
                   ],
                 ),
               );
@@ -261,301 +245,6 @@ class _Cabecera extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class _EjeHeader extends StatelessWidget {
-  final int eje;
-  final List<PosicionCubierta> posiciones;
-  const _EjeHeader({required this.eje, required this.posiciones});
-
-  @override
-  Widget build(BuildContext context) {
-    final tipo = posiciones.first.tipoUsoRequerido;
-    final etiquetaTipo = tipo == TipoUsoCubierta.direccion
-        ? 'DIRECCIÓN'
-        : 'TRACCIÓN';
-    final color = tipo == TipoUsoCubierta.direccion
-        ? AppColors.accentOrange
-        : AppColors.accentBlue;
-    return Row(
-      children: [
-        Text(
-          'EJE $eje',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.5,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: color, width: 0.5),
-          ),
-          child: Text(
-            etiquetaTipo,
-            style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// =============================================================================
-// GRID DE POSICIONES POR EJE
-// =============================================================================
-
-class _GridEje extends StatelessWidget {
-  final List<PosicionCubierta> posiciones;
-  final Map<String, CubiertaInstalada> instaladas;
-  final double? kmActualUnidad;
-  final ValueChanged<PosicionCubierta> onTap;
-
-  const _GridEje({
-    required this.posiciones,
-    required this.instaladas,
-    required this.kmActualUnidad,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Para reflejar la geometría física dejamos un gap visual entre
-    // las dos ruedas internas de un eje dual y un poco menos entre las
-    // pares IZQ_EXT|IZQ_INT (que físicamente están pegadas). Para el
-    // eje de dirección (2 posiciones) no hay duales: simétrico nomás.
-    final esDual = posiciones.length == 4;
-
-    // En mobile (< 480 dp) un eje dual con 4 tiles en una sola Row
-    // dejaba ~79 dp por tile y el modelo ("Bridgestone R268 295/80R22.5"
-    // fontSize 9 maxLines 2) wrappeaba a 3 líneas → overflow.
-    // Splitting en 2 filas IZQ + DER para mobile, manteniendo la
-    // representación física correcta. Eje no dual (2 ruedas) entra OK
-    // en cualquier ancho.
-    return LayoutBuilder(
-      builder: (ctx, constraints) {
-        final usar2x2 = esDual && constraints.maxWidth < 480;
-        if (usar2x2) {
-          return Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(child: _wrapTile(posiciones[0])),
-                  Expanded(child: _wrapTile(posiciones[1])),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(child: _wrapTile(posiciones[2])),
-                  Expanded(child: _wrapTile(posiciones[3])),
-                ],
-              ),
-            ],
-          );
-        }
-        // Layout original 1x4 con gap eje en el medio.
-        final widgets = <Widget>[];
-        for (var i = 0; i < posiciones.length; i++) {
-          widgets.add(Expanded(child: _wrapTile(posiciones[i])));
-          if (esDual && i == 1) {
-            widgets.add(const SizedBox(width: 28));
-          }
-        }
-        return Row(children: widgets);
-      },
-    );
-  }
-
-  Widget _wrapTile(PosicionCubierta p) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
-        child: _PosicionTile(
-          posicion: p,
-          instalada: instaladas[p.codigo],
-          kmActualUnidad: kmActualUnidad,
-          onTap: () => onTap(p),
-        ),
-      );
-}
-
-class _PosicionTile extends StatelessWidget {
-  final PosicionCubierta posicion;
-  final CubiertaInstalada? instalada;
-  final double? kmActualUnidad;
-  final VoidCallback onTap;
-
-  const _PosicionTile({
-    required this.posicion,
-    required this.instalada,
-    required this.kmActualUnidad,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ocupada = instalada != null;
-    if (!ocupada) {
-      return _tileVacia();
-    }
-    final pct =
-        instalada!.porcentajeVidaConsumida(kmActualUnidad: kmActualUnidad);
-    final color = _colorDesgaste(pct);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          border: Border.all(color: color, width: 1.5),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              posicion.lado,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white60,
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              instalada!.cubiertaCodigo,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            if (instalada!.modeloEtiqueta != null) ...[
-              const SizedBox(height: 2),
-              Text(
-                _resumenModelo(instalada!.modeloEtiqueta!),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 9,
-                  height: 1.1,
-                ),
-              ),
-            ],
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: AppColors.accentTeal.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Text(
-                    instalada!.vidaAlInstalar == 1
-                        ? 'NUEVA'
-                        : 'V${instalada!.vidaAlInstalar}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (pct != null) ...[
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: (pct / 100).clamp(0, 1).toDouble(),
-                  minHeight: 4,
-                  backgroundColor: Colors.white12,
-                  valueColor: AlwaysStoppedAnimation(color),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '${pct.toStringAsFixed(0)}%',
-                style: TextStyle(
-                  color: color,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _tileVacia() {
-    final color = AppColors.accentOrange.withValues(alpha: 0.5);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 6),
-        decoration: BoxDecoration(
-          border: Border.all(color: color, width: 1.5),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add_circle_outline, color: color, size: 22),
-            const SizedBox(height: 6),
-            Text(
-              posicion.lado,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white60,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Color del marco / progreso según el % de vida útil consumida.
-  /// `null` (sin estimación) → verde neutro. <80 verde, <100 ámbar,
-  /// >=100 rojo (pasó la vida estimada).
-  static Color _colorDesgaste(double? pct) {
-    if (pct == null) return AppColors.accentGreen;
-    if (pct >= 100) return AppColors.accentRed;
-    if (pct >= 80) return AppColors.accentOrange;
-    return AppColors.accentGreen;
-  }
-
-  /// Saca el "— Tracción"/"— Dirección" del final de la etiqueta del
-  /// modelo para no duplicar info que ya está en el header del eje.
-  /// "Bridgestone R268 295/80R22.5 — Tracción" → "Bridgestone R268
-  /// 295/80R22.5".
-  static String _resumenModelo(String etiqueta) {
-    final i = etiqueta.indexOf(' — ');
-    return i >= 0 ? etiqueta.substring(0, i) : etiqueta;
   }
 }
 
