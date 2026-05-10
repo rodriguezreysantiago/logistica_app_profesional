@@ -26,57 +26,73 @@ class GomeriaHubScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Gomería',
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Banner de alertas — toma su altura natural (0 si no hay
+            // alertas). El gap inferior está adentro del propio banner
+            // para que cuando no hay alertas no quede espacio en blanco.
             const _AlertasFinDeVida(),
-            const SizedBox(height: 16),
-            // Hub principal — 4 tiles. Usamos GridView "shrinkWrap" para
-            // que coexista con el banner de alertas en un mismo scroll.
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              // Ratio 1.1 + Flexible/maxLines en los textos abajo:
-              // mismo patrón ya aplicado a admin_panel KPIs. iOS suma
-              // ~6 px de line-height de Cupertino que el ratio fijo no
-              // compensa. Con 1.1 hay margen sólido, y los textos
-              // ellipsizan si por algún motivo siguen sin entrar.
-              childAspectRatio: 1.1,
-              children: const [
-                _HubTile(
-                  titulo: 'UNIDADES',
-                  subtitulo: 'Cambiar cubiertas por posición',
-                  icono: Icons.local_shipping_outlined,
-                  color: AppColors.accentOrange,
-                  ruta: AppRoutes.adminGomeriaUnidades,
-                ),
-                _HubTile(
-                  titulo: 'STOCK',
-                  subtitulo: 'Cubiertas + buscar por código',
-                  icono: Icons.inventory_2_outlined,
-                  color: AppColors.accentBlue,
-                  ruta: AppRoutes.adminGomeriaStock,
-                ),
-                _HubTile(
-                  titulo: 'RECAPADOS',
-                  subtitulo: 'Envíos y recepciones',
-                  icono: Icons.swap_horiz_outlined,
-                  color: AppColors.accentTeal,
-                  ruta: AppRoutes.adminGomeriaRecapados,
-                ),
-                _HubTile(
-                  titulo: 'MARCAS Y MODELOS',
-                  subtitulo: 'Catálogo (ABM)',
-                  icono: Icons.category_outlined,
-                  color: AppColors.accentPurple,
-                  ruta: AppRoutes.adminGomeriaMarcasModelos,
-                ),
-              ],
+            // Hub principal — 4 tiles que llenan TODO el alto disponible.
+            // El ratio se calcula con LayoutBuilder según el espacio que
+            // sobre después del banner: las cards se achican o se agrandan
+            // para que entren las 4 sin scrollear, sea mobile o tablet,
+            // con o sin banner. Antes era ratio 1.1 fijo + scroll → no
+            // adaptaba al tamaño de pantalla y obligaba a scrollear.
+            Expanded(
+              child: LayoutBuilder(
+                builder: (ctx, constraints) {
+                  const spacing = 16.0;
+                  final cellWidth = (constraints.maxWidth - spacing) / 2;
+                  final cellHeight = (constraints.maxHeight - spacing) / 2;
+                  // Defensivo: si la pantalla es absurdamente chica
+                  // (landscape de mobile bajo + banner enorme), evitamos
+                  // ratio negativo o NaN. Mínimo 0.5 → cards altas y
+                  // angostas; máximo 2.0 → cards anchas y bajas.
+                  final ratio = (cellHeight > 0)
+                      ? (cellWidth / cellHeight).clamp(0.5, 2.0)
+                      : 1.0;
+                  return GridView.count(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: spacing,
+                    mainAxisSpacing: spacing,
+                    childAspectRatio: ratio,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: const [
+                      _HubTile(
+                        titulo: 'UNIDADES',
+                        subtitulo: 'Cambiar cubiertas por posición',
+                        icono: Icons.local_shipping_outlined,
+                        color: AppColors.accentOrange,
+                        ruta: AppRoutes.adminGomeriaUnidades,
+                      ),
+                      _HubTile(
+                        titulo: 'STOCK',
+                        subtitulo: 'Cubiertas + buscar por código',
+                        icono: Icons.inventory_2_outlined,
+                        color: AppColors.accentBlue,
+                        ruta: AppRoutes.adminGomeriaStock,
+                      ),
+                      _HubTile(
+                        titulo: 'RECAPADOS',
+                        subtitulo: 'Envíos y recepciones',
+                        icono: Icons.swap_horiz_outlined,
+                        color: AppColors.accentTeal,
+                        ruta: AppRoutes.adminGomeriaRecapados,
+                      ),
+                      _HubTile(
+                        titulo: 'MARCAS Y MODELOS',
+                        subtitulo: 'Catálogo (ABM)',
+                        icono: Icons.category_outlined,
+                        color: AppColors.accentPurple,
+                        ruta: AppRoutes.adminGomeriaMarcasModelos,
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -204,7 +220,12 @@ class _AlertasFinDeVida extends StatelessWidget {
             final etiqueta = criticas > 0
                 ? '$criticas cubierta${criticas == 1 ? "" : "s"} pasaron su vida útil'
                 : '${alertas.length} cubierta${alertas.length == 1 ? "" : "s"} próxima${alertas.length == 1 ? "" : "s"} a fin de vida';
-            return InkWell(
+            // Padding bottom: 16 ⇒ separa el banner del grid de tiles
+            // sin agregar un SizedBox suelto en el padre (que quedaría
+            // visible cuando no hay alertas).
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: InkWell(
               onTap: () => _abrirDetalle(context, alertas),
               borderRadius: BorderRadius.circular(10),
               child: Container(
@@ -247,6 +268,7 @@ class _AlertasFinDeVida extends StatelessWidget {
                     Icon(Icons.chevron_right, color: color),
                   ],
                 ),
+              ),
               ),
             );
           },
