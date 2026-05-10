@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+#
+# Pre-commit hook — bloquea "TODO" o "FIXME" en mayúsculas en líneas
+# nuevas de archivos .dart o .ts.
+#
+# Por qué: el linter Dart `todo` (y typescript-eslint) flagean cualquier
+# "TODO" mayúscula como pendiente real, sin importar contexto. En
+# español "todo" significa "all" — fácil escribirlo accidentalmente
+# (ej. "llenar TODO el alto disponible") y romper el lint sin querer.
+#
+# Pasó 3 veces en 24h durante 2026-05-10/11 — este hook lo previene
+# en lugar de fixearlo después del fact.
+#
+# Política:
+#   - Detecta solo en LÍNEAS NUEVAS (git diff --cached) — los TODO
+#     viejos legítimos no se tocan.
+#   - Solo .dart y .ts — los lenguajes donde el linter dispara.
+#   - Si encontrás un caso legítimo (ej. quote literal de un mensaje
+#     de error que contiene "TODO"), bypassá con `git commit --no-verify`.
+#
+# Salida: exit 1 con mensaje claro si hay matches; exit 0 si limpio.
+
+set -e
+
+# Solo archivos .dart o .ts staged (added, modified, copied, renamed).
+files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(dart|ts)$' || true)
+
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+# Buscar líneas NUEVAS (que empiecen con '+' en el diff, NO '+++')
+# que contengan TODO o FIXME en mayúscula como palabra completa.
+# Usamos `git diff --cached -U0` para no incluir contexto.
+hits=$(git diff --cached -U0 -- $files | grep -E '^\+[^+].*\b(TODO|FIXME)\b' || true)
+
+if [ -n "$hits" ]; then
+    echo ""
+    echo "❌ pre-commit: encontré 'TODO' o 'FIXME' en MAYÚSCULA en líneas nuevas."
+    echo ""
+    echo "El linter Dart/TS los marca como pendientes. Si era texto natural"
+    echo "(ej. 'llenar TODO el alto'), usá 'todo' minúscula o sinónimo"
+    echo "('completo', 'entero')."
+    echo ""
+    echo "Si era un TODO real intencional, agregá autor + fecha:"
+    echo "    // TODO(santiago, 2026-05-11): refactorizar X cuando ..."
+    echo "y volvé a commitear con --no-verify para skipear este hook."
+    echo ""
+    echo "Líneas problemáticas:"
+    echo "$hits" | sed 's/^/    /'
+    echo ""
+    exit 1
+fi
+
+exit 0

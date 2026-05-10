@@ -247,6 +247,12 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
       body: StreamBuilder<DocumentSnapshot>(
         stream: _perfilStream,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return AppErrorState(
+              title: 'No se pudo cargar tu perfil',
+              subtitle: snapshot.error.toString(),
+            );
+          }
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const AppLoadingState();
           }

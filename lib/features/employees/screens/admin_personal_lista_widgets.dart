@@ -220,6 +220,12 @@ class _DetalleChofer extends StatelessWidget {
           .doc(dni)
           .snapshots(),
       builder: (ctx, snap) {
+        if (snap.hasError) {
+          return AppErrorState(
+            title: 'No se pudo cargar el empleado',
+            subtitle: snap.error.toString(),
+          );
+        }
         if (!snap.hasData) return const AppLoadingState();
         if (!snap.data!.exists) {
           return const AppErrorState(
