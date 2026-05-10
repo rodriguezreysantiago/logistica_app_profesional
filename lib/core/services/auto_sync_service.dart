@@ -91,7 +91,17 @@ class AutoSyncService {
       dashboard?.setTotal(docs.length);
 
       for (final doc in docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        // Defensivo: aunque snapshot.docs solo trae docs que existen,
+        // hubo casos raros donde `data()` devolvió null en Firestore
+        // emulator/cliente con cache desincronizado. El cast con `as`
+        // crashearía la app entera; con tryCast skipeamos el doc.
+        final raw = doc.data();
+        if (raw is! Map<String, dynamic>) {
+          procesados++;
+          dashboard?.updateProgress(procesados);
+          continue;
+        }
+        final data = raw;
         final patente = doc.id;
         final vin = (data['VIN'] ?? '').toString().trim();
         final marca = (data['MARCA'] ?? '').toString().toUpperCase();

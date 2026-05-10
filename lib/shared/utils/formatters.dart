@@ -4,22 +4,27 @@ class AppFormatters {
   // ✅ MEJORA PRO: Constructor privado para evitar instanciaciones innecesarias
   AppFormatters._();
 
+  /// RegExp para insertar separadores de miles AR (123.456.789).
+  /// Compilada una sola vez — antes se reconstruía en cada llamada a
+  /// `formatearKilometraje`/`formatearMiles` (hot path: cards, listas,
+  /// rebuilds frecuentes en KPIs).
+  static final RegExp _milesRegex = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
+
   // --- FORMATEAR KILOMETRAJE (1.232.232,0) ---
   static String formatearKilometraje(dynamic valor) {
     if (valor == null || valor == 0 || valor == "0" || valor == "" || valor.toString().toLowerCase() == "nan") return "0,0";
-    
+
     try {
-      String raw = valor.toString().replaceAll(',', '.'); 
+      String raw = valor.toString().replaceAll(',', '.');
       double numero = double.parse(raw);
-      
+
       String fixed = numero.toStringAsFixed(1).replaceAll('.', ',');
-      
+
       List<String> partes = fixed.split(',');
       String entera = partes[0];
       String decimal = partes[1];
 
-      final reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
-      entera = entera.replaceAllMapped(reg, (Match m) => '${m[1]}.');
+      entera = entera.replaceAllMapped(_milesRegex, (Match m) => '${m[1]}.');
 
       return "$entera,$decimal";
     } catch (e) {
@@ -43,8 +48,7 @@ class AppFormatters {
     final abs = valor.abs();
     final entero = abs.truncate();
     final s = entero.toString();
-    final reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
-    final parteEntera = s.replaceAllMapped(reg, (m) => '${m[1]}.');
+    final parteEntera = s.replaceAllMapped(_milesRegex, (m) => '${m[1]}.');
     String resultado;
     if (decimales > 0) {
       // toStringAsFixed redondea correctamente y siempre rellena con 0.

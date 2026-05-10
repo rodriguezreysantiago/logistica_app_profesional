@@ -32,13 +32,18 @@ class DigitOnlyFormatter extends TextInputFormatter {
 
   DigitOnlyFormatter({this.maxLength});
 
+  /// RegExp compilada UNA sola vez (formatter está en hot path: se
+  /// invoca en CADA keystroke del usuario). Antes era inline en
+  /// `formatEditUpdate` y se recompilaba cada tipeada.
+  static final RegExp _noDigit = RegExp(r'[^0-9]');
+
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
     // Filtro estricto: cualquier carácter que no sea \d se descarta.
-    var limpio = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    var limpio = newValue.text.replaceAll(_noDigit, '');
     if (maxLength != null && limpio.length > maxLength!) {
       limpio = limpio.substring(0, maxLength!);
     }

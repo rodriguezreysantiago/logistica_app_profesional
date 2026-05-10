@@ -161,13 +161,31 @@ class AuthService {
       return LoginResult.error(
           'Tiempo de espera agotado. Verifique su señal de internet.');
     } on DioException catch (e) {
-      debugPrint('🚨 loginConDni Dio → type=${e.type} msg=${e.message}');
-      debugPrint('   request URL: ${e.requestOptions.uri}');
-      debugPrint('   request method: ${e.requestOptions.method}');
-      debugPrint('   response status: ${e.response?.statusCode}');
-      debugPrint('   response data: ${e.response?.data}');
+      // Logs defensivos: NO incluir el body de la respuesta (puede traer
+      // tokens si el callable tuvo éxito parcial), NO incluir el path
+      // completo de la URL (preservar host pero recortar query/segments
+      // que podrían contener identificadores). Solo lo necesario para
+      // diagnosticar errores de red sin filtrar secretos.
+      final host = e.requestOptions.uri.host;
+      final errorBody = e.response?.data;
+      // Si el body es un Map con campo "error.message", logueamos solo
+      // ese campo (es el mensaje de error preparado server-side, no
+      // contiene tokens). Si es otra forma, mostramos el tipo nada más.
+      String resumenBody = '<sin body>';
+      if (errorBody is Map) {
+        final err = errorBody['error'];
+        if (err is Map && err['message'] != null) {
+          resumenBody = err['message'].toString();
+        } else {
+          resumenBody = '<map sin error.message>';
+        }
+      } else if (errorBody != null) {
+        resumenBody = '<${errorBody.runtimeType}>';
+      }
+      debugPrint('🚨 loginConDni Dio → type=${e.type} host=$host '
+          'status=${e.response?.statusCode} body=$resumenBody');
       if (e.error != null) {
-        debugPrint('   underlying error: ${e.error.runtimeType}: ${e.error}');
+        debugPrint('   underlying error: ${e.error.runtimeType}');
       }
       return LoginResult.error(
           'No se pudo conectar al servidor. Verifique su conexión.');

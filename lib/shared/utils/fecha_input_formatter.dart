@@ -28,6 +28,10 @@ import 'package:flutter/services.dart';
 class FechaInputFormatter extends TextInputFormatter {
   static bool _esDigito(int code) => code >= 0x30 && code <= 0x39;
 
+  /// RegExp compilada una sola vez (hot path: se llama en cada keystroke
+  /// del campo fecha — antes era inline y se recompilaba cada tipeada).
+  static final RegExp _noDigit = RegExp(r'[^0-9]');
+
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
@@ -46,7 +50,7 @@ class FechaInputFormatter extends TextInputFormatter {
     }
 
     // 2) Limpiamos a solo dígitos y truncamos a 8 (DDMMYYYY).
-    var digitos = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    var digitos = newValue.text.replaceAll(_noDigit, '');
     if (digitos.length > 8) digitos = digitos.substring(0, 8);
     if (digitosAntesCursor > digitos.length) {
       digitosAntesCursor = digitos.length;
