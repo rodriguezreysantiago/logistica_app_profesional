@@ -37,7 +37,7 @@ class LogisticaHubScreen extends StatelessWidget {
           children: [
             const _BannerInfo(),
             const SizedBox(height: 16),
-            // El grid llena TODO el alto disponible: número de columnas
+            // El grid llena todo el alto disponible: número de columnas
             // según ancho + ratio de cada cell calculado según las
             // filas que toquen y el alto que sobre. Si no entra cómodo
             // (mobile chico + 3 filas), las cards se achican (clamp

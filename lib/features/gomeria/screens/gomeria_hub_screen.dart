@@ -35,7 +35,7 @@ class GomeriaHubScreen extends StatelessWidget {
             // alertas). El gap inferior está adentro del propio banner
             // para que cuando no hay alertas no quede espacio en blanco.
             const _AlertasFinDeVida(),
-            // Hub principal — 4 tiles que llenan TODO el alto disponible.
+            // Hub principal — 4 tiles que llenan todo el alto disponible.
             // El ratio se calcula con LayoutBuilder según el espacio que
             // sobre después del banner: las cards se achican o se agrandan
             // para que entren las 4 sin scrollear, sea mobile o tablet,
