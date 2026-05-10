@@ -59,53 +59,80 @@ class MainPanel extends StatelessWidget {
                 _WelcomeHeader(dni: dni, nombre: nombre),
                 const SizedBox(height: 30),
                 Expanded(
-                  child: GridView.count(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 15,
-                    mainAxisSpacing: 15,
-                    childAspectRatio: 1.2,
-                    children: [
-                      _MenuButton(
-                        titulo: 'MI PERFIL',
-                        icono: Icons.person_pin_outlined,
-                        color: AppColors.accentBlue,
-                        onTap: () => Navigator.pushNamed(
-                          context,
-                          '/perfil',
-                          arguments: dni,
-                        ),
-                      ),
-                      _MenuButton(
-                        titulo: 'MI UNIDAD',
-                        icono: Icons.local_shipping_outlined,
-                        color: AppColors.accentOrange,
-                        onTap: () => Navigator.pushNamed(
-                          context,
-                          '/equipo',
-                          arguments: dni,
-                        ),
-                      ),
-                      _MenuButton(
-                        titulo: 'MIS VENCIMIENTOS',
-                        icono: Icons.assignment_late_outlined,
-                        color: AppColors.accentGreen,
-                        onTap: () => Navigator.pushNamed(
-                          context,
-                          '/mis_vencimientos',
-                          arguments: dni,
-                        ),
-                      ),
-                      if (_isAdmin)
-                        _MenuButton(
-                          titulo: 'ADMINISTRACIÓN',
-                          icono: Icons.admin_panel_settings_sharp,
-                          color: AppColors.accentRed,
-                          onTap: () => Navigator.pushNamed(
-                            context,
-                            '/admin_panel',
+                  child: LayoutBuilder(
+                    builder: (ctx, constraints) {
+                      // Botones del menú: 3 (chofer) o 4 (admin) en grid
+                      // 2x2. Calculamos el ratio según el alto disponible
+                      // para que las cards llenen la pantalla SIN scroll
+                      // interno. Antes era ratio 1.2 fijo → en mobile
+                      // chico el GridView scrolleaba internamente y
+                      // dejaba ver solo 2 botones.
+                      const cols = 2;
+                      const spacing = 15.0;
+                      // Cant filas reales = ceil(N / cols). Con 3 botones
+                      // y 2 cols, son 2 filas (la 2ª con 1 hueco). Con 4
+                      // botones, idem 2 filas pero llenas. Mismo cálculo.
+                      final n = _isAdmin ? 4 : 3;
+                      final filas = (n / cols).ceil();
+                      final cellWidth =
+                          (constraints.maxWidth - spacing * (cols - 1)) /
+                              cols;
+                      final cellHeight =
+                          (constraints.maxHeight - spacing * (filas - 1)) /
+                              filas;
+                      final ratio = (cellHeight > 0)
+                          ? (cellWidth / cellHeight).clamp(0.5, 2.0)
+                          : 1.2;
+                      return GridView.count(
+                        crossAxisCount: cols,
+                        crossAxisSpacing: spacing,
+                        mainAxisSpacing: spacing,
+                        childAspectRatio: ratio,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          _MenuButton(
+                            titulo: 'MI PERFIL',
+                            icono: Icons.person_pin_outlined,
+                            color: AppColors.accentBlue,
+                            onTap: () => Navigator.pushNamed(
+                              context,
+                              '/perfil',
+                              arguments: dni,
+                            ),
                           ),
-                        ),
-                    ],
+                          _MenuButton(
+                            titulo: 'MI UNIDAD',
+                            icono: Icons.local_shipping_outlined,
+                            color: AppColors.accentOrange,
+                            onTap: () => Navigator.pushNamed(
+                              context,
+                              '/equipo',
+                              arguments: dni,
+                            ),
+                          ),
+                          _MenuButton(
+                            titulo: 'MIS VENCIMIENTOS',
+                            icono: Icons.assignment_late_outlined,
+                            color: AppColors.accentGreen,
+                            onTap: () => Navigator.pushNamed(
+                              context,
+                              '/mis_vencimientos',
+                              arguments: dni,
+                            ),
+                          ),
+                          if (_isAdmin)
+                            _MenuButton(
+                              titulo: 'ADMINISTRACIÓN',
+                              icono: Icons.admin_panel_settings_sharp,
+                              color: AppColors.accentRed,
+                              onTap: () => Navigator.pushNamed(
+                                context,
+                                '/admin_panel',
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
                 ),
                 Center(

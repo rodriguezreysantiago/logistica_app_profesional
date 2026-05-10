@@ -30,41 +30,55 @@ class LogisticaHubScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Logística',
-      body: SingleChildScrollView(
+      body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const _BannerInfo(),
             const SizedBox(height: 16),
-            LayoutBuilder(
-              builder: (ctx, constraints) {
-                // Decidir cuántas columnas según el ancho disponible.
-                // Threshold testeados a ojo en Windows desktop +
-                // tablet portrait + celular Android (Galaxy A8).
-                final w = constraints.maxWidth;
-                final int columnas;
-                if (w >= 1100) {
-                  columnas = 5;
-                } else if (w >= 800) {
-                  columnas = 4;
-                } else if (w >= 540) {
-                  columnas = 3;
-                } else {
-                  columnas = 2;
-                }
-                // childAspectRatio: relación ancho/alto. Más alto =
-                // tile más cuadrado/alto. 1.05 hace tiles casi
-                // cuadrados que muestran ícono + título + contador
-                // sin sobrar espacio vacío.
-                return GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: columnas,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.05,
-                  children: [
+            // El grid llena TODO el alto disponible: número de columnas
+            // según ancho + ratio de cada cell calculado según las
+            // filas que toquen y el alto que sobre. Si no entra cómodo
+            // (mobile chico + 3 filas), las cards se achican (clamp
+            // 0.45..2.0); si tampoco así, el GridView scrollea por
+            // dentro como fallback. Antes era ratio 1.05 fijo dentro
+            // de SingleChildScrollView → scroll obligado siempre.
+            Expanded(
+              child: LayoutBuilder(
+                builder: (ctx, constraints) {
+                  // Decidir cuántas columnas según el ancho disponible.
+                  // Threshold testeados a ojo en Windows desktop +
+                  // tablet portrait + celular Android (Galaxy A8).
+                  final w = constraints.maxWidth;
+                  final int columnas;
+                  if (w >= 1100) {
+                    columnas = 5;
+                  } else if (w >= 800) {
+                    columnas = 4;
+                  } else if (w >= 540) {
+                    columnas = 3;
+                  } else {
+                    columnas = 2;
+                  }
+                  const totalTiles = 5;
+                  final filas = (totalTiles / columnas).ceil();
+                  const spacing = 12.0;
+                  final cellWidth =
+                      (constraints.maxWidth - spacing * (columnas - 1)) /
+                          columnas;
+                  final cellHeight =
+                      (constraints.maxHeight - spacing * (filas - 1)) /
+                          filas;
+                  final ratio = (cellHeight > 0)
+                      ? (cellWidth / cellHeight).clamp(0.45, 2.0)
+                      : 1.05;
+                  return GridView.count(
+                    crossAxisCount: columnas,
+                    crossAxisSpacing: spacing,
+                    mainAxisSpacing: spacing,
+                    childAspectRatio: ratio,
+                    children: [
                     _HubTile(
                       titulo: 'TARIFAS',
                       subtitulo: 'Rutas con precio',
@@ -128,6 +142,7 @@ class LogisticaHubScreen extends StatelessWidget {
                   ],
                 );
               },
+            ),
             ),
           ],
         ),
