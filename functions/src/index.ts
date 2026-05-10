@@ -4807,25 +4807,25 @@ export const resumenExcesosJornadaDiario = onSchedule(
 
 const DASHBOARD_STATS_SCHEMA_VERSION = 1;
 
-/// Roles cuyos miembros tienen vehículo asignable y por ende cuentan
-/// como "choferes activos". Espejo de `AppRoles.tieneVehiculo` en Dart.
+// Roles cuyos miembros tienen vehículo asignable y por ende cuentan
+// como "choferes activos". Espejo de `AppRoles.tieneVehiculo` en Dart.
 const ROLES_CON_VEHICULO = new Set<string>(["CHOFER", "USUARIO"]);
 
-/// Estados que indican que un vehículo está asignado a un chofer.
-/// Espejo de la lógica en `_Stats.from()` cliente.
+// Estados que indican que un vehículo está asignado a un chofer.
+// Espejo de la lógica en `_Stats.from()` cliente.
 const ESTADOS_VEHICULO_OCUPADO = new Set<string>(["OCUPADO", "ASIGNADO"]);
 
-/// Sufijos de `VENCIMIENTO_*` para EMPLEADOS. Espejo de
-/// `AppDocsEmpleado.etiquetas` en Dart. Los 4 docs laborales (ART, F.931,
-/// SCVO, sindical) NO van acá — son por empresa, no por empleado.
+// Sufijos de `VENCIMIENTO_*` para EMPLEADOS. Espejo de
+// `AppDocsEmpleado.etiquetas` en Dart. Los 4 docs laborales (ART, F.931,
+// SCVO, sindical) NO van acá — son por empresa, no por empleado.
 const VENCIMIENTOS_EMPLEADO_SUFIJOS = [
   "LICENCIA_DE_CONDUCIR",
   "PREOCUPACIONAL",
   "CURSO_DE_MANEJO_DEFENSIVO",
 ];
 
-/// Sufijos `VENCIMIENTO_*` para TRACTOR/CHASIS. Espejo de
-/// `AppVencimientos.tractor` en Dart.
+// Sufijos `VENCIMIENTO_*` para TRACTOR/CHASIS. Espejo de
+// `AppVencimientos.tractor` en Dart.
 const VENCIMIENTOS_TRACTOR_SUFIJOS = [
   "RTO",
   "SEGURO",
@@ -4833,8 +4833,8 @@ const VENCIMIENTOS_TRACTOR_SUFIJOS = [
   "EXTINTOR_EXTERIOR",
 ];
 
-/// Sufijos `VENCIMIENTO_*` para ENGANCHE (resto de tipos). Espejo de
-/// `AppVencimientos.enganche`.
+// Sufijos `VENCIMIENTO_*` para ENGANCHE (resto de tipos). Espejo de
+// `AppVencimientos.enganche`.
 const VENCIMIENTOS_ENGANCHE_SUFIJOS = ["RTO", "SEGURO"];
 
 /**
@@ -4882,7 +4882,9 @@ function _statsCalcularDiasRestantes(fecha: unknown): number | null {
     const f = soloFecha.replace(/\//g, "-");
     const partes = f.split("-");
     if (partes.length !== 3) return null;
-    let yyyy: number, mm: number, dd: number;
+    let yyyy: number;
+    let mm: number;
+    let dd: number;
     if (partes[0].length === 4) {
       // ISO YYYY-MM-DD.
       yyyy = parseInt(partes[0], 10);
@@ -4979,10 +4981,10 @@ async function _statsRecomputeDashboard(): Promise<DashboardCounters & { docs_le
       counters.unidades_asignadas++;
     }
     const tipo = String(data.TIPO ?? "").toUpperCase();
-    const sufijos =
-      tipo === "TRACTOR" || tipo === "CHASIS"
-        ? VENCIMIENTOS_TRACTOR_SUFIJOS
-        : VENCIMIENTOS_ENGANCHE_SUFIJOS;
+    const esTractor = tipo === "TRACTOR" || tipo === "CHASIS";
+    const sufijos = esTractor ?
+      VENCIMIENTOS_TRACTOR_SUFIJOS :
+      VENCIMIENTOS_ENGANCHE_SUFIJOS;
     for (const sufijo of sufijos) {
       _statsContarFecha(data[`VENCIMIENTO_${sufijo}`], counters);
     }
