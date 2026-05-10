@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
@@ -143,13 +144,16 @@ class _UserChecklistFormScreenState
         'SINCRONIZADO_LOCAL': true,
       };
 
-      // Modo offline: timeout de 4s. Si no hay red, Firebase guarda
-      // localmente y subirá el doc cuando recupere conexión.
+      // Modo offline: timeout de 15s. Si no hay red, Firebase guarda
+      // localmente y subirá el doc cuando recupere conexión. El timeout
+      // anterior era 4s y disparaba false positives en redes 3G/4G
+      // lentas (Bahía Blanca rural) — el chofer veía "se subirá
+      // automáticamente" cuando el doc igual estaba sincronizando OK.
       await FirebaseFirestore.instance
           .collection(AppCollections.checklists)
           .add(payload)
           .timeout(
-        const Duration(seconds: 4),
+        const Duration(seconds: 15),
         onTimeout: () {
           throw TimeoutException('OFFLINE_MODE');
         },
@@ -158,12 +162,26 @@ class _UserChecklistFormScreenState
       if (!mounted) return;
       AppFeedback.successOn(messenger, 'Registro sincronizado en la nube');
       navigator.pop();
-    } catch (e) {
+    } catch (e, stack) {
       if (!mounted) return;
       if (e is TimeoutException && e.message == 'OFFLINE_MODE') {
+        // Breadcrumb: si después aparece un error real, sirve de contexto.
+        AppLogger.log(
+          'CHECKLIST timeout offline-mode dni=${PrefsService.dni} '
+          'patente=${widget.patente} tipo=${widget.tipo}',
+        );
         AppFeedback.warningOn(messenger, 'Sin conexión. Guardado en el equipo, se subirá automáticamente.');
         navigator.pop();
       } else {
+        // Reportar a Crashlytics con contexto: hasta hoy estos errores
+        // se mostraban en pantalla y se perdían (sin reproducción).
+        AppLogger.recordError(
+          e,
+          stack,
+          reason: 'CHECKLIST guardar falló — '
+              'dni=${PrefsService.dni} patente=${widget.patente} '
+              'tipo=${widget.tipo}',
+        );
         setState(() => _enviando = false);
         _notificarError(messenger, 'Error crítico al guardar: $e');
       }
