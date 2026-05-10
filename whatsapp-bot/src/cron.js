@@ -641,12 +641,16 @@ async function _runOnce(fs) {
     // reportar; mandar "todo OK" todos los dias seria ruido para algo
     // que ya tiene baja frecuencia).
     // El resumen diario de alertas Volvo va SOLO al jefe de Seg e
-    // Higiene (Molina, DNI 34730329). Decisión Vecchi 2026-05-07: el
-    // admin (Santiago) no necesita recibirlo. Hardcodeado a propósito
-    // porque "Jefe de Seg e Higiene" es un rol estable; si rota la
-    // persona se cambia acá. El bloque de mantenimiento más abajo
-    // sigue usando `ALERTAS_RESUMEN_DESTINATARIO_DNI` y va al admin.
-    const dniAlertasResumen = '34730329';
+    // Higiene (Molina, DNI 34730329 al 2026-05-07). Decisión Vecchi:
+    // el admin (Santiago) no necesita recibirlo. Configurable via env
+    // var `ALERTAS_SEG_HIGIENE_DESTINATARIO_DNI` para que cuando rote
+    // la persona se cambie en `.env` sin tocar código + redeploy. Si
+    // la env var no está, fallback al DNI histórico hardcodeado para
+    // que la rotación no rompa producción si alguien olvida setearla.
+    // El bloque de mantenimiento más abajo sigue usando
+    // `ALERTAS_RESUMEN_DESTINATARIO_DNI` y va al admin.
+    const dniAlertasResumen =
+      (process.env.ALERTAS_SEG_HIGIENE_DESTINATARIO_DNI || '').trim() || '34730329';
     if (dniAlertasResumen) {
       const yaEnviadoAlertas = await hist.yaSeEnvioAlertasResumen(
         db,

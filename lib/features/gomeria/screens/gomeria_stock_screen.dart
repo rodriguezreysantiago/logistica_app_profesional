@@ -74,6 +74,16 @@ class _GomeriaStockScreenState extends State<GomeriaStockScreen> {
                 tipoUso: _tipoUso,
               ),
               builder: (ctx, snap) {
+                // Error explícito: sin este check el StreamBuilder
+                // mostraba CircularProgress eterno si Firestore fallaba
+                // (rules, red, índice faltante) y el usuario no entendía
+                // qué pasa. Reusamos AppErrorState (helper compartido).
+                if (snap.hasError) {
+                  return AppErrorState(
+                    title: 'No se pudieron cargar las cubiertas',
+                    subtitle: snap.error.toString(),
+                  );
+                }
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }

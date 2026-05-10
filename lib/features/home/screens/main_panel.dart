@@ -96,7 +96,7 @@ class MainPanel extends StatelessWidget {
                             color: AppColors.accentBlue,
                             onTap: () => Navigator.pushNamed(
                               context,
-                              '/perfil',
+                              AppRoutes.perfil,
                               arguments: dni,
                             ),
                           ),
@@ -106,7 +106,7 @@ class MainPanel extends StatelessWidget {
                             color: AppColors.accentOrange,
                             onTap: () => Navigator.pushNamed(
                               context,
-                              '/equipo',
+                              AppRoutes.equipo,
                               arguments: dni,
                             ),
                           ),
@@ -116,7 +116,7 @@ class MainPanel extends StatelessWidget {
                             color: AppColors.accentGreen,
                             onTap: () => Navigator.pushNamed(
                               context,
-                              '/mis_vencimientos',
+                              AppRoutes.misVencimientos,
                               arguments: dni,
                             ),
                           ),
@@ -127,7 +127,7 @@ class MainPanel extends StatelessWidget {
                               color: AppColors.accentRed,
                               onTap: () => Navigator.pushNamed(
                                 context,
-                                '/admin_panel',
+                                AppRoutes.adminPanel,
                               ),
                             ),
                         ],
