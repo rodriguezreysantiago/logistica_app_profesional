@@ -25,7 +25,7 @@ void main() {
   /// Reproduce el shape exacto que usa cada hub: Padding + Column +
   /// Expanded(LayoutBuilder + GridView.count). [tilesCount] mockea
   /// las 2-5 cards del hub real.
-  Widget _hubLikeWidget({
+  Widget hubLikeWidget({
     required int cols,
     required int tilesCount,
     double spacing = 16,
@@ -80,7 +80,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 4));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 4));
 
       // Las 4 tiles deben estar presentes.
       expect(find.text('Tile 0'), findsOneWidget);
@@ -97,7 +97,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 4));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 4));
 
       expect(find.text('Tile 0'), findsOneWidget);
       expect(find.text('Tile 3'), findsOneWidget);
@@ -110,7 +110,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 4));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 4));
 
       expect(find.text('Tile 0'), findsOneWidget);
       expect(find.text('Tile 3'), findsOneWidget);
@@ -125,7 +125,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 5));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 5));
 
       expect(find.text('Tile 0'), findsOneWidget);
       expect(find.text('Tile 4'), findsOneWidget);
@@ -138,7 +138,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 5, tilesCount: 5));
+      await tester.pumpWidget(hubLikeWidget(cols: 5, tilesCount: 5));
 
       expect(find.text('Tile 0'), findsOneWidget);
       expect(find.text('Tile 4'), findsOneWidget);
@@ -153,7 +153,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 3));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 3));
 
       expect(find.text('Tile 0'), findsOneWidget);
       expect(find.text('Tile 1'), findsOneWidget);
@@ -167,7 +167,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 4));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 4));
 
       expect(find.text('Tile 0'), findsOneWidget);
       expect(find.text('Tile 3'), findsOneWidget);
@@ -182,7 +182,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 4));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 4));
 
       final gridView = tester.widget<GridView>(find.byType(GridView));
       expect(gridView.physics, isA<NeverScrollableScrollPhysics>());
@@ -199,7 +199,7 @@ void main() {
       // Pantalla absurdamente chica: con padding 16+16 + spacing,
       // las celdas quedan muy chicas. Validación: NO crashea, las
       // tiles existen aunque sean diminutas.
-      await tester.pumpWidget(_hubLikeWidget(cols: 2, tilesCount: 4));
+      await tester.pumpWidget(hubLikeWidget(cols: 2, tilesCount: 4));
 
       // No nos importa si los textos son visibles a esa escala —
       // solo que NO haya exception del LayoutBuilder por NaN o
