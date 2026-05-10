@@ -42,54 +42,73 @@ class EsquemaUnidadView extends StatelessWidget {
   Widget build(BuildContext context) {
     final esTractor = tipo == TipoUnidadCubierta.tractor;
     // Aspect ratio = ancho / alto del PNG (los 2 son verticales).
-    // Tractor: 640/800. Enganche: 533/800.
+    // Tractor: 640/800 (~0.80). Enganche: 533/800 (~0.67).
     final aspect = esTractor ? 640 / 800 : 533 / 800;
     final assetPath = esTractor
         ? 'assets/gomeria/tractor_top.webp'
         : 'assets/gomeria/enganche_top.webp';
     final mapaPos = esTractor ? _posicionesTractor : _posicionesEnganche;
 
-    return AspectRatio(
-      aspectRatio: aspect,
-      child: LayoutBuilder(
-        builder: (ctx, constraints) {
-          final w = constraints.maxWidth;
-          final h = constraints.maxHeight;
-          // Tamaño del marker proporcional al ancho. ~9% es un buen
-          // balance: visible sin tapar la rueda completa.
-          final markerSize = w * 0.095;
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // Fondo: render foto-realista de la unidad.
-              Positioned.fill(
-                child: Image.asset(
-                  assetPath,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.medium,
-                ),
-              ),
-              // Overlay de cubiertas, una por posición física.
-              ...mapaPos.entries.map((e) {
-                final pos = posicionPorCodigo[e.key]!;
-                final instalada = instaladas[e.key];
-                final coords = e.value;
-                return Positioned(
-                  left: coords.dx * w - markerSize / 2,
-                  top: coords.dy * h - markerSize / 2,
-                  width: markerSize,
-                  height: markerSize,
-                  child: _MarkerCubierta(
-                    posicion: pos,
-                    instalada: instalada,
-                    kmActualUnidad: kmActualUnidad,
-                    onTap: () => onTapPosicion(pos),
+    // Cap del tamaño usando el alto REAL de la pantalla, no el alto
+    // del viewport (que es unbounded porque el padre es un
+    // SingleChildScrollView). Sin este cap, el AspectRatio toma todo
+    // el ancho disponible y la imagen sale gigante en desktop:
+    // 1500 px ancho / 0.67 ≈ 2240 px alto. Con el cap, el esquema
+    // ocupa como mucho ~65% del alto de pantalla y queda centrado.
+    //
+    // El maxWidth 600 es defensivo para pantallas ultra-anchas: en la
+    // práctica el ratio vertical hace que el limitante sea siempre el
+    // alto, pero evita que en algún caso raro el esquema se estire.
+    final screenH = MediaQuery.of(context).size.height;
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 600,
+          maxHeight: screenH * 0.65,
+        ),
+        child: AspectRatio(
+          aspectRatio: aspect,
+          child: LayoutBuilder(
+            builder: (ctx, constraints) {
+              final w = constraints.maxWidth;
+              final h = constraints.maxHeight;
+              // Tamaño del marker proporcional al ancho. ~9% es un buen
+              // balance: visible sin tapar la rueda completa.
+              final markerSize = w * 0.095;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // Fondo: render foto-realista de la unidad.
+                  Positioned.fill(
+                    child: Image.asset(
+                      assetPath,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.medium,
+                    ),
                   ),
-                );
-              }),
-            ],
-          );
-        },
+                  // Overlay de cubiertas, una por posición física.
+                  ...mapaPos.entries.map((e) {
+                    final pos = posicionPorCodigo[e.key]!;
+                    final instalada = instaladas[e.key];
+                    final coords = e.value;
+                    return Positioned(
+                      left: coords.dx * w - markerSize / 2,
+                      top: coords.dy * h - markerSize / 2,
+                      width: markerSize,
+                      height: markerSize,
+                      child: _MarkerCubierta(
+                        posicion: pos,
+                        instalada: instalada,
+                        kmActualUnidad: kmActualUnidad,
+                        onTap: () => onTapPosicion(pos),
+                      ),
+                    );
+                  }),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }
