@@ -1160,7 +1160,11 @@ export const telemetriaSnapshotScheduled = onSchedule(
     }
 
     // ─── 2. Map VIN → patente desde Firestore ──────────────────────
-    const vehiculosSnap = await db.collection("VEHICULOS").get();
+    // .limit(5000) defensivo: la flota Vecchi tiene ~127 vehículos
+    // (57 tractores + 70 enganches), pero un cap explícito evita
+    // sorpresas si en el futuro alguien duplica la colección o un
+    // import malformado infla docs. 5000 = 40x growth ceiling.
+    const vehiculosSnap = await db.collection("VEHICULOS").limit(5000).get();
     const vinToPatente = new Map<string, string>();
     for (const doc of vehiculosSnap.docs) {
       const data = doc.data();
@@ -1274,6 +1278,14 @@ export const telemetriaSnapshotScheduled = onSchedule(
       }
 
       const docId = `${patente}_${fechaTxt}`;
+      // TTL: el campo `expira_en` (fecha + 18 meses) marca cuándo
+      // GCP debe borrar este doc automáticamente. La policy se activa
+      // por separado con: `gcloud firestore fields ttls update
+      // expira_en --collection-group=TELEMETRIA_HISTORICO
+      // --enable-ttl --project=coopertrans-movil`. 18 meses cubre
+      // reportes anuales y comparativos año-a-año sin acumular
+      // indefinidamente (snapshot diario × 127 vehículos × N años).
+      const expiraEnMs = fechaMidnight.getTime() + 18 * 30 * 24 * 60 * 60 * 1000;
       const doc: Record<string, unknown> = {
         patente,
         vin,
@@ -1281,6 +1293,7 @@ export const telemetriaSnapshotScheduled = onSchedule(
         litros_acumulados: litros,
         km,
         timestamp: FieldValue.serverTimestamp(),
+        expira_en: Timestamp.fromMillis(expiraEnMs),
       };
       if (serviceKm != null) {
         doc.service_distance_km = serviceKm;
@@ -1989,12 +2002,21 @@ function buildAlertaDoc(
   const customerName = (alert.customerVehicleName ?? "").toString().trim();
   const patente = customerName || vinToPatente.get(vin) || null;
 
+  // TTL: `expira_en` (creado_en + 12 meses). Activar policy con:
+  //   gcloud firestore fields ttls update expira_en \
+  //     --collection-group=VOLVO_ALERTAS --enable-ttl \
+  //     --project=coopertrans-movil
+  // Las alertas son útiles para investigar incidentes recientes pero
+  // no para histórico anual; 12 meses cubre auditorías y disputas
+  // típicas con clientes/aseguradoras sin acumular sin tope.
+  const expiraEnMs = creadoMs + 12 * 30 * 24 * 60 * 60 * 1000;
   const doc: Record<string, unknown> = {
     vin,
     tipo,
     severidad,
     creado_en: Timestamp.fromMillis(creadoMs),
     polled_en: FieldValue.serverTimestamp(),
+    expira_en: Timestamp.fromMillis(expiraEnMs),
     // Estado de gestión inicial. El admin lo flippa a `true` desde el
     // tablero al marcarla atendida (junto con `atendida_por` y
     // `atendida_en`). El poller solo escribe `false` en la creación
@@ -2592,7 +2614,8 @@ export const volvoScoresPoller = onSchedule(
     logger.info("[volvoScoresPoller] iniciando ciclo", { fecha: fechaYmd });
 
     // Cross-ref VIN → patente. Mismo patrón que volvoAlertasPoller.
-    const vehiculosSnap = await db.collection("VEHICULOS").get();
+    // .limit(5000) defensivo — ver comentario en telemetriaSnapshotScheduled.
+    const vehiculosSnap = await db.collection("VEHICULOS").limit(5000).get();
     const vinToPatente = new Map<string, string>();
     for (const doc of vehiculosSnap.docs) {
       const data = doc.data();
@@ -3946,8 +3969,9 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
     // Filtramos por drift_tipo != null en código (Firestore no tiene
     // operador "IS NOT NULL" — `where("drift_tipo", "!=", null)` no
     // matchea docs sin el campo). Levantamos toda la colección (~55
-    // docs, batch única) y filtramos.
-    const snap = await db.collection("SITRACK_POSICIONES").get();
+    // docs, batch única) y filtramos. .limit(5000) defensivo: la
+    // colección tiene 1 doc por patente, no debería crecer mucho.
+    const snap = await db.collection("SITRACK_POSICIONES").limit(5000).get();
     const drifts = snap.docs
       .map((d) => ({ patente: d.id, data: d.data() }))
       .filter((x) => {
@@ -4126,7 +4150,8 @@ export const vigiladorJornadaChofer = onSchedule(
     logger.info("[vigiladorJornadaChofer] iniciando");
 
     // Leer SITRACK_POSICIONES para el snapshot actual de cada patente.
-    const snap = await db.collection("SITRACK_POSICIONES").get();
+    // .limit(5000) defensivo — 1 doc por patente, no debería crecer.
+    const snap = await db.collection("SITRACK_POSICIONES").limit(5000).get();
 
     const fechaArt = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Argentina/Buenos_Aires",

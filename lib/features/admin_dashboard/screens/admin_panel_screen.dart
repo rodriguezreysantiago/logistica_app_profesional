@@ -37,8 +37,15 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   void initState() {
     super.initState();
     final db = FirebaseFirestore.instance;
-    _empleadosStream = db.collection(AppCollections.empleados).snapshots();
-    _vehiculosStream = db.collection(AppCollections.vehiculos).snapshots();
+    // .limit(5000) defensivo en empleados/vehículos: la flota Vecchi
+    // tiene ~50 empleados + ~127 vehículos, lejos del cap. El cap
+    // explícito previene el caso accidente (un import malformado, una
+    // duplicación masiva por bug) — preferible degradación parcial a
+    // que el dashboard timeoutee bajando 100k docs al cliente.
+    _empleadosStream =
+        db.collection(AppCollections.empleados).limit(5000).snapshots();
+    _vehiculosStream =
+        db.collection(AppCollections.vehiculos).limit(5000).snapshots();
     // REVISIONES: las aprobadas/rechazadas se BORRAN del collection
     // (no soft-delete), asi que en condiciones normales solo hay
     // pendientes. Igual sumamos limit(50) como defensa: si en el
@@ -52,7 +59,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     // server-side: una collection STATS/dashboard con contadores
     // mantenidos por trigger Cloud Function en cambios de
     // EMPLEADOS/VEHICULOS/REVISIONES. La app lee 1 doc en lugar
-    // de N+M+R. Postergado hasta que el dimensionamiento lo amerite.
+    // de N+M+R. Postergado hasta que el dimensionamiento lo amerite —
+    // el .limit(5000) actual nos da 10x growth headroom.
     _revisionesStream = db.collection(AppCollections.revisiones).limit(50).snapshots();
     // El listener de notificaciones push para revisiones nuevas vive
     // en AdminShell (durante toda la sesion admin), no aca. Si lo
