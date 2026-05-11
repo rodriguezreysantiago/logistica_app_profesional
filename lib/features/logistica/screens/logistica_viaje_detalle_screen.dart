@@ -1,8 +1,10 @@
 import 'dart:io' show File, Platform, Process;
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -883,24 +885,28 @@ class _BotonImprimirComprobanteState extends State<_BotonImprimirComprobante> {
         numeroRecibo: numero,
         esReimpresion: resultado.esReimpresion,
       );
-      // 3. Guardar a archivo temp + abrir con app default del sistema
-      // (Edge / Adobe Reader en Windows, Files / Vista en mobile).
-      // El usuario imprime desde el viewer con Ctrl+P.
+      // 3. Imprimir directo a la impresora default del sistema (sin
+      //    abrir preview ni pedir Ctrl+P). Si no hay default printer
+      //    o el plugin falla, fallback al viewer del sistema.
       //
-      // Antes usábamos Printing.layoutPdf del package `printing` —
-      // crasheaba en Windows con código 0xe06d7363 (excepción C++
-      // del binding nativo) cuando el subsystem de impresión no
-      // estaba bien inicializado. Ese código nativo es incatchable
-      // desde Dart. El approach actual NO depende de printing.
-      await _abrirPdfConViewerSistema(
-        pdfBytes,
-        nombreArchivo:
-            'Comprobante-Adelanto-Nro-${numero.toString().padLeft(6, '0')}.pdf',
-      );
+      // El crash anterior con código C++ 0xe06d7363 que motivó sacar
+      // `printing` venía del renderer del PDF al toparse con glifos
+      // faltantes de Helvetica embedded (caracteres no-ASCII tipo
+      // "Ó", "°", "—"). Ahora con Roboto válida embedded eso ya no
+      // pasa, así que volvimos al directPrintPdf.
+      final nombreArchivo =
+          'Comprobante-Adelanto-Nro-${numero.toString().padLeft(6, '0')}.pdf';
+      final impresoOk = await _imprimirDirecto(pdfBytes, nombreArchivo);
       if (mounted) {
-        AppFeedback.successOn(messenger,
-            'Comprobante Nro. ${numero.toString().padLeft(6, '0')} abierto. '
-            'Imprimí desde el visor (Ctrl+P).');
+        if (impresoOk) {
+          AppFeedback.successOn(messenger,
+              'Comprobante Nro. ${numero.toString().padLeft(6, '0')} '
+              'enviado a la impresora.');
+        } else {
+          AppFeedback.successOn(messenger,
+              'Comprobante Nro. ${numero.toString().padLeft(6, '0')} abierto. '
+              'Imprimí desde el visor (Ctrl+P).');
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -911,9 +917,57 @@ class _BotonImprimirComprobanteState extends State<_BotonImprimirComprobante> {
     }
   }
 
+  /// Manda el PDF a la impresora default del sistema. Devuelve
+  /// `true` si pudo mandar a imprimir, `false` si no había impresora
+  /// disponible o el plugin falló (en ese caso cae al viewer).
+  ///
+  /// **Windows / macOS / Linux**: usa `Printing.directPrintPdf` con
+  /// la impresora default que reporta el OS. Sin diálogo ni preview.
+  /// **Android / iOS**: el subsystem de impresión nativo abre su
+  /// propio diálogo (es el comportamiento estándar mobile).
+  Future<bool> _imprimirDirecto(Uint8List bytes, String nombreArchivo) async {
+    try {
+      // Tomamos la impresora marcada como default en el sistema.
+      // `listPrinters()` enumera las impresoras instaladas; cada una
+      // tiene un flag `isDefault` que viene del config de Windows
+      // (Settings → Devices → Printers → "Set as default").
+      //
+      // Si no hay default (raro pero pasa en PCs nuevas), tomamos la
+      // primera de la lista. Si la lista está vacía, fallback al viewer.
+      final printers = await Printing.listPrinters();
+      if (printers.isEmpty) {
+        await _abrirPdfConViewerSistema(bytes, nombreArchivo: nombreArchivo);
+        return false;
+      }
+      final printer = printers.firstWhere(
+        (p) => p.isDefault,
+        orElse: () => printers.first,
+      );
+
+      final ok = await Printing.directPrintPdf(
+        printer: printer,
+        onLayout: (_) async => bytes,
+        name: nombreArchivo,
+      );
+      if (!ok) {
+        // El plugin devolvió false (job no aceptado) — fallback.
+        await _abrirPdfConViewerSistema(bytes, nombreArchivo: nombreArchivo);
+        return false;
+      }
+      return true;
+    } catch (e, stack) {
+      debugPrint('⚠️ Printing.directPrintPdf falló: $e');
+      debugPrint(stack.toString());
+      // Cualquier excepción del subsystem de impresión → fallback al
+      // viewer del sistema. No queremos dejar al user sin recibo.
+      await _abrirPdfConViewerSistema(bytes, nombreArchivo: nombreArchivo);
+      return false;
+    }
+  }
+
   /// Guarda el PDF a un archivo temp y lo abre con el viewer default
-  /// del sistema operativo. Cross-platform sin dependencias de
-  /// plugins de impresión nativos:
+  /// del sistema operativo. Usado como fallback si `directPrintPdf`
+  /// no pudo mandar el job (PC sin impresora, subsystem caído, etc.).
   ///   - **Windows**: `cmd /c start "" <ruta>` → abre con Edge / Adobe.
   ///   - **macOS / Linux**: `launchUrl(file://)` → abre con Preview / xdg-open.
   ///   - **Android / iOS**: `launchUrl(file://)` con `mode: externalApplication`.

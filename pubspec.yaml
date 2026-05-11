@@ -88,12 +88,14 @@ dependencies:
   # A4 duplicado: el operador imprime, corta al medio, una mitad
   # queda en oficina y la otra se la lleva el chofer firmada).
   pdf: ^3.10.7
-  # NOTA: el package `printing` se removió 2026-05-12 — su binding
-  # nativo Windows crasheaba con código C++ 0xe06d7363 cuando el
-  # subsystem de impresión no estaba bien inicializado. Ahora
-  # generamos el PDF a temp file y lo abrimos con el viewer default
-  # del sistema (Edge/Adobe en Windows, Files en mobile). El user
-  # imprime con Ctrl+P desde el viewer. Más robusto y cross-platform.
+  # `printing` para mandar el PDF directo a la impresora default sin
+  # abrir viewer (mejor UX que Ctrl+P manual). El crash anterior con
+  # código C++ 0xe06d7363 era por el PDF con glifos faltantes en
+  # Helvetica embedded — ahora con Roboto válida embebida el renderer
+  # nativo ya no tira. Wrapped en try/catch + fallback al viewer del
+  # sistema por si el subsystem de impresión Windows falla en alguna
+  # PC sin impresora configurada.
+  printing: ^5.13.0
 
   # ================= SEGURIDAD =================
   crypto: ^3.0.3      # SHA-256 (legacy, mantener para verificar contraseñas viejas)
