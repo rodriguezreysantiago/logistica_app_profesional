@@ -1034,7 +1034,17 @@ class _SeccionChofer extends StatelessWidget {
               .where('ROL', isEqualTo: 'CHOFER')
               .snapshots(),
           builder: (ctx, snap) {
-            final docs = snap.data?.docs ?? const [];
+            // Orden alfabético por NOMBRE (case-insensitive, locale-aware).
+            // Lo hacemos client-side para evitar tener que crear índice
+            // compuesto (ROL ASC + NOMBRE ASC) en Firestore — son ~50
+            // choferes, el sort es instantáneo.
+            final docs = List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
+              snap.data?.docs ?? const [],
+            )..sort((a, b) {
+                final na = (a.data()['NOMBRE'] ?? '').toString().toUpperCase();
+                final nb = (b.data()['NOMBRE'] ?? '').toString().toUpperCase();
+                return na.compareTo(nb);
+              });
             final items = docs.map((d) {
               final data = d.data();
               final dn = (data['DNI'] ?? d.id).toString();
