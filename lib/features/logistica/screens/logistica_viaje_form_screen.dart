@@ -173,6 +173,48 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
     );
   }
 
+  /// Cuando el operador selecciona un chofer en el form (CREACIÓN
+  /// nueva, no edición), busca el último viaje activo de ese chofer
+  /// y, si tenía adelanto > 0, lo sugiere como monto + observación.
+  ///
+  /// **Por qué**: en la práctica los choferes son consistentes con
+  /// sus adelantos — Ackermann siempre lleva $100k, Hidalgo nunca
+  /// lleva, etc. Sin esta sugerencia el operador tiene que
+  /// recordar o buscar viajes pasados.
+  ///
+  /// **No pisa si el último no tenía adelanto** — si el último
+  /// viaje del chofer fue sin adelanto, dejamos los campos vacíos
+  /// (es la "tendencia" del chofer).
+  ///
+  /// **Best-effort**: si el lookup falla por red, no muestra error
+  /// — el operador puede tipear el monto manualmente igual.
+  Future<void> _sugerirAdelantoUltimoViaje(String dni) async {
+    try {
+      final ultimo = await ViajesService.ultimoViajeDeChofer(dni);
+      if (!mounted) return;
+      // Solo sugerir si el último tenía adelanto > 0. Si no tenía,
+      // dejamos los campos en blanco (probablemente el chofer nunca
+      // lleva adelanto).
+      final monto = ultimo?.adelantoMonto ?? 0;
+      if (monto <= 0) return;
+      setState(() {
+        // Usamos parsearMiles/formatearMiles para que el campo
+        // muestre "100.000" en lugar de "100000.0" — coincide con
+        // lo que ve el operador en el resto de los campos $ del form.
+        _adelantoMontoCtrl.text = AppFormatters.formatearMiles(monto.toInt());
+        // Sugerir también la observación del último adelanto
+        // (suele ser igual: "combustible", "gastos varios", etc.).
+        final obs = ultimo?.adelantoObservacion?.trim();
+        if (obs != null && obs.isNotEmpty && _adelantoObsCtrl.text.isEmpty) {
+          _adelantoObsCtrl.text = obs;
+        }
+      });
+    } catch (_) {
+      // Best-effort: si falla la query (red caída, viaje borrado,
+      // etc.), no avisamos — el operador puede cargar manualmente.
+    }
+  }
+
   // ─── Guardar ───
   Future<void> _guardar() async {
     final messenger = ScaffoldMessenger.of(context);
@@ -366,20 +408,30 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
             _SeccionChofer(
               dni: _choferDni,
               nombre: _choferNombre,
-              onChanged: (dni, nombre, vehiculo, enganche) => setState(() {
-                _choferDni = dni;
-                _choferNombre = nombre;
-                // Auto-llenar las patentes con las que tiene asignadas
-                // el chofer en EMPLEADOS/{dni}.VEHICULO/.ENGANCHE.
-                // Caso típico: el viaje sale con la unidad habitual del
-                // chofer. Si va con otra, el operador la cambia desde
-                // los selectores de la sección 3 (que filtran solo
-                // patentes activas). Pisamos los TextField cualquiera
-                // sea el contenido previo: cambiar de chofer casi
-                // siempre implica cambio de unidad.
-                _vehiculoCtrl.text = vehiculo ?? '';
-                _engancheCtrl.text = enganche ?? '';
-              }),
+              onChanged: (dni, nombre, vehiculo, enganche) {
+                setState(() {
+                  _choferDni = dni;
+                  _choferNombre = nombre;
+                  // Auto-llenar las patentes con las que tiene asignadas
+                  // el chofer en EMPLEADOS/{dni}.VEHICULO/.ENGANCHE.
+                  // Caso típico: el viaje sale con la unidad habitual del
+                  // chofer. Si va con otra, el operador la cambia desde
+                  // los selectores de la sección 3 (que filtran solo
+                  // patentes activas). Pisamos los TextField cualquiera
+                  // sea el contenido previo: cambiar de chofer casi
+                  // siempre implica cambio de unidad.
+                  _vehiculoCtrl.text = vehiculo ?? '';
+                  _engancheCtrl.text = enganche ?? '';
+                });
+                // Sugerir el adelanto del último viaje del chofer
+                // (algunos siempre llevan el mismo monto, otros nunca
+                // llevan). Async — no bloquea el setState de arriba.
+                // Solo aplica en CREACIÓN: en edición no pisamos lo
+                // que ya estaba guardado.
+                if (!_esEdicion) {
+                  _sugerirAdelantoUltimoViaje(dni);
+                }
+              },
             ),
             const SizedBox(height: 12),
             _SeccionUnidad(

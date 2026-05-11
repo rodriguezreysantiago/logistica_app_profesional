@@ -71,6 +71,27 @@ class ViajesService {
         );
   }
 
+  /// Devuelve el último viaje activo del chofer (ordenado por
+  /// creado_en desc), o null si nunca tuvo viaje. One-shot, no
+  /// stream — pensado para usar como "sugerencia" cuando el
+  /// operador selecciona chofer en el form de viaje nuevo: del
+  /// último viaje sacamos el adelanto típico que llevó (algunos
+  /// choferes siempre llevan $100k, otros nunca llevan, etc.).
+  ///
+  /// Reusa el mismo índice que `streamViajesPorChofer`
+  /// (chofer_dni ASC + activo ASC + creado_en DESC).
+  static Future<Viaje?> ultimoViajeDeChofer(String dni) async {
+    final snap = await _col
+        .where('chofer_dni', isEqualTo: dni)
+        .where('activo', isEqualTo: true)
+        .orderBy('creado_en', descending: true)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    final d = snap.docs.first;
+    return Viaje.fromMap(d.id, d.data());
+  }
+
   // ===========================================================================
   // ALTA / EDICIÓN
   // ===========================================================================
