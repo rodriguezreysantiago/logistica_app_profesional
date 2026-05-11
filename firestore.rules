@@ -398,18 +398,26 @@ service cloud.firestore {
     // los choferes no necesitan ver tarifas (es info comercial), Seg e
     // Higiene tampoco (es parte de operación, no de monitoreo).
     //
-    // Soft-delete via campo `activa: bool`. Las históricas se mantienen
-    // para reportes pasados. NO permitimos `delete` para preservar el
-    // histórico — si el operador se equivoca con un alta, la desactiva.
+    // Permitimos hard-delete en EMPRESAS_LOGISTICA y UBICACIONES_LOGISTICA
+    // (Santiago 2026-05-12). El cliente hace check de referencias antes
+    // de borrar — LogisticaService.eliminarEmpresa/eliminarUbicacion
+    // cuentan tarifas y ubicaciones que las usan; si hay > 0 tira error
+    // accionable y no llega al delete.
+    //
+    // Viajes históricos NO se rompen al borrar empresa/ubicación porque
+    // cada viaje persistió `tarifa_snapshot` con los nombres cacheados
+    // al momento del viaje — no apuntan por id.
+    //
+    // TARIFAS_LOGISTICA sigue con `allow delete: if false` (más abajo);
+    // ahí sí se usa el flag `activa` para soft-delete porque las tarifas
+    // se referencian por id desde viajes nuevos en curso.
 
     match /EMPRESAS_LOGISTICA/{doc} {
-      allow read, create, update: if isAdminOrSupervisor();
-      allow delete: if false;
+      allow read, create, update, delete: if isAdminOrSupervisor();
     }
 
     match /UBICACIONES_LOGISTICA/{doc} {
-      allow read, create, update: if isAdminOrSupervisor();
-      allow delete: if false;
+      allow read, create, update, delete: if isAdminOrSupervisor();
     }
 
     match /TARIFAS_LOGISTICA/{doc} {
