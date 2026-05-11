@@ -17,8 +17,45 @@ import '../widgets/ubicacion_map_picker.dart';
 /// ABM de ubicaciones físicas (puntos de carga / descarga). Reusable
 /// entre tarifas: una misma ubicación puede ser origen de una tarifa y
 /// destino de otra.
-class LogisticaUbicacionesScreen extends StatelessWidget {
+class LogisticaUbicacionesScreen extends StatefulWidget {
   const LogisticaUbicacionesScreen({super.key});
+
+  @override
+  State<LogisticaUbicacionesScreen> createState() =>
+      _LogisticaUbicacionesScreenState();
+}
+
+class _LogisticaUbicacionesScreenState
+    extends State<LogisticaUbicacionesScreen> {
+  /// Filtro de búsqueda — se aplica client-side sobre el resultado
+  /// del stream (no hay índices Firestore para LIKE/contains). Como
+  /// son ~50-200 ubicaciones max, el filtrado en memoria es
+  /// instantáneo. Match por nombre, localidad, provincia y dirección
+  /// (todo case-insensitive).
+  String _filtro = '';
+
+  /// Filtra la lista por el texto tipeado. Tokeniza por espacios y
+  /// exige que TODOS los tokens estén presentes en algún campo de la
+  /// ubicación — permite buscar "puerto bahia" y matchear "Puerto
+  /// Galván — Bahía Blanca".
+  List<UbicacionLogistica> _aplicarFiltro(List<UbicacionLogistica> items) {
+    final q = _filtro.trim().toLowerCase();
+    if (q.isEmpty) return items;
+    final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
+    return items.where((u) {
+      final hay = [
+        u.nombre,
+        u.localidad,
+        u.provincia,
+        u.direccion ?? '',
+        u.empresaNombres.join(' '),
+      ].join(' ').toLowerCase();
+      for (final t in tokens) {
+        if (!hay.contains(t)) return false;
+      }
+      return true;
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,35 +69,73 @@ class LogisticaUbicacionesScreen extends StatelessWidget {
           label: const Text('NUEVA UBICACIÓN'),
         ),
       ),
-      body: StreamBuilder<List<UbicacionLogistica>>(
-        stream: LogisticaService.streamUbicaciones(),
-        builder: (ctx, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            return AppEmptyState(
-              icon: Icons.error_outline,
-              title: 'Error cargando la lista',
-              subtitle: snap.error.toString(),
-            );
-          }
-          final items = snap.data ?? const [];
-          if (items.isEmpty) {
-            return const AppEmptyState(
-              icon: Icons.place_outlined,
-              title: 'Sin ubicaciones cargadas',
-              subtitle: 'Tocá + para agregar la primera (silos, plantas, '
-                  'puertos, fábricas).',
-            );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, i) => _CardUbicacion(ubicacion: items[i]),
-          );
-        },
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: TextField(
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search, size: 20),
+                hintText: 'Buscar por nombre, localidad, empresa…',
+                border: const OutlineInputBorder(),
+                isDense: true,
+                // Botón X para limpiar — útil cuando se filtró mucho
+                // y querés volver a la lista completa.
+                suffixIcon: _filtro.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () => setState(() => _filtro = ''),
+                      ),
+              ),
+              onChanged: (v) => setState(() => _filtro = v),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<UbicacionLogistica>>(
+              stream: LogisticaService.streamUbicaciones(),
+              builder: (ctx, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return AppEmptyState(
+                    icon: Icons.error_outline,
+                    title: 'Error cargando la lista',
+                    subtitle: snap.error.toString(),
+                  );
+                }
+                final items = snap.data ?? const [];
+                if (items.isEmpty) {
+                  return const AppEmptyState(
+                    icon: Icons.place_outlined,
+                    title: 'Sin ubicaciones cargadas',
+                    subtitle:
+                        'Tocá + para agregar la primera (silos, plantas, '
+                        'puertos, fábricas).',
+                  );
+                }
+                final filtrados = _aplicarFiltro(items);
+                if (filtrados.isEmpty) {
+                  return AppEmptyState(
+                    icon: Icons.search_off,
+                    title: 'Sin resultados',
+                    subtitle:
+                        'Ninguna ubicación coincide con "$_filtro". Probá '
+                        'con otra palabra o limpiá el filtro.',
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
+                  itemCount: filtrados.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) =>
+                      _CardUbicacion(ubicacion: filtrados[i]),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
