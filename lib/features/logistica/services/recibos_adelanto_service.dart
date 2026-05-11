@@ -60,7 +60,7 @@ class RecibosAdelantoService {
       final monto = (data['adelanto_monto'] as num?)?.toDouble() ?? 0;
       if (monto <= 0) {
         throw StateError(
-            'El viaje no tiene adelanto cargado — no hay nada que imprimir.');
+            'El viaje no tiene adelanto cargado - no hay nada que imprimir.');
       }
       final yaTiene = (data['numero_recibo_adelanto'] as num?)?.toInt();
       if (yaTiene != null) {
@@ -131,14 +131,21 @@ class RecibosAdelantoService {
                 ),
               ),
               // ─── Línea de corte (punteada) ───
+              // **OJO**: usar solo ASCII para evitar crash nativo del
+              // plugin `pdf` en Windows. La fuente default (Helvetica)
+              // NO incluye glifos Unicode como ✂ (tijera) o → (flecha)
+              // — al intentar renderearlos el binding nativo crashea
+              // el proceso entero, no es excepción Dart capturable.
+              // Solución a futuro si querés el ícono: cargar una
+              // fuente que lo soporte vía pw.Font.ttf(rootBundle).
               pw.Container(
                 margin: const pw.EdgeInsets.symmetric(vertical: 8),
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.center,
                   children: [
                     pw.Text(
-                      '✂  - - - - - - - - - - - - - - - - - - - - - '
-                      'CORTAR POR LA LÍNEA - - - - - - - - - - - - - - - - - - - - -',
+                      '- - - - - - - - - - - - - - - - - - - - - '
+                      'CORTAR POR LA LINEA - - - - - - - - - - - - - - - - - - - - -',
                       style: const pw.TextStyle(
                         fontSize: 8,
                         color: PdfColors.grey600,
@@ -181,9 +188,12 @@ class _Mitad {
   }) {
     final monto = viaje.adelantoMonto ?? 0;
     final fechaAdelanto = viaje.adelantoFecha ?? viaje.fechaCarga ?? fechaImpresion;
+    // Defensivo: si la observación está vacía, usar guion ASCII (NO
+    // em-dash U+2014). Helvetica embedded de `pdf` no garantiza
+    // soporte de glifos fuera de WinAnsi en todas las plataformas.
     final observacion =
         (viaje.adelantoObservacion ?? '').trim().isEmpty
-            ? '—'
+            ? '-'
             : viaje.adelantoObservacion!.trim();
     final choferNombre = viaje.choferNombre ?? viaje.choferDni;
     final dniFmt = AppFormatters.formatearDNI(viaje.choferDni);
@@ -244,7 +254,9 @@ class _Mitad {
                       border: pw.Border.all(color: PdfColors.black, width: 1),
                     ),
                     child: pw.Text(
-                      'N° ${numeroRecibo.toString().padLeft(6, '0')}',
+                      // "Nro." en lugar de "N°" — el ° (U+00B0) puede
+                      // no renderearse en Helvetica embedded.
+                      'Nro. ${numeroRecibo.toString().padLeft(6, '0')}',
                       style: pw.TextStyle(
                         fontSize: 13,
                         fontWeight: pw.FontWeight.bold,
@@ -271,7 +283,10 @@ class _Mitad {
                             pw.Border.all(color: PdfColors.orange900, width: 0.5),
                       ),
                       child: pw.Text(
-                        'REIMPRESIÓN',
+                        // Sin acentos: "REIMPRESION" — el Ó (U+00D3)
+                        // puede crashear el render del PDF en algunas
+                        // versiones de Helvetica embedded.
+                        'REIMPRESION',
                         style: pw.TextStyle(
                           fontSize: 7,
                           fontWeight: pw.FontWeight.bold,
@@ -294,7 +309,9 @@ class _Mitad {
           ),
           _Linea(
             label: 'Chofer',
-            valor: '$choferNombre  ·  DNI $dniFmt',
+            // Separador "-" en lugar de "·" (middot, U+00B7) por
+            // misma razón que los otros caracteres no-ASCII.
+            valor: '$choferNombre  -  DNI $dniFmt',
             destacado: true,
           ),
           _Linea(
@@ -306,7 +323,9 @@ class _Mitad {
           pw.SizedBox(height: 8),
           // ─── Observación ───
           pw.Text(
-            'Observación / Concepto:',
+            // Sin acento por la misma razón que arriba (Helvetica
+            // embedded a veces falla con Latin-1 extendido).
+            'Observacion / Concepto:',
             style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
           ),
           pw.SizedBox(height: 3),
