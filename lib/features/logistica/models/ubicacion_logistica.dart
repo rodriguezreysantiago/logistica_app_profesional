@@ -52,6 +52,38 @@ class UbicacionLogistica {
     this.creadoPor,
   });
 
+  /// Devuelve una copia de la ubicación con los campos sobrescritos.
+  /// Útil para que las pantallas de edición refresquen su copia local
+  /// del modelo inmediatamente después de persistir un cambio, sin
+  /// esperar al stream de Firestore (que es asíncrono y puede demorar
+  /// en celus lentos).
+  UbicacionLogistica copyWith({
+    String? nombre,
+    String? localidad,
+    String? provincia,
+    String? direccion,
+    double? lat,
+    double? lng,
+    List<String>? empresaIds,
+    List<String>? empresaNombres,
+    bool? activa,
+  }) {
+    return UbicacionLogistica(
+      id: id,
+      nombre: nombre ?? this.nombre,
+      localidad: localidad ?? this.localidad,
+      provincia: provincia ?? this.provincia,
+      direccion: direccion ?? this.direccion,
+      lat: lat ?? this.lat,
+      lng: lng ?? this.lng,
+      empresaIds: empresaIds ?? this.empresaIds,
+      empresaNombres: empresaNombres ?? this.empresaNombres,
+      activa: activa ?? this.activa,
+      creadoEn: creadoEn,
+      creadoPor: creadoPor,
+    );
+  }
+
   /// Texto compuesto para mostrar como subtítulo / chip.
   /// Ejemplo: "Tres Arroyos, Buenos Aires" o "Tres Arroyos, Buenos
   /// Aires — Av. San Martín 123".

@@ -235,6 +235,32 @@ class _EditarUbicacionSheetState extends State<_EditarUbicacionSheet> {
       id: _ubicacion.id,
       cambios: {campo: valor},
     );
+    // Refrescar la copia local inmediatamente — sin esto, el sheet
+    // sigue mostrando el valor viejo hasta que el stream emita la
+    // versión actualizada y se rebuilde el padre. En celus lentos el
+    // delay es perceptible y al user le parece que "no se guardó".
+    if (!mounted) return;
+    setState(() {
+      switch (campo) {
+        case 'nombre':
+          _ubicacion = _ubicacion.copyWith(nombre: valor as String);
+          break;
+        case 'localidad':
+          _ubicacion = _ubicacion.copyWith(localidad: valor as String);
+          break;
+        case 'provincia':
+          _ubicacion = _ubicacion.copyWith(provincia: valor as String);
+          break;
+        case 'direccion':
+          _ubicacion = _ubicacion.copyWith(direccion: valor as String?);
+          break;
+        case 'activa':
+          _ubicacion = _ubicacion.copyWith(activa: valor as bool);
+          break;
+        // lat/lng se actualizan vía _abrirPicker (lógica propia que
+        // ya hace setState con coords + reverse geocoding).
+      }
+    });
   }
 
   Future<void> _abrirPicker() async {
