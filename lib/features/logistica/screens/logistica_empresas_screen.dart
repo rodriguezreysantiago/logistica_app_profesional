@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/constants/app_colors.dart';
@@ -288,6 +289,41 @@ class _CardEmpresa extends StatelessWidget {
 class _EditarEmpresaSheet extends StatelessWidget {
   final EmpresaLogistica empresa;
   const _EditarEmpresaSheet({required this.empresa});
+
+  @override
+  Widget build(BuildContext context) {
+    // Suscribimos al doc para que el sheet se refresque al toque
+    // cuando cambien productos, ubicaciones asignadas, datos
+    // básicos, etc. Antes el widget era estático y al agregar un
+    // producto había que cerrar y reabrir para verlo.
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: LogisticaService.empresasCol.doc(empresa.id).snapshots(),
+      // initialData con un fake snapshot — no lo usamos directo,
+      // pero evita que el builder reciba un null transitorio al
+      // arrancar el sheet (mostraría un flash de "loading" sobre
+      // la data que ya tenemos en la prop empresa).
+      builder: (ctx, snap) {
+        // Si llegó snapshot fresco, usamos ese. Si no (carga
+        // inicial o transitorio), usamos el `empresa` de la prop
+        // como fallback.
+        final actual = (snap.hasData &&
+                snap.data!.exists &&
+                snap.data!.data() != null)
+            ? EmpresaLogistica.fromMap(
+                snap.data!.id, snap.data!.data()!)
+            : empresa;
+        return _EditarEmpresaSheetBody(empresa: actual);
+      },
+    );
+  }
+}
+
+/// Body del sheet con la data ya resuelta. Separado para que el
+/// StreamBuilder solo se preocupe de la suscripción y este widget
+/// se enfoque en renderear / persistir.
+class _EditarEmpresaSheetBody extends StatelessWidget {
+  final EmpresaLogistica empresa;
+  const _EditarEmpresaSheetBody({required this.empresa});
 
   @override
   Widget build(BuildContext context) {
