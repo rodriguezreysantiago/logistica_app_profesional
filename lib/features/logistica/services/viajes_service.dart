@@ -353,6 +353,67 @@ class ViajesService {
     AppLogger.log('Viaje reactivado: $viajeId');
   }
 
+  /// Hard-delete del viaje: borra el doc completo de Firestore y
+  /// limpia los archivos de remito asociados en Storage.
+  ///
+  /// **Solo se usa durante etapa de testing** (Santiago 2026-05-12)
+  /// para limpiar viajes de prueba que ensucian la liquidación.
+  /// El flujo recomendado es:
+  ///   1. Soft-delete primero (`borrarViaje`) → queda con activo=false.
+  ///   2. Recién después, si NO se necesita preservar histórico,
+  ///      `eliminarViajeDefinitivo` que destruye el doc.
+  ///
+  /// Esto previene borrados accidentales: hace falta confirmar dos
+  /// veces.
+  ///
+  /// Storage cleanup: si el viaje tenía comprobantes de remito
+  /// subidos, los borramos también (multi-tramo: itera todos los
+  /// tramos). Best-effort — si falla algún delete de Storage, lo
+  /// loggeamos pero seguimos con el delete del doc.
+  static Future<void> eliminarViajeDefinitivo(String viajeId) async {
+    if (viajeId.isEmpty) {
+      throw ArgumentError('viajeId vacío.');
+    }
+    // Leer el doc primero para sacar las paths de Storage.
+    final snap = await _col.doc(viajeId).get();
+    if (!snap.exists) {
+      // Ya no existe — operación idempotente.
+      AppLogger.log('eliminarViajeDefinitivo: viaje $viajeId no existía.');
+      return;
+    }
+    final data = snap.data() ?? {};
+
+    // Recolectar las paths de remito a borrar. Multi-tramo: cada
+    // tramo puede tener su `remito_path_storage`. Single-tramo
+    // legacy: la path está al nivel del doc.
+    final pathsRemitos = <String>{};
+    final tramos = data['tramos'] as List?;
+    if (tramos != null) {
+      for (final t in tramos) {
+        if (t is Map) {
+          final p = t['remito_path_storage'];
+          if (p is String && p.isNotEmpty) pathsRemitos.add(p);
+        }
+      }
+    }
+    final pathLegacy = data['remito_path_storage'];
+    if (pathLegacy is String && pathLegacy.isNotEmpty) {
+      pathsRemitos.add(pathLegacy);
+    }
+
+    // Borrar remitos de Storage en paralelo (best-effort).
+    if (pathsRemitos.isNotEmpty) {
+      await Future.wait(pathsRemitos.map(borrarRemitoStorage));
+    }
+
+    // Hard-delete del doc.
+    await _col.doc(viajeId).delete();
+    AppLogger.log(
+      'Viaje eliminado definitivamente: $viajeId '
+      '(remitos limpiados: ${pathsRemitos.length})',
+    );
+  }
+
   // ===========================================================================
   // STORAGE — comprobante de remito firmado
   // ===========================================================================

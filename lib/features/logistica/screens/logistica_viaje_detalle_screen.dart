@@ -553,7 +553,7 @@ class _BotoneraAcciones extends StatelessWidget {
               side: const BorderSide(color: AppColors.accentRed),
             ),
           ),
-        ] else
+        ] else ...[
           OutlinedButton.icon(
             onPressed: () => _reactivar(context, v),
             icon: const Icon(Icons.restore, size: 18),
@@ -563,8 +563,112 @@ class _BotoneraAcciones extends StatelessWidget {
               side: const BorderSide(color: AppColors.accentAmber),
             ),
           ),
+          // Eliminar DEFINITIVO: solo aparece cuando el viaje ya está
+          // soft-deleted (activo=false). Etapa de testing: limpia
+          // viajes de prueba sin dejar rastro. Doble confirmación
+          // (soft primero, hard después) previene borrados
+          // accidentales.
+          OutlinedButton.icon(
+            onPressed: () => _confirmarEliminarDefinitivo(context, v),
+            icon: const Icon(Icons.delete_forever, size: 18),
+            label: const Text('ELIMINAR DEFINITIVO'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.accentRed,
+              side: const BorderSide(color: AppColors.accentRed),
+            ),
+          ),
+        ],
       ],
     );
+  }
+
+  /// Confirmación REDUNDANTE para hard-delete. Pide al operador
+  /// tipear "ELIMINAR" para liberar el botón final, así no se
+  /// pierde un viaje real por un click distraído. Etapa de testing.
+  Future<void> _confirmarEliminarDefinitivo(BuildContext ctx, Viaje v) async {
+    final messenger = ScaffoldMessenger.of(ctx);
+    final navigator = Navigator.of(ctx);
+    final ok = await showDialog<bool>(
+      context: ctx,
+      builder: (dCtx) {
+        final tipeoCtrl = TextEditingController();
+        var habilitado = false;
+        return StatefulBuilder(builder: (sCtx, setStateDialog) {
+          return AlertDialog(
+            backgroundColor: Theme.of(dCtx).colorScheme.surface,
+            title: const Text('¿Eliminar definitivamente?'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Vas a borrar este viaje POR COMPLETO de la base. No '
+                  'queda en histórico, no se puede reactivar, los '
+                  'comprobantes de remito también se borran de Storage.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Chofer: ${v.choferNombre ?? v.choferDni}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Ruta: ${v.rutaEtiqueta}',
+                  style: const TextStyle(color: Colors.white60),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Para confirmar, escribí ELIMINAR (en mayúscula):',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: tipeoCtrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (val) {
+                    final h = val.trim() == 'ELIMINAR';
+                    if (h != habilitado) {
+                      setStateDialog(() => habilitado = h);
+                    }
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dCtx, false),
+                child: const Text('CANCELAR'),
+              ),
+              FilledButton(
+                onPressed: habilitado
+                    ? () => Navigator.pop(dCtx, true)
+                    : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.accentRed,
+                ),
+                child: const Text('ELIMINAR DEFINITIVO'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+    if (ok != true) return;
+    if (!ctx.mounted) return;
+    try {
+      await ViajesService.eliminarViajeDefinitivo(v.id);
+      AppFeedback.successOn(messenger, 'Viaje eliminado definitivamente.');
+      navigator.pop();
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error: $e');
+    }
   }
 
   // _toggleLiquidado() eliminado 2026-05-11 junto con el botón

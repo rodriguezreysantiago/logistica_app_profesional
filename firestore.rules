@@ -437,12 +437,21 @@ service cloud.firestore {
     // adelantos, gastos, liquidación al chofer. NO se expone al chofer
     // (decisión Santiago 2026-05-09).
     //
-    // Soft-delete via `activo: false`. NO permitimos `delete` para
-    // preservar histórico — si el operador se equivoca, desactiva.
+    // Soft-delete via `activo: false` para el caso normal (operador
+    // se equivocó con un alta, lo desactiva y queda en histórico).
+    //
+    // Permitimos también HARD-delete a admin/supervisor (Santiago
+    // 2026-05-12) — durante la etapa de testeo se generan muchos
+    // viajes de prueba que ensucian el histórico. El flujo es:
+    //   1. Tap "Eliminar" → soft-delete (activo=false).
+    //   2. Si el viaje ya estaba soft-deleted, tap "Eliminar
+    //      definitivamente" en el detalle → hard-delete.
+    //
+    // Si se pasa a producción real, se puede volver a `delete: if false`
+    // para forzar que todo quede en histórico.
 
     match /VIAJES_LOGISTICA/{doc} {
-      allow read, create, update: if isAdminOrSupervisor();
-      allow delete: if false;
+      allow read, create, update, delete: if isAdminOrSupervisor();
     }
 
     // ========================================================================
