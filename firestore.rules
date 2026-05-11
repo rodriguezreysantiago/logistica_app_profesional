@@ -209,14 +209,19 @@ service cloud.firestore {
     //
     // `COUNTERS/recibos_adelanto.next` es el siguiente número de
     // comprobante de adelanto a imprimir. Se incrementa con
-    // `runTransaction` desde el cliente (RecibosAdelantoService) en el
-    // momento de la primera impresión de cada viaje.
+    // `runTransaction` desde la Cloud Function callable
+    // `asignarNumeroReciboAdelanto` (Admin SDK, server-side) — el
+    // plugin cloud_firestore en Windows desktop crashea con
+    // `runTransaction + serverTimestamp` (bug conocido), así que
+    // sacamos esa operación del cliente.
     //
-    // Solo admin/supervisor puede leer y escribir — son los únicos que
-    // imprimen comprobantes desde el detalle del viaje. Si alguien con
-    // otro rol intenta llamarla, Firestore tira `permission-denied`.
+    // Lectura permitida para admin/supervisor (la pantalla de
+    // configuración podría mostrar "próximo número"); escritura
+    // **bloqueada** desde el cliente — solo el Admin SDK escribe, y
+    // ese bypassea las rules.
     match /COUNTERS/{doc} {
-      allow read, write: if isAdminOrSupervisor();
+      allow read: if isAdminOrSupervisor();
+      allow write: if false;
     }
 
     // ========================================================================

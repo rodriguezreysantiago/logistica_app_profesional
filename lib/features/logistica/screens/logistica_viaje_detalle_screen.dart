@@ -867,16 +867,21 @@ class _BotonImprimirComprobanteState extends State<_BotonImprimirComprobante> {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _generando = true);
     try {
-      // 1. Asignar / reusar número correlativo (transacción atómica).
-      final numero = await RecibosAdelantoService.asignarNumeroSiFalta(
+      // 1. Asignar / reusar número correlativo (transacción atómica
+      //    server-side vía Cloud Function callable — el plugin
+      //    cloud_firestore en Windows crashea con runTransaction +
+      //    serverTimestamp).
+      final resultado = await RecibosAdelantoService.asignarNumeroSiFalta(
         viajeId: widget.viaje.id,
       );
-      // 2. Generar PDF en memoria (Uint8List).
-      final esReimpresion = widget.viaje.numeroReciboAdelanto != null;
+      final numero = resultado.numero;
+      // 2. Generar PDF en memoria (Uint8List). `esReimpresion` viene
+      //    del server, no del cache local del viaje — así si el doc
+      //    estaba stale en el cliente, igual marcamos correcto.
       final pdfBytes = await RecibosAdelantoService.generarPdf(
         viaje: widget.viaje,
         numeroRecibo: numero,
-        esReimpresion: esReimpresion,
+        esReimpresion: resultado.esReimpresion,
       );
       // 3. Guardar a archivo temp + abrir con app default del sistema
       // (Edge / Adobe Reader en Windows, Files / Vista en mobile).

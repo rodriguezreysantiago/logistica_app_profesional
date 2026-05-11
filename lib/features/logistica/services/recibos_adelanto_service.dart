@@ -1,20 +1,34 @@
-import 'dart:typed_data';
+import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dio/dio.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-import '../../../core/constants/app_constants.dart';
 import '../../../shared/utils/formatters.dart';
 import '../models/viaje.dart';
+
+/// Resultado de la asignación de número de recibo.
+class AsignarReciboResult {
+  final int numero;
+  final bool esReimpresion;
+
+  const AsignarReciboResult({
+    required this.numero,
+    required this.esReimpresion,
+  });
+}
 
 /// Service que asigna número correlativo + genera el PDF del
 /// comprobante de adelanto que se imprime al chofer.
 ///
 /// **Diseño**:
-///   - El número se incrementa con `runTransaction` sobre
-///     `COUNTERS/recibos_adelanto.next` — atómico, sin gaps, sin
+///   - El número se incrementa **server-side** vía la Cloud Function
+///     callable `asignarNumeroReciboAdelanto`, que corre un
+///     `runTransaction` con Admin SDK sobre
+///     `COUNTERS/recibos_adelanto.next`. Atómico, sin gaps, sin
 ///     duplicados aún con impresiones simultáneas.
 ///   - El número se asigna SOLO en la primera impresión. Si el
 ///     viaje ya tiene `numeroReciboAdelanto`, se reusa (la
@@ -25,59 +39,109 @@ import '../models/viaje.dart';
 ///     abajo. El operador imprime, corta al medio, una queda en
 ///     oficina y la otra firmada se la lleva el chofer.
 ///
-/// **Por qué Firestore transaction y no autoincrement de SQL**:
-/// Firebase no tiene autoincrement nativo; las transactions sobre
-/// un solo doc son la forma estándar y están garantizadas a no
-/// duplicar (Firestore reintenta automáticamente conflictos).
+/// **Por qué server-side y no client-side**: el plugin
+/// `cloud_firestore` en Windows desktop tiene un bug conocido que
+/// crashea con `abort()` C++ runtime cuando se combina
+/// `runTransaction` + `tx.set(merge: true)` +
+/// `FieldValue.serverTimestamp()` (ver memoria
+/// `feedback_windows_cloud_firestore_bugs.md`). El Admin SDK en
+/// Cloud Functions no tiene ese bug.
 class RecibosAdelantoService {
-  static final FirebaseFirestore _db = FirebaseFirestore.instance;
+  /// Endpoint del callable. Mismo patrón HTTPS directo que
+  /// `AuthService.loginConDni` porque el plugin `cloud_functions` no
+  /// tiene implementación nativa para Windows desktop — pegarle por
+  /// HTTPS funciona en todas las plataformas.
+  static const String _asignarReciboEndpoint =
+      'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/asignarNumeroReciboAdelanto';
 
-  /// Doc del counter. Si no existe, lo crea con `next: 1` en la
-  /// primera invocación.
-  static DocumentReference<Map<String, dynamic>> get _counterDoc =>
-      _db.collection(AppCollections.counters).doc('recibos_adelanto');
-
-  static DocumentReference<Map<String, dynamic>> _viajeDoc(String id) =>
-      _db.collection(AppCollections.viajesLogistica).doc(id);
+  static final Dio _dio = Dio();
 
   /// Asigna número correlativo al viaje (si no tiene) y devuelve el
-  /// número final que va a salir impreso. Idempotente: llamarla 2
-  /// veces sobre el mismo viaje devuelve el mismo número, sin
-  /// incrementar el counter dos veces.
+  /// número final que va a salir impreso + si es reimpresión.
+  /// Idempotente: llamarla 2 veces sobre el mismo viaje devuelve el
+  /// mismo número, sin incrementar el counter dos veces.
   ///
-  /// Lanza si no hay adelanto cargado en el viaje (no tiene sentido
-  /// imprimir comprobante sin adelanto).
-  static Future<int> asignarNumeroSiFalta({
+  /// Lanza [StateError] si la function rechaza la operación
+  /// (viaje inexistente, sin adelanto cargado, sin permiso, etc.)
+  /// con un mensaje listo para mostrar en UI.
+  static Future<AsignarReciboResult> asignarNumeroSiFalta({
     required String viajeId,
   }) async {
-    final viajeRef = _viajeDoc(viajeId);
-    return await _db.runTransaction<int>((tx) async {
-      final viajeSnap = await tx.get(viajeRef);
-      if (!viajeSnap.exists) {
-        throw StateError('El viaje $viajeId no existe.');
-      }
-      final data = viajeSnap.data()!;
-      final monto = (data['adelanto_monto'] as num?)?.toDouble() ?? 0;
-      if (monto <= 0) {
+    // Firebase Auth ID token: la function lo valida y extrae
+    // request.auth.token.rol para chequear permisos. Sin token, la
+    // function devuelve permission-denied.
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw StateError('Sesión expirada. Volvé a iniciar sesión.');
+    }
+    final idToken = await user.getIdToken();
+    if (idToken == null || idToken.isEmpty) {
+      throw StateError('No se pudo obtener el token de sesión.');
+    }
+
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        _asignarReciboEndpoint,
+        data: {
+          // Protocolo callable: payload envuelto en `data`.
+          'data': {'viajeId': viajeId},
+        },
+        options: Options(
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          // Manejamos los errores body-down, no por excepciones.
+          validateStatus: (_) => true,
+          responseType: ResponseType.json,
+        ),
+      ).timeout(
+        const Duration(seconds: 12),
+        onTimeout: () =>
+            throw TimeoutException('Sin conexión con el servidor.'),
+      );
+
+      if (response.statusCode == null || response.statusCode! >= 400) {
+        final err = response.data?['error'] as Map<String, dynamic>?;
+        final message = (err?['message'] ?? '').toString();
+        debugPrint(
+            '🚨 asignarNumeroReciboAdelanto HTTP ${response.statusCode}: $message');
         throw StateError(
-            'El viaje no tiene adelanto cargado — no hay nada que imprimir.');
+          message.isNotEmpty
+              ? message
+              : 'No se pudo asignar el número de recibo.',
+        );
       }
-      final yaTiene = (data['numero_recibo_adelanto'] as num?)?.toInt();
-      if (yaTiene != null) {
-        // Reimpresión: mismo número, no incrementar counter.
-        return yaTiene;
+
+      final result = response.data?['result'] as Map<String, dynamic>?;
+      if (result == null) {
+        throw StateError('Respuesta inválida del servidor.');
       }
-      // Primera impresión: leer counter, incrementar, asignar al viaje.
-      final counterSnap = await tx.get(_counterDoc);
-      final next = (counterSnap.data()?['next'] as num?)?.toInt() ?? 1;
-      tx.set(_counterDoc, {'next': next + 1}, SetOptions(merge: true));
-      tx.update(viajeRef, {
-        'numero_recibo_adelanto': next,
-        'recibo_impreso_en': FieldValue.serverTimestamp(),
-        'actualizado_en': FieldValue.serverTimestamp(),
-      });
-      return next;
-    });
+      final numero = (result['numero'] as num?)?.toInt();
+      final esReimpresion = result['esReimpresion'] as bool? ?? false;
+      if (numero == null || numero <= 0) {
+        throw StateError('El servidor no devolvió un número de recibo válido.');
+      }
+
+      return AsignarReciboResult(
+        numero: numero,
+        esReimpresion: esReimpresion,
+      );
+    } on TimeoutException {
+      throw StateError(
+          'Tiempo de espera agotado. Verificá la conexión e intentá de nuevo.');
+    } on DioException catch (e) {
+      debugPrint(
+          '🚨 asignarNumeroReciboAdelanto Dio → type=${e.type} status=${e.response?.statusCode}');
+      throw StateError(
+          'No se pudo conectar con el servidor. Verificá la conexión.');
+    } on StateError {
+      rethrow;
+    } catch (e, stack) {
+      debugPrint('🚨 asignarNumeroReciboAdelanto error: $e');
+      debugPrint(stack.toString());
+      throw StateError('Error interno al asignar el número de recibo.');
+    }
   }
 
   /// Genera el PDF del comprobante. Devuelve los bytes para que el

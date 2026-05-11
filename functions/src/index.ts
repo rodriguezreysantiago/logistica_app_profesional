@@ -5055,3 +5055,145 @@ export const recomputeDashboardStats = onSchedule(
     }
   }
 );
+
+// ============================================================================
+// asignarNumeroReciboAdelanto
+// ============================================================================
+// Asigna número correlativo al recibo de adelanto de un viaje. Atómico
+// server-side, idempotente.
+//
+// **Por qué server-side**: el cliente Windows desktop tiene un bug
+// conocido en `cloud_firestore` (plugin) que crashea con `abort()` C++
+// cuando se combina `runTransaction` + `tx.set(merge: true)` +
+// `FieldValue.serverTimestamp()` (ver `feedback_windows_cloud_firestore_bugs.md`).
+// El Admin SDK acá no tiene ese bug y la transacción corre limpia.
+//
+// **Diseño**:
+//   - Counter en `COUNTERS/recibos_adelanto.next` (arranca en 1 si no
+//     existe).
+//   - Si el viaje ya tiene `numero_recibo_adelanto`, devolvemos el mismo
+//     número sin incrementar (idempotente: reimprimir no quema un
+//     correlativo nuevo).
+//   - Si no tiene, leemos+incrementamos el counter y lo asignamos al
+//     viaje dentro de la misma transaction. Si dos operadores imprimen
+//     a la vez, Firestore reintenta y cada uno recibe un número
+//     distinto sin gaps.
+//   - Requiere ADMIN o SUPERVISOR (mismo scope que ver/editar viajes
+//     de logística).
+//
+// Input: `{ viajeId: string }`
+// Output: `{ numero: number, esReimpresion: boolean }`
+
+interface AsignarReciboInput {
+  viajeId?: unknown;
+}
+
+interface AsignarReciboResult {
+  numero: number;
+  esReimpresion: boolean;
+}
+
+export const asignarNumeroReciboAdelanto = onCall(
+  {
+    enforceAppCheck: false,
+  },
+  async (request): Promise<AsignarReciboResult> => {
+    // ─── Auth: ADMIN o SUPERVISOR ──────────────────────────────────
+    const rol = request.auth?.token?.rol;
+    if (!request.auth || (rol !== "ADMIN" && rol !== "SUPERVISOR")) {
+      logger.warn("[asignarReciboAdelanto] sin auth ADMIN/SUPERVISOR", {
+        uid: request.auth?.uid ?? "no-uid",
+        rol: rol ?? "no-rol",
+      });
+      throw new HttpsError(
+        "permission-denied",
+        "Solo admin o supervisor pueden imprimir comprobantes."
+      );
+    }
+
+    // ─── Validación de input ───────────────────────────────────────
+    const data = (request.data ?? {}) as AsignarReciboInput;
+    const viajeId = (data.viajeId ?? "").toString().trim();
+    if (!viajeId) {
+      throw new HttpsError("invalid-argument", "viajeId requerido.");
+    }
+    if (viajeId.length > 200) {
+      throw new HttpsError("invalid-argument", "viajeId inválido.");
+    }
+
+    const viajeRef = db.collection("VIAJES_LOGISTICA").doc(viajeId);
+    const counterRef = db.collection("COUNTERS").doc("recibos_adelanto");
+
+    try {
+      const resultado = await db.runTransaction(async (tx) => {
+        const viajeSnap = await tx.get(viajeRef);
+        if (!viajeSnap.exists) {
+          throw new HttpsError(
+            "not-found",
+            `El viaje ${viajeId} no existe.`
+          );
+        }
+        const viajeData = viajeSnap.data() ?? {};
+        const monto = typeof viajeData.adelanto_monto === "number" ?
+          viajeData.adelanto_monto :
+          0;
+        if (monto <= 0) {
+          throw new HttpsError(
+            "failed-precondition",
+            "El viaje no tiene adelanto cargado."
+          );
+        }
+
+        const yaTiene = typeof viajeData.numero_recibo_adelanto === "number" ?
+          Math.trunc(viajeData.numero_recibo_adelanto) :
+          null;
+        if (yaTiene !== null && yaTiene > 0) {
+          // Reimpresión: mismo número, no tocar el counter ni el
+          // timestamp `recibo_impreso_en` original.
+          return { numero: yaTiene, esReimpresion: true };
+        }
+
+        // Primera impresión: leer+incrementar counter.
+        const counterSnap = await tx.get(counterRef);
+        const next = typeof counterSnap.data()?.next === "number" ?
+          Math.trunc(counterSnap.data()!.next as number) :
+          1;
+
+        tx.set(
+          counterRef,
+          { next: next + 1, actualizado_en: FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+        tx.update(viajeRef, {
+          numero_recibo_adelanto: next,
+          recibo_impreso_en: FieldValue.serverTimestamp(),
+          actualizado_en: FieldValue.serverTimestamp(),
+        });
+
+        return { numero: next, esReimpresion: false };
+      });
+
+      logger.info("[asignarReciboAdelanto] OK", {
+        viajeId,
+        numero: resultado.numero,
+        esReimpresion: resultado.esReimpresion,
+        uid: request.auth.uid,
+      });
+      return resultado;
+    } catch (e) {
+      if (e instanceof HttpsError) {
+        throw e;
+      }
+      const err = e as Error;
+      logger.error("[asignarReciboAdelanto] error", {
+        viajeId,
+        message: err.message,
+        stack: err.stack,
+      });
+      throw new HttpsError(
+        "internal",
+        "No se pudo asignar el número de recibo."
+      );
+    }
+  }
+);
