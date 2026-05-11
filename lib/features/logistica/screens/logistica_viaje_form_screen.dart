@@ -458,6 +458,11 @@ class _TramoEditState {
 
   TarifaLogistica? tarifa;
   String? producto;
+  /// Controller del campo "producto libre" — solo se usa cuando la
+  /// empresa origen NO tiene productos catalogados (fallback). Vive
+  /// en el state del tramo (no se recrea en cada build) para no
+  /// perder el foco al tipear.
+  final TextEditingController productoLibreCtrl;
   final TextEditingController descripcionCargaCtrl;
   DateTime? fechaCarga;
   final TextEditingController kgCargadosCtrl;
@@ -484,7 +489,8 @@ class _TramoEditState {
     String? kgDescargados,
     this.remitoUrl,
     this.remitoPathStorage,
-  })  : descripcionCargaCtrl =
+  })  : productoLibreCtrl = TextEditingController(text: producto ?? ''),
+        descripcionCargaCtrl =
             TextEditingController(text: descripcionCarga ?? ''),
         kgCargadosCtrl = TextEditingController(text: kgCargados ?? ''),
         remitoNumeroCtrl = TextEditingController(text: remitoNumero ?? ''),
@@ -520,6 +526,7 @@ class _TramoEditState {
   }
 
   void dispose() {
+    productoLibreCtrl.dispose();
     descripcionCargaCtrl.dispose();
     kgCargadosCtrl.dispose();
     remitoNumeroCtrl.dispose();
@@ -677,9 +684,12 @@ class _TramoCard extends StatelessWidget {
         const SizedBox(height: 8),
         // Producto — dropdown poblado con productos de la empresa
         // origen de la tarifa. Si no hay tarifa, queda deshabilitado.
+        // Si la empresa NO tiene productos catalogados, cae a texto
+        // libre usando `productoLibreCtrl` (persistente del tramo).
         _DropdownProducto(
           empresaOrigenId: tarifa?.empresaOrigenId,
           valor: state.producto,
+          libreCtrl: state.productoLibreCtrl,
           onChanged: (p) {
             state.producto = p;
             onCambio();
@@ -785,11 +795,17 @@ class _BotonAgregarTramo extends StatelessWidget {
 class _DropdownProducto extends StatelessWidget {
   final String? empresaOrigenId;
   final String? valor;
+  /// Controller para el fallback de texto libre (cuando la empresa
+  /// origen no tiene productos catalogados). Debe vivir en el state
+  /// del padre — si se crea acá en cada build, se pierde el foco al
+  /// tipear (cada keystroke triggerea setState).
+  final TextEditingController libreCtrl;
   final ValueChanged<String?> onChanged;
 
   const _DropdownProducto({
     required this.empresaOrigenId,
     required this.valor,
+    required this.libreCtrl,
     required this.onChanged,
   });
 
@@ -822,13 +838,14 @@ class _DropdownProducto extends StatelessWidget {
         }
         if (productos.isEmpty) {
           // Empresa sin productos catalogados — caer a texto libre
-          // para no bloquear al operador.
+          // para no bloquear al operador. El controller viene de
+          // afuera (persistente) para no perder foco en cada keystroke.
           return TextField(
+            controller: libreCtrl,
             decoration: const InputDecoration(
               labelText: 'Producto (libre — la empresa no tiene catálogo)',
               border: OutlineInputBorder(),
             ),
-            controller: TextEditingController(text: valor ?? ''),
             onChanged: onChanged,
           );
         }
