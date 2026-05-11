@@ -138,10 +138,40 @@ class AuthService {
       final apodo = (result['apodo'] ?? '').toString().trim();
       final rol = (result['rol'] ?? 'USUARIO').toString();
 
-      // 2) Iniciamos sesión en Firebase Auth con el custom token.
-      await _auth.signInWithCustomToken(token);
+      // 2) Limpiamos cualquier sesión previa de Firebase Auth ANTES de
+      //    intercambiar el custom token. Sin esto, si quedó un user
+      //    pegado de un intento previo (ej. el reloj del device estaba
+      //    desfasado y el token vencía instantáneo), el SDK puede
+      //    quedar en un estado raro y `signInWithCustomToken` se cuelga
+      //    para siempre sin tirar excepción. Esto pasa puntualmente en
+      //    Android cuando los Google Play Services están desactualizados
+      //    o el clock skew es >5min.
+      try {
+        if (_auth.currentUser != null) {
+          await _auth.signOut().timeout(const Duration(seconds: 5));
+        }
+      } catch (e) {
+        debugPrint('⚠️ signOut previo falló (lo ignoramos): $e');
+      }
 
-      // 3) Persistimos los datos en SharedPreferences para que la app
+      // 3) Iniciamos sesión en Firebase Auth con el custom token.
+      //
+      // Lleva timeout explícito de 15s — el SDK NO lo trae por default
+      // y, ante problemas de red / Play Services / reloj desfasado,
+      // queda colgado indefinido. Mejor fallar rápido y mostrar un
+      // error accionable que dejar al user mirando un spinner eterno.
+      debugPrint('🔐 signInWithCustomToken iniciando…');
+      await _auth.signInWithCustomToken(token).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw TimeoutException(
+          'Firebase Auth no respondió. Revisá fecha/hora del celular '
+          '(debe estar en automático) y que Google Play Services esté '
+          'actualizado.',
+        ),
+      );
+      debugPrint('🔐 signInWithCustomToken OK uid=${_auth.currentUser?.uid}');
+
+      // 4) Persistimos los datos en SharedPreferences para que la app
       //    los muestre rápido sin tocar Firestore en cada pantalla.
       // Apodo cacheado para que el saludo del dashboard sea síncrono
       // (sin flicker "Bienvenido Santiago" → "Bienvenido Santi").
@@ -157,9 +187,17 @@ class AuthService {
       debugPrint('🚨 signInWithCustomToken → ${e.code}: ${e.message}');
       return LoginResult.error(
           'No se pudo iniciar sesión (${e.code}). Reintentá en un momento.');
-    } on TimeoutException catch (_) {
+    } on TimeoutException catch (e) {
+      // El TimeoutException puede venir del HTTP a la function (sin
+      // conexión / function fría / red lenta) o del signInWithCustomToken
+      // (Play Services / clock skew). Si trae mensaje específico lo
+      // mostramos tal cual; si no, fallback al genérico de red.
+      final msg = e.message?.trim();
       return LoginResult.error(
-          'Tiempo de espera agotado. Verifique su señal de internet.');
+        (msg != null && msg.isNotEmpty)
+            ? msg
+            : 'Tiempo de espera agotado. Verifique su señal de internet.',
+      );
     } on DioException catch (e) {
       // Logs defensivos: NO incluir el body de la respuesta (puede traer
       // tokens si el callable tuvo éxito parcial), NO incluir el path
