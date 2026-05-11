@@ -53,6 +53,14 @@ const DOCS_EMPLEADO = {
   'Manejo Defensivo': 'CURSO_DE_MANEJO_DEFENSIVO',
 };
 
+/// Ventana hacia adelante para el "resumen diario de vencimientos
+/// próximos" que recibe Giagante por WhatsApp (personal + vehículos
+/// + empresas). Un documento entra al resumen si vence dentro de
+/// los próximos N días. Subido de 7 a 15 días el 2026-05-12 a pedido
+/// de Santiago — 7 daba muy poco margen para renovar trámites de
+/// Bahía Blanca (RTO, seguros) que tardan ~10-14 días hábiles.
+const DIAS_AVISO_VENCIMIENTO_PROXIMO = 15;
+
 // Vencimientos auditados de VEHICULOS por tipo. Replica de
 // `lib/core/constants/vencimientos_config.dart`. Mantener sincronizado.
 const DOCS_VEHICULO = {
@@ -1088,7 +1096,7 @@ async function _runOnce(fs) {
                 const fechaStr = aIsoLocal(data[`VENCIMIENTO_${campoBase}`]);
                 const dias = calcularDiasRestantes(fechaStr);
                 if (dias == null) continue;
-                if (dias < 0 || dias > 7) continue;
+                if (dias < 0 || dias > DIAS_AVISO_VENCIMIENTO_PROXIMO) continue;
                 itemsPersonal.push({ chofer: nombre, etiqueta, fecha: fechaStr, dias });
               }
             }
@@ -1108,7 +1116,7 @@ async function _runOnce(fs) {
                 const fechaStr = aIsoLocal(v[spec.campoFecha]);
                 const dias = calcularDiasRestantes(fechaStr);
                 if (dias == null) continue;
-                if (dias < 0 || dias > 7) continue;
+                if (dias < 0 || dias > DIAS_AVISO_VENCIMIENTO_PROXIMO) continue;
                 itemsVehiculos.push({
                   patente,
                   tipoUnidad: tipo,
@@ -1132,7 +1140,7 @@ async function _runOnce(fs) {
                   const fechaStr = aIsoLocal(data[docSpec.campoFecha]);
                   const dias = calcularDiasRestantes(fechaStr);
                   if (dias == null) continue;
-                  if (dias < 0 || dias > 7) continue;
+                  if (dias < 0 || dias > DIAS_AVISO_VENCIMIENTO_PROXIMO) continue;
                   itemsEmpresas.push({
                     empresa: nombreEmpresa,
                     etiqueta: docSpec.etiqueta,
