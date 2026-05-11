@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/cuit_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/dato_editable.dart';
 import '../models/empresa_logistica.dart';
@@ -308,11 +309,19 @@ class _EditarEmpresaSheet extends StatelessWidget {
                 ),
                 DatoEditableTexto(
                   etiqueta: 'CUIT (opcional)',
-                  valor: empresa.cuit ?? '',
+                  // Mostramos el CUIT formateado XX-XXXXXXXX-X (si el
+                  // doc tiene solo dígitos lo formatea; si tiene
+                  // guiones queda igual).
+                  valor: CuitInputFormatter.formatear(empresa.cuit ?? ''),
                   aplicarMayusculas: false,
+                  inputFormatters: [CuitInputFormatter()],
+                  // Persistimos con guiones también — operador puede
+                  // leer el campo tal cual sin re-formatear server-side.
                   onSave: (v) => setCampo(
                     'cuit',
-                    v.trim().isEmpty ? null : v.trim(),
+                    v.trim().isEmpty
+                        ? null
+                        : CuitInputFormatter.formatear(v),
                   ),
                 ),
                 DatoEditableTexto(
@@ -700,8 +709,10 @@ class _AltaEmpresaDialogState extends State<_AltaEmpresaDialog> {
             TextField(
               controller: _cuitCtrl,
               keyboardType: TextInputType.number,
+              inputFormatters: [CuitInputFormatter()],
               decoration: const InputDecoration(
                 labelText: 'CUIT (opcional)',
+                hintText: 'XX-XXXXXXXX-X',
               ),
             ),
             const SizedBox(height: 8),
@@ -753,11 +764,16 @@ class _AltaEmpresaDialogState extends State<_AltaEmpresaDialog> {
       _error = null;
     });
     try {
+      // El TextField del CUIT ya muestra los guiones (vía
+      // CuitInputFormatter), así que `_cuitCtrl.text` viene formateado.
+      // Persistimos tal cual para que el doc en Firestore quede
+      // consistente con lo que ve el operador.
+      final cuitRaw = _cuitCtrl.text.trim();
       await LogisticaService.crearEmpresa(
         nombre: nombre,
         tipo: widget.tipo,
         apodo: _apodoCtrl.text.trim().isEmpty ? null : _apodoCtrl.text.trim(),
-        cuit: _cuitCtrl.text.trim().isEmpty ? null : _cuitCtrl.text.trim(),
+        cuit: cuitRaw.isEmpty ? null : CuitInputFormatter.formatear(cuitRaw),
         contacto: _contactoCtrl.text.trim().isEmpty
             ? null
             : _contactoCtrl.text.trim(),
