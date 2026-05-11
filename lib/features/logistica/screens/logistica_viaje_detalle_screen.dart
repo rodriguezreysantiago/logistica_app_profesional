@@ -478,18 +478,12 @@ class _BotoneraAcciones extends StatelessWidget {
           ),
         ),
         if (v.activo) ...[
-          OutlinedButton.icon(
-            onPressed: () => _toggleLiquidado(context, v),
-            icon: Icon(
-              v.liquidado ? Icons.undo : Icons.check_circle_outline,
-              size: 18,
-            ),
-            label: Text(v.liquidado ? 'DESMARCAR LIQUIDADO' : 'MARCAR LIQUIDADO'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.accentGreen,
-              side: const BorderSide(color: AppColors.accentGreen),
-            ),
-          ),
+          // Botón "MARCAR/DESMARCAR LIQUIDADO" eliminado 2026-05-11.
+          // La liquidación ahora se hace en bulk desde la pantalla
+          // LIQUIDACIÓN (filtros mes + empresa empleadora del chofer).
+          // El flag `liquidado` del viaje SE MANTIENE en el modelo y
+          // se sigue mostrando en el chip de cabecera — solo cambió
+          // el lugar donde se setea (de individual aquí a masivo allá).
           OutlinedButton.icon(
             onPressed: () => _confirmarBorrar(context, v),
             icon: const Icon(Icons.delete_outline, size: 18),
@@ -513,23 +507,12 @@ class _BotoneraAcciones extends StatelessWidget {
     );
   }
 
-  Future<void> _toggleLiquidado(BuildContext ctx, Viaje v) async {
-    final messenger = ScaffoldMessenger.of(ctx);
-    final dni = PrefsService.dni;
-    try {
-      if (v.liquidado) {
-        await ViajesService.desmarcarLiquidado(
-            viajeId: v.id, actualizadoPorDni: dni);
-        AppFeedback.successOn(messenger, 'Marcado como NO liquidado.');
-      } else {
-        await ViajesService.marcarLiquidado(
-            viajeId: v.id, liquidadoPorDni: dni);
-        AppFeedback.successOn(messenger, 'Marcado como liquidado.');
-      }
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error: $e');
-    }
-  }
+  // _toggleLiquidado() eliminado 2026-05-11 junto con el botón
+  // individual de liquidar. La acción ahora se hace en bulk desde
+  // la pantalla LIQUIDACIÓN. Los métodos
+  // `ViajesService.marcarLiquidado` y `desmarcarLiquidado` siguen
+  // existiendo (los usa la pantalla nueva) — solo se removió el
+  // call site individual de acá.
 
   Future<void> _confirmarBorrar(BuildContext ctx, Viaje v) async {
     final motivoCtrl = TextEditingController();
@@ -767,7 +750,7 @@ class _ChipEstado extends StatelessWidget {
     final color = switch (estado) {
       EstadoViaje.planeado => AppColors.accentBlue,
       EstadoViaje.enCurso => AppColors.accentAmber,
-      EstadoViaje.completado => AppColors.accentGreen,
+      EstadoViaje.concluido => AppColors.accentGreen,
       EstadoViaje.cancelado => AppColors.accentRed,
       EstadoViaje.postergado => Colors.purple,
     };

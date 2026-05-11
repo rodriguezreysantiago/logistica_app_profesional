@@ -270,6 +270,19 @@ class AppFormatters {
     return '${two(l.day)}/${two(l.month)}';
   }
 
+  /// Formatea un DateTime a "Mes YYYY" (ej. "Mayo 2026") en español.
+  /// Pensado para encabezados de períodos mensuales (pantalla
+  /// LIQUIDACIÓN, reportes mensuales). Devuelve "—" si fecha es null.
+  static String formatearMes(DateTime? fecha) {
+    if (fecha == null) return '—';
+    const meses = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+    ];
+    final l = fecha.isUtc ? fecha.toLocal() : fecha;
+    return '${meses[l.month - 1]} ${l.year}';
+  }
+
   // --- CÁLCULO DE DÍAS (PARA EL SEMÁFORO) ---
   //
   // Devuelve `null` cuando no se pudo parsear la fecha (input vacío,

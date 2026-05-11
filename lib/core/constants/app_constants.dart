@@ -53,6 +53,7 @@
   static const String adminLogisticaViajes = '/admin_logistica_viajes';
   static const String adminLogisticaViajeForm = '/admin_logistica_viaje_form';
   static const String adminLogisticaViajeDetalle = '/admin_logistica_viaje_detalle';
+  static const String adminLogisticaLiquidacion = '/admin_logistica_liquidacion';
 
   /// ABM de docs por empresa empleadora (Póliza ART + Formulario 931).
   /// Admin/Supervisor: una sola pantalla con tarjeta por empresa, cada

@@ -19,7 +19,12 @@ import 'tarifa_logistica.dart';
 enum EstadoViaje {
   planeado('PLANEADO', 'Planeado'),
   enCurso('EN_CURSO', 'En curso'),
-  completado('COMPLETADO', 'Completado'),
+  // Antes 'COMPLETADO' (rename 2026-05-11). Significa: el viaje
+  // terminó la operación física (carga + descarga). La liquidación
+  // del viaje (pagar al chofer + cobrar a la empresa) se maneja en
+  // la pantalla LIQUIDACION via el flag `liquidado`, NO desde acá.
+  // Etiqueta visible "Concluido" — más natural en español operativo.
+  concluido('CONCLUIDO', 'Concluido'),
   cancelado('CANCELADO', 'Cancelado'),
   postergado('POSTERGADO', 'Postergado');
 
@@ -28,9 +33,11 @@ enum EstadoViaje {
   const EstadoViaje(this.codigo, this.etiqueta);
 
   static EstadoViaje fromCodigo(String? codigo) {
-    // Compat retro: 'PROGRAMADO' antiguo se mapea a planeado por si
-    // hay docs viejos en Firestore (antes del rename 2026-05-09).
+    // Compat retro:
+    //   'PROGRAMADO' antiguo se mapea a planeado (rename 2026-05-09).
+    //   'COMPLETADO' antiguo se mapea a concluido (rename 2026-05-11).
     if (codigo == 'PROGRAMADO') return EstadoViaje.planeado;
+    if (codigo == 'COMPLETADO') return EstadoViaje.concluido;
     return EstadoViaje.values.firstWhere(
       (e) => e.codigo == codigo,
       orElse: () => EstadoViaje.planeado,

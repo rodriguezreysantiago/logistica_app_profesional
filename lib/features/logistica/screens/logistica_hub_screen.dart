@@ -62,7 +62,10 @@ class LogisticaHubScreen extends StatelessWidget {
                   } else {
                     columnas = 2;
                   }
-                  const totalTiles = 5;
+                  // 6 tiles: TARIFAS, EMPRESAS, UBICACIONES, MAPA,
+                  // VIAJES, LIQUIDACIÓN. Si se suma o saca uno,
+                  // ajustar acá Y la lista de _HubTile abajo.
+                  const totalTiles = 6;
                   final filas = (totalTiles / columnas).ceil();
                   const spacing = 12.0;
                   // Helper compartido — clamp 0.45..2.0 + fallback
@@ -130,7 +133,7 @@ class LogisticaHubScreen extends StatelessWidget {
                     ),
                     _HubTile(
                       titulo: 'VIAJES',
-                      subtitulo: 'Ejecución y liquidación',
+                      subtitulo: 'Ejecución de cada viaje',
                       icono: Icons.route_outlined,
                       color: AppColors.accentOrange,
                       ruta: AppRoutes.adminLogisticaViajes,
@@ -141,6 +144,13 @@ class LogisticaHubScreen extends StatelessWidget {
                         color: AppColors.accentOrange,
                         campoActivo: 'activo',
                       ),
+                    ),
+                    const _HubTile(
+                      titulo: 'LIQUIDACIÓN',
+                      subtitulo: 'Resumen mensual + facturación',
+                      icono: Icons.account_balance_wallet_outlined,
+                      color: AppColors.accentGreen,
+                      ruta: AppRoutes.adminLogisticaLiquidacion,
                     ),
                   ],
                 );
