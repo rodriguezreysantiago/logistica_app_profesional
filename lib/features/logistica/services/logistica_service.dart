@@ -94,6 +94,69 @@ class LogisticaService {
     await empresasCol.doc(id).update(cambios);
   }
 
+  /// Cuenta cuántas tarifas usan esta empresa (como origen o destino).
+  static Future<int> contarTarifasQueUsanEmpresa(String empresaId) async {
+    if (empresaId.isEmpty) return 0;
+    final results = await Future.wait([
+      tarifasCol
+          .where('empresa_origen_id', isEqualTo: empresaId)
+          .count()
+          .get(),
+      tarifasCol
+          .where('empresa_destino_id', isEqualTo: empresaId)
+          .count()
+          .get(),
+    ]);
+    return (results[0].count ?? 0) + (results[1].count ?? 0);
+  }
+
+  /// Cuenta cuántas ubicaciones tienen esta empresa asociada en su
+  /// `empresa_ids`.
+  static Future<int> contarUbicacionesQueUsanEmpresa(
+      String empresaId) async {
+    if (empresaId.isEmpty) return 0;
+    final res = await ubicacionesCol
+        .where('empresa_ids', arrayContains: empresaId)
+        .count()
+        .get();
+    return res.count ?? 0;
+  }
+
+  /// Elimina (hard-delete) una empresa de Firestore. Antes verifica
+  /// que no esté siendo referenciada por tarifas activas o por
+  /// ubicaciones — sino tira [StateError] con mensaje accionable.
+  ///
+  /// Viajes históricos NO se rompen: cada viaje persiste
+  /// `tarifa_snapshot` con el nombre de la empresa cacheado al
+  /// momento del viaje (no apunta por id).
+  static Future<void> eliminarEmpresa(String id) async {
+    if (id.isEmpty) {
+      throw ArgumentError('id de empresa vacío.');
+    }
+    final results = await Future.wait([
+      contarTarifasQueUsanEmpresa(id),
+      contarUbicacionesQueUsanEmpresa(id),
+    ]);
+    final enTarifas = results[0];
+    final enUbicaciones = results[1];
+    if (enTarifas > 0 || enUbicaciones > 0) {
+      final partes = <String>[];
+      if (enTarifas > 0) {
+        partes.add('$enTarifas ${enTarifas == 1 ? "tarifa" : "tarifas"}');
+      }
+      if (enUbicaciones > 0) {
+        partes.add(
+          '$enUbicaciones ${enUbicaciones == 1 ? "ubicación" : "ubicaciones"}',
+        );
+      }
+      throw StateError(
+        'No se puede eliminar: la empresa está usada en ${partes.join(" y ")}. '
+        'Primero borrá o reasigná esas referencias.',
+      );
+    }
+    await empresasCol.doc(id).delete();
+  }
+
   /// Setea la lista completa de productos de una empresa. Lista
   /// vacía → borra el campo productos (no queda lista vacía en
   /// Firestore para mantener docs livianos).

@@ -187,13 +187,16 @@ class _CardUbicacion extends StatelessWidget {
               ],
             ),
           ),
-          Switch(
-            value: ubicacion.activa,
-            onChanged: (v) => LogisticaService.actualizarUbicacion(
-              id: ubicacion.id,
-              cambios: {'activa': v},
-            ),
-            activeTrackColor: AppColors.accentTeal,
+          // Botón eliminar directo desde la card. Antes había un
+          // Switch activa/inactiva acá, pero el operador NO usa el
+          // estado inactivo (Santiago 2026-05-12): si no usa más la
+          // ubicación, la borra. El check de referencias en tarifas
+          // del service evita borrar algo que esté en uso.
+          IconButton(
+            icon: const Icon(Icons.delete_outline,
+                color: AppColors.accentRed),
+            tooltip: 'Eliminar ubicación',
+            onPressed: () => _confirmarEliminar(context),
           ),
         ],
       ),
@@ -207,6 +210,47 @@ class _CardUbicacion extends StatelessWidget {
       isScrollControlled: true,
       builder: (_) => _EditarUbicacionSheet(ubicacion: ubicacion),
     );
+  }
+
+  /// Confirma con AlertDialog + llama al service. Si la ubicación
+  /// está en uso por alguna tarifa, el service tira StateError con
+  /// mensaje accionable que mostramos en SnackBar.
+  Future<void> _confirmarEliminar(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirma = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: Theme.of(dCtx).colorScheme.surface,
+        title: const Text('¿Eliminar ubicación?'),
+        content: Text(
+          '${ubicacion.nombre}\n\n'
+          'Esta acción no se puede deshacer. Si la ubicación está usada '
+          'por alguna tarifa, no se va a poder borrar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('CANCELAR'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.accentRed,
+            ),
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            child: const Text('ELIMINAR'),
+          ),
+        ],
+      ),
+    );
+    if (confirma != true) return;
+    try {
+      await LogisticaService.eliminarUbicacion(ubicacion.id);
+      AppFeedback.successOn(messenger, 'Ubicación eliminada.');
+    } on StateError catch (e) {
+      AppFeedback.errorOn(messenger, e.message);
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al eliminar: $e');
+    }
   }
 }
 

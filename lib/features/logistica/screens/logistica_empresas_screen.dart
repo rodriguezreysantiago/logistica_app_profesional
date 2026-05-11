@@ -178,6 +178,17 @@ class _CardEmpresa extends StatelessWidget {
                 ),
                 activeTrackColor: AppColors.accentBlue,
               ),
+              // Botón eliminar al lado del switch. El check de
+              // referencias en tarifas + ubicaciones se hace
+              // server-side; si la empresa está en uso, no se borra
+              // y mostramos un mensaje accionable.
+              IconButton(
+                icon: const Icon(Icons.delete_outline,
+                    color: AppColors.accentRed),
+                tooltip: 'Eliminar empresa',
+                onPressed: () => _confirmarEliminar(context),
+                visualDensity: VisualDensity.compact,
+              ),
             ],
           ),
           if (empresa.cuit != null || empresa.contacto != null) ...[
@@ -204,6 +215,49 @@ class _CardEmpresa extends StatelessWidget {
       isScrollControlled: true,
       builder: (_) => _EditarEmpresaSheet(empresa: empresa),
     );
+  }
+
+  /// Confirma + elimina la empresa. El service chequea referencias
+  /// (tarifas como origen/destino, ubicaciones que la tienen
+  /// asociada) y tira StateError accionable si la empresa está en
+  /// uso. En ese caso mostramos el mensaje exacto del service en
+  /// SnackBar y no se hace el delete.
+  Future<void> _confirmarEliminar(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final confirma = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: Theme.of(dCtx).colorScheme.surface,
+        title: const Text('¿Eliminar empresa?'),
+        content: Text(
+          '${empresa.nombre}\n\n'
+          'Esta acción no se puede deshacer. Si la empresa está usada '
+          'por alguna tarifa o ubicación, no se va a poder borrar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('CANCELAR'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.accentRed,
+            ),
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            child: const Text('ELIMINAR'),
+          ),
+        ],
+      ),
+    );
+    if (confirma != true) return;
+    try {
+      await LogisticaService.eliminarEmpresa(empresa.id);
+      AppFeedback.successOn(messenger, 'Empresa eliminada.');
+    } on StateError catch (e) {
+      AppFeedback.errorOn(messenger, e.message);
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al eliminar: $e');
+    }
   }
 }
 
