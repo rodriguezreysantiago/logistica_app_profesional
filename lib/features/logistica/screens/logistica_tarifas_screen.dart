@@ -3,6 +3,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/tarifa_logistica.dart';
@@ -201,7 +202,7 @@ class _CardTarifa extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Línea 1: tipo + flete + activa
+          // Línea 1: tipo + flete + activa + botón eliminar
           Row(
             children: [
               Icon(
@@ -217,15 +218,33 @@ class _CardTarifa extends StatelessWidget {
               _ChipFlete(flete: tarifa.flete),
               const Spacer(),
               if (!tarifa.activa)
-                const Text(
-                  'INACTIVA',
-                  style: TextStyle(
-                    color: Colors.white38,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.3,
+                const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Text(
+                    'INACTIVA',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.3,
+                    ),
                   ),
                 ),
+              // Botón eliminar. El service chequea viajes en curso
+              // (PLANEADO / EN_CURSO) que usan la tarifa antes de
+              // borrar. Si hay alguno, muestra mensaje accionable.
+              IconButton(
+                icon: const Icon(Icons.delete_outline,
+                    color: AppColors.accentRed),
+                tooltip: 'Eliminar tarifa',
+                onPressed: () => _confirmarEliminar(context),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                  minWidth: 32,
+                  minHeight: 32,
+                ),
+              ),
             ],
           ),
           if (tarifa.producto != null) ...[
@@ -279,6 +298,47 @@ class _CardTarifa extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _confirmarEliminar(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ruta =
+        '${tarifa.empresaOrigenNombre} → ${tarifa.empresaDestinoNombre}';
+    final confirma = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: Theme.of(dCtx).colorScheme.surface,
+        title: const Text('¿Eliminar tarifa?'),
+        content: Text(
+          '$ruta\n\n'
+          'Esta acción no se puede deshacer. Si la tarifa está usada '
+          'por algún viaje en curso (PLANEADO o EN CURSO), no se va '
+          'a poder borrar. Los viajes históricos no se rompen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('CANCELAR'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.accentRed,
+            ),
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            child: const Text('ELIMINAR'),
+          ),
+        ],
+      ),
+    );
+    if (confirma != true) return;
+    try {
+      await LogisticaService.eliminarTarifa(tarifa.id);
+      AppFeedback.successOn(messenger, 'Tarifa eliminada.');
+    } on StateError catch (e) {
+      AppFeedback.errorOn(messenger, e.message);
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al eliminar: $e');
+    }
   }
 }
 

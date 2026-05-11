@@ -471,4 +471,63 @@ class LogisticaService {
   }) async {
     await tarifasCol.doc(id).update(cambios);
   }
+
+  /// Cuenta cuántos viajes EN CURSO (estado PLANEADO o EN_CURSO,
+  /// activos) usan esta tarifa en alguno de sus tramos.
+  ///
+  /// Por qué scan client-side: con multi-tramo la tarifa puede estar
+  /// en cualquier posición del array `tramos[]`, y Firestore no
+  /// soporta queries sobre campos dentro de arrays de objetos. Como
+  /// son ~100-200 viajes activos típicamente, el scan es viable y
+  /// más simple que mantener un campo denormalizado `tarifa_ids[]`.
+  static Future<int> contarViajesEnCursoConTarifa(String tarifaId) async {
+    if (tarifaId.isEmpty) return 0;
+    final col = _db.collection(AppCollections.viajesLogistica);
+    final snap = await col.where('activo', isEqualTo: true).get();
+    var count = 0;
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      final estado = (data['estado'] ?? '').toString();
+      // Solo viajes en curso. Históricos (CONCLUIDO, CANCELADO,
+      // POSTERGADO) no bloquean el delete — usan tarifa_snapshot.
+      if (estado != 'PLANEADO' && estado != 'EN_CURSO') continue;
+
+      final tramos = data['tramos'] as List?;
+      if (tramos != null) {
+        for (final t in tramos) {
+          if (t is Map && t['tarifa_id'] == tarifaId) {
+            count++;
+            break;
+          }
+        }
+      } else if (data['tarifa_id'] == tarifaId) {
+        // Compat viajes viejos single-tramo con `tarifa_id` al
+        // nivel del doc.
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// Elimina (hard-delete) una tarifa. Antes verifica que no esté
+  /// usada por viajes EN CURSO (PLANEADO/EN_CURSO) — sino tira
+  /// [StateError] con mensaje accionable.
+  ///
+  /// Viajes históricos (CONCLUIDO/CANCELADO/POSTERGADO) NO bloquean:
+  /// cada viaje persistió `tarifa_snapshot` con los datos cacheados
+  /// al momento del viaje, así que siguen funcionando.
+  static Future<void> eliminarTarifa(String id) async {
+    if (id.isEmpty) {
+      throw ArgumentError('id de tarifa vacío.');
+    }
+    final enCurso = await contarViajesEnCursoConTarifa(id);
+    if (enCurso > 0) {
+      throw StateError(
+        'No se puede eliminar: la tarifa está en $enCurso '
+        '${enCurso == 1 ? "viaje" : "viajes"} en curso. '
+        'Primero concluí, cancelá o cambiale la tarifa a esos viajes.',
+      );
+    }
+    await tarifasCol.doc(id).delete();
+  }
 }

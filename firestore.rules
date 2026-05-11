@@ -420,9 +420,13 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdminOrSupervisor();
     }
 
+    // TARIFAS_LOGISTICA: igual que empresas/ubicaciones, permitimos
+    // delete a admin/supervisor (Santiago 2026-05-12). El cliente
+    // hace check de viajes en curso (PLANEADO/EN_CURSO) que usan la
+    // tarifa antes de borrar — si hay > 0, tira error accionable.
+    // Viajes históricos siguen funcionando con su `tarifa_snapshot`.
     match /TARIFAS_LOGISTICA/{doc} {
-      allow read, create, update: if isAdminOrSupervisor();
-      allow delete: if false;
+      allow read, create, update, delete: if isAdminOrSupervisor();
     }
 
     // ========================================================================
