@@ -248,8 +248,8 @@ class _LogisticaMapaTarifasScreenState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${f.tarifa.empresaOrigenNombre} → '
-                            '${f.tarifa.empresaDestinoNombre}',
+                            '${f.tarifa.ubicacionOrigenEtiqueta} → '
+                            '${f.tarifa.ubicacionDestinoEtiqueta}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -744,8 +744,8 @@ class _LeyendaInferior extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          '${t.tarifa.empresaOrigenNombre} → '
-                          '${t.tarifa.empresaDestinoNombre}',
+                          '${t.tarifa.ubicacionOrigenEtiqueta} → '
+                          '${t.tarifa.ubicacionDestinoEtiqueta}',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 12,
@@ -811,7 +811,7 @@ class _DetalleTarifaSheet extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '${t.empresaOrigenNombre} → ${t.empresaDestinoNombre}',
+                  '${t.ubicacionOrigenEtiqueta} → ${t.ubicacionDestinoEtiqueta}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
