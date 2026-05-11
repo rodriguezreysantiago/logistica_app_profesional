@@ -143,12 +143,9 @@ if (!user || !pass) {
 
   if (relevantes.length === 0) {
     console.log(
-      "❌ Ningún eventName parece de conducción (frenadas, aceleración,\n" +
-      "   velocidad, idling). Capaz el `/v2/report` que tenemos\n" +
-      "   contratado solo trae eventos de posición + ignición.\n\n" +
-      "   Próximo paso: consultar a Sitrack si existe un endpoint\n" +
-      "   tipo /v2/events, /v2/alerts o /v2/harsh-events que sí\n" +
-      "   exponga eventos de conducción."
+      "❌ Ningún eventName del último report parece de conducción.\n" +
+      "   Eso es ESPERADO con /v2/report (solo último estado).\n" +
+      "   Para histórico de eventos hay que activar /files/reports.\n"
     );
   } else {
     console.log("✅ Eventos relevantes para calcular ICM:\n");
@@ -156,9 +153,109 @@ if (!user || !pass) {
       console.log(`   ▸ ${evt}  (${info.count} reports)`);
     }
     console.log(
-      "\n   Estos los podemos pollear, persistir en\n" +
-      "   SITRACK_EVENTOS_HISTORICO y agregar por chofer/día.\n" +
-      "   La fórmula del ICM se calcula con count × peso → 100 - penalización."
+      "\n   (igualmente, /files/reports daría histórico completo)\n"
+    );
+  }
+
+  // ─── Análisis de campos disponibles ───
+  // Lo CRÍTICO para decidir si arrancamos Fase 1: saber qué campos
+  // ricos para ICM nos están mandando los equipos. Si los samplings
+  // y los campos onboardComputer* vienen poblados, podemos calcular
+  // un ICM aproximado YA sin esperar a Sitrack.
+  console.log("\n=== CAMPOS RICOS DISPONIBLES (para ICM aproximado) ===\n");
+
+  const camposClaveICM = [
+    "onboardComputerMaxSpeed",
+    "onboardComputerTotalIdleTime",
+    "onboardComputerHourmeter",
+    "onboardComputerOdometer",
+    "onboardComputerFuelRateAverageConsumption",
+    "onboardComputerLastActivityConsumedFuelIdleVolume",
+    "onboardComputerLastActivityConsumedFuelInRpmExcessVolume",
+    "onboardComputerLastActivityConsumedFuelInMovementVolume",
+    "speedSampling",
+    "rpmSampling",
+    "acceleratorSampling",
+    "coolantTemperatureSampling",
+    "cartographyLimitSpeed",
+    "rpm",
+    "speed",
+    "gpsSpeed",
+    "driverDocumentNumber",
+    "driverName",
+    "trailerId",
+  ];
+
+  const conteoCampos = new Map();
+  for (const campo of camposClaveICM) {
+    conteoCampos.set(campo, { presentes: 0, ejemplos: [] });
+  }
+
+  for (const r of reports) {
+    for (const campo of camposClaveICM) {
+      const v = r[campo];
+      if (v != null && v !== "" && v !== 0 &&
+          !(Array.isArray(v) && v.length === 0)) {
+        const bucket = conteoCampos.get(campo);
+        bucket.presentes++;
+        if (bucket.ejemplos.length < 2) {
+          let valorMostrado;
+          if (Array.isArray(v)) {
+            valorMostrado = `array[${v.length}]: ${JSON.stringify(v).substring(0, 80)}…`;
+          } else if (typeof v === "object") {
+            valorMostrado = JSON.stringify(v).substring(0, 80);
+          } else {
+            valorMostrado = String(v);
+          }
+          bucket.ejemplos.push({
+            asset: r.assetName ?? r.assetId ?? "?",
+            valor: valorMostrado,
+          });
+        }
+      }
+    }
+  }
+
+  const totalReports = reports.length;
+  let camposUtiles = 0;
+  for (const campo of camposClaveICM) {
+    const bucket = conteoCampos.get(campo);
+    const pct = totalReports === 0
+      ? 0
+      : Math.round((bucket.presentes / totalReports) * 100);
+    const marca = bucket.presentes > 0 ? "✅" : "  ";
+    console.log(
+      `${marca} ${campo.padEnd(50)} ${bucket.presentes}/${totalReports} (${pct}%)`
+    );
+    if (bucket.ejemplos.length > 0) {
+      for (const ej of bucket.ejemplos) {
+        console.log(`     ${ej.asset.padEnd(15)} → ${ej.valor}`);
+      }
+    }
+    if (bucket.presentes > 0) camposUtiles++;
+  }
+
+  console.log(`\n${camposUtiles} de ${camposClaveICM.length} campos clave vienen poblados.\n`);
+
+  if (camposUtiles >= 5) {
+    console.log(
+      "✅ Hay suficientes datos para arrancar Fase 1 (ICM aproximado)\n" +
+      "   SIN esperar a Sitrack. Próximo paso:\n" +
+      "   - Actualizar sitrackPosicionPoller para persistir los\n" +
+      "     campos extra junto con la posición.\n" +
+      "   - Cron diario que agrega y calcula score 0-100 por chofer.\n"
+    );
+  } else if (camposUtiles >= 2) {
+    console.log(
+      "⚠️  Algunos campos están pero faltan los críticos.\n" +
+      "   Capaz tus equipos no tienen ICAN/computadora de a bordo.\n" +
+      "   Necesario sí o sí activar /files/reports en Sitrack.\n"
+    );
+  } else {
+    console.log(
+      "❌ Casi no hay campos ricos. Los equipos parecen ser GPS\n" +
+      "   básicos sin ICAN. Sin Sitrack no podemos calcular ICM.\n" +
+      "   Único camino: pedir a Sitrack /files/reports + eventos.\n"
     );
   }
 })().catch((e) => {
