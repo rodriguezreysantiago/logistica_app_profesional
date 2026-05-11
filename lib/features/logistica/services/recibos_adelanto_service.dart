@@ -60,7 +60,7 @@ class RecibosAdelantoService {
       final monto = (data['adelanto_monto'] as num?)?.toDouble() ?? 0;
       if (monto <= 0) {
         throw StateError(
-            'El viaje no tiene adelanto cargado - no hay nada que imprimir.');
+            'El viaje no tiene adelanto cargado — no hay nada que imprimir.');
       }
       final yaTiene = (data['numero_recibo_adelanto'] as num?)?.toInt();
       if (yaTiene != null) {
@@ -95,7 +95,24 @@ class RecibosAdelantoService {
     required int numeroRecibo,
     required bool esReimpresion,
   }) async {
-    final doc = pw.Document();
+    // Cargar fuentes Roboto (Regular + Bold) desde assets/fonts/.
+    // Roboto soporta el bloque Latin extendido completo (acentos
+    // españoles, eñes, paréntesis, comillas tipográficas) — Helvetica
+    // embedded del package `pdf` NO los garantiza y crashea cuando
+    // intenta renderear glifos que no tiene. Con Roboto recuperamos
+    // "REIMPRESIÓN", "Observación", "N°", "Pérez", etc. correctos.
+    final robotoRegular = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/Roboto-Regular.ttf'),
+    );
+    final robotoBold = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/Roboto-Bold.ttf'),
+    );
+    final doc = pw.Document(
+      theme: pw.ThemeData.withFont(
+        base: robotoRegular,
+        bold: robotoBold,
+      ),
+    );
     final fechaImpresion = DateTime.now();
 
     // Cargar logo VAVG desde assets/brand/. Se carga UNA vez antes
@@ -131,13 +148,10 @@ class RecibosAdelantoService {
                 ),
               ),
               // ─── Línea de corte (punteada) ───
-              // **OJO**: usar solo ASCII para evitar crash nativo del
-              // plugin `pdf` en Windows. La fuente default (Helvetica)
-              // NO incluye glifos Unicode como ✂ (tijera) o → (flecha)
-              // — al intentar renderearlos el binding nativo crashea
-              // el proceso entero, no es excepción Dart capturable.
-              // Solución a futuro si querés el ícono: cargar una
-              // fuente que lo soporte vía pw.Font.ttf(rootBundle).
+              // Roboto soporta ✂ (U+2702), pero la fuente regular de
+              // Google Fonts NO trae glifos symbol/emoji — el ícono
+              // se renderea como cuadrado vacío. Para evitar eso,
+              // dejamos texto descriptivo + guiones que sí soporta.
               pw.Container(
                 margin: const pw.EdgeInsets.symmetric(vertical: 8),
                 child: pw.Row(
@@ -145,7 +159,7 @@ class RecibosAdelantoService {
                   children: [
                     pw.Text(
                       '- - - - - - - - - - - - - - - - - - - - - '
-                      'CORTAR POR LA LINEA - - - - - - - - - - - - - - - - - - - - -',
+                      'CORTAR POR LA LÍNEA - - - - - - - - - - - - - - - - - - - - -',
                       style: const pw.TextStyle(
                         fontSize: 8,
                         color: PdfColors.grey600,
@@ -188,12 +202,12 @@ class _Mitad {
   }) {
     final monto = viaje.adelantoMonto ?? 0;
     final fechaAdelanto = viaje.adelantoFecha ?? viaje.fechaCarga ?? fechaImpresion;
-    // Defensivo: si la observación está vacía, usar guion ASCII (NO
-    // em-dash U+2014). Helvetica embedded de `pdf` no garantiza
-    // soporte de glifos fuera de WinAnsi en todas las plataformas.
+    // Si la observación está vacía, usar em-dash (—) como placeholder.
+    // Roboto soporta correctamente U+2014, ya no hace falta el guion
+    // ASCII defensivo.
     final observacion =
         (viaje.adelantoObservacion ?? '').trim().isEmpty
-            ? '-'
+            ? '—'
             : viaje.adelantoObservacion!.trim();
     final choferNombre = viaje.choferNombre ?? viaje.choferDni;
     final dniFmt = AppFormatters.formatearDNI(viaje.choferDni);
@@ -254,9 +268,9 @@ class _Mitad {
                       border: pw.Border.all(color: PdfColors.black, width: 1),
                     ),
                     child: pw.Text(
-                      // "Nro." en lugar de "N°" — el ° (U+00B0) puede
-                      // no renderearse en Helvetica embedded.
-                      'Nro. ${numeroRecibo.toString().padLeft(6, '0')}',
+                      // Roboto soporta ° (U+00B0) — recuperamos
+                      // "N° 000123" más natural para el comprobante.
+                      'N° ${numeroRecibo.toString().padLeft(6, '0')}',
                       style: pw.TextStyle(
                         fontSize: 13,
                         fontWeight: pw.FontWeight.bold,
@@ -283,10 +297,7 @@ class _Mitad {
                             pw.Border.all(color: PdfColors.orange900, width: 0.5),
                       ),
                       child: pw.Text(
-                        // Sin acentos: "REIMPRESION" — el Ó (U+00D3)
-                        // puede crashear el render del PDF en algunas
-                        // versiones de Helvetica embedded.
-                        'REIMPRESION',
+                        'REIMPRESIÓN',
                         style: pw.TextStyle(
                           fontSize: 7,
                           fontWeight: pw.FontWeight.bold,
@@ -309,9 +320,7 @@ class _Mitad {
           ),
           _Linea(
             label: 'Chofer',
-            // Separador "-" en lugar de "·" (middot, U+00B7) por
-            // misma razón que los otros caracteres no-ASCII.
-            valor: '$choferNombre  -  DNI $dniFmt',
+            valor: '$choferNombre  ·  DNI $dniFmt',
             destacado: true,
           ),
           _Linea(
@@ -323,9 +332,7 @@ class _Mitad {
           pw.SizedBox(height: 8),
           // ─── Observación ───
           pw.Text(
-            // Sin acento por la misma razón que arriba (Helvetica
-            // embedded a veces falla con Latin-1 extendido).
-            'Observacion / Concepto:',
+            'Observación / Concepto:',
             style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
           ),
           pw.SizedBox(height: 3),
