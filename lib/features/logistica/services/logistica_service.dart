@@ -219,6 +219,58 @@ class LogisticaService {
     await ubicacionesCol.doc(id).update(cambios);
   }
 
+  /// Setea las ubicaciones asociadas a una empresa (sentido inverso
+  /// del N:M — para el caso de uso "cada empresa tiene N ubicaciones
+  /// de carga/descarga"). Actualiza el `empresa_ids` / `empresa_nombres`
+  /// de cada ubicación afectada con un batch.
+  ///
+  /// `ubicacionIds` es la lista nueva. El service:
+  ///   1. Lee qué ubicaciones tienen actualmente esta empresa
+  ///      asociada (`empresa_ids array-contains empresaId`).
+  ///   2. Calcula diff con la lista nueva: ubicaciones a agregar y a
+  ///      quitar.
+  ///   3. Hace los updates en un batch (atómico).
+  ///
+  /// El campo `empresa_nombres` se mantiene sincronizado: al agregar
+  /// se appendea el nombre actual; al quitar se borra el del array
+  /// (con `arrayRemove` matcheando string exacto). Si la empresa
+  /// cambió de nombre y un doc viejo tiene el viejo, ese stale
+  /// queda — se limpia entrando a la ubicación y re-asignando, no
+  /// es bloqueante.
+  static Future<void> setUbicacionesDeEmpresa({
+    required String empresaId,
+    required String empresaNombre,
+    required List<String> ubicacionIds,
+  }) async {
+    if (empresaId.isEmpty) {
+      throw ArgumentError('empresaId vacío.');
+    }
+    final actualesSnap = await ubicacionesCol
+        .where('empresa_ids', arrayContains: empresaId)
+        .get();
+    final actuales = actualesSnap.docs.map((d) => d.id).toSet();
+    final nuevas = ubicacionIds.toSet();
+    final paraAgregar = nuevas.difference(actuales);
+    final paraQuitar = actuales.difference(nuevas);
+
+    if (paraAgregar.isEmpty && paraQuitar.isEmpty) return;
+
+    final batch = _db.batch();
+    for (final id in paraAgregar) {
+      batch.update(ubicacionesCol.doc(id), {
+        'empresa_ids': FieldValue.arrayUnion([empresaId]),
+        'empresa_nombres': FieldValue.arrayUnion([empresaNombre]),
+      });
+    }
+    for (final id in paraQuitar) {
+      batch.update(ubicacionesCol.doc(id), {
+        'empresa_ids': FieldValue.arrayRemove([empresaId]),
+        'empresa_nombres': FieldValue.arrayRemove([empresaNombre]),
+      });
+    }
+    await batch.commit();
+  }
+
   /// Cuenta cuántas tarifas usan esta ubicación (como origen o destino).
   /// Útil antes de borrar — si > 0, NO se debe permitir hard-delete
   /// porque rompería los snapshots históricos de viajes pasados.

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/dato_editable.dart';
 import '../models/empresa_logistica.dart';
+import '../models/ubicacion_logistica.dart';
 import '../services/logistica_service.dart';
 
 /// ABM de empresas con tabs (CLIENTES / DADORES). Cada tipo en una
@@ -327,7 +329,304 @@ class _EditarEmpresaSheet extends StatelessWidget {
                   empresaId: empresa.id,
                   productos: empresa.productos,
                 ),
+                const SizedBox(height: 12),
+                _BloqueUbicacionesDeEmpresa(
+                  empresaId: empresa.id,
+                  empresaNombre: empresa.nombre,
+                ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bloque "UBICACIONES DE ESTA EMPRESA" en el sheet de edición de
+/// empresa. Lista las ubicaciones que tienen esta empresa en su
+/// `empresa_ids` (relación N:M, lado opuesto del que se gestiona
+/// desde la pantalla de Ubicaciones).
+///
+/// Decisión Santiago 2026-05-12: además de poder asociar empresas
+/// desde una ubicación, también se puede asociar ubicaciones desde
+/// una empresa. Es la misma relación, vista desde el otro lado.
+/// Útil cuando se carga una empresa nueva y tiene varios puntos de
+/// carga/descarga — más natural pensar "Cargill carga en X, Y, Z"
+/// que abrir cada ubicación y agregar "Cargill" una por una.
+class _BloqueUbicacionesDeEmpresa extends StatelessWidget {
+  final String empresaId;
+  final String empresaNombre;
+
+  const _BloqueUbicacionesDeEmpresa({
+    required this.empresaId,
+    required this.empresaNombre,
+  });
+
+  Future<void> _editar(
+    BuildContext context,
+    List<UbicacionLogistica> todasLasUbicaciones,
+    Set<String> seleccionadas,
+  ) async {
+    final res = await showModalBottomSheet<Set<String>>(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      builder: (_) => _SeleccionUbicacionesSheet(
+        todas: todasLasUbicaciones,
+        seleccionadasIniciales: seleccionadas,
+      ),
+    );
+    if (res == null) return;
+    try {
+      await LogisticaService.setUbicacionesDeEmpresa(
+        empresaId: empresaId,
+        empresaNombre: empresaNombre,
+        ubicacionIds: res.toList(),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      AppFeedback.errorOn(
+        ScaffoldMessenger.of(context),
+        'No se pudieron actualizar las ubicaciones: $e',
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<UbicacionLogistica>>(
+      stream: LogisticaService.streamUbicaciones(),
+      builder: (ctx, snap) {
+        final todas = snap.data ?? const <UbicacionLogistica>[];
+        // Ubicaciones que tienen esta empresa asociada.
+        final asociadas = todas
+            .where((u) => u.empresaIds.contains(empresaId))
+            .toList();
+        final asociadasIds = asociadas.map((u) => u.id).toSet();
+
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.place_outlined,
+                      color: AppColors.accentTeal, size: 16),
+                  SizedBox(width: 6),
+                  Text(
+                    'UBICACIONES DE ESTA EMPRESA',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (asociadas.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    'Sin ubicaciones asignadas',
+                    style: TextStyle(color: Colors.white38, fontSize: 13),
+                  ),
+                )
+              else
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: asociadas.map((u) {
+                    return Chip(
+                      label: Text(
+                        u.nombre,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      backgroundColor:
+                          AppColors.accentTeal.withValues(alpha: 0.25),
+                      side: BorderSide(
+                        color: AppColors.accentTeal.withValues(alpha: 0.6),
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                    );
+                  }).toList(),
+                ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => _editar(context, todas, asociadasIds),
+                icon: const Icon(Icons.add, size: 16),
+                label: Text(
+                  asociadas.isEmpty
+                      ? 'ASIGNAR UBICACIONES'
+                      : 'EDITAR UBICACIONES',
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.accentTeal,
+                  side: const BorderSide(color: AppColors.accentTeal),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Sheet de multi-selección de ubicaciones. Devuelve el set de IDs
+/// elegidos (o null si el operador canceló).
+class _SeleccionUbicacionesSheet extends StatefulWidget {
+  final List<UbicacionLogistica> todas;
+  final Set<String> seleccionadasIniciales;
+
+  const _SeleccionUbicacionesSheet({
+    required this.todas,
+    required this.seleccionadasIniciales,
+  });
+
+  @override
+  State<_SeleccionUbicacionesSheet> createState() =>
+      _SeleccionUbicacionesSheetState();
+}
+
+class _SeleccionUbicacionesSheetState
+    extends State<_SeleccionUbicacionesSheet> {
+  late Set<String> _seleccionadas;
+  String _filtro = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _seleccionadas = Set<String>.from(widget.seleccionadasIniciales);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtroLower = _filtro.toLowerCase();
+    final ubicacionesFiltradas = widget.todas.where((u) {
+      if (filtroLower.isEmpty) return true;
+      return u.nombre.toLowerCase().contains(filtroLower) ||
+          u.localidad.toLowerCase().contains(filtroLower);
+    }).toList();
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.7,
+      maxChildSize: 0.95,
+      builder: (ctx, controller) => Column(
+        children: [
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+              'SELECCIONAR UBICACIONES',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search, size: 18),
+                hintText: 'Buscar por nombre o localidad…',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              onChanged: (v) => setState(() => _filtro = v),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              controller: controller,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              itemCount: ubicacionesFiltradas.length,
+              itemBuilder: (_, i) {
+                final u = ubicacionesFiltradas[i];
+                final marcada = _seleccionadas.contains(u.id);
+                return CheckboxListTile(
+                  value: marcada,
+                  onChanged: (val) {
+                    setState(() {
+                      if (val == true) {
+                        _seleccionadas.add(u.id);
+                      } else {
+                        _seleccionadas.remove(u.id);
+                      }
+                    });
+                  },
+                  title: Text(
+                    u.nombre,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    u.etiquetaCompleta,
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                    ),
+                  ),
+                  activeColor: AppColors.accentTeal,
+                  dense: true,
+                );
+              },
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('CANCELAR'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.accentTeal,
+                      ),
+                      onPressed: () =>
+                          Navigator.of(context).pop(_seleccionadas),
+                      child: Text(
+                        'GUARDAR (${_seleccionadas.length})',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
