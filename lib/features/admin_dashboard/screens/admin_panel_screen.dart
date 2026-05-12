@@ -29,6 +29,8 @@ class AdminPanelScreen extends StatefulWidget {
 
 class _AdminPanelScreenState extends State<AdminPanelScreen> {
   late final Stream<DocumentSnapshot<Map<String, dynamic>>> _statsStream;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>>
+      _revisionesPendientesStream;
 
   @override
   void initState() {
@@ -46,6 +48,18 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
         .collection('STATS')
         .doc('dashboard')
         .snapshots();
+    // EXCEPCIÓN: "Trámites pendientes" se lee EN VIVO (no del stats
+    // stale). Cuando un chofer envía una revisión nueva, el admin
+    // necesita verlo al toque, no esperar hasta 5 min al próximo
+    // ciclo del cron. Como típicamente hay 0-5 docs pendientes, el
+    // costo es despreciable (5 reads × N admins activos / hora ≈
+    // nada vs. la mejora UX). Reportado por Santiago 2026-05-12:
+    // chofer mandaba revisión, dashboard mostraba 0 hasta el próximo
+    // cron tick.
+    _revisionesPendientesStream = FirebaseFirestore.instance
+        .collection('REVISIONES')
+        .where('estado', isEqualTo: 'PENDIENTE')
+        .snapshots();
     // El listener de notificaciones push para revisiones nuevas vive
     // en AdminShell (durante toda la sesion admin), no aca. Si lo
     // duplicaramos en este State, el admin recibiria 2 push identicas
@@ -62,11 +76,23 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           const _Saludo(),
           const SizedBox(height: 16),
           // ------- KPIs en vivo -------
+          // Stats genérico desde STATS/dashboard (cron 5 min) +
+          // override en vivo de "trámites pendientes" desde
+          // REVISIONES directo (sin esperar al cron) para que el
+          // admin vea las revisiones nuevas al toque.
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: _statsStream,
-            builder: (ctx, snap) {
-              final stats = _Stats.fromDoc(snap.data?.data());
-              return _GridKPIs(stats: stats);
+            builder: (ctx, statsSnap) {
+              final stats = _Stats.fromDoc(statsSnap.data?.data());
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _revisionesPendientesStream,
+                builder: (ctx2, revSnap) {
+                  final statsFinal = revSnap.hasData
+                      ? stats.conRevisionesPendientes(revSnap.data!.docs.length)
+                      : stats;
+                  return _GridKPIs(stats: statsFinal);
+                },
+              );
             },
           ),
           const SizedBox(height: 24),
@@ -401,6 +427,23 @@ class _Stats {
       proximos7: asInt(data['proximos_7']),
       proximos30: asInt(data['proximos_30']),
       cargando: false,
+    );
+  }
+
+  /// Devuelve una copia con `revisionesPendientes` sobreescrito por
+  /// el count en vivo del stream de REVISIONES. Usado para corregir
+  /// el delay del cron (5 min) específicamente en ese contador, sin
+  /// tocar el resto que se queda con el valor del stats stale.
+  _Stats conRevisionesPendientes(int cantidad) {
+    return _Stats(
+      choferesActivos: choferesActivos,
+      unidadesTotal: unidadesTotal,
+      unidadesAsignadas: unidadesAsignadas,
+      revisionesPendientes: cantidad,
+      vencidos: vencidos,
+      proximos7: proximos7,
+      proximos30: proximos30,
+      cargando: cargando,
     );
   }
 }

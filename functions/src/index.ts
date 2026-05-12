@@ -5003,9 +5003,16 @@ async function _statsRecomputeDashboard(): Promise<DashboardCounters & { docs_le
     }
   }
 
-  // Revisiones pendientes (las aprobadas/rechazadas se borran del
-  // collection, así que en condiciones normales solo hay pendientes).
-  const revisionesSnap = await db.collection("REVISIONES").limit(500).get();
+  // Revisiones pendientes. Las aprobadas/rechazadas se borran del
+  // collection en condiciones normales, pero filtramos por
+  // estado=PENDIENTE defensivamente — si algún día queda basura
+  // sin borrar, el contador no se infla. Además mantiene el
+  // semántico claro (no contar todo lo que esté en la colección).
+  const revisionesSnap = await db
+    .collection("REVISIONES")
+    .where("estado", "==", "PENDIENTE")
+    .limit(500)
+    .get();
   counters.revisiones_pendientes = revisionesSnap.size;
 
   return {
