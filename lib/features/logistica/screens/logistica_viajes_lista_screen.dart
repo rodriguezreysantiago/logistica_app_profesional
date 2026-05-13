@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/viaje.dart';
@@ -295,16 +297,74 @@ class _ViajeTile extends StatelessWidget {
                   color: AppColors.accentGreen,
                   icono: Icons.check,
                 ),
-              if (!viaje.activo)
+              if (!viaje.activo) ...[
                 const _ChipMini(
                   label: 'BORRADO',
                   color: AppColors.accentRed,
                 ),
+                const SizedBox(width: 4),
+                // Botón rápido restaurar — evita abrir el detalle solo
+                // para reactivar. Confirmación inline en diálogo corto.
+                Builder(
+                  builder: (ctx) => IconButton(
+                    icon: const Icon(Icons.restore,
+                        size: 18, color: AppColors.accentAmber),
+                    tooltip: 'Reactivar viaje',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                    onPressed: () => _confirmarReactivar(ctx, viaje),
+                  ),
+                ),
+              ],
             ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _confirmarReactivar(BuildContext ctx, Viaje v) async {
+    final messenger = ScaffoldMessenger.of(ctx);
+    final fecha = v.fechaReferencia;
+    final fechaStr = fecha == null
+        ? 'sin fecha'
+        : AppFormatters.formatearFecha(fecha);
+    final ok = await showDialog<bool>(
+      context: ctx,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Reactivar viaje'),
+        content: Text(
+          'Vas a reactivar el viaje de ${v.choferNombre ?? "DNI ${v.choferDni}"} '
+          '($fechaStr · ${v.rutaEtiqueta}). Vuelve a aparecer en la lista '
+          'normal y entra otra vez en LIQUIDACIÓN.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('CANCELAR'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.accentAmber,
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('REACTIVAR'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ViajesService.reactivarViaje(
+        viajeId: v.id,
+        reactivadoPorDni: PrefsService.dni,
+      );
+      AppFeedback.successOn(messenger, 'Viaje reactivado.');
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al reactivar: $e');
+    }
   }
 
   Color _colorEstado(EstadoViaje e) {
