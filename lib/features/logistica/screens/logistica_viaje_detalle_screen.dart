@@ -218,14 +218,8 @@ class _DetalleTramo extends StatelessWidget {
             ),
             const SizedBox(height: 6),
           ],
-          _Linea(
-            label: 'Origen',
-            valor: '${ts.origenEtiqueta} (${ts.empresaOrigenNombre})',
-          ),
-          _Linea(
-            label: 'Destino',
-            valor: '${ts.destinoEtiqueta} (${ts.empresaDestinoNombre})',
-          ),
+          _Linea(label: 'Origen', valor: ts.origenDisplay),
+          _Linea(label: 'Destino', valor: ts.destinoDisplay),
           if (tramo.producto != null && tramo.producto!.isNotEmpty)
             _Linea(label: 'Producto', valor: tramo.producto!)
           else if (ts.producto != null && ts.producto!.isNotEmpty)

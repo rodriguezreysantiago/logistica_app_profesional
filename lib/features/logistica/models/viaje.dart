@@ -116,6 +116,36 @@ class TarifaSnapshot {
     this.empresaOrigenId,
   });
 
+  /// Etiqueta de origen lista para mostrar: `"<ubicación> (<empresa>)"`
+  /// EXCEPTO si el nombre de la ubicación ya contiene el nombre de la
+  /// empresa (caso típico: "PROFERTIL (BAHIA BLANCA)" para empresa
+  /// PROFERTIL — agregar "(PROFERTIL)" al final dejaba "PROFERTIL
+  /// (BAHIA BLANCA) (PROFERTIL)", redundante). En ese caso devolvemos
+  /// solo la etiqueta de la ubicación.
+  ///
+  /// El sufijo SÍ aporta cuando el dueño de la carga es distinto al
+  /// dueño del punto físico — ej. "ACÁ LA BALLENERA (LA BALLENERA)
+  /// (PROFERTIL)" significa "Profertil paga el flete pero la planta
+  /// es de ACA" (Santiago confirmó 2026-05-13 que es un caso real).
+  String get origenDisplay =>
+      _displayUbicacionConEmpresa(origenEtiqueta, empresaOrigenNombre);
+
+  /// Versión "display" de destino, misma lógica que [origenDisplay].
+  String get destinoDisplay =>
+      _displayUbicacionConEmpresa(destinoEtiqueta, empresaDestinoNombre);
+
+  static String _displayUbicacionConEmpresa(
+    String ubicacion,
+    String empresa,
+  ) {
+    final u = ubicacion.trim();
+    final e = empresa.trim();
+    if (e.isEmpty) return u;
+    // Comparamos en uppercase para no fallar por capitalización
+    // (las ubicaciones se cargan con varias variantes).
+    return u.toUpperCase().contains(e.toUpperCase()) ? u : '$u ($e)';
+  }
+
   factory TarifaSnapshot.fromTarifa(TarifaLogistica t) {
     return TarifaSnapshot(
       origenEtiqueta: t.ubicacionOrigenEtiqueta,

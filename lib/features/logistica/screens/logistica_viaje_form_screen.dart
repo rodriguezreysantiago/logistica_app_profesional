@@ -1894,10 +1894,8 @@ class _ItemTarifaPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final origen =
-        '${tarifa.ubicacionOrigenEtiqueta} (${tarifa.empresaOrigenNombre})';
-    final destino =
-        '${tarifa.ubicacionDestinoEtiqueta} (${tarifa.empresaDestinoNombre})';
+    final origen = tarifa.origenDisplay;
+    final destino = tarifa.destinoDisplay;
     final unidad = tarifa.unidadTarifa.etiqueta;
     final sufijo = tarifa.unidadTarifa.sufijoMonto;
     final montoReal = AppFormatters.formatearMonto(tarifa.tarifaReal);

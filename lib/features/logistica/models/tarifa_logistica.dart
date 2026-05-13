@@ -97,6 +97,29 @@ class TarifaLogistica {
   final String ubicacionDestinoId;
   final String ubicacionDestinoEtiqueta;
 
+  /// Etiqueta de origen lista para mostrar: `"<ubicación> (<empresa>)"`
+  /// EXCEPTO si la ubicación ya contiene el nombre de la empresa (caso
+  /// típico: ubicación "PROFERTIL (BAHIA BLANCA)" + empresa
+  /// "PROFERTIL" → mostrar solo "PROFERTIL (BAHIA BLANCA)" sin
+  /// duplicar). Misma lógica que `TarifaSnapshot.origenDisplay` —
+  /// duplicado para mantener cada modelo autocontenido.
+  String get origenDisplay =>
+      _displayUbicacionConEmpresa(ubicacionOrigenEtiqueta, empresaOrigenNombre);
+
+  /// Versión "display" de destino, misma lógica que [origenDisplay].
+  String get destinoDisplay => _displayUbicacionConEmpresa(
+      ubicacionDestinoEtiqueta, empresaDestinoNombre);
+
+  static String _displayUbicacionConEmpresa(
+    String ubicacion,
+    String empresa,
+  ) {
+    final u = ubicacion.trim();
+    final e = empresa.trim();
+    if (e.isEmpty) return u;
+    return u.toUpperCase().contains(e.toUpperCase()) ? u : '$u ($e)';
+  }
+
   final FleteLogistica flete;
   final UnidadTarifa unidadTarifa;
   final double tarifaReal;
