@@ -367,6 +367,25 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // BOT_SILENCIADOS_CHOFER — choferes silenciados (server + bot only)
+    // ========================================================================
+    // Doc id: DNI del chofer. Lo escribe el bot vía comando WhatsApp
+    // `/silenciar DNI dur [motivo]` — el admin lo usa cuando el chofer
+    // está en taller / GPS roto / problema conocido para que el
+    // vigilador de jornada no le mande spam cada 5 min.
+    //
+    // Lo lee el cron `vigiladorJornadaChofer` al iniciar cada ciclo.
+    // Si `silenciado_hasta > now`, no encola avisos para ese chofer
+    // (la jornada SÍ se sigue acumulando, solo se suprime el envío).
+    //
+    // Cliente bloqueado: el flujo correcto es por WhatsApp, no por la
+    // app. Sino habría que armar UI nueva.
+
+    match /BOT_SILENCIADOS_CHOFER/{doc} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
     // META_AVISOS_NO_ID — throttle del aviso "pasá el iButton" (server-only)
     // ========================================================================
     // Doc id: dni del chofer. Guarda `last_sent_at` (server timestamp) y

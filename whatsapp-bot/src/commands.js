@@ -5,11 +5,18 @@
 // empieza con `/` y el bot interpreta y responde.
 //
 // Comandos soportados:
-//   /estado          → resumen del bot (cola, último ciclo, pausa).
-//   /pausar [Nh|Nd]  → pausa el bot. Opcional: duración (ej. /pausar 24h).
-//   /reanudar        → quita la pausa.
-//   /forzar-cron     → corre el ciclo del cron ahora (no espera 60min).
-//   /ayuda           → lista de comandos.
+//   /estado                  → resumen del bot (cola, último ciclo, pausa).
+//   /pausar [Nh|Nd]          → pausa el bot. Opcional: duración.
+//   /reanudar                → quita la pausa.
+//   /forzar-cron             → corre el ciclo del cron ahora.
+//   /test-aviso DNI          → mensaje de prueba al DNI indicado.
+//   /jornada DNI             → estado del vigilador para ese chofer.
+//   /silenciar DNI dur [m]   → suprime avisos del vigilador para ese
+//                              chofer durante `dur` (Ns/Nm/Nh/Nd, cap 30d).
+//                              Útil cuando el chofer está en taller, GPS
+//                              roto, problema conocido — el bot no spamea.
+//   /desilenciar DNI         → revierte un /silenciar previo.
+//   /ayuda                   → lista de comandos.
 //
 // Seguridad:
 //   - Solo responde a teléfonos en la whitelist `ADMIN_PHONES` del .env
@@ -116,6 +123,15 @@ async function manejarSiEsComando(msg, contextos) {
         break;
       case '/test-aviso':
         await _comandoTestAviso(msg, contextos, args);
+        break;
+      case '/jornada':
+        await _comandoJornada(msg, contextos, args);
+        break;
+      case '/silenciar':
+        await _comandoSilenciar(msg, contextos, args);
+        break;
+      case '/desilenciar':
+        await _comandoDesilenciar(msg, contextos, args);
         break;
       case '/ayuda':
       case '/help':
@@ -271,12 +287,16 @@ async function _comandoAyuda(msg) {
   const txt = [
     '*Comandos disponibles*',
     '',
-    '/estado          → resumen del bot.',
-    '/pausar [dur]    → pausar envíos. Ej: /pausar 24h',
-    '/reanudar        → reanudar envíos.',
-    '/forzar-cron     → correr el cron ahora.',
-    '/test-aviso DNI  → mandar un mensaje de prueba al DNI indicado.',
-    '/ayuda           → este mensaje.',
+    '/estado                → resumen del bot.',
+    '/pausar [dur]          → pausar envíos. Ej: /pausar 24h',
+    '/reanudar              → reanudar envíos.',
+    '/forzar-cron           → correr el cron ahora.',
+    '/test-aviso DNI        → mensaje de prueba al DNI.',
+    '/jornada DNI           → estado del vigilador para ese chofer.',
+    '/silenciar DNI dur [m] → no mandar avisos a ese chofer. Ej: ' +
+      '/silenciar 12345678 2h taller',
+    '/desilenciar DNI       → revertir silenciado.',
+    '/ayuda                 → este mensaje.',
   ].join('\n');
   await msg.reply(txt);
 }
@@ -341,6 +361,246 @@ async function _comandoTestAviso(msg, { db, fs }, args) {
     `✓ Mensaje de prueba encolado para ${nombre} (DNI ${dni}, tel ${tel}).\n` +
     `Doc cola: ${colaRef.id}\n\n` +
     `Si está fuera de horario hábil, se envía cuando reabra la ventana.`
+  );
+}
+
+/**
+ * Devuelve la fecha actual en formato YYYY-MM-DD ART. Mismo formato
+ * que usa el cron `vigiladorJornadaChofer` para el doc id de
+ * `JORNADAS_CHOFER` (`{dni}_{fechaArt}`).
+ */
+function _fechaArt() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+/**
+ * Formatea segundos a "Xh YYm" — versión compacta para WhatsApp.
+ * Si es < 1h, "Xm". Si es 0, "0m".
+ */
+function _fmtSegCompacto(seg) {
+  const s = Math.max(0, Math.floor(seg || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m.toString().padStart(2, '0')}m`;
+}
+
+function _fmtFechaHoraCompacto(ts) {
+  if (!ts) return null;
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return new Intl.DateTimeFormat('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+}
+
+/**
+ * `/jornada <DNI>` → estado del vigilador para ese chofer en el día
+ * actual ART. Es la versión "para WhatsApp" de
+ * `scripts/diagnosticar_vigilador_chofer.js` — más compacta, sin
+ * detalles de Sitrack stale.
+ *
+ * Mostramos:
+ *   - Nombre + patente actual del chofer.
+ *   - Total del día / jornada actual / continuo / pausa actual.
+ *   - Flags de alertas del día (3:45, 11:30, 12:00, descanso corto).
+ *   - Estado de silenciado (si aplica) — útil para que Santiago se
+ *     acuerde si el chofer está mute.
+ *   - Última actualización del poll Sitrack.
+ *
+ * Si no hay JORNADAS_CHOFER del día (chofer no manejó hoy o el cron
+ * no lo vio), lo decimos explícito.
+ */
+async function _comandoJornada(msg, { db }, args) {
+  const dni = (args[0] || '').replace(/\D+/g, '');
+  if (!dni) {
+    await msg.reply('Uso: /jornada <DNI>\nEj: /jornada 12345678');
+    return;
+  }
+  const fecha = _fechaArt();
+  const docId = `${dni}_${fecha}`;
+
+  const [empSnap, jSnap, silSnap] = await Promise.all([
+    db.collection('EMPLEADOS').doc(dni).get(),
+    db.collection('JORNADAS_CHOFER').doc(docId).get(),
+    db.collection('BOT_SILENCIADOS_CHOFER').doc(dni).get(),
+  ]);
+
+  const lineas = [`*Jornada del chofer ${dni}* (${fecha})`];
+
+  if (empSnap.exists) {
+    const e = empSnap.data() || {};
+    const nombre = (e.NOMBRE || '(sin nombre)').toString();
+    const vehAsignado = (e.VEHICULO || '').toString().trim();
+    lineas.push(`👤 ${nombre}${vehAsignado ? ` · ${vehAsignado}` : ''}`);
+  } else {
+    lineas.push('⚠ DNI no figura en EMPLEADOS.');
+  }
+
+  // Estado de silencio — lo mostramos arriba del todo así no se
+  // pierde scrolling.
+  if (silSnap.exists) {
+    const s = silSnap.data() || {};
+    const hasta = s.silenciado_hasta;
+    const hastaMs = hasta && hasta.toMillis ? hasta.toMillis() : 0;
+    if (hastaMs > Date.now()) {
+      const motivo = (s.motivo || '(sin motivo)').toString();
+      lineas.push(
+        `🔕 SILENCIADO hasta ${_fmtFechaHoraCompacto(hasta)} ART · ${motivo}`
+      );
+    }
+  }
+
+  if (!jSnap.exists) {
+    lineas.push('');
+    lineas.push(
+      'Sin doc JORNADAS_CHOFER del día — el chofer no tiene posición ' +
+      'activa con su DNI o todavía no manejó hoy.'
+    );
+    await msg.reply(lineas.join('\n'));
+    return;
+  }
+  const j = jSnap.data() || {};
+  const totalDia = j.segundos_total_dia || 0;
+  const jornadaActual = j.segundos_jornada_actual || 0;
+  const continuo = j.segundos_continuo_actual || 0;
+  const pausa = j.segundos_pausa_actual || 0;
+
+  lineas.push('');
+  lineas.push(`🚛 Total del día: ${_fmtSegCompacto(totalDia)}`);
+  if (jornadaActual > totalDia + 60) {
+    // Jornada arrancó el día anterior (cruzó medianoche).
+    lineas.push(
+      `🕓 Jornada actual: ${_fmtSegCompacto(jornadaActual)} ` +
+      '(arrancó ayer)'
+    );
+  } else {
+    lineas.push(`🕓 Jornada actual: ${_fmtSegCompacto(jornadaActual)}`);
+  }
+  lineas.push(`⏱ Continuo: ${_fmtSegCompacto(continuo)}`);
+  if (pausa > 0) {
+    lineas.push(`⏸ Pausa actual: ${_fmtSegCompacto(pausa)}`);
+  }
+
+  // Flags de alertas — compactas, una sola línea con las que se
+  // dispararon.
+  const flags = [];
+  if (j.alerta_3_45_continua_enviada) flags.push('3:45');
+  if (j.alerta_11_30_diaria_enviada) flags.push('11:30');
+  if (j.alerta_12_00_diaria_enviada) flags.push('12:00');
+  if (j.aviso_descanso_corto_enviada) {
+    const desc = j.descanso_corto_segundos
+      ? ` (descanso ${_fmtSegCompacto(j.descanso_corto_segundos)})`
+      : '';
+    flags.push(`descanso-corto${desc}`);
+  }
+  if (flags.length > 0) {
+    lineas.push(`🚨 Avisos enviados: ${flags.join(', ')}`);
+  } else {
+    lineas.push('✓ Sin alertas hoy.');
+  }
+
+  if (j.ultima_actualizacion_at) {
+    lineas.push(
+      `🛰 Último update: ${_fmtFechaHoraCompacto(j.ultima_actualizacion_at)} ART`
+    );
+  }
+  if (j.ultima_patente) {
+    lineas.push(`🚐 Patente: ${j.ultima_patente}`);
+  }
+
+  await msg.reply(lineas.join('\n'));
+}
+
+/**
+ * `/silenciar <DNI> <duración> [motivo...]` → suprime los avisos del
+ * vigilador de jornada para ese chofer durante la duración indicada.
+ * Útil cuando el chofer está en taller, hay GPS roto, problema
+ * conocido, etc. — sino el bot lo molesta cada 5 min.
+ *
+ * Persiste en `BOT_SILENCIADOS_CHOFER/{dni}`. La cloud function del
+ * vigilador chequea ese doc antes de encolar cada aviso (al chofer
+ * y a los admins).
+ *
+ * Reusa `_parsearDuracion` (Ns/Nm/Nh/Nd, cap 30 días).
+ */
+async function _comandoSilenciar(msg, { db }, args) {
+  if (args.length < 2) {
+    await msg.reply(
+      'Uso: /silenciar <DNI> <duración> [motivo]\n' +
+      'Ej: /silenciar 12345678 2h en taller\n' +
+      'Duración: Ns / Nm / Nh / Nd. Cap: 30d.'
+    );
+    return;
+  }
+  const dni = (args[0] || '').replace(/\D+/g, '');
+  if (!dni) {
+    await msg.reply('DNI inválido. Solo dígitos.');
+    return;
+  }
+  const ms = _parsearDuracion(args[1]);
+  if (ms == null) {
+    await msg.reply(
+      `❌ Duración inválida: "${args[1]}".\n` +
+      'Formato: Ns / Nm / Nh / Nd (ej: 30m, 2h, 1d). Cap: 30d.'
+    );
+    return;
+  }
+  const motivo = args.slice(2).join(' ').trim() || '(sin motivo)';
+  const hasta = new Date(Date.now() + ms);
+
+  // Verificar que el chofer exista — sino el silenciado queda colgado
+  // sin mapeo a empleado.
+  const empSnap = await db.collection('EMPLEADOS').doc(dni).get();
+  if (!empSnap.exists) {
+    await msg.reply(`No encontré un empleado con DNI ${dni} en EMPLEADOS.`);
+    return;
+  }
+  const nombre = ((empSnap.data() || {}).NOMBRE || dni).toString();
+
+  const admin = require('firebase-admin');
+  await db.collection('BOT_SILENCIADOS_CHOFER').doc(dni).set({
+    chofer_dni: dni,
+    chofer_nombre: nombre,
+    silenciado_hasta: admin.firestore.Timestamp.fromDate(hasta),
+    motivo,
+    silenciado_at: admin.firestore.FieldValue.serverTimestamp(),
+    silenciado_por_canal: 'WHATSAPP_COMMAND',
+    duracion_raw: args[1],
+  });
+  await msg.reply(
+    `🔕 ${nombre} (DNI ${dni}) silenciado hasta ` +
+    `${_fmtFechaHoraCompacto(hasta)} ART.\n` +
+    `Motivo: ${motivo}\n\n` +
+    'El vigilador no le manda avisos hasta esa hora. ' +
+    'Para revertir antes: /desilenciar ' + dni
+  );
+}
+
+/**
+ * `/desilenciar <DNI>` → revierte un /silenciar previo. Borra el doc
+ * de BOT_SILENCIADOS_CHOFER. Idempotente — si no estaba silenciado,
+ * igual responde OK.
+ */
+async function _comandoDesilenciar(msg, { db }, args) {
+  const dni = (args[0] || '').replace(/\D+/g, '');
+  if (!dni) {
+    await msg.reply('Uso: /desilenciar <DNI>\nEj: /desilenciar 12345678');
+    return;
+  }
+  await db.collection('BOT_SILENCIADOS_CHOFER').doc(dni).delete();
+  await msg.reply(
+    `✓ Silencio levantado para DNI ${dni}. ` +
+    'El vigilador vuelve a operar normal con este chofer.'
   );
 }
 

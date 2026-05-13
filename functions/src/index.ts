@@ -4198,6 +4198,12 @@ export const vigiladorJornadaChofer = onSchedule(
     // .limit(5000) defensivo — 1 doc por patente, no debería crecer.
     const snap = await db.collection("SITRACK_POSICIONES").limit(5000).get();
 
+    // Set de choferes silenciados (comando /silenciar via WhatsApp).
+    // Una sola query al iniciar el ciclo — el set se consulta luego
+    // antes de encolar cada aviso. ~50 choferes potenciales, en
+    // general 0-2 silenciados a la vez.
+    const silenciadosSet = await _cargarSilenciadosVigilador();
+
     const fechaArt = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Argentina/Buenos_Aires",
       year: "numeric",
@@ -4208,6 +4214,7 @@ export const vigiladorJornadaChofer = onSchedule(
     const ahora = Timestamp.now();
     let alertasContinuoEnviadas = 0;
     let alertasDiarioEnviadas = 0;
+    let alertasSilenciadas = 0;
     let choferesEvaluados = 0;
 
     for (const d of snap.docs) {
@@ -4504,25 +4511,49 @@ export const vigiladorJornadaChofer = onSchedule(
           };
         });
 
-        if (result.alertContinuo) {
-          await _encolarAvisoPausaContinua(driverDni, patente);
-          alertasContinuoEnviadas++;
-        }
-        if (result.alertDiario) {
-          await _encolarAvisoLimiteDiario(driverDni, patente);
-          alertasDiarioEnviadas++;
-        }
-        if (result.alertDiarioLimite) {
-          await _encolarAvisoJornadaExcedida(driverDni, patente);
-          alertasDiarioEnviadas++;
-        }
-        if (result.alertDescansoCorto) {
-          await _encolarAvisoDescansoCorto(
+        // Si el chofer está silenciado (comando /silenciar via
+        // WhatsApp) NO encolamos los avisos — pero la jornada SÍ
+        // se sigue acumulando arriba (la transacción ya se commiteó
+        // con los nuevos segundos). El flag de "alerta enviada" del
+        // doc tampoco se toca para este path silenciado, así si se
+        // levanta el silencio antes del descanso de 8h igual le
+        // llega cuando vuelva a cruzar el umbral en otro poll.
+        const estaSilenciado = silenciadosSet.has(driverDni);
+        if (estaSilenciado &&
+            (result.alertContinuo || result.alertDiario ||
+             result.alertDiarioLimite || result.alertDescansoCorto)) {
+          alertasSilenciadas++;
+          logger.info("[vigiladorJornadaChofer] aviso silenciado", {
             driverDni,
             patente,
-            result.descansoCortoSegundos
-          );
-          alertasDiarioEnviadas++;
+            tipos: [
+              result.alertContinuo ? "continuo" : null,
+              result.alertDiario ? "diario1130" : null,
+              result.alertDiarioLimite ? "diario1200" : null,
+              result.alertDescansoCorto ? "descansoCorto" : null,
+            ].filter(Boolean),
+          });
+        } else {
+          if (result.alertContinuo) {
+            await _encolarAvisoPausaContinua(driverDni, patente);
+            alertasContinuoEnviadas++;
+          }
+          if (result.alertDiario) {
+            await _encolarAvisoLimiteDiario(driverDni, patente);
+            alertasDiarioEnviadas++;
+          }
+          if (result.alertDiarioLimite) {
+            await _encolarAvisoJornadaExcedida(driverDni, patente);
+            alertasDiarioEnviadas++;
+          }
+          if (result.alertDescansoCorto) {
+            await _encolarAvisoDescansoCorto(
+              driverDni,
+              patente,
+              result.descansoCortoSegundos
+            );
+            alertasDiarioEnviadas++;
+          }
         }
       } catch (e) {
         logger.warn("[vigiladorJornadaChofer] fallo procesar chofer", {
@@ -4537,9 +4568,40 @@ export const vigiladorJornadaChofer = onSchedule(
       choferesEvaluados,
       alertasContinuoEnviadas,
       alertasDiarioEnviadas,
+      alertasSilenciadas,
+      silenciadosCount: silenciadosSet.size,
     });
   }
 );
+
+/**
+ * Lee `BOT_SILENCIADOS_CHOFER` y devuelve el set de DNIs que están
+ * actualmente silenciados (silenciado_hasta > now). Pensado para
+ * llamarse 1 vez al iniciar el ciclo del vigilador.
+ *
+ * Si la query falla, devuelve set vacío (no rompemos el vigilador
+ * por un fallo de read — peor caso seguimos mandando avisos).
+ */
+async function _cargarSilenciadosVigilador(): Promise<Set<string>> {
+  try {
+    const ahora = Timestamp.now();
+    const snap = await db
+      .collection("BOT_SILENCIADOS_CHOFER")
+      .where("silenciado_hasta", ">", ahora)
+      .limit(500)
+      .get();
+    const set = new Set<string>();
+    for (const d of snap.docs) {
+      set.add(d.id);
+    }
+    return set;
+  } catch (e) {
+    logger.warn("[vigiladorJornadaChofer] no pude cargar silenciados", {
+      error: (e as Error).message,
+    });
+    return new Set();
+  }
+}
 
 // Encola aviso al chofer cuando lleva 3:45h continuas de manejo.
 async function _encolarAvisoPausaContinua(
