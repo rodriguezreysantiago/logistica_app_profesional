@@ -9,6 +9,7 @@ import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/adelanto_chofer.dart';
 import '../models/viaje.dart';
+import '../utils/calculos_viaje.dart';
 import '../services/adelantos_service.dart';
 import '../services/viajes_service.dart';
 
@@ -179,6 +180,7 @@ class _SeccionTramos extends StatelessWidget {
             child: _DetalleTramo(
               numero: v.esMultiTramo ? i + 1 : null,
               tramo: t,
+              comisionPct: v.comisionChoferPct,
             ),
           );
         }),
@@ -190,11 +192,37 @@ class _SeccionTramos extends StatelessWidget {
 class _DetalleTramo extends StatelessWidget {
   final int? numero;
   final TramoViaje tramo;
-  const _DetalleTramo({required this.numero, required this.tramo});
+  /// Porcentaje de comisión del chofer (típicamente 18) que viene del
+  /// viaje. Lo necesitamos para mostrar la comisión del chofer DE ESTE
+  /// TRAMO (18 % sobre la base bruta del tramo). Antes el detalle solo
+  /// mostraba la tarifa $/TN; ahora pidió Santiago ver Vecchi total +
+  /// chofer base + comisión chofer por tramo (la suma de todos los
+  /// tramos queda en MONTOS Y LIQUIDACIÓN abajo).
+  final double comisionPct;
+
+  const _DetalleTramo({
+    required this.numero,
+    required this.tramo,
+    required this.comisionPct,
+  });
 
   @override
   Widget build(BuildContext context) {
     final ts = tramo.tarifaSnapshot;
+    // Cálculos del tramo. Reusamos el mismo helper que la pantalla
+    // LIQUIDACIÓN para garantizar consistencia (POR_VIAJE devuelve la
+    // tarifa fija; POR_TONELADA aplica `tarifa × TN` con prioridad a
+    // kg DESCARGADOS, fallback a kg cargados).
+    final brutos = CalculosViaje.calcularMontosBrutos(
+      unidadTarifa: ts.unidadTarifa,
+      tarifaReal: ts.tarifaReal,
+      tarifaChofer: ts.tarifaChofer,
+      kgCargados: tramo.kgCargados,
+      kgDescargados: tramo.kgDescargados,
+    );
+    final comisionChoferTramo = brutos.montoChofer * (comisionPct / 100.0);
+    final hayMontos =
+        brutos.montoVecchi > 0 || brutos.montoChofer > 0;
     return Container(
       decoration: numero == null
           ? null
@@ -269,6 +297,28 @@ class _DetalleTramo extends StatelessWidget {
               url: tramo.remitoUrl!,
               etiqueta: 'Abrir comprobante',
             ),
+          // Montos calculados del tramo. Solo aparecen si hay base —
+          // tramo sin kg ni en POR_VIAJE definido devuelve 0 y no
+          // tiene sentido mostrar líneas de $ 0.
+          if (hayMontos) ...[
+            const Divider(color: Colors.white12, height: 16),
+            _Linea(
+              label: 'Tarifa Vecchi (factura)',
+              valor: '\$ ${AppFormatters.formatearMonto(brutos.montoVecchi)}',
+            ),
+            _Linea(
+              label: 'Tarifa chofer (base)',
+              valor: '\$ ${AppFormatters.formatearMonto(brutos.montoChofer)}',
+              sub: true,
+            ),
+            _Linea(
+              label:
+                  'Comisión chofer (${comisionPct.toStringAsFixed(0)}%)',
+              valor:
+                  '\$ ${AppFormatters.formatearMonto(comisionChoferTramo)}',
+              highlight: true,
+            ),
+          ],
         ],
       ),
     );
