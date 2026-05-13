@@ -10,16 +10,36 @@ import '../models/adelanto_chofer.dart';
 
 /// Reporte Excel de adelantos. Lo dispara `LogisticaAdelantosScreen`
 /// con los adelantos que el operador **seleccionó** en la lista
-/// (checkbox por adelanto) y el rango de fechas activo si lo hay.
+/// (checkbox por adelanto).
 ///
-/// Output: hoja única `ADELANTOS` con columnas pedidas por Santiago
-/// (2026-05-13):
-///   #  ·  FECHA  ·  CHOFER  ·  DESCRIPCIÓN  ·  IMPORTE  ·  N° RECIBO
+/// Diseño basado en la planilla que Santiago compartió 2026-05-13
+/// (`2026-05-13 - VIAJES DARIOS.xlsx`). Estructura:
 ///
-/// Última fila: TOTAL con la suma de importes (en bold, columna
-/// IMPORTE).
+///   ┌────────────────────────────────────────────────────────┐
+///   │  TRANSPORTE SERVI-TOLVA                                │   ← banner
+///   │  Resumen de adelantos                                  │
+///   │  FECHA: 13-05-2026             (o FECHAS si > 1 día)   │
+///   ├────────────────────────────────────────────────────────┤
+///   │  # │ CHOFER │ DETALLE │ ADELANTO $ │ N° RECIBO          │
+///   │  1 │ ...    │ ...     │      ...   │ ...                │
+///   │  ...                                                    │
+///   │            │         │      TOTAL │ $ XXX.XXX           │
+///   └────────────────────────────────────────────────────────┘
+///
+/// Cambios vs versión anterior pedidos por Santiago:
+///   - Columna FECHA del cuerpo → SACADA (ahora está en el encabezado).
+///   - Columna OBSERVACIÓN → renombrada a DETALLE.
+///   - Sin columna firma (era columna nominal en la planilla de
+///     referencia, pero acá la firma física vive en el recibo
+///     impreso de cada adelanto).
+///   - Encabezado dinámico: muestra "FECHA: dd-mm-aaaa" si todos los
+///     adelantos son del mismo día; sino "FECHAS: dd-mm · dd-mm · …".
 class ReportAdelantosService {
   ReportAdelantosService._();
+
+  /// Número de columnas de la tabla — usado para mergear el banner
+  /// superior. Si cambian las columnas, ajustar acá.
+  static const int _cols = 5;
 
   static Future<void> generar({
     required BuildContext context,
@@ -46,39 +66,78 @@ class ReportAdelantosService {
       excel.rename('Sheet1', 'ADELANTOS');
       final hoja = excel['ADELANTOS'];
 
-      // Ordenar por fecha ascendente para que el correlativo del
-      // reporte (columna #) tenga sentido cronológico — el stream de
-      // la pantalla viene ordenado descendente.
+      // Orden cronológico ASC para que el correlativo del reporte
+      // (columna #) tenga sentido (más antiguos arriba). El stream de
+      // la pantalla viene desc.
       final ordenados = [...adelantos]
         ..sort((a, b) => a.fecha.compareTo(b.fecha));
 
+      // ─── ENCABEZADO ──────────────────────────────────────────────
+      // Fila 0: razón social en bold grande.
+      _setMergedHeader(
+        hoja,
+        row: 0,
+        text: 'TRANSPORTE SERVI-TOLVA',
+        backgroundHex: '#1B5E20',
+        fontHex: '#FFFFFF',
+        fontSize: 16,
+        bold: true,
+        align: ex.HorizontalAlign.Center,
+      );
+      // Fila 1: subtítulo.
+      _setMergedHeader(
+        hoja,
+        row: 1,
+        text: 'Resumen de adelantos',
+        backgroundHex: '#2E7D32',
+        fontHex: '#FFFFFF',
+        fontSize: 11,
+        bold: true,
+        align: ex.HorizontalAlign.Center,
+      );
+      // Fila 2: FECHA o FECHAS según cuántos días distintos.
+      _setMergedHeader(
+        hoja,
+        row: 2,
+        text: _renderEtiquetaFechas(ordenados),
+        backgroundHex: '#E8F5E9',
+        fontHex: '#1B5E20',
+        fontSize: 11,
+        bold: true,
+        align: ex.HorizontalAlign.Center,
+      );
+      // Fila 3: separador en blanco.
+
+      // ─── HEADERS DE TABLA (fila 4) ───────────────────────────────
+      const headerRow = 4;
       final headers = [
         '#',
-        'FECHA',
         'CHOFER',
-        'DESCRIPCIÓN',
-        'IMPORTE',
+        'DETALLE',
+        'ADELANTO \$',
         'N° RECIBO',
       ];
       for (var i = 0; i < headers.length; i++) {
         final cell = hoja.cell(
-            ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+            ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: headerRow));
         cell.value = ex.TextCellValue(headers[i]);
         cell.cellStyle = ex.CellStyle(
           bold: true,
           backgroundColorHex: ex.ExcelColor.fromHexString('#2E7D32'),
           fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
+          horizontalAlign: ex.HorizontalAlign.Center,
         );
       }
 
+      // ─── FILAS DE DATOS ──────────────────────────────────────────
       var total = 0.0;
       for (var i = 0; i < ordenados.length; i++) {
         final a = ordenados[i];
-        final row = i + 1;
+        final row = headerRow + 1 + i;
         final nombre = a.choferNombre?.trim().isNotEmpty == true
             ? a.choferNombre!.trim()
             : 'DNI ${a.choferDni}';
-        final desc = a.observacion?.trim().isNotEmpty == true
+        final detalle = a.observacion?.trim().isNotEmpty == true
             ? a.observacion!.trim()
             : '';
         final recibo = a.numeroRecibo == null
@@ -86,37 +145,45 @@ class ReportAdelantosService {
             : a.numeroRecibo.toString().padLeft(6, '0');
 
         _setInt(hoja, 0, row, i + 1);
-        _setText(hoja, 1, row, AppFormatters.formatearFecha(a.fecha));
-        _setText(hoja, 2, row, nombre);
-        _setText(hoja, 3, row, desc);
-        _setMonto(hoja, 4, row, a.monto);
-        _setText(hoja, 5, row, recibo);
-
+        _setText(hoja, 1, row, nombre);
+        _setText(hoja, 2, row, detalle);
+        _setMonto(hoja, 3, row, a.monto);
+        _setText(hoja, 4, row, recibo);
         total += a.monto;
       }
 
-      // Fila TOTAL — al final, columna IMPORTE en bold con la suma.
-      final totalRow = ordenados.length + 1;
-      _setText(hoja, 3, totalRow, 'TOTAL');
+      // ─── FILA TOTAL ──────────────────────────────────────────────
+      final totalRow = headerRow + 1 + ordenados.length;
+      _setText(hoja, 2, totalRow, 'TOTAL');
       hoja
-              .cell(ex.CellIndex.indexByColumnRow(
-                  columnIndex: 3, rowIndex: totalRow))
-              .cellStyle =
-          ex.CellStyle(bold: true);
-      _setMonto(hoja, 4, totalRow, total, bold: true);
+          .cell(ex.CellIndex.indexByColumnRow(
+              columnIndex: 2, rowIndex: totalRow))
+          .cellStyle = ex.CellStyle(
+        bold: true,
+        horizontalAlign: ex.HorizontalAlign.Right,
+      );
+      _setMonto(hoja, 3, totalRow, total, bold: true);
 
-      xu.autoFitColumnas(hoja, headers.length, totalRow + 1);
+      xu.autoFitColumnas(hoja, _cols, totalRow + 1);
+      // Forzar ancho mínimo de la columna "DETALLE" para que las
+      // observaciones largas no se compriman demasiado al exportar.
+      // `getColumnWidth` no expone API confiable en excel ^4.0.6, así
+      // que aplicamos un ancho fijo cómodo (24) que cubre la mayoría
+      // de observaciones; si el autoFit calculó más, queda el mayor.
+      hoja.setColumnWidth(2, 24);
 
       final bytesRaw = excel.save();
       if (bytesRaw == null || bytesRaw.isEmpty) {
         throw StateError('El archivo Excel se generó vacío.');
       }
-      final bytes = xu.aplicarAutoFilterAlXlsx(bytesRaw);
+      // No aplicamos AutoFilter al xlsx porque el encabezado merged
+      // de filas 0-2 confunde al filtro (lo coloca sobre el banner en
+      // lugar de la tabla). El operador puede activarlo manual con
+      // Ctrl+Shift+L si lo necesita.
+      final bytes = bytesRaw;
 
-      // Nombre del archivo: si hay rango de fechas, lo metemos para
-      // que dos exports distintos no se pisen. Ej:
-      //   Adelantos_2026_05_13_HHmmss.xlsx
-      //   Adelantos_2026_05_13_HHmmss_01-05-2026_al_13-05-2026.xlsx
+      // Nombre: si hay rango activo en la UI, lo metemos para que
+      // dos exports del mismo período no se pisen.
       String? sufijo;
       if (fechaDesde != null && fechaHasta != null) {
         sufijo =
@@ -143,9 +210,73 @@ class ReportAdelantosService {
     }
   }
 
+  /// Devuelve "FECHA: dd-mm-aaaa" si todos los adelantos son del mismo
+  /// día, o "FECHAS: dd-mm · dd-mm · ..." si son varios. Las fechas se
+  /// listan ordenadas ascendente. Si hay más de 5 fechas distintas
+  /// muestra el rango "FECHAS: dd-mm-aaaa AL dd-mm-aaaa" para no
+  /// inflar el encabezado.
+  static String _renderEtiquetaFechas(List<AdelantoChofer> adelantos) {
+    // Set para deduplicar por día (ignoramos hora — todos los
+    // adelantos suelen estar a las 00:00 pero por las dudas).
+    final dias = <DateTime>{};
+    for (final a in adelantos) {
+      dias.add(DateTime(a.fecha.year, a.fecha.month, a.fecha.day));
+    }
+    final ordenados = dias.toList()..sort();
+    if (ordenados.length == 1) {
+      return 'FECHA: ${AppFormatters.formatearFecha(ordenados.first)}';
+    }
+    if (ordenados.length > 5) {
+      return 'FECHAS: ${AppFormatters.formatearFecha(ordenados.first)} '
+          'AL ${AppFormatters.formatearFecha(ordenados.last)}';
+    }
+    return 'FECHAS: ${ordenados.map(AppFormatters.formatearFecha).join(" · ")}';
+  }
+
   // ===========================================================================
   // HELPERS DE CELDA
   // ===========================================================================
+
+  /// Crea una fila "banner" merged a través de todas las columnas de
+  /// la tabla, con el estilo dado. La lib `excel` no acepta merge
+  /// vacío — escribimos el texto en la primera celda y mergeamos.
+  static void _setMergedHeader(
+    ex.Sheet hoja, {
+    required int row,
+    required String text,
+    required String backgroundHex,
+    required String fontHex,
+    required double fontSize,
+    bool bold = false,
+    required ex.HorizontalAlign align,
+  }) {
+    final first = ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row);
+    final last =
+        ex.CellIndex.indexByColumnRow(columnIndex: _cols - 1, rowIndex: row);
+    final cell = hoja.cell(first);
+    cell.value = ex.TextCellValue(text);
+    cell.cellStyle = ex.CellStyle(
+      bold: bold,
+      fontSize: fontSize.toInt(),
+      backgroundColorHex: ex.ExcelColor.fromHexString(backgroundHex),
+      fontColorHex: ex.ExcelColor.fromHexString(fontHex),
+      horizontalAlign: align,
+      verticalAlign: ex.VerticalAlign.Center,
+    );
+    // Aplicar el mismo background a las celdas mergeadas para que
+    // visualmente quede uniforme — sin esto, el resto de la fila
+    // queda blanca y se ve el corte.
+    for (var c = 1; c < _cols; c++) {
+      hoja
+          .cell(
+              ex.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: row))
+          .cellStyle = ex.CellStyle(
+        backgroundColorHex: ex.ExcelColor.fromHexString(backgroundHex),
+      );
+    }
+    hoja.merge(first, last);
+    hoja.setRowHeight(row, fontSize + 12);
+  }
 
   static void _setText(ex.Sheet hoja, int col, int row, String v) {
     hoja
@@ -158,7 +289,10 @@ class ReportAdelantosService {
     final cell = hoja.cell(
         ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row));
     cell.value = ex.IntCellValue(v);
-    cell.cellStyle = ex.CellStyle(numberFormat: xu.formatoARSinDecimales);
+    cell.cellStyle = ex.CellStyle(
+      numberFormat: xu.formatoARSinDecimales,
+      horizontalAlign: ex.HorizontalAlign.Center,
+    );
   }
 
   static void _setMonto(
@@ -174,6 +308,7 @@ class ReportAdelantosService {
     cell.cellStyle = ex.CellStyle(
       numberFormat: xu.formatoAR,
       bold: bold,
+      horizontalAlign: ex.HorizontalAlign.Right,
     );
   }
 
