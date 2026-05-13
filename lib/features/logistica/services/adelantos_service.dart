@@ -185,6 +185,55 @@ class AdelantosService {
     AppLogger.log('Adelanto actualizado: $adelantoId');
   }
 
+  /// Asocia un adelanto a un viaje (set `viaje_id`). Lo usa el form
+  /// de viaje cuando el operador elige un adelanto preexistente del
+  /// chofer en el dropdown "ADELANTO ASOCIADO". Pasando `viajeId=null`
+  /// desasocia (limpia el campo con `FieldValue.delete()`, así el
+  /// adelanto queda "libre" para asociarse a otro viaje).
+  ///
+  /// NO toca el resto de los campos (monto, fecha, observación,
+  /// medio de pago, número de recibo). Idempotente: si ya estaba
+  /// asociado al mismo viaje, no hace nada visible.
+  static Future<void> setViajeAsociado({
+    required String adelantoId,
+    required String? viajeId,
+    required String actualizadoPorDni,
+  }) async {
+    if (adelantoId.isEmpty) {
+      throw ArgumentError('adelantoId vacío.');
+    }
+    final data = <String, dynamic>{
+      'viaje_id': viajeId == null || viajeId.trim().isEmpty
+          ? FieldValue.delete()
+          : viajeId.trim(),
+      'actualizado_en': FieldValue.serverTimestamp(),
+      'actualizado_por_dni': actualizadoPorDni,
+    };
+    await _col.doc(adelantoId).update(data);
+    AppLogger.log(
+      'Adelanto $adelantoId asociación viaje → ${viajeId ?? "(libre)"}',
+    );
+  }
+
+  /// Devuelve el adelanto asociado a un viaje (si existe). La hace el
+  /// form de viaje al cargar en modo edición para hidratar el
+  /// dropdown "ADELANTO ASOCIADO" con la selección actual.
+  /// Devuelve null si no hay ninguno (caso normal — la mayoría de
+  /// viajes no van a tener adelanto asociado).
+  ///
+  /// El modelo soporta a lo sumo UN adelanto por viaje desde la UI
+  /// (el dropdown es single-select). Si por alguna razón hay varios
+  /// docs con el mismo viaje_id (data corrupta), tomamos el primero.
+  static Future<AdelantoChofer?> getPorViaje(String viajeId) async {
+    if (viajeId.isEmpty) return null;
+    final snap = await _col
+        .where('viaje_id', isEqualTo: viajeId)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return AdelantoChofer.fromDoc(snap.docs.first);
+  }
+
   /// Hard-delete del adelanto. Idempotente (si no existe, no hace nada).
   /// El operador puede borrar adelantos cargados por error. Si ya tenía
   /// `numero_recibo` impreso, ese correlativo queda quemado (no se

@@ -9,9 +9,11 @@ import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../models/adelanto_chofer.dart';
 import '../models/empresa_logistica.dart';
 import '../models/tarifa_logistica.dart';
 import '../models/viaje.dart';
+import '../services/adelantos_service.dart';
 import '../services/logistica_service.dart';
 import '../services/viajes_service.dart';
 import '../utils/calculos_viaje.dart';
@@ -47,11 +49,15 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
   final _vehiculoCtrl = TextEditingController();
   final _engancheCtrl = TextEditingController();
 
-  // Adelanto: removido del form de viaje (2026-05-13). Vive en su
-  // propia pantalla LogisticaAdelantosScreen porque hay adelantos
-  // sin viaje asociado (de sueldo). Si necesitás registrar un
-  // adelanto para este viaje, hacelo desde Logística → Adelantos
-  // después de crear el viaje.
+  // Adelanto: la sección de alta inline se removió 2026-05-13 (ahora
+  // viven en `ADELANTOS_CHOFER`). El 2026-05-13 también se agregó la
+  // posibilidad de ASOCIAR un adelanto preexistente al viaje desde
+  // este form — `_adelantoAsociadoId` es el doc id elegido en el
+  // dropdown. `_adelantoAsociadoIdInicial` guarda el valor con el que
+  // se abrió el form (modo edición), para calcular el delta al
+  // guardar y hacer solo el update mínimo (asociar/desasociar).
+  String? _adelantoAsociadoId;
+  String? _adelantoAsociadoIdInicial;
 
   List<GastoViaje> _gastos = [];
 
@@ -142,6 +148,22 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
       // editar al menos.
       if (_tramos.isEmpty) {
         _tramos.add(_TramoEditState.vacio());
+      }
+
+      // Hidratar el adelanto asociado. Si hay uno con
+      // `viaje_id == widget.viajeId`, lo seteamos como selección
+      // inicial del dropdown. Sin esto, en modo edición el dropdown
+      // arrancaría en "(sin adelanto)" aún si el viaje ya tenía uno
+      // asociado desde antes.
+      try {
+        final adAsociado =
+            await AdelantosService.getPorViaje(widget.viajeId!);
+        if (adAsociado != null) {
+          _adelantoAsociadoId = adAsociado.id;
+          _adelantoAsociadoIdInicial = adAsociado.id;
+        }
+      } catch (_) {
+        // No es fatal — el operador puede asociar uno nuevo igual.
       }
 
       setState(() => _cargando = false);
@@ -301,6 +323,44 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
         });
       }
 
+      // Sincronizar asociación del adelanto. Lo hacemos DESPUÉS de
+      // tener el `viajeId` confirmado (sirve tanto para alta como
+      // edición). Tres casos:
+      //   1. Cambió a otro adelanto: desasociar el anterior + asociar
+      //      el nuevo (2 writes).
+      //   2. Se eligió uno y antes no había: asociar (1 write).
+      //   3. Se sacó la asociación: desasociar el anterior (1 write).
+      // Si no cambió respecto del valor inicial, no se hace nada
+      // (idempotente).
+      if (_adelantoAsociadoId != _adelantoAsociadoIdInicial) {
+        try {
+          if (_adelantoAsociadoIdInicial != null) {
+            await AdelantosService.setViajeAsociado(
+              adelantoId: _adelantoAsociadoIdInicial!,
+              viajeId: null,
+              actualizadoPorDni: dniActual,
+            );
+          }
+          if (_adelantoAsociadoId != null) {
+            await AdelantosService.setViajeAsociado(
+              adelantoId: _adelantoAsociadoId!,
+              viajeId: viajeId,
+              actualizadoPorDni: dniActual,
+            );
+          }
+        } catch (e) {
+          // El viaje YA quedó guardado. Si falla la asociación del
+          // adelanto avisamos pero no rompemos el flujo — el operador
+          // puede reasociar entrando a Editar.
+          if (mounted) {
+            AppFeedback.warningOn(
+              messenger,
+              'Viaje guardado, pero falló asociar el adelanto: $e',
+            );
+          }
+        }
+      }
+
       if (!mounted) return;
       AppFeedback.successOn(
         messenger,
@@ -366,6 +426,13 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
               nombre: _choferNombre,
               onChanged: (dni, nombre, vehiculo, enganche) {
                 setState(() {
+                  // Si cambia el chofer, el adelanto previamente
+                  // seleccionado pertenece a OTRO chofer (los adelantos
+                  // viven por DNI). Lo limpiamos para que el operador
+                  // elija uno del chofer nuevo si corresponde.
+                  if (dni != _choferDni) {
+                    _adelantoAsociadoId = null;
+                  }
                   _choferDni = dni;
                   _choferNombre = nombre;
                   _vehiculoCtrl.text = vehiculo ?? '';
@@ -384,19 +451,36 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
             ),
             const SizedBox(height: 12),
 
-            // 4. GASTOS EXTRAORDINARIOS. (La sección de Adelanto se
-            // removió del form de viaje el 2026-05-13 — los adelantos
-            // pasaron a su propia pantalla `LogisticaAdelantosScreen`
-            // porque también se entregan adelantos de sueldo sin viaje
-            // asociado. Para registrar un adelanto: hub Logística →
-            // ADELANTOS → "NUEVO ADELANTO".)
+            // 4. ADELANTO ASOCIADO (opcional). Si el operador ya
+            // creó un adelanto antes de armar el viaje (caso típico:
+            // le pagó al chofer en mano y después arma el viaje al
+            // que pertenece), lo elige acá. La sección de ALTA de
+            // adelantos sigue viviendo en `LogisticaAdelantosScreen`
+            // — esto es solo ASOCIACIÓN.
+            _SeccionAdelantoAsociado(
+              choferDni: _choferDni,
+              viajeIdActual: widget.viajeId,
+              adelantoSeleccionadoId: _adelantoAsociadoId,
+              onChanged: (id) =>
+                  setState(() => _adelantoAsociadoId = id),
+            ),
+            const SizedBox(height: 12),
+
+            // 5. GASTOS EXTRAORDINARIOS. (La sección de Adelanto INLINE
+            // se removió del form de viaje el 2026-05-13 — los
+            // adelantos viven en su propia pantalla
+            // `LogisticaAdelantosScreen` porque también se entregan
+            // adelantos de sueldo sin viaje asociado. Para crear un
+            // adelanto: hub Logística → ADELANTOS → "NUEVO ADELANTO".
+            // El dropdown de "ADELANTO ASOCIADO" de arriba solo elige
+            // entre los ya existentes.)
             _SeccionGastos(
               gastos: _gastos,
               onChanged: (l) => setState(() => _gastos = l),
             ),
             const SizedBox(height: 12),
 
-            // 5. TRAMOS (uno o varios).
+            // 6. TRAMOS (uno o varios).
             ..._tramos.asMap().entries.map((entry) {
               final index = entry.key;
               final tramo = entry.value;
@@ -1120,10 +1204,134 @@ class _SeccionUnidad extends StatelessWidget {
   }
 }
 
-// `_SeccionAdelanto` removida del form de viaje el 2026-05-13.
-// Los adelantos pasaron a ser entidad propia (`ADELANTOS_CHOFER`)
-// con su propia pantalla. El operador carga el adelanto desde
-// LOGÍSTICA → ADELANTOS, no desde el viaje.
+// `_SeccionAdelanto` (alta inline) removida del form de viaje el
+// 2026-05-13. Los adelantos pasaron a ser entidad propia
+// (`ADELANTOS_CHOFER`) con su propia pantalla. El operador crea el
+// adelanto desde LOGÍSTICA → ADELANTOS y, opcionalmente, lo ASOCIA al
+// viaje desde la sección `_SeccionAdelantoAsociado` (dropdown).
+
+/// Dropdown para ASOCIAR un adelanto preexistente al viaje. Muestra:
+///   - "(sin adelanto asociado)" como opción default.
+///   - Cada adelanto del chofer seleccionado que esté libre (sin
+///     `viaje_id`) O que ya esté asociado a ESTE viaje (modo edición).
+///
+/// Si todavía no se eligió chofer, se muestra un mensaje pidiendo
+/// que se seleccione uno primero — los adelantos viven por DNI, no
+/// tiene sentido listar.
+///
+/// La sección NO permite crear adelantos nuevos. Si el operador
+/// quiere un adelanto que todavía no existe, lo crea desde
+/// `LogisticaAdelantosScreen` y vuelve a este form.
+class _SeccionAdelantoAsociado extends StatelessWidget {
+  final String? choferDni;
+  /// Si es edición, traemos los adelantos ya asociados a este viaje
+  /// además de los libres. Null en modo alta.
+  final String? viajeIdActual;
+  final String? adelantoSeleccionadoId;
+  final ValueChanged<String?> onChanged;
+
+  const _SeccionAdelantoAsociado({
+    required this.choferDni,
+    required this.viajeIdActual,
+    required this.adelantoSeleccionadoId,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SeccionCard(
+      titulo: 'ADELANTO ASOCIADO (OPCIONAL)',
+      icono: Icons.payments_outlined,
+      children: [
+        if (choferDni == null || choferDni!.isEmpty)
+          const Text(
+            'Seleccioná un chofer primero — los adelantos viven por chofer.',
+            style: TextStyle(color: Colors.white60, fontSize: 12),
+          )
+        else
+          StreamBuilder<List<AdelantoChofer>>(
+            stream: AdelantosService.streamAdelantosPorChofer(choferDni!),
+            builder: (ctx, snap) {
+              if (snap.hasError) {
+                return Text(
+                  'Error cargando adelantos: ${snap.error}',
+                  style: const TextStyle(
+                      color: AppColors.accentRed, fontSize: 12),
+                );
+              }
+              if (!snap.hasData) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: LinearProgressIndicator(minHeight: 2),
+                );
+              }
+              // Filtro client-side: adelantos sin viaje O ya
+              // asociados a ESTE viaje. Los asociados a otro viaje
+              // se excluyen — no queremos robarle el adelanto a otro
+              // viaje sin querer.
+              final candidatos = snap.data!
+                  .where((a) =>
+                      a.viajeId == null ||
+                      a.viajeId!.isEmpty ||
+                      a.viajeId == viajeIdActual)
+                  .toList();
+              if (candidatos.isEmpty) {
+                return const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No hay adelantos libres de este chofer.',
+                      style:
+                          TextStyle(color: Colors.white60, fontSize: 12),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Si necesitás crear uno, andá a LOGÍSTICA → '
+                      'ADELANTOS y volvé.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                  ],
+                );
+              }
+              return DropdownButtonFormField<String?>(
+                initialValue: adelantoSeleccionadoId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Adelanto del chofer',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 12),
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('(sin adelanto asociado)'),
+                  ),
+                  ...candidatos.map((a) {
+                    final fecha = AppFormatters.formatearFecha(a.fecha);
+                    final monto = AppFormatters.formatearMonto(a.monto);
+                    final medio = a.medioPago.etiqueta;
+                    final obs = a.observacion?.trim().isNotEmpty == true
+                        ? ' · ${a.observacion!.trim()}'
+                        : '';
+                    return DropdownMenuItem<String?>(
+                      value: a.id,
+                      child: Text(
+                        '$fecha · \$ $monto · $medio$obs',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }),
+                ],
+                onChanged: onChanged,
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
 
 class _SeccionGastos extends StatelessWidget {
   final List<GastoViaje> gastos;

@@ -7,7 +7,9 @@ import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../models/adelanto_chofer.dart';
 import '../models/viaje.dart';
+import '../services/adelantos_service.dart';
 import '../services/viajes_service.dart';
 
 /// Detalle read-only de un viaje. Vista resumida para consulta rápida
@@ -60,6 +62,8 @@ class LogisticaViajeDetalleScreen extends StatelessWidget {
                 _Cabecera(v: v),
                 const SizedBox(height: 12),
                 _SeccionAsignacion(v: v),
+                const SizedBox(height: 12),
+                _SeccionAdelantoAsociado(viajeId: v.id),
                 const SizedBox(height: 12),
                 _SeccionTramos(v: v),
                 const SizedBox(height: 12),
@@ -273,6 +277,46 @@ class _DetalleTramo extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Bloque que muestra el adelanto asociado al viaje (si hay uno).
+/// Lectura via `AdelantosService.getPorViaje` — una vez al construir,
+/// no es stream porque la asociación cambia poco. Si no hay adelanto
+/// asociado, el bloque se colapsa (`SizedBox.shrink`).
+class _SeccionAdelantoAsociado extends StatelessWidget {
+  final String viajeId;
+  const _SeccionAdelantoAsociado({required this.viajeId});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<AdelantoChofer?>(
+      future: AdelantosService.getPorViaje(viajeId),
+      builder: (ctx, snap) {
+        final a = snap.data;
+        if (a == null) return const SizedBox.shrink();
+        final fechaFmt = AppFormatters.formatearFecha(a.fecha);
+        final montoFmt = AppFormatters.formatearMonto(a.monto);
+        final medio = a.medioPago.etiqueta;
+        return _Seccion(
+          titulo: 'ADELANTO ASOCIADO',
+          icono: Icons.payments_outlined,
+          iconColor: AppColors.accentBlue,
+          children: [
+            _Linea(label: 'Fecha', valor: fechaFmt),
+            _Linea(label: 'Monto', valor: '\$ $montoFmt'),
+            _Linea(label: 'Medio de pago', valor: medio),
+            if (a.observacion != null && a.observacion!.trim().isNotEmpty)
+              _Linea(label: 'Observación', valor: a.observacion!),
+            if (a.numeroRecibo != null)
+              _Linea(
+                label: 'Recibo N°',
+                valor: a.numeroRecibo!.toString().padLeft(6, '0'),
+              ),
+          ],
+        );
+      },
     );
   }
 }
