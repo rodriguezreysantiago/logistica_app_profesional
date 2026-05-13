@@ -9,6 +9,7 @@ import '../../../shared/widgets/app_widgets.dart';
 import '../models/adelanto_chofer.dart';
 import '../models/viaje.dart';
 import '../services/adelantos_service.dart';
+import '../services/report_liquidacion.dart';
 import '../services/liquidacion_service.dart';
 
 /// Pantalla LIQUIDACIÓN — agregaciones financieras de los viajes
@@ -184,6 +185,16 @@ class _LogisticaLiquidacionScreenState
                           empleados: empleados,
                           choferDniFiltro: _choferDni,
                           onLiquidarBulk: () => _liquidarBulk(context, viajes),
+                          onExportarExcel: () =>
+                              ReportLiquidacionService.generar(
+                            context: context,
+                            viajes: viajes,
+                            adelantos: adelantos,
+                            empleados: empleados,
+                            mes: _mesSeleccionado,
+                            empresaCuit: _empresaCuit,
+                            choferDniFiltro: _choferDni,
+                          ),
                         );
                       },
                     );
@@ -427,6 +438,7 @@ class _Contenido extends StatelessWidget {
   final Map<String, EmpleadoLiquidacion> empleados;
   final String? choferDniFiltro;
   final VoidCallback onLiquidarBulk;
+  final VoidCallback onExportarExcel;
 
   const _Contenido({
     required this.viajes,
@@ -434,6 +446,7 @@ class _Contenido extends StatelessWidget {
     required this.empleados,
     required this.choferDniFiltro,
     required this.onLiquidarBulk,
+    required this.onExportarExcel,
   });
 
   @override
@@ -495,7 +508,25 @@ class _Contenido extends StatelessWidget {
               ),
             ),
           ),
-        if (hayPendientes) const SizedBox(height: 16),
+        if (hayPendientes) const SizedBox(height: 8),
+        // Exportar a Excel — siempre disponible si hay datos. Útil para
+        // mandar al contador, imprimir o auditar offline. 3 hojas:
+        // RESUMEN por chofer, VIAJES uno por uno, ADELANTOS uno por uno.
+        OutlinedButton.icon(
+          onPressed: onExportarExcel,
+          icon: const Icon(Icons.file_download_outlined),
+          label: const Text('EXPORTAR A EXCEL'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.accentBlue,
+            side: const BorderSide(color: AppColors.accentBlue),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.0,
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
         // Si no hay chofer filtrado, mostrar tabla agregada por chofer.
         // Si hay chofer filtrado, mostrar lista de viajes individuales.
         if (choferDniFiltro == null)

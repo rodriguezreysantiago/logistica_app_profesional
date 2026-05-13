@@ -1,0 +1,400 @@
+import 'package:excel/excel.dart' as ex;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+
+import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/formatters.dart';
+import '../../reports/services/excel_utils.dart' as xu;
+import '../../reports/services/report_save_helper.dart';
+import '../models/adelanto_chofer.dart';
+import '../models/viaje.dart';
+import '../services/liquidacion_service.dart' show EmpleadoLiquidacion;
+
+/// Reporte Excel de liquidación. Lo dispara la pantalla
+/// `LogisticaLiquidacionScreen` con los viajes + adelantos ya
+/// filtrados en memoria (mes + empresa empleadora + chofer +
+/// estado liquidado). El service NO vuelve a consultar Firestore.
+///
+/// Output: 3 hojas
+///   1. RESUMEN     — una fila por chofer con totales y neto.
+///   2. VIAJES      — una fila por viaje con monto y comisión.
+///   3. ADELANTOS   — una fila por adelanto con medio de pago.
+///
+/// Si el filtro está acotado a 1 chofer la hoja RESUMEN igual se
+/// genera (con 1 sola fila) para que el contador siempre lea de la
+/// misma estructura.
+class ReportLiquidacionService {
+  ReportLiquidacionService._();
+
+  static Future<void> generar({
+    required BuildContext context,
+    required List<Viaje> viajes,
+    required List<AdelantoChofer> adelantos,
+    required Map<String, EmpleadoLiquidacion> empleados,
+    required DateTime mes,
+    String? empresaCuit,
+    String? choferDniFiltro,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (kIsWeb) {
+      AppFeedback.warningOn(messenger,
+          'Los reportes Excel solo están disponibles en Windows, Android e iOS.');
+      return;
+    }
+    if (viajes.isEmpty && adelantos.isEmpty) {
+      AppFeedback.warningOn(messenger,
+          'No hay datos para exportar en el período seleccionado.');
+      return;
+    }
+
+    _notificarProgreso(messenger);
+    try {
+      final excel = ex.Excel.createExcel();
+      // El excel arranca con una hoja "Sheet1" que renombramos a
+      // RESUMEN. Después agregamos VIAJES y ADELANTOS.
+      excel.rename('Sheet1', 'RESUMEN');
+
+      _llenarHojaResumen(
+        excel,
+        viajes: viajes,
+        adelantos: adelantos,
+        empleados: empleados,
+      );
+      _llenarHojaViajes(
+        excel,
+        viajes: viajes,
+        empleados: empleados,
+      );
+      _llenarHojaAdelantos(
+        excel,
+        adelantos: adelantos,
+        empleados: empleados,
+      );
+
+      final bytesRaw = excel.save();
+      if (bytesRaw == null || bytesRaw.isEmpty) {
+        throw StateError('El archivo Excel se generó vacío.');
+      }
+      final bytes = xu.aplicarAutoFilterAlXlsx(bytesRaw);
+
+      // Nombre: `Liquidacion_2026_05_HHmmss.xlsx` con sufijo chofer
+      // o empresa si filtró por alguno (para que se diferencien
+      // exports del mismo mes).
+      final mesStr =
+          '${mes.year.toString().padLeft(4, '0')}_${mes.month.toString().padLeft(2, '0')}';
+      final sufijos = <String>[];
+      if (choferDniFiltro != null) {
+        final nombre = empleados[choferDniFiltro]?.nombre ?? choferDniFiltro;
+        sufijos.add(_slugSeguro(nombre));
+      } else if (empresaCuit != null) {
+        sufijos.add(_slugSeguro(empresaCuit));
+      }
+      final sufijo = sufijos.isEmpty ? null : sufijos.join('_');
+      final nombreArchivo = ReportSaveHelper.nombreUnico(
+        'Liquidacion_$mesStr',
+        sufijoExtra: sufijo,
+      );
+
+      await ReportSaveHelper.guardarYAbrir(
+        bytes: bytes,
+        nombreDefault: nombreArchivo,
+        messenger: messenger,
+        textoCompartir:
+            'Liquidación ${AppFormatters.formatearMes(mes)} — Coopertrans Móvil',
+      );
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error generando reporte: $e');
+    }
+  }
+
+  // ===========================================================================
+  // HOJAS
+  // ===========================================================================
+
+  static void _llenarHojaResumen(
+    ex.Excel excel, {
+    required List<Viaje> viajes,
+    required List<AdelantoChofer> adelantos,
+    required Map<String, EmpleadoLiquidacion> empleados,
+  }) {
+    final hoja = excel['RESUMEN'];
+    final headers = [
+      'CHOFER',
+      'DNI',
+      'EMPRESA EMPLEADORA',
+      'VIAJES',
+      'ADELANTOS',
+      'FACTURADO A EMPRESA',
+      'COMISIÓN CHOFER',
+      'ADELANTOS ENTREGADOS',
+      'GASTOS REEMBOLSABLES',
+      'NETO A PAGAR',
+    ];
+    for (var i = 0; i < headers.length; i++) {
+      final cell = hoja.cell(
+          ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+      cell.value = ex.TextCellValue(headers[i]);
+      cell.cellStyle = ex.CellStyle(
+        bold: true,
+        backgroundColorHex: ex.ExcelColor.fromHexString('#2E7D32'),
+        fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
+      );
+    }
+
+    // Agrupar por DNI. Unión de DNIs presentes en viajes y adelantos.
+    final viajesPorChofer = <String, List<Viaje>>{};
+    for (final v in viajes) {
+      viajesPorChofer.putIfAbsent(v.choferDni, () => []).add(v);
+    }
+    final adelantosPorChofer = <String, List<AdelantoChofer>>{};
+    for (final a in adelantos) {
+      adelantosPorChofer.putIfAbsent(a.choferDni, () => []).add(a);
+    }
+    final dnis = <String>{
+      ...viajesPorChofer.keys,
+      ...adelantosPorChofer.keys,
+    }.toList()
+      ..sort((a, b) {
+        final na = empleados[a]?.nombre ?? a;
+        final nb = empleados[b]?.nombre ?? b;
+        return na.compareTo(nb);
+      });
+
+    var row = 1;
+    for (final dni in dnis) {
+      final vs = viajesPorChofer[dni] ?? const <Viaje>[];
+      final ads = adelantosPorChofer[dni] ?? const <AdelantoChofer>[];
+      final emp = empleados[dni];
+      final nombre = emp?.nombre ?? 'DNI $dni';
+      final empresa = emp?.empresaCuit ?? '';
+      final facturado = vs.fold<double>(0, (a, v) => a + v.montoVecchi);
+      final chofer = vs.fold<double>(0, (a, v) => a + v.montoChoferRedondeado);
+      final adel = ads.fold<double>(0, (a, ad) => a + ad.monto);
+      final gastos = vs.fold<double>(0, (a, v) => a + v.gastosTotal);
+      final neto = chofer - adel + gastos;
+
+      _setText(hoja, 0, row, nombre);
+      _setText(hoja, 1, row, dni);
+      _setText(hoja, 2, row, empresa);
+      _setInt(hoja, 3, row, vs.length);
+      _setInt(hoja, 4, row, ads.length);
+      _setMonto(hoja, 5, row, facturado);
+      _setMonto(hoja, 6, row, chofer);
+      _setMonto(hoja, 7, row, adel);
+      _setMonto(hoja, 8, row, gastos);
+      _setMonto(hoja, 9, row, neto, bold: true);
+
+      row++;
+    }
+
+    xu.autoFitColumnas(hoja, headers.length, row);
+  }
+
+  static void _llenarHojaViajes(
+    ex.Excel excel, {
+    required List<Viaje> viajes,
+    required Map<String, EmpleadoLiquidacion> empleados,
+  }) {
+    final hoja = excel['VIAJES'];
+    final headers = [
+      'FECHA',
+      'CHOFER',
+      'DNI',
+      'TRACTOR',
+      'ENGANCHE',
+      'TRAMOS',
+      'RUTA',
+      'KG DESCARGADOS',
+      'FACTURADO',
+      'COMISIÓN CHOFER',
+      'REDONDEADO',
+      'GASTOS',
+      'LIQUIDADO',
+      'ESTADO',
+    ];
+    for (var i = 0; i < headers.length; i++) {
+      final cell = hoja.cell(
+          ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+      cell.value = ex.TextCellValue(headers[i]);
+      cell.cellStyle = ex.CellStyle(
+        bold: true,
+        backgroundColorHex: ex.ExcelColor.fromHexString('#1565C0'),
+        fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
+      );
+    }
+
+    final ordenados = [...viajes]
+      ..sort((a, b) {
+        final fa = a.fechaReferencia;
+        final fb = b.fechaReferencia;
+        if (fa == null && fb == null) return 0;
+        if (fa == null) return 1;
+        if (fb == null) return -1;
+        return fa.compareTo(fb);
+      });
+
+    var row = 1;
+    for (final v in ordenados) {
+      final fecha = v.fechaReferencia;
+      final fechaStr =
+          fecha == null ? '' : AppFormatters.formatearFecha(fecha);
+      final nombre = v.choferNombre ?? empleados[v.choferDni]?.nombre ?? '';
+      final kgDescTotal = v.tramos.fold<double>(
+        0,
+        (acc, t) => acc + (t.kgDescargados ?? 0),
+      );
+
+      _setText(hoja, 0, row, fechaStr);
+      _setText(hoja, 1, row, nombre);
+      _setText(hoja, 2, row, v.choferDni);
+      _setText(hoja, 3, row, v.vehiculoId ?? '');
+      _setText(hoja, 4, row, v.engancheId ?? '');
+      _setInt(hoja, 5, row, v.cantidadTramos);
+      _setText(hoja, 6, row, v.rutaEtiqueta);
+      if (kgDescTotal > 0) {
+        _setInt(hoja, 7, row, kgDescTotal.round());
+      }
+      _setMonto(hoja, 8, row, v.montoVecchi);
+      _setMonto(hoja, 9, row, v.montoChofer);
+      _setMonto(hoja, 10, row, v.montoChoferRedondeado);
+      _setMonto(hoja, 11, row, v.gastosTotal);
+      _setText(hoja, 12, row, v.liquidado ? 'SÍ' : 'NO');
+      _setText(hoja, 13, row, v.estado.etiqueta);
+
+      row++;
+    }
+
+    xu.autoFitColumnas(hoja, headers.length, row);
+  }
+
+  static void _llenarHojaAdelantos(
+    ex.Excel excel, {
+    required List<AdelantoChofer> adelantos,
+    required Map<String, EmpleadoLiquidacion> empleados,
+  }) {
+    final hoja = excel['ADELANTOS'];
+    final headers = [
+      'FECHA',
+      'CHOFER',
+      'DNI',
+      'MONTO',
+      'MEDIO DE PAGO',
+      'OBSERVACIÓN',
+      'VIAJE ID',
+      'RECIBO N°',
+      'IMPRESO',
+    ];
+    for (var i = 0; i < headers.length; i++) {
+      final cell = hoja.cell(
+          ex.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+      cell.value = ex.TextCellValue(headers[i]);
+      cell.cellStyle = ex.CellStyle(
+        bold: true,
+        backgroundColorHex: ex.ExcelColor.fromHexString('#EF6C00'),
+        fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
+      );
+    }
+
+    final ordenados = [...adelantos]..sort((a, b) => a.fecha.compareTo(b.fecha));
+
+    var row = 1;
+    for (final a in ordenados) {
+      final nombre = a.choferNombre ?? empleados[a.choferDni]?.nombre ?? '';
+      _setText(hoja, 0, row, AppFormatters.formatearFecha(a.fecha));
+      _setText(hoja, 1, row, nombre);
+      _setText(hoja, 2, row, a.choferDni);
+      _setMonto(hoja, 3, row, a.monto);
+      _setText(hoja, 4, row, a.medioPago.etiqueta);
+      _setText(hoja, 5, row, a.observacion ?? '');
+      _setText(hoja, 6, row, a.viajeId ?? '');
+      if (a.numeroRecibo != null) {
+        _setText(hoja, 7, row, a.numeroRecibo.toString().padLeft(6, '0'));
+      }
+      _setText(
+        hoja,
+        8,
+        row,
+        a.impresoEn == null
+            ? 'NO'
+            : AppFormatters.formatearFechaHoraSinSegundos(a.impresoEn),
+      );
+
+      row++;
+    }
+
+    xu.autoFitColumnas(hoja, headers.length, row);
+  }
+
+  // ===========================================================================
+  // HELPERS DE CELDA
+  // ===========================================================================
+
+  static void _setText(ex.Sheet hoja, int col, int row, String v) {
+    hoja
+            .cell(ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row))
+            .value =
+        ex.TextCellValue(v);
+  }
+
+  static void _setInt(ex.Sheet hoja, int col, int row, int v) {
+    final cell = hoja.cell(
+        ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row));
+    cell.value = ex.IntCellValue(v);
+    cell.cellStyle = ex.CellStyle(numberFormat: xu.formatoARSinDecimales);
+  }
+
+  static void _setMonto(
+    ex.Sheet hoja,
+    int col,
+    int row,
+    double v, {
+    bool bold = false,
+  }) {
+    final cell = hoja.cell(
+        ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row));
+    cell.value = ex.DoubleCellValue(v);
+    cell.cellStyle = ex.CellStyle(
+      numberFormat: xu.formatoAR,
+      bold: bold,
+    );
+  }
+
+  // ===========================================================================
+  // OTROS
+  // ===========================================================================
+
+  static String _slugSeguro(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[áä]'), 'a')
+        .replaceAll(RegExp(r'[éë]'), 'e')
+        .replaceAll(RegExp(r'[íï]'), 'i')
+        .replaceAll(RegExp(r'[óö]'), 'o')
+        .replaceAll(RegExp(r'[úü]'), 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '')
+        .substring(0, 0 + (raw.length > 32 ? 32 : raw.length).clamp(0, 32));
+  }
+
+  static void _notificarProgreso(ScaffoldMessengerState messenger) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                  color: Colors.white, strokeWidth: 2),
+            ),
+            SizedBox(width: 15),
+            Text('Generando reporte de liquidación...'),
+          ],
+        ),
+        backgroundColor: Colors.blueGrey,
+      ),
+    );
+  }
+}
