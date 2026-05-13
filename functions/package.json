@@ -2,7 +2,7 @@
   "name": "functions",
   "description": "Cloud Functions for Coopertrans Móvil (Vecchi)",
   "scripts": {
-    "lint": "eslint --ext .js,.ts .",
+    "lint": "eslint .",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "test": "npm run build && node --test",
@@ -17,18 +17,17 @@
   },
   "main": "lib/index.js",
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "firebase-admin": "^12.6.0",
+    "bcryptjs": "^3.0.3",
+    "firebase-admin": "^13.9.0",
     "firebase-functions": "^7.2.5"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@typescript-eslint/eslint-plugin": "~8.59.2",
-    "@typescript-eslint/parser": "~8.59.2",
-    "eslint": "^8.57.0",
-    "eslint-config-google": "^0.14.0",
-    "eslint-plugin-import": "^2.29.1",
-    "typescript": "~5.5.4"
+    "@eslint/js": "^9.39.4",
+    "@types/bcryptjs": "^3.0.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-import": "^2.32.0",
+    "typescript": "~5.5.4",
+    "typescript-eslint": "^8.59.3"
   },
   "private": true
 }
