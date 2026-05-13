@@ -108,18 +108,31 @@ class _LogisticaTarifasScreenState extends State<LogisticaTarifasScreen> {
     );
   }
 
+  /// Filtro token-based: exige que TODOS los tokens estén presentes
+  /// en algún campo de la tarifa. Permite buscar "profertil olavarria"
+  /// y matchear una tarifa con origen Profertil y destino Olavarría.
+  /// Mismo patrón que `LogisticaUbicacionesScreen` y
+  /// `LogisticaEmpresasScreen`.
   List<TarifaLogistica> _aplicarFiltro(
     List<TarifaLogistica> tarifas,
     String filtro,
   ) {
-    if (filtro.trim().isEmpty) return tarifas;
-    final f = filtro.trim().toUpperCase();
+    final q = filtro.trim().toLowerCase();
+    if (q.isEmpty) return tarifas;
+    final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
     return tarifas.where((t) {
-      return t.empresaOrigenNombre.toUpperCase().contains(f) ||
-          t.empresaDestinoNombre.toUpperCase().contains(f) ||
-          t.ubicacionOrigenEtiqueta.toUpperCase().contains(f) ||
-          t.ubicacionDestinoEtiqueta.toUpperCase().contains(f) ||
-          (t.dadorNombre?.toUpperCase().contains(f) ?? false);
+      final hay = [
+        t.empresaOrigenNombre,
+        t.empresaDestinoNombre,
+        t.ubicacionOrigenEtiqueta,
+        t.ubicacionDestinoEtiqueta,
+        t.dadorNombre ?? '',
+        t.producto ?? '',
+      ].join(' ').toLowerCase();
+      for (final token in tokens) {
+        if (!hay.contains(token)) return false;
+      }
+      return true;
     }).toList();
   }
 }
@@ -147,7 +160,7 @@ class _BarraFiltros extends StatelessWidget {
             child: TextField(
               onChanged: onCambioFiltro,
               decoration: const InputDecoration(
-                hintText: 'Buscar empresa o ubicación...',
+                hintText: 'Buscar por empresa, ubicación, dador o producto…',
                 prefixIcon: Icon(Icons.search, color: Colors.white54),
                 isDense: true,
               ),

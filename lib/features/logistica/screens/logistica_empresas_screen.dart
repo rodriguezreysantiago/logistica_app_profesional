@@ -43,60 +43,127 @@ class LogisticaEmpresasScreen extends StatelessWidget {
   }
 }
 
-class _ListaEmpresas extends StatelessWidget {
+class _ListaEmpresas extends StatefulWidget {
   final TipoEmpresaLogistica tipo;
   const _ListaEmpresas({required this.tipo});
+
+  @override
+  State<_ListaEmpresas> createState() => _ListaEmpresasState();
+}
+
+class _ListaEmpresasState extends State<_ListaEmpresas> {
+  String _filtro = '';
+
+  /// Tokeniza el filtro y exige que TODOS los tokens estén presentes
+  /// en algún campo de la empresa. Permite buscar "vecchi 2914" y
+  /// matchear "Vecchi Ariel SRL" con teléfono 2914567890. Mismo patrón
+  /// que `LogisticaUbicacionesScreen`.
+  List<EmpresaLogistica> _aplicarFiltro(List<EmpresaLogistica> items) {
+    final q = _filtro.trim().toLowerCase();
+    if (q.isEmpty) return items;
+    final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
+    return items.where((e) {
+      final hay = [
+        e.nombre,
+        e.apodo ?? '',
+        e.cuit ?? '',
+        e.contacto ?? '',
+        e.nombreContacto ?? '',
+        e.productos.join(' '),
+      ].join(' ').toLowerCase();
+      for (final t in tokens) {
+        if (!hay.contains(t)) return false;
+      }
+      return true;
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        StreamBuilder<List<EmpresaLogistica>>(
-          stream: LogisticaService.streamEmpresas(tipo: tipo),
-          builder: (ctx, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            // Mostrar error real (típico: "requires an index" si falta
-            // el índice compuesto en firestore.indexes.json). Sin esto
-            // el StreamBuilder mostraría empty state y el operador
-            // pensaría que "no se guarda nada" cuando en realidad la
-            // query falla en Firestore.
-            if (snap.hasError) {
-              return AppEmptyState(
-                icon: Icons.error_outline,
-                title: 'Error cargando la lista',
-                subtitle: snap.error.toString(),
-              );
-            }
-            final items = snap.data ?? const [];
-            if (items.isEmpty) {
-              return AppEmptyState(
-                icon: Icons.business_outlined,
-                title: tipo == TipoEmpresaLogistica.cliente
-                    ? 'Sin clientes cargados'
-                    : 'Sin dadores de transporte cargados',
-                subtitle: 'Tocá + para agregar el primero',
-              );
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-              itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (_, i) => _CardEmpresa(empresa: items[i]),
-            );
-          },
+        Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: TextField(
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  hintText: widget.tipo == TipoEmpresaLogistica.cliente
+                      ? 'Buscar por nombre, CUIT, contacto, producto…'
+                      : 'Buscar por nombre, CUIT, contacto…',
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  suffixIcon: _filtro.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () => setState(() => _filtro = ''),
+                        ),
+                ),
+                onChanged: (v) => setState(() => _filtro = v),
+              ),
+            ),
+            Expanded(
+              child: StreamBuilder<List<EmpresaLogistica>>(
+                stream: LogisticaService.streamEmpresas(tipo: widget.tipo),
+                builder: (ctx, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  // Mostrar error real (típico: "requires an index" si falta
+                  // el índice compuesto en firestore.indexes.json). Sin esto
+                  // el StreamBuilder mostraría empty state y el operador
+                  // pensaría que "no se guarda nada" cuando en realidad la
+                  // query falla en Firestore.
+                  if (snap.hasError) {
+                    return AppEmptyState(
+                      icon: Icons.error_outline,
+                      title: 'Error cargando la lista',
+                      subtitle: snap.error.toString(),
+                    );
+                  }
+                  final items = snap.data ?? const [];
+                  if (items.isEmpty) {
+                    return AppEmptyState(
+                      icon: Icons.business_outlined,
+                      title: widget.tipo == TipoEmpresaLogistica.cliente
+                          ? 'Sin clientes cargados'
+                          : 'Sin dadores de transporte cargados',
+                      subtitle: 'Tocá + para agregar el primero',
+                    );
+                  }
+                  final filtrados = _aplicarFiltro(items);
+                  if (filtrados.isEmpty) {
+                    return AppEmptyState(
+                      icon: Icons.search_off,
+                      title: 'Sin resultados',
+                      subtitle:
+                          'Ninguna empresa coincide con "$_filtro". Probá '
+                          'con otra palabra o limpiá el filtro.',
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
+                    itemCount: filtrados.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) => _CardEmpresa(empresa: filtrados[i]),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
         Positioned(
           right: 16,
           bottom: 16,
           child: FloatingActionButton.extended(
-            heroTag: 'fab_empresa_${tipo.codigo}',
+            heroTag: 'fab_empresa_${widget.tipo.codigo}',
             backgroundColor: AppColors.accentBlue,
-            onPressed: () => _abrirAlta(context, tipo),
+            onPressed: _abrirAlta,
             icon: const Icon(Icons.add),
             label: Text(
-              tipo == TipoEmpresaLogistica.cliente
+              widget.tipo == TipoEmpresaLogistica.cliente
                   ? 'NUEVO CLIENTE'
                   : 'NUEVO DADOR',
             ),
@@ -106,13 +173,10 @@ class _ListaEmpresas extends StatelessWidget {
     );
   }
 
-  Future<void> _abrirAlta(
-    BuildContext context,
-    TipoEmpresaLogistica tipo,
-  ) async {
+  Future<void> _abrirAlta() async {
     await showDialog(
       context: context,
-      builder: (_) => _AltaEmpresaDialog(tipo: tipo),
+      builder: (_) => _AltaEmpresaDialog(tipo: widget.tipo),
     );
   }
 }
