@@ -126,51 +126,62 @@ class ReportAdelantosService {
           backgroundColorHex: ex.ExcelColor.fromHexString('#2E7D32'),
           fontColorHex: ex.ExcelColor.fromHexString('#FFFFFF'),
           horizontalAlign: ex.HorizontalAlign.Center,
+          verticalAlign: ex.VerticalAlign.Center,
         );
       }
+      // Header un poco más alto que las filas de datos.
+      hoja.setRowHeight(headerRow, 24);
 
-      // ─── FILAS DE DATOS ──────────────────────────────────────────
-      var total = 0.0;
-      for (var i = 0; i < ordenados.length; i++) {
-        final a = ordenados[i];
+      // ─── FILAS DE DATOS + FILAS VACÍAS NUMERADAS ─────────────────
+      // Replicamos el formato de la planilla manual de Santiago: 20
+      // filas (o más, si los seleccionados ya las superan) pre-
+      // numeradas, con las primeras N llenas y el resto en blanco
+      // para que pueda escribir a mano más adelantos si los carga
+      // físicamente y los entra después al sistema.
+      const filasMin = 20;
+      final totalFilas =
+          ordenados.length > filasMin ? ordenados.length : filasMin;
+      for (var i = 0; i < totalFilas; i++) {
         final row = headerRow + 1 + i;
-        final nombre = a.choferNombre?.trim().isNotEmpty == true
-            ? a.choferNombre!.trim()
-            : 'DNI ${a.choferDni}';
-        final detalle = a.observacion?.trim().isNotEmpty == true
-            ? a.observacion!.trim()
-            : '';
-        final recibo = a.numeroRecibo == null
-            ? ''
-            : a.numeroRecibo.toString().padLeft(6, '0');
 
+        // Numeración (siempre, esté la fila llena o vacía).
         _setInt(hoja, 0, row, i + 1);
-        _setText(hoja, 1, row, nombre);
-        _setText(hoja, 2, row, detalle);
-        _setMonto(hoja, 3, row, a.monto);
-        _setText(hoja, 4, row, recibo);
-        total += a.monto;
+
+        if (i < ordenados.length) {
+          final a = ordenados[i];
+          final nombre = a.choferNombre?.trim().isNotEmpty == true
+              ? a.choferNombre!.trim()
+              : 'DNI ${a.choferDni}';
+          final detalle = a.observacion?.trim().isNotEmpty == true
+              ? a.observacion!.trim()
+              : '';
+          final recibo = a.numeroRecibo == null
+              ? ''
+              : a.numeroRecibo.toString().padLeft(6, '0');
+          _setText(hoja, 1, row, nombre);
+          _setText(hoja, 2, row, detalle);
+          _setMonto(hoja, 3, row, a.monto);
+          _setText(hoja, 4, row, recibo);
+        }
+
+        // Altura cómoda en TODAS las filas (llenas y vacías) para
+        // que el reporte luzca espacioso, no comprimido. Es lo que
+        // pidió Santiago al pasar el ejemplo de planilla manual.
+        hoja.setRowHeight(row, 22);
       }
 
-      // ─── FILA TOTAL ──────────────────────────────────────────────
-      final totalRow = headerRow + 1 + ordenados.length;
-      _setText(hoja, 2, totalRow, 'TOTAL');
-      hoja
-          .cell(ex.CellIndex.indexByColumnRow(
-              columnIndex: 2, rowIndex: totalRow))
-          .cellStyle = ex.CellStyle(
-        bold: true,
-        horizontalAlign: ex.HorizontalAlign.Right,
-      );
-      _setMonto(hoja, 3, totalRow, total, bold: true);
-
-      xu.autoFitColumnas(hoja, _cols, totalRow + 1);
+      final ultimaRow = headerRow + totalFilas;
+      xu.autoFitColumnas(hoja, _cols, ultimaRow + 1);
       // Forzar ancho mínimo de la columna "DETALLE" para que las
       // observaciones largas no se compriman demasiado al exportar.
       // `getColumnWidth` no expone API confiable en excel ^4.0.6, así
-      // que aplicamos un ancho fijo cómodo (24) que cubre la mayoría
+      // que aplicamos un ancho fijo cómodo (28) que cubre la mayoría
       // de observaciones; si el autoFit calculó más, queda el mayor.
-      hoja.setColumnWidth(2, 24);
+      hoja.setColumnWidth(2, 28);
+      // Columnas Chofer y Recibo un toque más anchas también.
+      hoja.setColumnWidth(1, 22);
+      hoja.setColumnWidth(3, 16);
+      hoja.setColumnWidth(4, 14);
 
       final bytesRaw = excel.save();
       if (bytesRaw == null || bytesRaw.isEmpty) {
