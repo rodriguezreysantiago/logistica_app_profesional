@@ -70,6 +70,43 @@ class ViajesService {
         );
   }
 
+  /// Busca viajes activos del chofer creados en las últimas
+  /// `ventana` que comparten al menos un `tarifaId` con la lista que
+  /// se pasa. Pensado para detectar duplicados al guardar — caso
+  /// "operador cargó el mismo viaje 2 veces sin darse cuenta".
+  ///
+  /// Reusa el índice `chofer_dni + activo + creado_en DESC` que ya
+  /// existe (mismo de `ultimoViajeDeChofer`).
+  ///
+  /// Devuelve hasta 5 candidatos (no esperamos más en 24h).
+  static Future<List<Viaje>> buscarPosiblesDuplicados({
+    required String choferDni,
+    required List<String> tarifaIds,
+    Duration ventana = const Duration(hours: 24),
+  }) async {
+    if (choferDni.isEmpty || tarifaIds.isEmpty) return const [];
+    final corte = Timestamp.fromDate(DateTime.now().subtract(ventana));
+    final snap = await _col
+        .where('chofer_dni', isEqualTo: choferDni)
+        .where('activo', isEqualTo: true)
+        .where('creado_en', isGreaterThan: corte)
+        .orderBy('creado_en', descending: true)
+        .limit(10)
+        .get();
+    if (snap.docs.isEmpty) return const [];
+    final tarifaIdsSet = tarifaIds.toSet();
+    final candidatos = <Viaje>[];
+    for (final d in snap.docs) {
+      final v = Viaje.fromMap(d.id, d.data());
+      // Comparte tarifa con alguno de los nuevos tramos.
+      final compartido =
+          v.tramos.any((t) => tarifaIdsSet.contains(t.tarifaId));
+      if (compartido) candidatos.add(v);
+      if (candidatos.length >= 5) break;
+    }
+    return candidatos;
+  }
+
   /// Devuelve el último viaje activo del chofer (ordenado por
   /// creado_en desc), o null si nunca tuvo viaje. One-shot, no
   /// stream — pensado para usar como "sugerencia" cuando el

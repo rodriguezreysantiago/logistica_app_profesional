@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +16,7 @@ import '../models/empresa_logistica.dart';
 import '../models/tarifa_logistica.dart';
 import '../models/viaje.dart';
 import '../services/adelantos_service.dart';
+import '../services/borradores_viaje_service.dart';
 import '../services/logistica_service.dart';
 import '../services/viajes_service.dart';
 import '../utils/calculos_viaje.dart';
@@ -76,6 +79,16 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
 
   bool get _esEdicion => widget.viajeId != null;
 
+  // ─── Auto-guardar borrador ───
+  // Timer debounced que persiste el estado del form a
+  // `BORRADORES_VIAJE/{dni}_{viajeId|nuevo}` cuando hay cambios.
+  // Sin esto, si se cierra la app cargando un viaje multi-tramo, se
+  // perdían 10+ minutos de tipeo (pedido Santiago 2026-05-13).
+  Timer? _borradorTimer;
+  static const Duration _borradorDebounce = Duration(seconds: 10);
+  bool _hayCambiosSinPersistir = false;
+  bool _yaAvisoRecuperar = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +97,50 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
 
   @override
   void dispose() {
+    _borradorTimer?.cancel();
+    // Si hay cambios que no llegaron al timer (operador cerró el form
+    // < 10s después de tipear), disparamos el save fire-and-forget.
+    // El SDK de Firestore mantiene su propia cola de writes y completa
+    // aunque este widget se haya disposeado — la app sigue viva.
+    if (_hayCambiosSinPersistir) {
+      // Snapshot del state ANTES de disposear los controllers — sino
+      // el save async lee texto de TextEditingController ya cerrado.
+      final operadorDni = PrefsService.dni;
+      final viajeIdOriginal = widget.viajeId;
+      final choferDni = _choferDni;
+      final choferNombre = _choferNombre;
+      final vehiculoId = _vehiculoCtrl.text.trim().isEmpty
+          ? null
+          : _vehiculoCtrl.text.trim().toUpperCase();
+      final engancheId = _engancheCtrl.text.trim().isEmpty
+          ? null
+          : _engancheCtrl.text.trim().toUpperCase();
+      final estado = _estado;
+      final motivoCancelacion = _motivoCancelacionCtrl.text.trim().isEmpty
+          ? null
+          : _motivoCancelacionCtrl.text.trim();
+      final fechaPostergadoA = _fechaPostergadoA;
+      final adelantoAsociadoId = _adelantoAsociadoId;
+      final tramosViaje = _tramos
+          .where((t) => t.tarifa != null)
+          .map((t) => t.toTramoViaje())
+          .toList(growable: false);
+      // Detached future — no await en dispose.
+      // ignore: discarded_futures
+      BorradoresViajeService.guardar(
+        operadorDni: operadorDni,
+        viajeIdOriginal: viajeIdOriginal,
+        choferDni: choferDni,
+        choferNombre: choferNombre,
+        vehiculoId: vehiculoId,
+        engancheId: engancheId,
+        tramos: tramosViaje,
+        estado: estado,
+        motivoCancelacion: motivoCancelacion,
+        fechaPostergadoA: fechaPostergadoA,
+        adelantoAsociadoId: adelantoAsociadoId,
+      ).catchError((_) {/* best-effort */});
+    }
     _vehiculoCtrl.dispose();
     _engancheCtrl.dispose();
     _motivoCancelacionCtrl.dispose();
@@ -93,11 +150,195 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
     super.dispose();
   }
 
+  /// Programa un save del borrador con debounce. Lo invoca el resto
+  /// del form cuando hay cambios. Si llaman 10 veces seguidas en 5s,
+  /// solo se persiste 1 vez al pasar 10s sin nuevas invocaciones.
+  void _programarGuardadoBorrador() {
+    _hayCambiosSinPersistir = true;
+    _borradorTimer?.cancel();
+    _borradorTimer = Timer(_borradorDebounce, _persistirBorradorAhora);
+  }
+
+  /// Persiste el estado actual del form al borrador. Best-effort —
+  /// si falla (sin internet, etc.) no rompe el flow del form.
+  Future<void> _persistirBorradorAhora() async {
+    if (!_hayCambiosSinPersistir) return;
+    _hayCambiosSinPersistir = false;
+    try {
+      final tramosViaje = _tramos
+          .where((t) => t.tarifa != null)
+          .map((t) => t.toTramoViaje())
+          .toList();
+      await BorradoresViajeService.guardar(
+        operadorDni: PrefsService.dni,
+        viajeIdOriginal: widget.viajeId,
+        choferDni: _choferDni,
+        choferNombre: _choferNombre,
+        vehiculoId: _vehiculoCtrl.text.trim().isEmpty
+            ? null
+            : _vehiculoCtrl.text.trim().toUpperCase(),
+        engancheId: _engancheCtrl.text.trim().isEmpty
+            ? null
+            : _engancheCtrl.text.trim().toUpperCase(),
+        tramos: tramosViaje,
+        estado: _estado,
+        motivoCancelacion: _motivoCancelacionCtrl.text.trim().isEmpty
+            ? null
+            : _motivoCancelacionCtrl.text.trim(),
+        fechaPostergadoA: _fechaPostergadoA,
+        adelantoAsociadoId: _adelantoAsociadoId,
+      );
+    } catch (_) {
+      // Best-effort. Si falla, el operador no se entera — el
+      // borrador queda con el estado del último save exitoso.
+    }
+  }
+
+  Future<void> _eliminarBorrador() async {
+    _borradorTimer?.cancel();
+    _hayCambiosSinPersistir = false;
+    try {
+      await BorradoresViajeService.eliminar(
+        operadorDni: PrefsService.dni,
+        viajeIdOriginal: widget.viajeId,
+      );
+    } catch (_) {
+      // Idem — best-effort.
+    }
+  }
+
+  /// Chequea si quedó un borrador del operador para este viaje (o para
+  /// "nuevo" en modo alta). Si existe, ofrece recuperarlo. Se llama una
+  /// sola vez al terminar la carga inicial — `_yaAvisoRecuperar` evita
+  /// loops si el operador reabre o si por algún motivo se vuelve a
+  /// invocar.
+  Future<void> _chequearBorradorAlIniciar() async {
+    if (_yaAvisoRecuperar) return;
+    _yaAvisoRecuperar = true;
+    try {
+      final dni = PrefsService.dni;
+      if (dni.isEmpty) return;
+      final borrador = await BorradoresViajeService.leer(
+        operadorDni: dni,
+        viajeIdOriginal: widget.viajeId,
+      );
+      if (borrador == null || !mounted) return;
+      // Si el borrador está totalmente vacío (chofer null + sin tramos
+      // con tarifa), no vale la pena ofrecer recuperar — lo borramos
+      // silencioso así no molesta más.
+      final hayContenido = (borrador.choferDni != null &&
+              borrador.choferDni!.isNotEmpty) ||
+          borrador.tramos.any((t) => t.tarifaId.isNotEmpty);
+      if (!hayContenido) {
+        await BorradoresViajeService.eliminar(
+          operadorDni: dni,
+          viajeIdOriginal: widget.viajeId,
+        );
+        return;
+      }
+      final aceptar = await _mostrarDialogRecuperar(borrador);
+      if (!mounted) return;
+      if (aceptar != true) {
+        // Operador descartó — borrar para no volver a preguntar.
+        await BorradoresViajeService.eliminar(
+          operadorDni: dni,
+          viajeIdOriginal: widget.viajeId,
+        );
+        return;
+      }
+      await _hidratarDesdeBorrador(borrador);
+    } catch (_) {
+      // Best-effort. Si falla leer/dialog/etc., el form sigue con lo
+      // que tenía cargado del viaje (o vacío en alta).
+    }
+  }
+
+  /// Dialog "¿Recuperar borrador?". Devuelve true si el operador
+  /// quiere recuperar, false si quiere descartar, null si lo cerró
+  /// con back (lo tratamos como descartar).
+  Future<bool?> _mostrarDialogRecuperar(BorradorViaje b) {
+    final cuando = b.actualizadoEn == null
+        ? 'fecha desconocida'
+        : AppFormatters.formatearFechaHoraSinSegundos(b.actualizadoEn!);
+    final cantTramos = b.tramos.length;
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dCtx) {
+        return AlertDialog(
+          title: const Text('Recuperar borrador'),
+          content: Text(
+            'Encontramos un borrador sin guardar de este viaje '
+            '(actualizado $cuando, $cantTramos tramo(s)).\n\n'
+            '¿Querés recuperarlo o descartarlo?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dCtx).pop(false),
+              child: const Text('DESCARTAR'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dCtx).pop(true),
+              child: const Text('RECUPERAR'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Reemplaza el estado actual del form con lo que tenga el borrador.
+  /// Resuelve la tarifa de cada tramo igual que `_cargarSiEdicion`
+  /// (mirando el catálogo). Notifica al operador con un snackbar.
+  Future<void> _hidratarDesdeBorrador(BorradorViaje b) async {
+    // Limpiar tramos actuales antes de reemplazar (sino fugamos
+    // controllers de TextEditingController).
+    for (final t in _tramos) {
+      t.dispose();
+    }
+    _tramos.clear();
+
+    _choferDni = b.choferDni;
+    _choferNombre = b.choferNombre;
+    _vehiculoCtrl.text = b.vehiculoId ?? '';
+    _engancheCtrl.text = b.engancheId ?? '';
+    _estado = b.estado;
+    _motivoCancelacionCtrl.text = b.motivoCancelacion ?? '';
+    _fechaPostergadoA = b.fechaPostergadoA;
+    _adelantoAsociadoId = b.adelantoAsociadoId;
+
+    for (final t in b.tramos) {
+      TarifaLogistica? tarifa;
+      try {
+        final tSnap = await LogisticaService.tarifasCol.doc(t.tarifaId).get();
+        if (tSnap.exists) {
+          tarifa = TarifaLogistica.fromMap(tSnap.id, tSnap.data()!);
+        }
+      } catch (_) {
+        // Tarifa borrada del catálogo — el `_TramoEditState.fromTramoViaje`
+        // acepta null y igual conserva el snapshot persistido.
+      }
+      _tramos.add(_TramoEditState.fromTramoViaje(t, tarifa));
+    }
+    if (_tramos.isEmpty) {
+      _tramos.add(_TramoEditState.vacio());
+    }
+
+    if (!mounted) return;
+    setState(() {});
+    AppFeedback.successOn(
+      ScaffoldMessenger.of(context),
+      'Borrador recuperado.',
+    );
+  }
+
   Future<void> _cargarSiEdicion() async {
     if (!_esEdicion) {
       // Alta: arrancamos con un tramo vacío.
       _tramos.add(_TramoEditState.vacio());
       setState(() => _cargando = false);
+      // Después del primer render, ofrecer recuperar borrador si hay.
+      await _chequearBorradorAlIniciar();
       return;
     }
     try {
@@ -171,6 +412,9 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
       }
 
       setState(() => _cargando = false);
+      // Igual que en alta: chequear borrador previo si el operador
+      // estaba editando este viaje y cerró la app a mitad de camino.
+      await _chequearBorradorAlIniciar();
     } catch (e) {
       setState(() {
         _cargando = false;
@@ -265,6 +509,122 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
         'Revisá si está bien.';
   }
 
+  /// Warning si la fecha de descarga es ANTERIOR a la fecha de carga
+  /// dentro del mismo tramo. Si alguna de las dos es null (caso típico
+  /// "todavía no descargó"), no se valida. NO bloquea — solo advierte.
+  /// Pedido Santiago 2026-05-13: validar fechas pero no kg
+  /// ("muchas veces no sabemos los kg que cargan hasta que regresan").
+  String? _validarFechasInternasTramo(_TramoEditState t) {
+    final c = t.fechaCarga;
+    final d = t.fechaDescarga;
+    if (c == null || d == null) return null;
+    // Comparamos día calendario, no instantáneo (las fechas no llevan
+    // hora — son DatePicker). `isBefore` es estricto: igual día = OK.
+    final cd = DateTime(c.year, c.month, c.day);
+    final dd = DateTime(d.year, d.month, d.day);
+    if (dd.isBefore(cd)) {
+      return 'La fecha de descarga (${AppFormatters.formatearFecha(d)}) es '
+          'anterior a la fecha de carga (${AppFormatters.formatearFecha(c)}). '
+          'Revisá si está bien.';
+    }
+    return null;
+  }
+
+  /// Dialog "Encontramos viajes parecidos — ¿es distinto?". Lista
+  /// los candidatos con fecha + chofer + ruta del primer tramo.
+  /// Devuelve true si el operador confirma "es distinto, guardar
+  /// igual", false si quiere revisar.
+  Future<bool?> _mostrarDialogDuplicados(List<Viaje> candidatos) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dCtx) {
+        return AlertDialog(
+          title: const Text('Posibles duplicados'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Encontramos ${candidatos.length} '
+                  'viaje${candidatos.length == 1 ? "" : "s"} del mismo '
+                  'chofer en las últimas 24h con alguna tarifa en común:',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                ...candidatos.map((v) {
+                  final fecha = v.fechaReferencia == null
+                      ? 's/fecha'
+                      : AppFormatters.formatearFecha(v.fechaReferencia!);
+                  // `rutaEtiqueta` ya maneja multi-tramo (orig → … → dest).
+                  final ruta = v.tramos.isEmpty ? 'sin ruta' : v.rutaEtiqueta;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.warning_amber_outlined,
+                            size: 16, color: AppColors.accentAmber),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '$fecha · $ruta',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                const SizedBox(height: 8),
+                const Text(
+                  '¿Es un viaje distinto?',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dCtx).pop(false),
+              child: const Text('REVISAR'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dCtx).pop(true),
+              child: const Text('SÍ, GUARDAR IGUAL'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Warning si la fecha de carga del tramo `actual` es ANTERIOR a la
+  /// fecha de descarga del tramo `anterior`. Si falta alguna fecha,
+  /// no se valida. NO bloquea.
+  String? _validarFechasEntreTramos(
+    _TramoEditState anterior,
+    _TramoEditState actual,
+  ) {
+    final descPrev = anterior.fechaDescarga;
+    final cargaCurr = actual.fechaCarga;
+    if (descPrev == null || cargaCurr == null) return null;
+    final dp = DateTime(descPrev.year, descPrev.month, descPrev.day);
+    final cc = DateTime(cargaCurr.year, cargaCurr.month, cargaCurr.day);
+    if (cc.isBefore(dp)) {
+      return 'La carga de este tramo '
+          '(${AppFormatters.formatearFecha(cargaCurr)}) es anterior a la '
+          'descarga del tramo anterior '
+          '(${AppFormatters.formatearFecha(descPrev)}). Revisá si está bien.';
+    }
+    return null;
+  }
+
   // ─── Guardar ───
   Future<void> _guardar() async {
     final messenger = ScaffoldMessenger.of(context);
@@ -283,6 +643,38 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
         'Todos los tramos deben tener tarifa seleccionada.',
       );
       return;
+    }
+
+    // Detección de duplicados — solo modo ALTA (en edición, el viaje
+    // YA existe, no puede ser duplicado de sí mismo trivialmente).
+    // Si hay candidatos, mostramos un dialog y dejamos al operador
+    // decidir si igual quiere crearlo (NO bloqueamos — puede ser
+    // legítimo: viaje 2 del día con misma ruta).
+    if (!_esEdicion) {
+      final tarifaIds = _tramos
+          .map((t) => t.tarifa!.id)
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList(growable: false);
+      try {
+        final candidatos = await ViajesService.buscarPosiblesDuplicados(
+          choferDni: _choferDni!,
+          tarifaIds: tarifaIds,
+        );
+        if (!mounted) return;
+        if (candidatos.isNotEmpty) {
+          final continuar = await _mostrarDialogDuplicados(candidatos);
+          if (continuar != true) return;
+        }
+      } catch (e) {
+        // Si la query falla (sin internet, etc.), NO bloqueamos el
+        // guardado — la detección es best-effort.
+        // ignore: avoid_print
+        AppFeedback.warningOn(
+          messenger,
+          'No se pudo chequear duplicados ($e). Guardando igual.',
+        );
+      }
     }
 
     setState(() => _guardando = true);
@@ -420,6 +812,11 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
         }
       }
 
+      // El viaje quedó guardado en firme — el borrador ya no sirve.
+      // Lo borramos para que la próxima vez que el operador entre al
+      // form no le ofrezca recuperar algo viejo.
+      await _eliminarBorrador();
+
       if (!mounted) return;
       AppFeedback.successOn(
         messenger,
@@ -474,8 +871,15 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
               estado: _estado,
               motivoCtrl: _motivoCancelacionCtrl,
               fechaPostergadoA: _fechaPostergadoA,
-              onEstadoChanged: (e) => setState(() => _estado = e),
-              onFechaChanged: (d) => setState(() => _fechaPostergadoA = d),
+              onEstadoChanged: (e) {
+                setState(() => _estado = e);
+                _programarGuardadoBorrador();
+              },
+              onFechaChanged: (d) {
+                setState(() => _fechaPostergadoA = d);
+                _programarGuardadoBorrador();
+              },
+              onCambio: _programarGuardadoBorrador,
             ),
             const SizedBox(height: 12),
 
@@ -497,6 +901,7 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
                   _vehiculoCtrl.text = vehiculo ?? '';
                   _engancheCtrl.text = enganche ?? '';
                 });
+                _programarGuardadoBorrador();
                 // _sugerirAdelantoUltimoViaje removido el 2026-05-13:
                 // los adelantos ya no viven en el viaje, así que no
                 // tiene sentido sugerir el adelanto del último viaje.
@@ -506,7 +911,10 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
             _SeccionUnidad(
               vehiculoCtrl: _vehiculoCtrl,
               engancheCtrl: _engancheCtrl,
-              onChanged: () => setState(() {}),
+              onChanged: () {
+                setState(() {});
+                _programarGuardadoBorrador();
+              },
             ),
             const SizedBox(height: 12),
 
@@ -520,8 +928,10 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
               choferDni: _choferDni,
               viajeIdActual: widget.viajeId,
               adelantoSeleccionadoId: _adelantoAsociadoId,
-              onChanged: (id) =>
-                  setState(() => _adelantoAsociadoId = id),
+              onChanged: (id) {
+                setState(() => _adelantoAsociadoId = id);
+                _programarGuardadoBorrador();
+              },
             ),
             const SizedBox(height: 12),
 
@@ -535,17 +945,20 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
             ..._tramos.asMap().entries.expand((entry) {
               final index = entry.key;
               final tramo = entry.value;
-              // Warning de encadenamiento: si el origen del tramo
-              // actual NO coincide con el destino del tramo anterior,
-              // mostramos un banner amarillo entre cards. Es un
-              // warning, NO bloqueante — el operador puede ignorarlo
-              // (caso "el tractor pasó por la base entre tramos").
+              // Banners entre tramos: encadenamiento de ubicaciones +
+              // fechas cronológicas. Ambos son WARNINGs, NO bloquean
+              // — el operador puede ignorarlos (caso "el tractor pasó
+              // por la base entre tramos" o "fechas se cargan después").
               final widgets = <Widget>[];
               if (index > 0) {
                 final prev = _tramos[index - 1];
-                final advertencia = _validarEncadenamiento(prev, tramo);
-                if (advertencia != null) {
-                  widgets.add(_BannerEncadenamiento(mensaje: advertencia));
+                final wEnc = _validarEncadenamiento(prev, tramo);
+                if (wEnc != null) {
+                  widgets.add(_BannerEncadenamiento(mensaje: wEnc));
+                }
+                final wFechas = _validarFechasEntreTramos(prev, tramo);
+                if (wFechas != null) {
+                  widgets.add(_BannerEncadenamiento(mensaje: wFechas));
                 }
               }
               widgets.add(Padding(
@@ -554,19 +967,38 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
                   key: ValueKey(tramo.id),
                   numero: index + 1,
                   state: tramo,
+                  warningFechasInternas: _validarFechasInternasTramo(tramo),
                   puedeEliminar: _tramos.length > 1,
                   puedeSubir: index > 0,
                   puedeBajar: index < _tramos.length - 1,
-                  onEliminar: () => _eliminarTramo(index),
-                  onSubir: () => _moverTramoArriba(index),
-                  onBajar: () => _moverTramoAbajo(index),
-                  onDuplicar: () => _duplicarTramo(index),
-                  onCambio: () => setState(() {}),
+                  onEliminar: () {
+                    _eliminarTramo(index);
+                    _programarGuardadoBorrador();
+                  },
+                  onSubir: () {
+                    _moverTramoArriba(index);
+                    _programarGuardadoBorrador();
+                  },
+                  onBajar: () {
+                    _moverTramoAbajo(index);
+                    _programarGuardadoBorrador();
+                  },
+                  onDuplicar: () {
+                    _duplicarTramo(index);
+                    _programarGuardadoBorrador();
+                  },
+                  onCambio: () {
+                    setState(() {});
+                    _programarGuardadoBorrador();
+                  },
                 ),
               ));
               return widgets;
             }),
-            _BotonAgregarTramo(onPressed: _agregarTramo),
+            _BotonAgregarTramo(onPressed: () {
+              _agregarTramo();
+              _programarGuardadoBorrador();
+            }),
             const SizedBox(height: 24),
 
             _BotonesGuardar(
@@ -724,6 +1156,11 @@ class _TramoEditState {
 class _TramoCard extends StatelessWidget {
   final int numero;
   final _TramoEditState state;
+  /// Mensaje de warning sobre las fechas del propio tramo (descarga
+  /// anterior a carga). Null si no hay problema. Calculado por el
+  /// padre, no por este widget — así el padre puede usar la misma
+  /// función al guardar para mostrar un resumen.
+  final String? warningFechasInternas;
   final bool puedeEliminar;
   final bool puedeSubir;
   final bool puedeBajar;
@@ -737,6 +1174,7 @@ class _TramoCard extends StatelessWidget {
     super.key,
     required this.numero,
     required this.state,
+    required this.warningFechasInternas,
     required this.puedeEliminar,
     required this.puedeSubir,
     required this.puedeBajar,
@@ -817,6 +1255,11 @@ class _TramoCard extends StatelessWidget {
         ],
       ),
       children: [
+        // Warning de fechas internas (descarga < carga). Lo ponemos
+        // arriba del todo así el operador lo ve al volver a revisar
+        // el tramo. Es NO bloqueante — el guardado igual procede.
+        if (warningFechasInternas != null)
+          _BannerEncadenamiento(mensaje: warningFechasInternas!),
         // Tarifa. Antes era un DropdownButtonFormField simple — con el
         // catálogo creciendo se volvió impráctico (Santiago 2026-05-13:
         // "hay muchas tarifas creadas"). Ahora es un campo tappeable
@@ -912,6 +1355,7 @@ class _TramoCard extends StatelessWidget {
             border: OutlineInputBorder(),
           ),
           maxLines: 2,
+          onChanged: (_) => onCambio(),
         ),
         const SizedBox(height: 16),
 
@@ -933,6 +1377,7 @@ class _TramoCard extends StatelessWidget {
             labelText: 'Número de remito',
             border: OutlineInputBorder(),
           ),
+          onChanged: (_) => onCambio(),
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
@@ -1234,6 +1679,10 @@ class _SeccionEstado extends StatelessWidget {
   final DateTime? fechaPostergadoA;
   final ValueChanged<EstadoViaje> onEstadoChanged;
   final ValueChanged<DateTime?> onFechaChanged;
+  /// Hook genérico para auto-save del borrador. Se invoca cuando
+  /// cambia algún campo "menor" (texto del motivo) que no tiene
+  /// callback dedicado pero igual queremos persistirlo.
+  final VoidCallback onCambio;
 
   const _SeccionEstado({
     required this.estado,
@@ -1241,6 +1690,7 @@ class _SeccionEstado extends StatelessWidget {
     required this.fechaPostergadoA,
     required this.onEstadoChanged,
     required this.onFechaChanged,
+    required this.onCambio,
   });
 
   @override
@@ -1276,6 +1726,7 @@ class _SeccionEstado extends StatelessWidget {
               border: OutlineInputBorder(),
             ),
             maxLines: 2,
+            onChanged: (_) => onCambio(),
           ),
         ],
         if (estado == EstadoViaje.postergado) ...[
