@@ -47,9 +47,11 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
   final _vehiculoCtrl = TextEditingController();
   final _engancheCtrl = TextEditingController();
 
-  final _adelantoMontoCtrl = TextEditingController();
-  DateTime? _adelantoFecha;
-  final _adelantoObsCtrl = TextEditingController();
+  // Adelanto: removido del form de viaje (2026-05-13). Vive en su
+  // propia pantalla LogisticaAdelantosScreen porque hay adelantos
+  // sin viaje asociado (de sueldo). Si necesitás registrar un
+  // adelanto para este viaje, hacelo desde Logística → Adelantos
+  // después de crear el viaje.
 
   List<GastoViaje> _gastos = [];
 
@@ -77,8 +79,6 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
   void dispose() {
     _vehiculoCtrl.dispose();
     _engancheCtrl.dispose();
-    _adelantoMontoCtrl.dispose();
-    _adelantoObsCtrl.dispose();
     _motivoCancelacionCtrl.dispose();
     for (final t in _tramos) {
       t.dispose();
@@ -111,12 +111,10 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
       _choferNombre = v.choferNombre;
       _vehiculoCtrl.text = v.vehiculoId ?? '';
       _engancheCtrl.text = v.engancheId ?? '';
-      if (v.adelantoMonto != null) {
-        _adelantoMontoCtrl.text =
-            AppFormatters.formatearMiles(v.adelantoMonto!.toInt());
-      }
-      _adelantoFecha = v.adelantoFecha;
-      _adelantoObsCtrl.text = v.adelantoObservacion ?? '';
+      // Adelantos antes vivían en el viaje (`v.adelantoMonto` etc.).
+      // Ahora viven en ADELANTOS_CHOFER. Los campos del viaje siguen
+      // accesibles vía getters de compat pero NO se editan más desde
+      // este form — la pantalla LogisticaAdelantosScreen los gestiona.
       _gastos = List.of(v.gastos);
       _estado = v.estado;
       _motivoCancelacionCtrl.text = v.motivoCancelacion ?? '';
@@ -156,37 +154,21 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
   }
 
   /// Cálculos del resumen — suma los montos de todos los tramos con
-  /// tarifa elegida + descuenta adelanto + suma gastos. Si ningún
-  /// tramo tiene tarifa, devuelve null y el resumen muestra "—".
+  /// tarifa elegida + suma gastos. Adelanto removido del form 2026-05-13
+  /// (vive en colección propia ahora). El resumen acá muestra el bruto
+  /// del chofer sin descontar adelantos — la pantalla LIQUIDACIÓN sí
+  /// los suma del rango cuando se cierra el mes.
   MontosViaje? get _montosCalc {
     final tramosConTarifa = _tramos
         .where((t) => t.tarifa != null)
         .map((t) => t.toTramoViaje())
         .toList();
     if (tramosConTarifa.isEmpty) return null;
-    final ade =
-        AppFormatters.parsearMiles(_adelantoMontoCtrl.text)?.toDouble() ?? 0;
     return CalculosViaje.calcularTodoMultiTramo(
       tramos: tramosConTarifa,
-      adelanto: ade,
+      adelanto: 0,
       gastos: _gastos,
     );
-  }
-
-  Future<void> _sugerirAdelantoUltimoViaje(String dni) async {
-    try {
-      final ultimo = await ViajesService.ultimoViajeDeChofer(dni);
-      if (!mounted) return;
-      final monto = ultimo?.adelantoMonto ?? 0;
-      if (monto <= 0) return;
-      setState(() {
-        _adelantoMontoCtrl.text = AppFormatters.formatearMiles(monto.toInt());
-        final obs = ultimo?.adelantoObservacion?.trim();
-        if (obs != null && obs.isNotEmpty && _adelantoObsCtrl.text.isEmpty) {
-          _adelantoObsCtrl.text = obs;
-        }
-      });
-    } catch (_) {/* best-effort */}
   }
 
   void _agregarTramo() {
@@ -223,8 +205,6 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
     setState(() => _guardando = true);
     try {
       final dniActual = PrefsService.dni;
-      final ade =
-          AppFormatters.parsearMiles(_adelantoMontoCtrl.text)?.toDouble();
 
       // Construir lista de tramos para persistir.
       final tramosViaje = _tramos.map((t) => t.toTramoViaje()).toList();
@@ -242,11 +222,14 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
           engancheId: _engancheCtrl.text.trim().isEmpty
               ? null
               : _engancheCtrl.text.trim().toUpperCase(),
-          adelantoMonto: ade,
-          adelantoFecha: _adelantoFecha,
-          adelantoObservacion: _adelantoObsCtrl.text.trim().isEmpty
-              ? null
-              : _adelantoObsCtrl.text.trim(),
+          // Adelanto: removido del form 2026-05-13. Si el viaje viejo
+          // ya tenía adelantoMonto/Fecha/Observacion, el service NO
+          // los pisa porque le pasamos null (acepta null). Si querés
+          // limpiar campos legacy, hay que hacerlo desde un script
+          // de migración aparte.
+          adelantoMonto: null,
+          adelantoFecha: null,
+          adelantoObservacion: null,
           gastos: _gastos,
           estado: _estado,
           motivoCancelacion: _motivoCancelacionCtrl.text.trim().isEmpty
@@ -267,11 +250,12 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
           engancheId: _engancheCtrl.text.trim().isEmpty
               ? null
               : _engancheCtrl.text.trim().toUpperCase(),
-          adelantoMonto: ade,
-          adelantoFecha: _adelantoFecha,
-          adelantoObservacion: _adelantoObsCtrl.text.trim().isEmpty
-              ? null
-              : _adelantoObsCtrl.text.trim(),
+          // Adelantos en colección aparte desde 2026-05-13. Si el
+          // operador necesita registrar un adelanto para este viaje,
+          // lo hace después desde Logística → Adelantos.
+          adelantoMonto: null,
+          adelantoFecha: null,
+          adelantoObservacion: null,
           gastos: _gastos,
           estado: _estado,
           motivoCancelacion: _motivoCancelacionCtrl.text.trim().isEmpty
@@ -387,9 +371,9 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
                   _vehiculoCtrl.text = vehiculo ?? '';
                   _engancheCtrl.text = enganche ?? '';
                 });
-                if (!_esEdicion) {
-                  _sugerirAdelantoUltimoViaje(dni);
-                }
+                // _sugerirAdelantoUltimoViaje removido el 2026-05-13:
+                // los adelantos ya no viven en el viaje, así que no
+                // tiene sentido sugerir el adelanto del último viaje.
               },
             ),
             const SizedBox(height: 12),
@@ -400,24 +384,19 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
             ),
             const SizedBox(height: 12),
 
-            // 4. ADELANTO.
-            _SeccionAdelanto(
-              montoCtrl: _adelantoMontoCtrl,
-              fecha: _adelantoFecha,
-              obsCtrl: _adelantoObsCtrl,
-              onMontoChanged: () => setState(() {}),
-              onFechaChanged: (d) => setState(() => _adelantoFecha = d),
-            ),
-            const SizedBox(height: 12),
-
-            // 5. GASTOS EXTRAORDINARIOS.
+            // 4. GASTOS EXTRAORDINARIOS. (La sección de Adelanto se
+            // removió del form de viaje el 2026-05-13 — los adelantos
+            // pasaron a su propia pantalla `LogisticaAdelantosScreen`
+            // porque también se entregan adelantos de sueldo sin viaje
+            // asociado. Para registrar un adelanto: hub Logística →
+            // ADELANTOS → "NUEVO ADELANTO".)
             _SeccionGastos(
               gastos: _gastos,
               onChanged: (l) => setState(() => _gastos = l),
             ),
             const SizedBox(height: 12),
 
-            // 6. TRAMOS (uno o varios).
+            // 5. TRAMOS (uno o varios).
             ..._tramos.asMap().entries.map((entry) {
               final index = entry.key;
               final tramo = entry.value;
@@ -1141,57 +1120,10 @@ class _SeccionUnidad extends StatelessWidget {
   }
 }
 
-class _SeccionAdelanto extends StatelessWidget {
-  final TextEditingController montoCtrl;
-  final DateTime? fecha;
-  final TextEditingController obsCtrl;
-  final VoidCallback onMontoChanged;
-  final ValueChanged<DateTime?> onFechaChanged;
-
-  const _SeccionAdelanto({
-    required this.montoCtrl,
-    required this.fecha,
-    required this.obsCtrl,
-    required this.onMontoChanged,
-    required this.onFechaChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _SeccionCard(
-      titulo: 'ADELANTO AL CHOFER',
-      icono: Icons.payments_outlined,
-      children: [
-        TextField(
-          controller: montoCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Monto adelanto',
-            prefixText: '\$ ',
-            border: OutlineInputBorder(),
-          ),
-          keyboardType: TextInputType.number,
-          inputFormatters: [AppFormatters.inputMiles],
-          onChanged: (_) => onMontoChanged(),
-        ),
-        const SizedBox(height: 8),
-        _BotonFecha(
-          label: 'Fecha del adelanto',
-          fecha: fecha,
-          onChanged: onFechaChanged,
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: obsCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Observación / concepto',
-            border: OutlineInputBorder(),
-          ),
-          maxLines: 2,
-        ),
-      ],
-    );
-  }
-}
+// `_SeccionAdelanto` removida del form de viaje el 2026-05-13.
+// Los adelantos pasaron a ser entidad propia (`ADELANTOS_CHOFER`)
+// con su propia pantalla. El operador carga el adelanto desde
+// LOGÍSTICA → ADELANTOS, no desde el viaje.
 
 class _SeccionGastos extends StatelessWidget {
   final List<GastoViaje> gastos;

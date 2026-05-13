@@ -1,10 +1,4 @@
-import 'dart:io' show File, Platform, Process;
-import 'dart:typed_data';
-
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -14,7 +8,6 @@ import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../models/viaje.dart';
-import '../services/recibos_adelanto_service.dart';
 import '../services/viajes_service.dart';
 
 /// Detalle read-only de un viaje. Vista resumida para consulta rápida
@@ -72,7 +65,7 @@ class LogisticaViajeDetalleScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 _SeccionMontos(v: v),
                 const SizedBox(height: 12),
-                _SeccionAdelantoYGastos(v: v),
+                _SeccionGastos(v: v),
                 if (v.motivoCancelacion != null ||
                     v.fechaPostergadoA != null) ...[
                   const SizedBox(height: 12),
@@ -346,12 +339,16 @@ class _SeccionMontos extends StatelessWidget {
           sub: true,
         ),
         const Divider(height: 16),
-        _Linea(
-          label: 'Adelanto al chofer',
-          valor: v.adelantoMonto == null || v.adelantoMonto == 0
-              ? '—'
-              : '−\$ ${AppFormatters.formatearMonto(v.adelantoMonto!)}',
-        ),
+        // Los adelantos ya NO viven en el viaje (refactor 2026-05-13).
+        // Los viajes legacy creados antes pueden tener `adelantoMonto`
+        // todavía cargado — en ese caso lo mostramos para no romper
+        // la trazabilidad de viajes ya impresos. Los nuevos viajes
+        // siempre tendrán adelantoMonto == null.
+        if (v.adelantoMonto != null && v.adelantoMonto! > 0)
+          _Linea(
+            label: 'Adelanto al chofer (legacy)',
+            valor: '−\$ ${AppFormatters.formatearMonto(v.adelantoMonto!)}',
+          ),
         _Linea(
           label: 'Gastos extraordinarios',
           valor: v.gastosTotal == 0
@@ -360,94 +357,73 @@ class _SeccionMontos extends StatelessWidget {
         ),
         const Divider(height: 16),
         _Linea(
-          label: 'LIQUIDACIÓN AL CHOFER',
+          label: v.adelantoMonto != null && v.adelantoMonto! > 0
+              ? 'LIQUIDACIÓN AL CHOFER (con adelanto legacy)'
+              : 'SUBTOTAL CHOFER (sin adelantos)',
           valor: '\$ ${AppFormatters.formatearMonto(v.liquidacionChofer)}',
           highlight: true,
         ),
+        if (v.adelantoMonto == null || v.adelantoMonto == 0)
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              'Los adelantos se restan en LIQUIDACIÓN sumando los '
+              'del chofer en el rango. Acá solo se muestra lo que '
+              'genera el viaje en sí.',
+              style: TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ),
       ],
     );
   }
 }
 
-class _SeccionAdelantoYGastos extends StatelessWidget {
+/// Sección de gastos extraordinarios del viaje (peajes, lavado,
+/// reparaciones menores, etc.). Hasta 2026-05-13 esto se mostraba
+/// junto con el adelanto, pero los adelantos pasaron a ser una
+/// entidad propia (`ADELANTOS_CHOFER`). Ahora la sección solo
+/// muestra los gastos.
+class _SeccionGastos extends StatelessWidget {
   final Viaje v;
-  const _SeccionAdelantoYGastos({required this.v});
+  const _SeccionGastos({required this.v});
 
   @override
   Widget build(BuildContext context) {
-    if ((v.adelantoMonto == null || v.adelantoMonto == 0) &&
-        v.gastos.isEmpty) {
+    if (v.gastos.isEmpty) {
       return const SizedBox.shrink();
     }
     return _Seccion(
-      titulo: 'DETALLE ADELANTO Y GASTOS',
+      titulo: 'GASTOS EXTRAORDINARIOS',
       icono: Icons.receipt_long_outlined,
       children: [
-        if (v.adelantoMonto != null && v.adelantoMonto! > 0) ...[
-          _Linea(
-            label: 'Adelanto monto',
-            valor: '\$ ${AppFormatters.formatearMonto(v.adelantoMonto!)}',
-          ),
-          if (v.adelantoFecha != null)
-            _Linea(
-              label: 'Adelanto fecha',
-              valor: AppFormatters.formatearFecha(v.adelantoFecha),
-            ),
-          if (v.adelantoObservacion != null &&
-              v.adelantoObservacion!.isNotEmpty)
-            _Linea(label: 'Observación', valor: v.adelantoObservacion!),
-          if (v.numeroReciboAdelanto != null)
-            _Linea(
-              label: 'N° comprobante',
-              valor: v.numeroReciboAdelanto.toString().padLeft(6, '0'),
-            ),
-          const SizedBox(height: 10),
-          _BotonImprimirComprobante(viaje: v),
-        ],
-        if (v.gastos.isNotEmpty) ...[
-          if (v.adelantoMonto != null && v.adelantoMonto! > 0)
-            const Divider(height: 16),
-          const Padding(
-            padding: EdgeInsets.only(bottom: 4),
-            child: Text(
-              'Gastos extraordinarios',
-              style: TextStyle(
-                color: Colors.white60,
-                fontSize: 11,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          for (final g in v.gastos)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(
-                children: [
-                  const Icon(Icons.add_circle_outline,
-                      size: 14, color: AppColors.accentTeal),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      g.detalle?.isNotEmpty == true
-                          ? '${g.detalle} (${AppFormatters.formatearFecha(g.fecha)})'
-                          : 'Gasto del ${AppFormatters.formatearFecha(g.fecha)}',
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 12),
-                    ),
-                  ),
-                  Text(
-                    '\$ ${AppFormatters.formatearMonto(g.monto)}',
+        for (final g in v.gastos)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              children: [
+                const Icon(Icons.add_circle_outline,
+                    size: 14, color: AppColors.accentTeal),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    g.detalle?.isNotEmpty == true
+                        ? '${g.detalle} (${AppFormatters.formatearFecha(g.fecha)})'
+                        : 'Gasto del ${AppFormatters.formatearFecha(g.fecha)}',
                     style: const TextStyle(
-                      color: AppColors.accentTeal,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
+                        color: Colors.white70, fontSize: 12),
                   ),
-                ],
-              ),
+                ),
+                Text(
+                  '\$ ${AppFormatters.formatearMonto(g.monto)}',
+                  style: const TextStyle(
+                    color: AppColors.accentTeal,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
-        ],
+          ),
       ],
     );
   }
@@ -959,191 +935,8 @@ class _Chip extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// BOTÓN IMPRIMIR COMPROBANTE DE ADELANTO
-// ============================================================================
-
-/// Botón que dispara el flujo de impresión del comprobante de adelanto:
-///   1. Asigna número correlativo en Firestore (transacción atómica
-///      — no se pisan dos impresiones simultáneas, no hay gaps).
-///   2. Genera el PDF (A4 duplicado: 2 mitades idénticas).
-///   3. Abre el dialog nativo de impresión via `printing` package
-///      (Windows: print-to-PDF / impresora; mobile: AirPrint /
-///      Google Print / share).
-///
-/// Si el viaje YA tiene número asignado (reimpresión), reusa el mismo
-/// número y marca el PDF como "REIMPRESIÓN" para distinguirlo.
-class _BotonImprimirComprobante extends StatefulWidget {
-  final Viaje viaje;
-  const _BotonImprimirComprobante({required this.viaje});
-
-  @override
-  State<_BotonImprimirComprobante> createState() =>
-      _BotonImprimirComprobanteState();
-}
-
-class _BotonImprimirComprobanteState extends State<_BotonImprimirComprobante> {
-  bool _generando = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final esReimpresion = widget.viaje.numeroReciboAdelanto != null;
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: _generando ? null : _imprimir,
-        icon: _generando
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppColors.accentGreen),
-              )
-            : Icon(esReimpresion ? Icons.refresh : Icons.print_outlined,
-                size: 18),
-        label: Text(esReimpresion
-            ? 'REIMPRIMIR COMPROBANTE'
-            : 'IMPRIMIR COMPROBANTE DE ADELANTO'),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.accentGreen,
-          side: const BorderSide(color: AppColors.accentGreen),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          textStyle:
-              const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _imprimir() async {
-    final messenger = ScaffoldMessenger.of(context);
-    setState(() => _generando = true);
-    try {
-      // 1. Asignar / reusar número correlativo (transacción atómica
-      //    server-side vía Cloud Function callable — el plugin
-      //    cloud_firestore en Windows crashea con runTransaction +
-      //    serverTimestamp).
-      final resultado = await RecibosAdelantoService.asignarNumeroSiFalta(
-        viajeId: widget.viaje.id,
-      );
-      final numero = resultado.numero;
-      // 2. Generar PDF en memoria (Uint8List). `esReimpresion` viene
-      //    del server, no del cache local del viaje — así si el doc
-      //    estaba stale en el cliente, igual marcamos correcto.
-      final pdfBytes = await RecibosAdelantoService.generarPdf(
-        viaje: widget.viaje,
-        numeroRecibo: numero,
-        esReimpresion: resultado.esReimpresion,
-      );
-      // 3. Imprimir directo a la impresora default del sistema (sin
-      //    abrir preview ni pedir Ctrl+P). Si no hay default printer
-      //    o el plugin falla, fallback al viewer del sistema.
-      //
-      // El crash anterior con código C++ 0xe06d7363 que motivó sacar
-      // `printing` venía del renderer del PDF al toparse con glifos
-      // faltantes de Helvetica embedded (caracteres no-ASCII tipo
-      // "Ó", "°", "—"). Ahora con Roboto válida embedded eso ya no
-      // pasa, así que volvimos al directPrintPdf.
-      final nombreArchivo =
-          'Comprobante-Adelanto-Nro-${numero.toString().padLeft(6, '0')}.pdf';
-      final impresoOk = await _imprimirDirecto(pdfBytes, nombreArchivo);
-      if (mounted) {
-        if (impresoOk) {
-          AppFeedback.successOn(messenger,
-              'Comprobante Nro. ${numero.toString().padLeft(6, '0')} '
-              'enviado a la impresora.');
-        } else {
-          AppFeedback.successOn(messenger,
-              'Comprobante Nro. ${numero.toString().padLeft(6, '0')} abierto. '
-              'Imprimí desde el visor (Ctrl+P).');
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        AppFeedback.errorOn(messenger, 'Error al generar comprobante: $e');
-      }
-    } finally {
-      if (mounted) setState(() => _generando = false);
-    }
-  }
-
-  /// Manda el PDF a la impresora default del sistema. Devuelve
-  /// `true` si pudo mandar a imprimir, `false` si no había impresora
-  /// disponible o el plugin falló (en ese caso cae al viewer).
-  ///
-  /// **Windows / macOS / Linux**: usa `Printing.directPrintPdf` con
-  /// la impresora default que reporta el OS. Sin diálogo ni preview.
-  /// **Android / iOS**: el subsystem de impresión nativo abre su
-  /// propio diálogo (es el comportamiento estándar mobile).
-  Future<bool> _imprimirDirecto(Uint8List bytes, String nombreArchivo) async {
-    try {
-      // Tomamos la impresora marcada como default en el sistema.
-      // `listPrinters()` enumera las impresoras instaladas; cada una
-      // tiene un flag `isDefault` que viene del config de Windows
-      // (Settings → Devices → Printers → "Set as default").
-      //
-      // Si no hay default (raro pero pasa en PCs nuevas), tomamos la
-      // primera de la lista. Si la lista está vacía, fallback al viewer.
-      final printers = await Printing.listPrinters();
-      if (printers.isEmpty) {
-        await _abrirPdfConViewerSistema(bytes, nombreArchivo: nombreArchivo);
-        return false;
-      }
-      final printer = printers.firstWhere(
-        (p) => p.isDefault,
-        orElse: () => printers.first,
-      );
-
-      final ok = await Printing.directPrintPdf(
-        printer: printer,
-        onLayout: (_) async => bytes,
-        name: nombreArchivo,
-      );
-      if (!ok) {
-        // El plugin devolvió false (job no aceptado) — fallback.
-        await _abrirPdfConViewerSistema(bytes, nombreArchivo: nombreArchivo);
-        return false;
-      }
-      return true;
-    } catch (e, stack) {
-      debugPrint('⚠️ Printing.directPrintPdf falló: $e');
-      debugPrint(stack.toString());
-      // Cualquier excepción del subsystem de impresión → fallback al
-      // viewer del sistema. No queremos dejar al user sin recibo.
-      await _abrirPdfConViewerSistema(bytes, nombreArchivo: nombreArchivo);
-      return false;
-    }
-  }
-
-  /// Guarda el PDF a un archivo temp y lo abre con el viewer default
-  /// del sistema operativo. Usado como fallback si `directPrintPdf`
-  /// no pudo mandar el job (PC sin impresora, subsystem caído, etc.).
-  ///   - **Windows**: `cmd /c start "" <ruta>` → abre con Edge / Adobe.
-  ///   - **macOS / Linux**: `launchUrl(file://)` → abre con Preview / xdg-open.
-  ///   - **Android / iOS**: `launchUrl(file://)` con `mode: externalApplication`.
-  Future<void> _abrirPdfConViewerSistema(
-    List<int> bytes, {
-    required String nombreArchivo,
-  }) async {
-    final tempDir = await getTemporaryDirectory();
-    final file = File('${tempDir.path}/$nombreArchivo');
-    await file.writeAsBytes(bytes, flush: true);
-    if (!kIsWeb && Platform.isWindows) {
-      // En Windows el `start` builtin de cmd abre con la app default
-      // sin esperar — el control vuelve enseguida al usuario.
-      // Notar las comillas vacías "" — son el "title" del comando
-      // start, sin esto trataría el primer arg como title y no
-      // como ruta.
-      await Process.start(
-        'cmd',
-        ['/c', 'start', '', file.path],
-        runInShell: true,
-      );
-    } else {
-      await launchUrl(
-        Uri.file(file.path),
-        mode: LaunchMode.externalApplication,
-      );
-    }
-  }
-}
+// `_BotonImprimirComprobante` removido del detalle de viaje el
+// 2026-05-13. Los adelantos pasaron a ser entidad propia
+// (`ADELANTOS_CHOFER`) y la impresión del comprobante ahora vive
+// en `LogisticaAdelantosScreen`, donde cada adelanto tiene su
+// propio botón "IMPRIMIR".

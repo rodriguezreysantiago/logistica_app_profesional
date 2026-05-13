@@ -28,6 +28,7 @@ import '../features/gomeria/screens/gomeria_unidad_detalle_screen.dart';
 import '../features/gomeria/screens/gomeria_unidades_lista_screen.dart';
 import '../features/logistica/screens/logistica_empresas_screen.dart';
 import '../features/logistica/screens/logistica_hub_screen.dart';
+import '../features/logistica/screens/logistica_adelantos_screen.dart';
 import '../features/logistica/screens/logistica_liquidacion_screen.dart';
 import '../features/logistica/screens/logistica_mapa_tarifas_screen.dart';
 import '../features/logistica/screens/logistica_tarifa_form_screen.dart';
@@ -406,6 +407,11 @@ class AppRouter {
       case AppRoutes.adminLogisticaLiquidacion:
         return _buildRoute(
           _protegerAdmin(const LogisticaLiquidacionScreen()),
+          settings,
+        );
+      case AppRoutes.adminLogisticaAdelantos:
+        return _buildRoute(
+          _protegerAdmin(const LogisticaAdelantosScreen()),
           settings,
         );
 

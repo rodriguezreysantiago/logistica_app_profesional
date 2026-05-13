@@ -54,6 +54,10 @@
   static const String adminLogisticaViajeForm = '/admin_logistica_viaje_form';
   static const String adminLogisticaViajeDetalle = '/admin_logistica_viaje_detalle';
   static const String adminLogisticaLiquidacion = '/admin_logistica_liquidacion';
+  // Adelantos — independientes de viajes (2026-05-13). Por sueldo o
+  // por viaje específico, con comprobante imprimible (mismo counter
+  // que tenía el adelanto del viaje en la versión vieja).
+  static const String adminLogisticaAdelantos = '/admin_logistica_adelantos';
 
   /// ABM de docs por empresa empleadora (Póliza ART + Formulario 931).
   /// Admin/Supervisor: una sola pantalla con tarjeta por empresa, cada
@@ -282,6 +286,24 @@ class AppCollections {
   /// Santiago 2026-05-09 — info delicada como tarifas, comisiones,
   /// liquidaciones).
   static const String viajesLogistica = 'VIAJES_LOGISTICA';
+
+  /// Adelantos al chofer — montos entregados en mano para cubrir gastos
+  /// del viaje O adelantos de sueldo (decisión Santiago 2026-05-13:
+  /// muchos adelantos NO están atados a un viaje específico). Cada doc
+  /// tiene chofer + fecha + monto + observación + correlativo del
+  /// comprobante impreso. Campo opcional `viaje_id` por si el operador
+  /// quiere vincularlo a un viaje (no obligatorio).
+  ///
+  /// Antes vivían como subcampos del viaje (adelanto_monto, adelanto_fecha,
+  /// adelanto_observacion, numero_recibo_adelanto). Migrados a colección
+  /// propia para soportar adelantos sin viaje. La pantalla LIQUIDACIÓN
+  /// suma los adelantos del chofer en el rango (no del viaje específico).
+  ///
+  /// La numeración del comprobante sigue compartiendo el counter
+  /// `COUNTERS/recibos_adelanto.next` (misma serie física). Se asigna al
+  /// PRIMER imprimir, no al crear, para no quemar correlativos en
+  /// adelantos borrados sin imprimir.
+  static const String adelantosChofer = 'ADELANTOS_CHOFER';
 
   /// Contadores atómicos para correlativos que requieren orden estricto
   /// (sin gaps, sin duplicados). Cada doc representa un correlativo

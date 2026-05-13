@@ -188,6 +188,22 @@
         { "fieldPath": "activo", "order": "ASCENDING" },
         { "fieldPath": "fecha_carga", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "ADELANTOS_CHOFER",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "chofer_dni", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ADELANTOS_CHOFER",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "chofer_dni", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

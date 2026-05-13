@@ -62,10 +62,10 @@ class LogisticaHubScreen extends StatelessWidget {
                   } else {
                     columnas = 2;
                   }
-                  // 6 tiles: TARIFAS, EMPRESAS, UBICACIONES, MAPA,
-                  // VIAJES, LIQUIDACIÓN. Si se suma o saca uno,
+                  // 7 tiles: TARIFAS, EMPRESAS, UBICACIONES, MAPA,
+                  // VIAJES, ADELANTOS, LIQUIDACIÓN. Si se suma o saca uno,
                   // ajustar acá Y la lista de _HubTile abajo.
-                  const totalTiles = 6;
+                  const totalTiles = 7;
                   final filas = (totalTiles / columnas).ceil();
                   const spacing = 12.0;
                   // Helper compartido — clamp 0.45..2.0 + fallback
@@ -143,6 +143,21 @@ class LogisticaHubScreen extends StatelessWidget {
                         soloActivas: false,
                         color: AppColors.accentOrange,
                         campoActivo: 'activo',
+                      ),
+                    ),
+                    _HubTile(
+                      titulo: 'ADELANTOS',
+                      subtitulo: 'Entregas al chofer',
+                      icono: Icons.payments_outlined,
+                      color: AppColors.accentBlue,
+                      ruta: AppRoutes.adminLogisticaAdelantos,
+                      // Adelantos no tiene flag "activa" — todos los
+                      // docs son activos. Mostramos count total.
+                      contador: _StreamCount(
+                        coleccion: FirebaseFirestore.instance
+                            .collection(AppCollections.adelantosChofer),
+                        soloActivas: false,
+                        color: AppColors.accentBlue,
                       ),
                     ),
                     const _HubTile(

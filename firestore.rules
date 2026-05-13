@@ -455,6 +455,27 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // ADELANTOS_CHOFER — entregas al chofer (de viaje o de sueldo)
+    // ========================================================================
+    // Creada en el refactor 2026-05-13. Hasta entonces los adelantos
+    // vivían embebidos en VIAJES_LOGISTICA (campos `adelantoMonto` /
+    // `adelantoFecha` / `numero_recibo`). Se separó porque muchas veces
+    // se le da un adelanto al chofer SIN viaje asociado (adelanto de
+    // sueldo). Ver `project_modulo_logistica.md` para más contexto.
+    //
+    // Datos delicados (montos, número de recibo correlativo). El chofer
+    // NO los ve directo — solo el operador admin/supervisor.
+    //
+    // El campo `numero_recibo` lo asigna la Cloud Function callable
+    // `asignarNumeroReciboAdelanto` server-side (workaround del bug de
+    // runTransaction en Windows), NO el cliente. Por eso el cliente
+    // puede crear/actualizar el resto pero no necesita setearlo.
+
+    match /ADELANTOS_CHOFER/{doc} {
+      allow read, create, update, delete: if isAdminOrSupervisor();
+    }
+
+    // ========================================================================
     // EMPRESAS_EMPLEADORAS — Póliza ART y F.931 a nivel empresa
     // ========================================================================
     // Una entrada por empresa empleadora del personal (Vecchi Ariel,

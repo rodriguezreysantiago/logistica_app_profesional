@@ -6,7 +6,9 @@ import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../models/adelanto_chofer.dart';
 import '../models/viaje.dart';
+import '../services/adelantos_service.dart';
 import '../services/liquidacion_service.dart';
 
 /// Pantalla LIQUIDACIÓN — agregaciones financieras de los viajes
@@ -153,11 +155,37 @@ class _LogisticaLiquidacionScreenState
                           .where((v) => v.liquidado == _filtroLiquidado)
                           .toList();
                     }
-                    return _Contenido(
-                      viajes: viajes,
-                      empleados: empleados,
-                      choferDniFiltro: _choferDni,
-                      onLiquidarBulk: () => _liquidarBulk(context, viajes),
+                    // Stream paralelo de adelantos en el mismo rango,
+                    // filtrados por los mismos DNIs (empresa+chofer).
+                    // Los adelantos NO viven en el viaje desde el
+                    // refactor 2026-05-13 — se suman aparte para el
+                    // neto del chofer.
+                    return StreamBuilder<List<AdelantoChofer>>(
+                      stream: AdelantosService.streamAdelantosEnRango(
+                        desde: _inicioMes,
+                        hasta: _inicioMesSiguiente,
+                        choferDnis: dnisFiltro,
+                      ),
+                      builder: (ctx, adSnap) {
+                        if (adSnap.hasError) {
+                          return AppErrorState(
+                            title: 'No se pudieron cargar los adelantos',
+                            subtitle: adSnap.error.toString(),
+                          );
+                        }
+                        // Si todavía no hay datos de adelantos, mostramos
+                        // los KPIs con lista vacía (no bloquea el flujo —
+                        // el operador ve la grilla y los adelantos
+                        // aparecen apenas llegan).
+                        final adelantos = adSnap.data ?? const <AdelantoChofer>[];
+                        return _Contenido(
+                          viajes: viajes,
+                          adelantos: adelantos,
+                          empleados: empleados,
+                          choferDniFiltro: _choferDni,
+                          onLiquidarBulk: () => _liquidarBulk(context, viajes),
+                        );
+                      },
                     );
                   },
                 ),
@@ -395,12 +423,14 @@ class _ChipFiltro extends StatelessWidget {
 
 class _Contenido extends StatelessWidget {
   final List<Viaje> viajes;
+  final List<AdelantoChofer> adelantos;
   final Map<String, EmpleadoLiquidacion> empleados;
   final String? choferDniFiltro;
   final VoidCallback onLiquidarBulk;
 
   const _Contenido({
     required this.viajes,
+    required this.adelantos,
     required this.empleados,
     required this.choferDniFiltro,
     required this.onLiquidarBulk,
@@ -408,10 +438,13 @@ class _Contenido extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (viajes.isEmpty) {
+    // El empty-state mira AMBAS fuentes: si no hay viajes pero sí hay
+    // adelantos (caso "adelanto de sueldo sin viaje"), tampoco
+    // queremos esconder la información.
+    if (viajes.isEmpty && adelantos.isEmpty) {
       return const AppEmptyState(
         icon: Icons.inbox_outlined,
-        title: 'Sin viajes en el período',
+        title: 'Sin viajes ni adelantos en el período',
         subtitle: 'Probá cambiar mes / empresa / chofer / estado liquidación.',
       );
     }
@@ -420,8 +453,17 @@ class _Contenido extends StatelessWidget {
         viajes.fold<double>(0, (acc, v) => acc + v.montoVecchi);
     final totalChofer =
         viajes.fold<double>(0, (acc, v) => acc + v.montoChoferRedondeado);
-    final totalAdelantos =
-        viajes.fold<double>(0, (acc, v) => acc + (v.adelantoMonto ?? 0));
+    // Adelantos: sumamos los de la nueva colección ADELANTOS_CHOFER
+    // (refactor 2026-05-13) MÁS los legacy embedidos en el viaje, PERO
+    // excluyendo los viajes con `adelantoMigradoAId` seteado — esos
+    // ya tienen su adelanto duplicado en la colección nueva por el
+    // script de migración, sumarlos también produciría doble conteo.
+    final totalAdelantosNuevos =
+        adelantos.fold<double>(0, (acc, a) => acc + a.monto);
+    final totalAdelantosLegacy = viajes
+        .where((v) => v.adelantoMigradoAId == null)
+        .fold<double>(0, (acc, v) => acc + (v.adelantoMonto ?? 0));
+    final totalAdelantos = totalAdelantosNuevos + totalAdelantosLegacy;
     final totalGastos =
         viajes.fold<double>(0, (acc, v) => acc + v.gastosTotal);
     // Neto a pagar al chofer = ganancia chofer - adelantos + gastos.
@@ -439,6 +481,7 @@ class _Contenido extends StatelessWidget {
           totalGastos: totalGastos,
           netoChofer: netoChofer,
           cantViajes: viajes.length,
+          cantAdelantos: adelantos.length,
         ),
         const SizedBox(height: 16),
         if (hayPendientes)
@@ -461,9 +504,13 @@ class _Contenido extends StatelessWidget {
         // Si no hay chofer filtrado, mostrar tabla agregada por chofer.
         // Si hay chofer filtrado, mostrar lista de viajes individuales.
         if (choferDniFiltro == null)
-          _TablaPorChofer(viajes: viajes, empleados: empleados)
+          _TablaPorChofer(
+            viajes: viajes,
+            adelantos: adelantos,
+            empleados: empleados,
+          )
         else
-          _ListaViajes(viajes: viajes),
+          _ListaViajes(viajes: viajes, adelantos: adelantos),
       ],
     );
   }
@@ -480,6 +527,7 @@ class _SeccionKPIs extends StatelessWidget {
   final double totalGastos;
   final double netoChofer;
   final int cantViajes;
+  final int cantAdelantos;
 
   const _SeccionKPIs({
     required this.totalFacturado,
@@ -488,6 +536,7 @@ class _SeccionKPIs extends StatelessWidget {
     required this.totalGastos,
     required this.netoChofer,
     required this.cantViajes,
+    required this.cantAdelantos,
   });
 
   @override
@@ -502,13 +551,17 @@ class _SeccionKPIs extends StatelessWidget {
               const Icon(Icons.account_balance_wallet,
                   size: 20, color: AppColors.accentGreen),
               const SizedBox(width: 8),
-              Text(
-                'Resumen — $cantViajes viaje(s)',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  letterSpacing: 0.8,
+              Expanded(
+                child: Text(
+                  'Resumen — $cantViajes viaje(s) · '
+                  '$cantAdelantos adelanto(s)',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    letterSpacing: 0.8,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -596,22 +649,37 @@ class _LineaKPI extends StatelessWidget {
 
 class _TablaPorChofer extends StatelessWidget {
   final List<Viaje> viajes;
+  final List<AdelantoChofer> adelantos;
   final Map<String, EmpleadoLiquidacion> empleados;
 
-  const _TablaPorChofer({required this.viajes, required this.empleados});
+  const _TablaPorChofer({
+    required this.viajes,
+    required this.adelantos,
+    required this.empleados,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // Agrupar viajes por chofer DNI.
-    final porChofer = <String, List<Viaje>>{};
+    // Agrupar viajes y adelantos por chofer DNI. Cada chofer puede
+    // tener viajes, adelantos, o ambos (caso adelanto de sueldo sin
+    // viaje en el mes).
+    final viajesPorChofer = <String, List<Viaje>>{};
     for (final v in viajes) {
-      porChofer.putIfAbsent(v.choferDni, () => []).add(v);
+      viajesPorChofer.putIfAbsent(v.choferDni, () => []).add(v);
     }
-    // Orden por nombre del chofer.
-    final entries = porChofer.entries.toList()
+    final adelantosPorChofer = <String, List<AdelantoChofer>>{};
+    for (final a in adelantos) {
+      adelantosPorChofer.putIfAbsent(a.choferDni, () => []).add(a);
+    }
+    // Union de DNIs (chofer puede aparecer porque tiene viajes, o
+    // porque tiene adelantos, o ambos).
+    final dnis = <String>{
+      ...viajesPorChofer.keys,
+      ...adelantosPorChofer.keys,
+    }.toList()
       ..sort((a, b) {
-        final na = empleados[a.key]?.nombre ?? a.key;
-        final nb = empleados[b.key]?.nombre ?? b.key;
+        final na = empleados[a]?.nombre ?? a;
+        final nb = empleados[b]?.nombre ?? b;
         return na.compareTo(nb);
       });
 
@@ -630,17 +698,23 @@ class _TablaPorChofer extends StatelessWidget {
             ),
           ),
         ),
-        ...entries.map((e) {
-          final dni = e.key;
-          final vs = e.value;
+        ...dnis.map((dni) {
+          final vs = viajesPorChofer[dni] ?? const <Viaje>[];
+          final ads = adelantosPorChofer[dni] ?? const <AdelantoChofer>[];
           final nombre = empleados[dni]?.nombre ?? 'DNI $dni';
           final facturado = vs.fold<double>(0, (a, v) => a + v.montoVecchi);
           final chofer =
               vs.fold<double>(0, (a, v) => a + v.montoChoferRedondeado);
-          final adelantos =
-              vs.fold<double>(0, (a, v) => a + (v.adelantoMonto ?? 0));
+          // Sumamos adelantos NUEVOS (colección) + LEGACY (campo en
+          // viaje) excluyendo viajes ya migrados (adelantoMigradoAId
+          // != null) para evitar doble conteo.
+          final adelantosNuevos = ads.fold<double>(0, (a, ad) => a + ad.monto);
+          final adelantosLegacy = vs
+              .where((v) => v.adelantoMigradoAId == null)
+              .fold<double>(0, (a, v) => a + (v.adelantoMonto ?? 0));
+          final adelantosTotal = adelantosNuevos + adelantosLegacy;
           final gastos = vs.fold<double>(0, (a, v) => a + v.gastosTotal);
-          final neto = chofer - adelantos + gastos;
+          final neto = chofer - adelantosTotal + gastos;
           final pendientes = vs.where((v) => !v.liquidado).length;
           return AppCard(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -663,12 +737,24 @@ class _TablaPorChofer extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '${vs.length} viaje${vs.length == 1 ? "" : "s"}',
+                      vs.isEmpty
+                          ? 'sin viajes'
+                          : '${vs.length} viaje${vs.length == 1 ? "" : "s"}',
                       style: const TextStyle(
                         color: Colors.white54,
                         fontSize: 11,
                       ),
                     ),
+                    if (ads.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '·  ${ads.length} adel.',
+                        style: const TextStyle(
+                          color: AppColors.accentBlue,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
                     if (pendientes > 0) ...[
                       const SizedBox(width: 6),
                       Container(
@@ -695,7 +781,7 @@ class _TablaPorChofer extends StatelessWidget {
                 const SizedBox(height: 6),
                 _MiniCelda(label: 'Facturado', valor: facturado),
                 _MiniCelda(label: 'Ganancia chofer', valor: chofer),
-                _MiniCelda(label: 'Adelantos', valor: -adelantos),
+                _MiniCelda(label: 'Adelantos', valor: -adelantosTotal),
                 _MiniCelda(label: 'Gastos', valor: gastos),
                 const Divider(color: Colors.white12, height: 12),
                 _MiniCelda(
@@ -759,27 +845,112 @@ class _MiniCelda extends StatelessWidget {
 
 class _ListaViajes extends StatelessWidget {
   final List<Viaje> viajes;
-  const _ListaViajes({required this.viajes});
+  final List<AdelantoChofer> adelantos;
+  const _ListaViajes({required this.viajes, required this.adelantos});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
-          child: Text(
-            'VIAJES DEL CHOFER',
-            style: TextStyle(
-              color: Colors.white60,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.5,
+        if (viajes.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+            child: Text(
+              'VIAJES DEL CHOFER',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.5,
+              ),
             ),
           ),
-        ),
-        ...viajes.map((v) => _ViajeCardLiquidacion(v: v)),
+          ...viajes.map((v) => _ViajeCardLiquidacion(v: v)),
+        ],
+        if (adelantos.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+            child: Text(
+              'ADELANTOS DEL CHOFER',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+          ...adelantos.map((a) => _AdelantoCardLiquidacion(a: a)),
+        ],
       ],
+    );
+  }
+}
+
+/// Card compacta de un adelanto cuando el operador filtra por chofer
+/// en LIQUIDACIÓN. Muestra fecha, monto, observación y número de
+/// recibo si ya se imprimió. NO permite editar / borrar desde acá —
+/// para eso está LOGÍSTICA → ADELANTOS.
+class _AdelantoCardLiquidacion extends StatelessWidget {
+  final AdelantoChofer a;
+  const _AdelantoCardLiquidacion({required this.a});
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.payments_outlined,
+              size: 18, color: AppColors.accentBlue),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppFormatters.formatearFecha(a.fecha),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+                if (a.observacion != null && a.observacion!.isNotEmpty)
+                  Text(
+                    a.observacion!,
+                    style: const TextStyle(
+                      color: Colors.white60,
+                      fontSize: 11,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                if (a.numeroRecibo != null)
+                  Text(
+                    'Recibo Nº ${a.numeroRecibo.toString().padLeft(6, '0')}',
+                    style: const TextStyle(
+                      color: Colors.white38,
+                      fontSize: 10,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '−\$${AppFormatters.formatearMonto(a.monto)}',
+            style: const TextStyle(
+              color: AppColors.accentOrange,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

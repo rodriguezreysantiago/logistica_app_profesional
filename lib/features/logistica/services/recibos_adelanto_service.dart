@@ -8,7 +8,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../../../shared/utils/formatters.dart';
-import '../models/viaje.dart';
+import '../models/adelanto_chofer.dart';
 
 /// Resultado de la asignación de número de recibo.
 class AsignarReciboResult {
@@ -56,16 +56,16 @@ class RecibosAdelantoService {
 
   static final Dio _dio = Dio();
 
-  /// Asigna número correlativo al viaje (si no tiene) y devuelve el
+  /// Asigna número correlativo al adelanto (si no tiene) y devuelve el
   /// número final que va a salir impreso + si es reimpresión.
-  /// Idempotente: llamarla 2 veces sobre el mismo viaje devuelve el
+  /// Idempotente: llamarla 2 veces sobre el mismo adelanto devuelve el
   /// mismo número, sin incrementar el counter dos veces.
   ///
   /// Lanza [StateError] si la function rechaza la operación
-  /// (viaje inexistente, sin adelanto cargado, sin permiso, etc.)
-  /// con un mensaje listo para mostrar en UI.
+  /// (adelanto inexistente, monto inválido, sin permiso, etc.) con
+  /// un mensaje listo para mostrar en UI.
   static Future<AsignarReciboResult> asignarNumeroSiFalta({
-    required String viajeId,
+    required String adelantoId,
   }) async {
     // Firebase Auth ID token: la function lo valida y extrae
     // request.auth.token.rol para chequear permisos. Sin token, la
@@ -84,7 +84,7 @@ class RecibosAdelantoService {
         _asignarReciboEndpoint,
         data: {
           // Protocolo callable: payload envuelto en `data`.
-          'data': {'viajeId': viajeId},
+          'data': {'adelantoId': adelantoId},
         },
         options: Options(
           headers: {
@@ -150,12 +150,12 @@ class RecibosAdelantoService {
   ///
   /// Layout: hoja A4 vertical (210×297mm) dividida horizontalmente
   /// en 2 mitades idénticas. Cada mitad tiene encabezado, datos
-  /// del viaje, observación, y línea para firma.
+  /// del adelanto, observación, y línea para firma.
   ///
   /// [esReimpresion] = true → marca cada mitad con sello "REIMPRESIÓN"
   /// para diferenciarla del original.
   static Future<Uint8List> generarPdf({
-    required Viaje viaje,
+    required AdelantoChofer adelanto,
     required int numeroRecibo,
     required bool esReimpresion,
   }) async {
@@ -203,7 +203,7 @@ class RecibosAdelantoService {
               // ─── Mitad 1 (arriba) — copia OFICINA ───
               pw.Expanded(
                 child: _Mitad.build(
-                  viaje: viaje,
+                  adelanto: adelanto,
                   numeroRecibo: numeroRecibo,
                   fechaImpresion: fechaImpresion,
                   esReimpresion: esReimpresion,
@@ -235,7 +235,7 @@ class RecibosAdelantoService {
               // ─── Mitad 2 (abajo) — copia CHOFER ───
               pw.Expanded(
                 child: _Mitad.build(
-                  viaje: viaje,
+                  adelanto: adelanto,
                   numeroRecibo: numeroRecibo,
                   fechaImpresion: fechaImpresion,
                   esReimpresion: esReimpresion,
@@ -257,24 +257,24 @@ class RecibosAdelantoService {
 /// OFICINA" / "COPIA CHOFER" en la esquina superior derecha.
 class _Mitad {
   static pw.Widget build({
-    required Viaje viaje,
+    required AdelantoChofer adelanto,
     required int numeroRecibo,
     required DateTime fechaImpresion,
     required bool esReimpresion,
     required String copia,
     required pw.MemoryImage? logo,
   }) {
-    final monto = viaje.adelantoMonto ?? 0;
-    final fechaAdelanto = viaje.adelantoFecha ?? viaje.fechaCarga ?? fechaImpresion;
+    final monto = adelanto.monto;
+    final fechaAdelanto = adelanto.fecha;
     // Si la observación está vacía, usar em-dash (—) como placeholder.
     // Roboto soporta correctamente U+2014, ya no hace falta el guion
     // ASCII defensivo.
     final observacion =
-        (viaje.adelantoObservacion ?? '').trim().isEmpty
+        (adelanto.observacion ?? '').trim().isEmpty
             ? '—'
-            : viaje.adelantoObservacion!.trim();
-    final choferNombre = viaje.choferNombre ?? viaje.choferDni;
-    final dniFmt = AppFormatters.formatearDNI(viaje.choferDni);
+            : adelanto.observacion!.trim();
+    final choferNombre = adelanto.choferNombre ?? adelanto.choferDni;
+    final dniFmt = AppFormatters.formatearDNI(adelanto.choferDni);
 
     return pw.Container(
       decoration: pw.BoxDecoration(
