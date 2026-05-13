@@ -2895,6 +2895,13 @@ const VIGILADOR_CONTINUO_ALERTA_SEGUNDOS = 3 * 3600 + 45 * 60;
 const VIGILADOR_CONTINUO_LIMITE_SEGUNDOS = 4 * 3600;
 const VIGILADOR_DIARIO_ALERTA_SEGUNDOS = 11 * 3600 + 30 * 60;
 const VIGILADOR_DIARIO_LIMITE_SEGUNDOS = 12 * 3600;
+// Pausa larga que cierra una jornada y abre una nueva (descanso entre
+// jornadas). Resetea `segundos_jornada_actual` y los flags de alerta
+// diaria. 8h = mínimo Argentina (Ley 24653 art. 53). Mercosur pide 11h
+// pero respetamos el mínimo legal local. Sin esta lógica, un chofer
+// que cruza medianoche se ve como "2 jornadas separadas" — antes del
+// fix 2026-05-13 perdíamos las jornadas nocturnas en el resumen.
+const VIGILADOR_DESCANSO_JORNADA_SEGUNDOS = 8 * 3600;
 // Cap para evitar deltas locos si el cron estuvo caído mucho tiempo.
 // 10 min = 2 ciclos completos del cron de 5 min.
 const VIGILADOR_DELTA_MAX_SEGUNDOS = 600;
@@ -2922,6 +2929,7 @@ const AVISO_NO_ID_THROTTLE_SEGUNDOS = 30 * 60;
 // llegan cuando llegan.
 const TTL_PAUSA_CONTINUA_MIN = 60; // 3h45 chofer
 const TTL_LIMITE_DIARIO_MIN = 120; // 11h30 chofer
+const TTL_JORNADA_EXCEDIDA_MIN = 60; // 12h chofer (excedió límite legal)
 const TTL_FIN_NOCTURNO_MIN = 60; // 23:30 chofer (cuando se active)
 const TTL_VOLVO_MANEJO_MIN = 120; // OVERSPEED, IDLING, HARSH, PTO
 const TTL_PASA_IBUTTON_MIN = 30; // CHOFER_NO_IDENTIFICADO Sitrack
@@ -4235,26 +4243,78 @@ export const vigiladorJornadaChofer = onSchedule(
       try {
         const result = await db.runTransaction(async (tx) => {
           const snapJ = await tx.get(refJornada);
+
+          // Estado base — se hidrata si hay doc del día anterior con
+          // jornada en curso (caso típico: chofer cruzó medianoche
+          // manejando, doc del día NUEVO arranca como continuación
+          // del anterior, no en cero). Sin esto, se perdían las
+          // jornadas nocturnas: el doc del 13 quedaba con 2h y el
+          // del 14 arrancaba en 0, ningún día llegaba a 11h30 →
+          // ninguna alerta + resumen subestimado. Fix 2026-05-13.
+          let segundosTotalDia = 0;
+          let segundosJornadaActual = 0;
+          let segundosContinuoActual = 0;
+          let segundosPausaActual = 0;
+          let alerta345Enviada = false;
+          let alerta1130Enviada = false;
+          let alerta1200Enviada = false;
+          let pausaObligatoriaExcedida = false;
+          let jornadaDiariaExcedida = false;
+          let alerta345At: Timestamp | null = null;
+          let alerta1130At: Timestamp | null = null;
+          let alerta1200At: Timestamp | null = null;
+
           if (!snapJ.exists) {
-            // Primer poll del día para este chofer → estado inicial.
-            // No acumulamos en este poll (no hay delta), próximo sí.
+            // Primer poll del día para este chofer. Mirar el doc del
+            // día anterior — si la jornada estaba en curso, hidratar.
+            const refAyer = db
+              .collection("JORNADAS_CHOFER")
+              .doc(`${driverDni}_${_fechaArtPrevia(fechaArt)}`);
+            const snapAyer = await tx.get(refAyer);
+            if (snapAyer.exists) {
+              const dA = snapAyer.data() ?? {};
+              segundosJornadaActual =
+                (dA.segundos_jornada_actual as number) ?? 0;
+              segundosContinuoActual =
+                (dA.segundos_continuo_actual as number) ?? 0;
+              segundosPausaActual =
+                (dA.segundos_pausa_actual as number) ?? 0;
+              alerta345Enviada =
+                (dA.alerta_3_45_continua_enviada as boolean) ?? false;
+              alerta1130Enviada =
+                (dA.alerta_11_30_diaria_enviada as boolean) ?? false;
+              alerta1200Enviada =
+                (dA.alerta_12_00_diaria_enviada as boolean) ?? false;
+              pausaObligatoriaExcedida =
+                (dA.pausa_obligatoria_excedida as boolean) ?? false;
+              jornadaDiariaExcedida =
+                (dA.jornada_diaria_excedida as boolean) ?? false;
+            }
             tx.set(refJornada, {
               chofer_dni: driverDni,
               fecha_art: fechaArt,
               segundos_total_dia: 0,
-              segundos_continuo_actual: 0,
-              segundos_pausa_actual: 0,
+              segundos_jornada_actual: segundosJornadaActual,
+              segundos_continuo_actual: segundosContinuoActual,
+              segundos_pausa_actual: segundosPausaActual,
               ultima_actualizacion_at: ahora,
               ultima_patente: patente,
-              alerta_3_45_continua_enviada: false,
-              alerta_11_30_diaria_enviada: false,
+              alerta_3_45_continua_enviada: alerta345Enviada,
+              alerta_11_30_diaria_enviada: alerta1130Enviada,
+              alerta_12_00_diaria_enviada: alerta1200Enviada,
               alerta_3_45_continua_at: null,
               alerta_11_30_diaria_at: null,
-              pausa_obligatoria_excedida: false,
-              jornada_diaria_excedida: false,
+              alerta_12_00_diaria_at: null,
+              pausa_obligatoria_excedida: pausaObligatoriaExcedida,
+              jornada_diaria_excedida: jornadaDiariaExcedida,
               creado_en: ahora,
             });
-            return { alertContinuo: false, alertDiario: false };
+            // No acumulamos en este poll (no hay delta), próximo sí.
+            return {
+              alertContinuo: false,
+              alertDiario: false,
+              alertDiarioLimite: false,
+            };
           }
 
           const docJ = snapJ.data() ?? {};
@@ -4269,41 +4329,62 @@ export const vigiladorJornadaChofer = onSchedule(
             VIGILADOR_DELTA_MAX_SEGUNDOS
           );
 
-          let segundosTotalDia = (docJ.segundos_total_dia as number) ?? 0;
-          let segundosContinuoActual =
+          segundosTotalDia = (docJ.segundos_total_dia as number) ?? 0;
+          segundosJornadaActual =
+            (docJ.segundos_jornada_actual as number) ?? 0;
+          segundosContinuoActual =
             (docJ.segundos_continuo_actual as number) ?? 0;
-          let segundosPausaActual =
+          segundosPausaActual =
             (docJ.segundos_pausa_actual as number) ?? 0;
-          let alerta345Enviada =
+          alerta345Enviada =
             (docJ.alerta_3_45_continua_enviada as boolean) ?? false;
-          let alerta1130Enviada =
+          alerta1130Enviada =
             (docJ.alerta_11_30_diaria_enviada as boolean) ?? false;
-          let pausaObligatoriaExcedida =
+          alerta1200Enviada =
+            (docJ.alerta_12_00_diaria_enviada as boolean) ?? false;
+          pausaObligatoriaExcedida =
             (docJ.pausa_obligatoria_excedida as boolean) ?? false;
-          let jornadaDiariaExcedida =
+          jornadaDiariaExcedida =
             (docJ.jornada_diaria_excedida as boolean) ?? false;
+          alerta345At =
+            (docJ.alerta_3_45_continua_at as Timestamp | null) ?? null;
+          alerta1130At =
+            (docJ.alerta_11_30_diaria_at as Timestamp | null) ?? null;
+          alerta1200At =
+            (docJ.alerta_12_00_diaria_at as Timestamp | null) ?? null;
 
           if (speedEfectivo > VIGILADOR_UMBRAL_MOVIMIENTO_KMH) {
             // Manejando ahora.
+            // Reset del CONTINUO: pausa de 10 min sin movimiento.
             if (segundosPausaActual >= VIGILADOR_PAUSA_RESET_SEGUNDOS) {
-              // Tuvo pausa válida → reset del continuo y de la flag de
-              // alerta para que pueda dispararse de nuevo en el próximo
-              // ciclo de 4h.
               segundosContinuoActual = 0;
               alerta345Enviada = false;
+            }
+            // Reset de la JORNADA: pausa de 8h (descanso entre
+            // jornadas, mínimo Argentina). Resetea jornada_actual y
+            // todas las flags de alerta diaria + el flag de exceso
+            // continuo (la jornada nueva arranca con todo limpio).
+            if (segundosPausaActual >= VIGILADOR_DESCANSO_JORNADA_SEGUNDOS) {
+              segundosJornadaActual = 0;
+              alerta1130Enviada = false;
+              alerta1200Enviada = false;
+              jornadaDiariaExcedida = false;
+              pausaObligatoriaExcedida = false;
             }
             segundosPausaActual = 0;
             segundosContinuoActual += deltaSegundos;
             segundosTotalDia += deltaSegundos;
+            segundosJornadaActual += deltaSegundos;
           } else {
             // Parado o moviéndose lento (< umbral).
             segundosPausaActual += deltaSegundos;
-            // segundos_continuo_actual y _total_dia NO se mueven.
+            // continuo, jornada y total NO se mueven.
           }
 
           // Chequear umbrales de alerta.
           let alertContinuo = false;
           let alertDiario = false;
+          let alertDiarioLimite = false;
 
           if (
             segundosContinuoActual >= VIGILADOR_CONTINUO_ALERTA_SEGUNDOS &&
@@ -4316,36 +4397,47 @@ export const vigiladorJornadaChofer = onSchedule(
             pausaObligatoriaExcedida = true;
           }
 
+          // Las alertas diarias evalúan contra `segundos_jornada_actual`
+          // (no contra `segundos_total_dia`). El total_dia es solo para
+          // el resumen del día calendario; la jornada_actual es lo que
+          // realmente importa para las alertas legales (puede cruzar
+          // medianoche).
           if (
-            segundosTotalDia >= VIGILADOR_DIARIO_ALERTA_SEGUNDOS &&
+            segundosJornadaActual >= VIGILADOR_DIARIO_ALERTA_SEGUNDOS &&
             !alerta1130Enviada
           ) {
             alertDiario = true;
             alerta1130Enviada = true;
           }
-          if (segundosTotalDia >= VIGILADOR_DIARIO_LIMITE_SEGUNDOS) {
+          if (
+            segundosJornadaActual >= VIGILADOR_DIARIO_LIMITE_SEGUNDOS &&
+            !alerta1200Enviada
+          ) {
+            alertDiarioLimite = true;
+            alerta1200Enviada = true;
+          }
+          if (segundosJornadaActual >= VIGILADOR_DIARIO_LIMITE_SEGUNDOS) {
             jornadaDiariaExcedida = true;
           }
 
           tx.update(refJornada, {
             segundos_total_dia: segundosTotalDia,
+            segundos_jornada_actual: segundosJornadaActual,
             segundos_continuo_actual: segundosContinuoActual,
             segundos_pausa_actual: segundosPausaActual,
             ultima_actualizacion_at: ahora,
             ultima_patente: patente,
             alerta_3_45_continua_enviada: alerta345Enviada,
             alerta_11_30_diaria_enviada: alerta1130Enviada,
-            alerta_3_45_continua_at: alertContinuo ?
-              ahora :
-              docJ.alerta_3_45_continua_at ?? null,
-            alerta_11_30_diaria_at: alertDiario ?
-              ahora :
-              docJ.alerta_11_30_diaria_at ?? null,
+            alerta_12_00_diaria_enviada: alerta1200Enviada,
+            alerta_3_45_continua_at: alertContinuo ? ahora : alerta345At,
+            alerta_11_30_diaria_at: alertDiario ? ahora : alerta1130At,
+            alerta_12_00_diaria_at: alertDiarioLimite ? ahora : alerta1200At,
             pausa_obligatoria_excedida: pausaObligatoriaExcedida,
             jornada_diaria_excedida: jornadaDiariaExcedida,
           });
 
-          return { alertContinuo, alertDiario };
+          return { alertContinuo, alertDiario, alertDiarioLimite };
         });
 
         if (result.alertContinuo) {
@@ -4354,6 +4446,10 @@ export const vigiladorJornadaChofer = onSchedule(
         }
         if (result.alertDiario) {
           await _encolarAvisoLimiteDiario(driverDni, patente);
+          alertasDiarioEnviadas++;
+        }
+        if (result.alertDiarioLimite) {
+          await _encolarAvisoJornadaExcedida(driverDni, patente);
           alertasDiarioEnviadas++;
         }
       } catch (e) {
@@ -4538,6 +4634,117 @@ async function _encolarAvisoLimiteDiario(
   });
 }
 
+/**
+ * Encola el aviso "ya excediste el límite diario de 12 horas" — se
+ * dispara cuando `segundos_jornada_actual` cruza las 12h. Antes solo
+ * había aviso a las 11h30 ("te quedan 30 min") y el flag de exceso
+ * para el resumen diario; al pasar las 12h el chofer NO recibía
+ * nada en el momento, solo Molina al día siguiente.
+ *
+ * Diseño:
+ *   - 6 variantes anti-baneo, igual que las otras alertas al chofer.
+ *   - Tono más firme que el aviso 11:30 (ya es exceso, no faltan
+ *     minutos).
+ *   - TTL corto (60 min): si el bot estaba caído y se manda 1h
+ *     después, igual sigue vigente; si está caído más, el aviso
+ *     pierde sentido (el chofer ya está descansando o sigue
+ *     manejando en exceso y no hace falta el avisado tardío).
+ */
+async function _encolarAvisoJornadaExcedida(
+  choferDni: string,
+  patente: string
+): Promise<void> {
+  const empSnap = await db.collection("EMPLEADOS").doc(choferDni).get();
+  if (!empSnap.exists) return;
+  const empData = empSnap.data() ?? {};
+  if (empData.ACTIVO === false) return;
+  const tel = (empData.TELEFONO ?? "").toString().trim();
+  if (!tel || tel === "-") return;
+
+  const apodo = (empData.APODO ?? "").toString().trim();
+  const nombreFull = (empData.NOMBRE ?? "").toString().trim();
+  const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+  const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
+
+  const variantes = [
+    `${saludo},\n\n` +
+      "Ya cumpliste las 12 horas de manejo permitidas por jornada. " +
+      "Tenés que parar.\n\n" +
+      `Buscá un lugar seguro para el ${patente} y descansá hasta ` +
+      "mañana — la jornada ya terminó.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}.\n\n` +
+      "Aviso urgente: superaste las 12 horas diarias al volante. " +
+      "Hay que parar ya.\n\n" +
+      `Estacioná el ${patente} en un lugar seguro y cortá la jornada.\n\n` +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}, atención.\n\n` +
+      "Llegaste al máximo diario de 12 horas de manejo. Es momento " +
+      "de cerrar la jornada.\n\n" +
+      `Frená el ${patente} en un lugar seguro. Mañana retomás.\n\n` +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}.\n\n` +
+      "Excediste las 12 horas diarias permitidas. Es obligatorio " +
+      "parar y descansar.\n\n" +
+      `Buscá dónde estacionar el ${patente} y cerrá la jornada de hoy.\n\n` +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}, recordatorio importante.\n\n` +
+      "Pasaste el tope diario de 12 horas al volante. La jornada se " +
+      "tiene que cerrar.\n\n" +
+      `Frená el ${patente} en un lugar seguro y descansá. Seguís ` +
+      "mañana después del descanso obligatorio.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+    `${saludo}.\n\n` +
+      "Por norma de manejo, cumpliste 12 horas y tenés que parar. " +
+      "No podés seguir hoy.\n\n" +
+      `Buscá un lugar seguro para el ${patente} y descansá hasta ` +
+      "mañana.\n\n" +
+      BANNER_TESTING +
+      "_Coopertrans Móvil — Mensaje automático._",
+  ];
+  const mensaje = variantes[_rrPick(variantes.length)];
+
+  await db.collection("COLA_WHATSAPP").add({
+    telefono: tel,
+    mensaje,
+    estado: "PENDIENTE",
+    encolado_en: FieldValue.serverTimestamp(),
+    expira_en: _expiraEnMinutos(TTL_JORNADA_EXCEDIDA_MIN),
+    enviado_en: null,
+    error: null,
+    intentos: 0,
+    origen: "jornada_excedida",
+    destinatario_coleccion: "EMPLEADOS",
+    destinatario_id: choferDni,
+    campo_base: "JORNADA",
+    admin_dni: "BOT",
+    admin_nombre: "Bot vigilador jornada",
+    alert_patente: patente,
+  });
+}
+
+/**
+ * Devuelve la fecha ART del día anterior a la fecha dada
+ * (formato YYYY-MM-DD). Usada para hidratar el doc nuevo de
+ * `JORNADAS_CHOFER` desde el doc del día anterior cuando una
+ * jornada cruza medianoche.
+ */
+function _fechaArtPrevia(fechaArt: string): string {
+  // Parseamos como UTC para evitar offsets locales. La hora 12:00 da
+  // margen contra cualquier corrimiento de timezone al restar 1 día.
+  const d = new Date(`${fechaArt}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  const yyyy = d.getUTCFullYear().toString();
+  const mm = (d.getUTCMonth() + 1).toString().padStart(2, "0");
+  const dd = d.getUTCDate().toString().padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // ============================================================================
 // avisoFinJornadaNocturna — aviso 23:30 "buscá lugar para descansar"
 // ============================================================================
@@ -4662,6 +4869,7 @@ export const resumenExcesosJornadaDiario = onSchedule(
       choferDni: string;
       patente: string;
       segundosTotal: number;
+      segundosJornadaActual: number;
       segundosContinuoMax: number;
       excedio4hContinua: boolean;
       excedio12hDiaria: boolean;
@@ -4677,6 +4885,14 @@ export const resumenExcesosJornadaDiario = onSchedule(
         choferDni: (data.chofer_dni ?? "").toString(),
         patente: (data.ultima_patente ?? "").toString(),
         segundosTotal: (data.segundos_total_dia as number) ?? 0,
+        // segundos_jornada_actual mide la jornada lógica (puede cruzar
+        // medianoche y ser > segundos_total_dia cuando la jornada
+        // empezó el día anterior). Lo agregamos al reporte para que
+        // Molina vea la jornada real, no solo el slice del día
+        // calendario. Si fueron iguales, la jornada se cerró dentro
+        // del día.
+        segundosJornadaActual:
+          (data.segundos_jornada_actual as number) ?? 0,
         segundosContinuoMax:
           (data.segundos_continuo_actual as number) ?? 0,
         excedio4hContinua: excedio4h,
@@ -4775,9 +4991,19 @@ export const resumenExcesosJornadaDiario = onSchedule(
       const flags: string[] = [];
       if (x.excedio4hContinua) flags.push("4h continuas");
       if (x.excedio12hDiaria) flags.push("12h diarias");
+      // Si la jornada (que puede cruzar medianoche) es mayor que el
+      // total del día calendario, mostramos AMBOS para que Molina vea
+      // que la jornada empezó el día anterior. Sin esto el resumen
+      // subestima jornadas nocturnas (problema histórico antes del
+      // fix 2026-05-13).
+      const lineaJornada =
+        x.segundosJornadaActual > x.segundosTotal + 60 ?
+          `   Jornada total: ${fmtHm(x.segundosJornadaActual)} hs (empezó día anterior)\n` :
+          "";
       return (
         `🚛 *${x.patente || "—"}* — ${nombre} (DNI ${x.choferDni})\n` +
-        `   Total día: ${fmtHm(x.segundosTotal)} hs\n` +
+        `   Total día calendario: ${fmtHm(x.segundosTotal)} hs\n` +
+        lineaJornada +
         `   Continuo máx: ${fmtHm(x.segundosContinuoMax)} hs\n` +
         `   ⚠️ Excedió: ${flags.join(", ")}`
       );
@@ -4794,8 +5020,8 @@ export const resumenExcesosJornadaDiario = onSchedule(
       `${excesos.length} chofer${excesos.length === 1 ? "" : "es"} ` +
       "excedió límites de manejo:\n\n" +
       `${lineas.join("\n\n")}\n\n` +
-      "_Datos calculados por el vigilador (Sitrack speed > 10 km/h, " +
-      "pausa válida 15 min)._\n\n" +
+      "_Datos calculados por el vigilador (Sitrack speed > 15 km/h, " +
+      "pausa válida 10 min, jornada nueva tras 8 h de descanso)._\n\n" +
       BANNER_TESTING +
       "_Coopertrans Móvil — Aviso automático._";
 

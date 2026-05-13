@@ -118,19 +118,25 @@ async function main() {
   } else {
     const j = jSnap.data();
     const totalDia = j.segundos_total_dia ?? 0;
+    const jornadaActual = j.segundos_jornada_actual ?? 0;
     const continuo = j.segundos_continuo_actual ?? 0;
     const pausa = j.segundos_pausa_actual ?? 0;
     console.log('📋 JORNADAS_CHOFER');
-    console.log(`  Total del día      : ${fmtSeg(totalDia)}    (${totalDia}s)`);
+    console.log(`  Total día calend.  : ${fmtSeg(totalDia)}    (${totalDia}s)`);
+    console.log(`  Jornada actual     : ${fmtSeg(jornadaActual)}    (${jornadaActual}s)  ← desde último descanso ≥ 8 h`);
     console.log(`  Continuo actual    : ${fmtSeg(continuo)}    (${continuo}s)`);
     console.log(`  Pausa actual       : ${fmtSeg(pausa)}    (${pausa}s)`);
     console.log(`  Última patente     : ${j.ultima_patente ?? '(?)'}`);
     console.log(`  Última actualiz.   : ${fmtFecha(j.ultima_actualizacion_at)}`);
     console.log('  Flags:');
-    console.log(`    Alerta 3:45 enviada : ${j.alerta_3_45_continua_enviada ? 'SÍ' : 'no'} ${j.alerta_3_45_continua_at ? `(${fmtFecha(j.alerta_3_45_continua_at)})` : ''}`);
-    console.log(`    Alerta 11:30 enviada: ${j.alerta_11_30_diaria_enviada ? 'SÍ' : 'no'} ${j.alerta_11_30_diaria_at ? `(${fmtFecha(j.alerta_11_30_diaria_at)})` : ''}`);
+    console.log(`    Alerta 3:45 enviada  : ${j.alerta_3_45_continua_enviada ? 'SÍ' : 'no'} ${j.alerta_3_45_continua_at ? `(${fmtFecha(j.alerta_3_45_continua_at)})` : ''}`);
+    console.log(`    Alerta 11:30 enviada : ${j.alerta_11_30_diaria_enviada ? 'SÍ' : 'no'} ${j.alerta_11_30_diaria_at ? `(${fmtFecha(j.alerta_11_30_diaria_at)})` : ''}`);
+    console.log(`    Alerta 12:00 enviada : ${j.alerta_12_00_diaria_enviada ? 'SÍ' : 'no'} ${j.alerta_12_00_diaria_at ? `(${fmtFecha(j.alerta_12_00_diaria_at)})` : ''}`);
     console.log(`    Pausa obligatoria excedida (>4h)  : ${j.pausa_obligatoria_excedida ? 'SÍ' : 'no'}`);
     console.log(`    Jornada diaria excedida (>12h)    : ${j.jornada_diaria_excedida ? 'SÍ' : 'no'}`);
+    if (jornadaActual > totalDia + 60) {
+      console.log(`  ↪ La jornada arrancó el día anterior (jornada > total_dia)`);
+    }
     console.log('');
 
     // 3) Última posición de la patente
