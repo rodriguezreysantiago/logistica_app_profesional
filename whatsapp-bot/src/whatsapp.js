@@ -8,6 +8,8 @@
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const { execSync } = require('child_process');
+const path = require('path');
 const log = require('./logger');
 const health = require('./health');
 
@@ -17,7 +19,34 @@ const callbacksAlEstarListo = [];
 
 function inicializar() {
   if (client) return _esperarListo();
+  _construirCliente();
+  // Bug observado en producción: si `client.initialize()` lanza un
+  // error sincrónico o rechaza la promesa antes de que dispare el
+  // evento `authenticated`, el watchdog (que solo arranca con ese
+  // evento) NUNCA arranca → bot queda colgado en estado INICIANDO sin
+  // recovery. NSSM lo reinicia pero arranca con el mismo problema →
+  // loop de cuelgues que requiere reejecutar manual.
+  //
+  // Fix: catcheamos el error y disparamos el flujo de reconexión
+  // (mismo backoff exponencial que `disconnected`), de modo que el
+  // bot intente reinicializar N veces antes de exit(1).
+  _safeInitialize();
+  return _esperarListo();
+}
 
+/**
+ * Crea una instancia nueva de `Client` con todos los event listeners.
+ * Reusable: lo llama `inicializar()` la primera vez y
+ * `_recrearCliente()` cada vez que el initialize falla porque la
+ * referencia vieja al cliente quedó podrida (browser huérfano,
+ * userDataDir lockeado, etc.).
+ *
+ * Si había un handler de mensajes entrantes registrado (vía
+ * `onMensajeEntrante`), lo re-registra automáticamente en la nueva
+ * instancia — sin esto perderíamos los mensajes entrantes después de
+ * un recovery.
+ */
+function _construirCliente() {
   client = new Client({
     authStrategy: new LocalAuth({}),
     // ─── webVersionCache remoto ───
@@ -84,19 +113,11 @@ function inicializar() {
     _intentarReconexion();
   });
 
-  // Bug observado en producción: si `client.initialize()` lanza un
-  // error sincrónico o rechaza la promesa antes de que dispare el
-  // evento `authenticated`, el watchdog (que solo arranca con ese
-  // evento) NUNCA arranca → bot queda colgado en estado INICIANDO sin
-  // recovery. NSSM lo reinicia pero arranca con el mismo problema →
-  // loop de cuelgues que requiere reejecutar manual.
-  //
-  // Fix: catcheamos el error y disparamos el flujo de reconexión
-  // (mismo backoff exponencial que `disconnected`), de modo que el
-  // bot intente reinicializar N veces antes de exit(1).
-  _safeInitialize();
-
-  return _esperarListo();
+  // Re-registrar el handler de mensajes entrantes si había uno (caso
+  // recovery del cliente — la instancia nueva no hereda los listeners).
+  if (_messageHandler) {
+    client.on('message_create', _messageHandler);
+  }
 }
 
 function _safeInitialize() {
@@ -126,6 +147,87 @@ let _reconexionEnCurso = false;
 let _intentosReconexion = 0;
 const _maxReconexiones = 5;
 
+/**
+ * Detecta el caso del "browser huérfano": después de un crash del
+ * cliente, Puppeteer puede dejar un proceso Chromium vivo que sigue
+ * tomando el lock de `.wwebjs_auth/session/`. En ese caso el nuevo
+ * `initialize()` falla con un mensaje tipo:
+ *   "The browser is already running for ... Use a different `userDataDir` or stop the running browser first."
+ *
+ * Este patrón se usa para decidir si hay que matar manualmente los
+ * Chromes huérfanos antes de reintentar.
+ */
+function _esErrorBrowserHuerfano(e) {
+  const msg = (e && e.message) || String(e || '');
+  return /browser is already running/i.test(msg) ||
+      /already running for/i.test(msg) ||
+      /different.*userdatadir/i.test(msg);
+}
+
+/**
+ * Matar Chromes huérfanos en Windows que tengan el `userDataDir` del
+ * bot abierto. Sin esto, el siguiente `initialize()` vuelve a fallar
+ * con "already running" y caemos en loop. Solo se ejecuta cuando
+ * detectamos el patrón específico — no spammeamos taskkill cada
+ * recovery.
+ *
+ * En Linux/macOS no hace nada por ahora (no observamos el problema
+ * ahí; whatsapp-web.js suele limpiar bien fuera de Windows).
+ */
+function _matarChromesHuerfanos() {
+  if (process.platform !== 'win32') return;
+  // Path absoluto del userDataDir donde LocalAuth persiste la sesión.
+  // En Windows lleva backslashes en la commandline de Chrome — los
+  // escapamos para el filtro WMIC.
+  const sessionDir = path.resolve(
+    process.cwd(),
+    '.wwebjs_auth',
+    'session'
+  );
+  const sessionDirEscaped = sessionDir.replace(/\\/g, '\\\\');
+  try {
+    // WMIC busca chrome.exe cuya commandline contenga la ruta del
+    // userDataDir, los lista en CSV y matamos cada uno. Si no hay
+    // matches, WMIC devuelve "No Instance(s) Available." y no rompe.
+    const stdout = execSync(
+      `wmic process where "name='chrome.exe' and commandline like '%${sessionDirEscaped}%'" get processid /format:csv`,
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    const pids = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.toLowerCase().startsWith('node'))
+      .map((line) => line.split(',').pop())
+      .filter((pid) => /^\d+$/.test(pid));
+
+    if (pids.length === 0) {
+      log.info(
+        'No se encontraron Chromes huérfanos del bot en la búsqueda WMIC.'
+      );
+      return;
+    }
+    log.warn(
+      `Matando ${pids.length} Chrome(s) huérfano(s) del bot: PIDs ${pids.join(', ')}`
+    );
+    for (const pid of pids) {
+      try {
+        execSync(`taskkill /F /PID ${pid} /T`, {
+          stdio: ['ignore', 'ignore', 'ignore'],
+        });
+      } catch (killErr) {
+        // /T mata todo el árbol; si alguno ya murió, taskkill exit !=0
+        // pero no es fatal.
+        log.warn(`taskkill PID ${pid} falló: ${killErr.message}`);
+      }
+    }
+  } catch (e) {
+    // Si WMIC no está disponible (Win10+ marca deprecation) o falla
+    // por otra razón, no es fatal — el siguiente retry capaz anda
+    // solo si Chromium se cerró por su cuenta.
+    log.warn(`Búsqueda de Chromes huérfanos falló: ${e.message}`);
+  }
+}
+
 function _intentarReconexion() {
   if (_reconexionEnCurso) return;
   _reconexionEnCurso = true;
@@ -144,12 +246,38 @@ function _intentarReconexion() {
   );
 
   setTimeout(async () => {
+    let huboError = false;
     try {
       await client.initialize();
     } catch (e) {
+      huboError = true;
       log.warn(`Reconexión falló: ${e.message}`);
+      // Si el error es el clásico "browser is already running"
+      // (Chromium huérfano lockeando el userDataDir), matamos esos
+      // procesos y recreamos el cliente desde cero. La referencia al
+      // `client` viejo quedó podrida — `initialize()` no se recupera
+      // sobre la misma instancia, hay que tirarla.
+      if (_esErrorBrowserHuerfano(e)) {
+        _matarChromesHuerfanos();
+        try {
+          await client.destroy();
+        } catch (destroyErr) {
+          log.warn(
+            `Destroy del cliente viejo falló (esperable): ${destroyErr.message}`
+          );
+        }
+        _construirCliente();
+      }
     } finally {
       _reconexionEnCurso = false;
+    }
+    // Si el retry falló, encadenamos otro automáticamente sin esperar
+    // que alguien lo dispare desde afuera. Sin esto, después del
+    // primer fallo el bot quedaba en limbo: `client` vivo en memoria
+    // pero `listo=false`, y nada vuelve a llamar `_intentarReconexion`.
+    // Detectado 2026-05-13 con bot caído ~30min después de un crash.
+    if (huboError) {
+      _intentarReconexion();
     }
   }, delayMs);
 }
@@ -228,12 +356,28 @@ function _arrancarWatchdogReady() {
         'cliente_wa',
         `Reinicialización tras timeout falló: ${e.message}`
       );
+      // Caso "browser huérfano": matamos los Chromes que siguen
+      // tomando el userDataDir y recreamos el cliente. El mismo fix
+      // que el ciclo de `_intentarReconexion`, replicado acá porque
+      // el watchdog tiene su propio flujo de retry.
+      if (_esErrorBrowserHuerfano(e)) {
+        _matarChromesHuerfanos();
+        try {
+          await client.destroy();
+        } catch (destroyErr) {
+          log.warn(
+            `Destroy del cliente viejo falló (esperable): ${destroyErr.message}`
+          );
+        }
+        _construirCliente();
+      }
       // Si la reinicialización dentro del watchdog también falla, el
       // bot queda en INICIANDO sin watchdog activo. Re-arrancamos uno
       // nuevo con el mismo timeout para que el ciclo de retry no se
       // pierda — sin esto, el bot se cuelga silenciosamente.
       if (_intentosReadyTimeout < _maxReadyTimeouts) {
         _arrancarWatchdogReady();
+        _safeInitialize();
       } else {
         log.error('Watchdog agotado después de fallo en reinicialización. exit(1).');
         process.exit(1);
