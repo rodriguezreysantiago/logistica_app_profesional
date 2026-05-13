@@ -17,6 +17,7 @@ import '../../../shared/widgets/app_widgets.dart';
 import '../models/adelanto_chofer.dart';
 import '../services/adelantos_service.dart';
 import '../services/recibos_adelanto_service.dart';
+import '../services/report_adelantos.dart';
 
 /// ABM de adelantos a chofer. Lista por fecha desc, alta vía dialog,
 /// edición inline al tocar la card, eliminar con confirmación,
@@ -37,6 +38,30 @@ class LogisticaAdelantosScreen extends StatefulWidget {
 
 class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
   String _filtro = '';
+
+  /// Filtros de fecha (desde/hasta, inclusive). Si null, no aplica.
+  /// El operador suele querer "los adelantos de este mes" o "del último
+  /// pago de sueldo hasta hoy" — el rango lo arma con 2 date pickers.
+  DateTime? _fechaDesde;
+  DateTime? _fechaHasta;
+
+  /// IDs de adelantos DESELECCIONADOS para el export Excel. Default:
+  /// todos los visibles están seleccionados (set vacío). El operador
+  /// destildea los que NO quiere incluir en el resumen — más común
+  /// que tildar uno por uno cuando son muchos.
+  final Set<String> _deseleccionados = {};
+
+  bool _seleccionado(String id) => !_deseleccionados.contains(id);
+
+  void _toggleSeleccion(String id) {
+    setState(() {
+      if (_deseleccionados.contains(id)) {
+        _deseleccionados.remove(id);
+      } else {
+        _deseleccionados.add(id);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +95,38 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
               onChanged: (v) => setState(() => _filtro = v),
             ),
           ),
+          // ─── Filtros de fecha (desde / hasta) ────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _BotonFechaFiltro(
+                    label: 'DESDE',
+                    fecha: _fechaDesde,
+                    onChanged: (d) => setState(() => _fechaDesde = d),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _BotonFechaFiltro(
+                    label: 'HASTA',
+                    fecha: _fechaHasta,
+                    onChanged: (d) => setState(() => _fechaHasta = d),
+                  ),
+                ),
+                if (_fechaDesde != null || _fechaHasta != null)
+                  IconButton(
+                    icon: const Icon(Icons.clear, size: 18),
+                    tooltip: 'Limpiar fechas',
+                    onPressed: () => setState(() {
+                      _fechaDesde = null;
+                      _fechaHasta = null;
+                    }),
+                  ),
+              ],
+            ),
+          ),
           Expanded(
             child: StreamBuilder<List<AdelantoChofer>>(
               stream: AdelantosService.streamAdelantos(),
@@ -94,20 +151,52 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
                 }
                 final filtrados = _aplicarFiltro(items);
                 if (filtrados.isEmpty) {
-                  return AppEmptyState(
+                  return const AppEmptyState(
                     icon: Icons.search_off,
                     title: 'Sin resultados',
                     subtitle:
-                        'Ningún adelanto coincide con "$_filtro". Probá con '
-                        'otra palabra o limpiá el filtro.',
+                        'Ningún adelanto coincide con los filtros actuales. '
+                        'Probá cambiar el rango de fechas o el texto.',
                   );
                 }
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
-                  itemCount: filtrados.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) =>
-                      _CardAdelanto(adelanto: filtrados[i]),
+                // Barra de selección + export. Solo aparece cuando hay
+                // al menos un adelanto en la lista filtrada (sino el
+                // botón "EXPORTAR" no tiene nada que mandar).
+                final seleccionados = filtrados
+                    .where((a) => _seleccionado(a.id))
+                    .toList();
+                return Column(
+                  children: [
+                    _BarraSeleccion(
+                      totalVisibles: filtrados.length,
+                      totalSeleccionados: seleccionados.length,
+                      onSeleccionarTodos: () =>
+                          setState(() => _deseleccionados.clear()),
+                      onDeseleccionarTodos: () => setState(() =>
+                          _deseleccionados.addAll(
+                              filtrados.map((a) => a.id))),
+                      onExportar: seleccionados.isEmpty
+                          ? null
+                          : () => _exportarExcel(seleccionados),
+                    ),
+                    Expanded(
+                      child: ListView.separated(
+                        padding:
+                            const EdgeInsets.fromLTRB(12, 4, 12, 90),
+                        itemCount: filtrados.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 8),
+                        itemBuilder: (_, i) {
+                          final a = filtrados[i];
+                          return _CardAdelanto(
+                            adelanto: a,
+                            seleccionado: _seleccionado(a.id),
+                            onToggleSeleccion: () => _toggleSeleccion(a.id),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
@@ -117,28 +206,182 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
     );
   }
 
+  /// Aplica los 3 filtros activos: texto (token-based), fecha desde
+  /// y fecha hasta. El stream ya viene ordenado por fecha desc desde
+  /// el service.
   List<AdelantoChofer> _aplicarFiltro(List<AdelantoChofer> items) {
+    Iterable<AdelantoChofer> it = items;
+    // Fecha desde (inclusive — comparamos contra inicio del día).
+    if (_fechaDesde != null) {
+      final desde = DateTime(
+          _fechaDesde!.year, _fechaDesde!.month, _fechaDesde!.day);
+      it = it.where((a) => !a.fecha.isBefore(desde));
+    }
+    // Fecha hasta (inclusive — comparamos contra el inicio del día
+    // siguiente para incluir todo el día "hasta").
+    if (_fechaHasta != null) {
+      final finDelDia = DateTime(_fechaHasta!.year, _fechaHasta!.month,
+          _fechaHasta!.day + 1);
+      it = it.where((a) => a.fecha.isBefore(finDelDia));
+    }
+    // Texto.
     final q = _filtro.trim().toLowerCase();
-    if (q.isEmpty) return items;
-    final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
-    return items.where((a) {
-      final hay = [
-        a.choferNombre ?? '',
-        a.choferDni,
-        a.observacion ?? '',
-        if (a.numeroRecibo != null) 'recibo n${a.numeroRecibo}',
-      ].join(' ').toLowerCase();
-      for (final t in tokens) {
-        if (!hay.contains(t)) return false;
-      }
-      return true;
-    }).toList();
+    if (q.isNotEmpty) {
+      final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty);
+      it = it.where((a) {
+        final hay = [
+          a.choferNombre ?? '',
+          a.choferDni,
+          a.observacion ?? '',
+          if (a.numeroRecibo != null) 'recibo n${a.numeroRecibo}',
+        ].join(' ').toLowerCase();
+        for (final t in tokens) {
+          if (!hay.contains(t)) return false;
+        }
+        return true;
+      });
+    }
+    return it.toList();
   }
 
   Future<void> _abrirAlta(BuildContext context) async {
     await showDialog(
       context: context,
       builder: (_) => const _AdelantoFormDialog(),
+    );
+  }
+
+  Future<void> _exportarExcel(List<AdelantoChofer> seleccionados) async {
+    await ReportAdelantosService.generar(
+      context: context,
+      adelantos: seleccionados,
+      fechaDesde: _fechaDesde,
+      fechaHasta: _fechaHasta,
+    );
+  }
+}
+
+// =============================================================================
+// FILTROS / BARRA DE SELECCIÓN
+// =============================================================================
+
+/// Botón compacto que muestra una fecha o "DESDE/HASTA" si está vacía.
+/// Al tocarlo abre `showDatePicker`. Long-press limpia. Usado en la
+/// barra de filtros de fecha de adelantos.
+class _BotonFechaFiltro extends StatelessWidget {
+  final String label;
+  final DateTime? fecha;
+  final ValueChanged<DateTime?> onChanged;
+
+  const _BotonFechaFiltro({
+    required this.label,
+    required this.fecha,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fechaStr =
+        fecha == null ? label : AppFormatters.formatearFecha(fecha!);
+    return OutlinedButton.icon(
+      onPressed: () async {
+        final ahora = DateTime.now();
+        final d = await showDatePicker(
+          context: context,
+          initialDate: fecha ?? ahora,
+          firstDate: DateTime(ahora.year - 2),
+          lastDate: DateTime(ahora.year + 1),
+        );
+        if (d != null) onChanged(d);
+      },
+      onLongPress: fecha == null ? null : () => onChanged(null),
+      icon: const Icon(Icons.calendar_today_outlined, size: 14),
+      label: Text(
+        fechaStr,
+        style: const TextStyle(fontSize: 12),
+        overflow: TextOverflow.ellipsis,
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: fecha == null ? Colors.white60 : Colors.white,
+        side: BorderSide(
+          color: fecha == null ? Colors.white24 : AppColors.accentGreen,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+  }
+}
+
+/// Barra que muestra cuántos adelantos están seleccionados +
+/// botones para seleccionar/deseleccionar todos + botón EXPORTAR.
+/// Aparece arriba de la lista cuando hay al menos 1 adelanto visible.
+class _BarraSeleccion extends StatelessWidget {
+  final int totalVisibles;
+  final int totalSeleccionados;
+  final VoidCallback onSeleccionarTodos;
+  final VoidCallback onDeseleccionarTodos;
+  final VoidCallback? onExportar;
+
+  const _BarraSeleccion({
+    required this.totalVisibles,
+    required this.totalSeleccionados,
+    required this.onSeleccionarTodos,
+    required this.onDeseleccionarTodos,
+    required this.onExportar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Row(
+        children: [
+          Text(
+            '$totalSeleccionados / $totalVisibles seleccionado(s)',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const Spacer(),
+          TextButton(
+            onPressed: totalSeleccionados == totalVisibles
+                ? null
+                : onSeleccionarTodos,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('TODOS', style: TextStyle(fontSize: 11)),
+          ),
+          TextButton(
+            onPressed:
+                totalSeleccionados == 0 ? null : onDeseleccionarTodos,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('NINGUNO', style: TextStyle(fontSize: 11)),
+          ),
+          const SizedBox(width: 4),
+          ElevatedButton.icon(
+            onPressed: onExportar,
+            icon: const Icon(Icons.file_download_outlined, size: 16),
+            label: Text(
+              'EXCEL ($totalSeleccionados)',
+              style: const TextStyle(fontSize: 11),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accentBlue,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -149,7 +392,17 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
 
 class _CardAdelanto extends StatelessWidget {
   final AdelantoChofer adelanto;
-  const _CardAdelanto({required this.adelanto});
+  /// Si está deseleccionado, la card se ve atenuada y el checkbox
+  /// vacío. Indica al operador que este adelanto NO va a entrar en
+  /// el export Excel.
+  final bool seleccionado;
+  final VoidCallback onToggleSeleccion;
+
+  const _CardAdelanto({
+    required this.adelanto,
+    required this.seleccionado,
+    required this.onToggleSeleccion,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -160,49 +413,65 @@ class _CardAdelanto extends StatelessWidget {
         : 'DNI ${adelanto.choferDni}';
     final yaImpreso = adelanto.numeroRecibo != null;
 
-    return AppCard(
-      onTap: () => showDialog(
-        context: context,
-        builder: (_) => _AdelantoFormDialog(adelanto: adelanto),
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.payments_outlined,
-                  size: 20, color: AppColors.accentGreen),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  chofer,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+    return Opacity(
+      opacity: seleccionado ? 1.0 : 0.55,
+      child: AppCard(
+        onTap: () => showDialog(
+          context: context,
+          builder: (_) => _AdelantoFormDialog(adelanto: adelanto),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                // Checkbox para incluir/excluir del export. Compacto
+                // y separado del onTap general de la card (que abre
+                // edición) usando GestureDetector explícito.
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: Checkbox(
+                    value: seleccionado,
+                    onChanged: (_) => onToggleSeleccion(),
+                    visualDensity: VisualDensity.compact,
+                    activeColor: AppColors.accentBlue,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              Text(
-                '\$ $montoFmt',
-                style: const TextStyle(
-                  color: AppColors.accentGreen,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+                const SizedBox(width: 4),
+                const Icon(Icons.payments_outlined,
+                    size: 20, color: AppColors.accentGreen),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    chofer,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    color: AppColors.accentRed),
-                tooltip: 'Eliminar adelanto',
-                onPressed: () => _confirmarEliminar(context),
-                visualDensity: VisualDensity.compact,
-              ),
-            ],
-          ),
+                Text(
+                  '\$ $montoFmt',
+                  style: const TextStyle(
+                    color: AppColors.accentGreen,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline,
+                      color: AppColors.accentRed),
+                  tooltip: 'Eliminar adelanto',
+                  onPressed: () => _confirmarEliminar(context),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
           const SizedBox(height: 4),
           Wrap(
             spacing: 12,
@@ -254,12 +523,13 @@ class _CardAdelanto extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: _BotonImprimirComprobante(adelanto: adelanto),
-          ),
-        ],
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: _BotonImprimirComprobante(adelanto: adelanto),
+            ),
+          ],
+        ),
       ),
     );
   }
