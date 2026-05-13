@@ -287,7 +287,7 @@ class _Mitad {
         children: [
           // ─── Encabezado: logo + razón social + N° recibo + tipo
           // de copia. Logo VAVG arriba a la izquierda (si pudo
-          // cargarse), texto "TRANSPORTE COOPER-TRANS" al lado. ───
+          // cargarse), texto "TRANSPORTE SERVI-TOLVA" al lado. ───
           pw.Row(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
@@ -305,7 +305,7 @@ class _Mitad {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
-                      'TRANSPORTE COOPER-TRANS',
+                      'TRANSPORTE SERVI-TOLVA',
                       style: pw.TextStyle(
                         fontSize: 16,
                         fontWeight: pw.FontWeight.bold,
