@@ -92,7 +92,18 @@ class _UserMiEquipoScreenState extends State<UserMiEquipoScreen> {
             );
           }
 
-          final empleado = empSnap.data!.data() as Map<String, dynamic>;
+          // Cast defensivo: si el doc llegara con shape inesperado,
+          // devolvemos error en lugar de crashear (mismo patrón que
+          // user_mi_perfil_screen + user_mis_vencimientos_screen).
+          final raw = empSnap.data!.data();
+          if (raw is! Map<String, dynamic>) {
+            return const AppErrorState(
+              title: 'Datos corruptos',
+              subtitle:
+                  'El formato de tu legajo no es válido. Contactá a la oficina.',
+            );
+          }
+          final empleado = raw;
           final nombreChofer = (empleado['NOMBRE'] ?? 'Chofer').toString();
           final patenteVehiculo =
               (empleado['VEHICULO'] ?? '').toString().trim();

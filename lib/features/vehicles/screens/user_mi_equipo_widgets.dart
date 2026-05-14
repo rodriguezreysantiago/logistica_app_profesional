@@ -30,9 +30,16 @@ class _SeccionUnidad extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Filtro por campo + estado=PENDIENTE. El admin BORRA el doc al
+    // aprobar/rechazar (revision_service.dart:399), así que en teoría
+    // todos están pendientes — defensa explícita por si en el futuro
+    // se conserva histórico. Cast defensivo: si shape inválido,
+    // descartar en silencio en lugar de crashear.
     final solicitudPendiente = solicitudes.where((s) {
-      final data = s.data() as Map<String, dynamic>;
-      return data['campo'] == claveSolicitud;
+      final data = s.data();
+      if (data is! Map<String, dynamic>) return false;
+      final estado = (data['estado'] ?? 'PENDIENTE').toString();
+      return data['campo'] == claveSolicitud && estado == 'PENDIENTE';
     }).toList();
 
     final tienePendiente = solicitudPendiente.isNotEmpty;
@@ -105,7 +112,17 @@ class _CardEnRevision extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final data = solicitud.data() as Map<String, dynamic>;
+    // Cast defensivo (consistente con _SeccionUnidad). Si por algún
+    // motivo el doc está corrupto, mostramos un placeholder en lugar
+    // de crashear.
+    final raw = solicitud.data();
+    if (raw is! Map<String, dynamic>) {
+      return const AppCard(
+        child: Text('Solicitud con formato inválido. Avisá a la oficina.',
+            style: TextStyle(color: Colors.white70)),
+      );
+    }
+    final data = raw;
     final patenteSolicitada = (data['patente'] ?? '—').toString();
 
     return AppCard(
@@ -182,17 +199,38 @@ class _CardUnidad extends StatelessWidget {
           .doc(patente)
           .snapshots(),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return AppCard(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                'Error cargando $patente: ${snap.error}',
+                style: const TextStyle(color: AppColors.accentRed),
+              ),
+            ),
+          );
+        }
         if (!snap.hasData || !snap.data!.exists) {
           return const _CardSinAsignacion();
         }
-        final v = snap.data!.data() as Map<String, dynamic>;
+        // Cast defensivo (consistente con el resto de la app).
+        final raw = snap.data!.data();
+        if (raw is! Map<String, dynamic>) {
+          return const _CardSinAsignacion();
+        }
+        final v = raw;
 
         return AppCard(
           padding: EdgeInsets.zero,
           margin: EdgeInsets.zero,
           child: Column(
             children: [
-              // Header con patente grande
+              // Header con patente grande + telemetría JUSTO ABAJO.
+              // Antes la telemetría iba debajo de marca/modelo y se
+              // perdía. Pedido Santiago 2026-05-14: el chofer va a
+              // querer ver primero combustible/autonomía/odómetro,
+              // que es la info viva del día. Marca/modelo es contexto
+              // de menor prioridad — lo movemos abajo.
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -201,90 +239,205 @@ class _CardUnidad extends StatelessWidget {
                     Icon(icono, color: Colors.white70, size: 32),
                     const SizedBox(width: 16),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            patente.toUpperCase(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 24,
-                              letterSpacing: 2,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Text(
-                                'MARCA: ',
-                                style: TextStyle(
-                                  color: AppColors.accentGreen,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Flexible(
-                                child: Text(
-                                  (v['MARCA'] ?? 'S/D').toString(),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'MODELO: ',
-                                style: TextStyle(
-                                  color: AppColors.accentGreen,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Flexible(
-                                child: Text(
-                                  (v['MODELO'] ?? 'S/D').toString(),
-                                  maxLines: 1,
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                      child: Text(
+                        patente.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 24,
+                          letterSpacing: 2,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
               const Divider(color: Colors.white10, height: 1),
-              // Telemetría en vivo (combustible + autonomía).
-              // Solo se renderiza si la unidad reporta esos datos vía
-              // Volvo Connect — para marcas no-Volvo o sincros viejas
-              // queda colapsado y no muestra nada.
+              // Telemetría arriba — info más útil del día a día. Si la
+              // unidad no reporta (no-Volvo / sin sync), no se renderiza.
               _BloqueTelemetria(data: v),
-              // Vencimientos: lista construida desde AppVencimientos
-              // según el TIPO de la unidad. Tractor → 4 (RTO, Seguro,
-              // Extintor Cabina, Extintor Exterior). Enganche → 2.
-              for (final spec
-                  in AppVencimientos.forTipo(v['TIPO']?.toString()))
-                _FilaVencimiento(
-                  etiqueta: spec.etiqueta,
-                  fecha: v[spec.campoFecha],
-                  url: v[spec.campoArchivo]?.toString(),
-                  tituloVisor: '${spec.etiqueta} $patente',
+              // Marca + modelo como subtítulo discreto (contexto, no
+              // info principal).
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${(v['MARCA'] ?? 'S/D')} · ${(v['MODELO'] ?? 'S/D')}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              // Resumen de vencimientos (sustituye la lista completa).
+              // Antes se duplicaba contra MIS VENCIMIENTOS — pedido
+              // Santiago 2026-05-14: en MI EQUIPO solo el resumen
+              // (cuántos OK / cuántos próximos / cuántos vencidos),
+              // y un link a MIS VENCIMIENTOS para ver el detalle.
+              const Divider(color: Colors.white10, height: 1),
+              _ResumenVencimientosEquipo(data: v),
               const SizedBox(height: 8),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+/// Resumen compacto de los vencimientos del equipo: contadores por
+/// estado (vencido, crítico, próximo, OK) en una sola fila + texto
+/// que invita a ir a MIS VENCIMIENTOS para el detalle. Reemplaza la
+/// lista completa de _FilaVencimiento que se duplicaba con la otra
+/// pantalla (Santiago 2026-05-14).
+class _ResumenVencimientosEquipo extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ResumenVencimientosEquipo({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final tipo = (data['TIPO'] ?? '').toString();
+    final specs = AppVencimientos.forTipo(tipo);
+
+    int vencidos = 0;
+    int criticos = 0;
+    int proximos = 0;
+    int ok = 0;
+    int sinFecha = 0;
+
+    for (final spec in specs) {
+      final fecha = data[spec.campoFecha]?.toString();
+      final tieneFecha = fecha != null && fecha.isNotEmpty;
+      final dias = tieneFecha
+          ? AppFormatters.calcularDiasRestantes(fecha)
+          : null;
+      final estado = calcularEstadoVencimiento(dias, tieneFecha: tieneFecha);
+      switch (estado) {
+        case VencimientoEstado.vencido:
+        case VencimientoEstado.invalida:
+          vencidos++;
+          break;
+        case VencimientoEstado.critico:
+          criticos++;
+          break;
+        case VencimientoEstado.proximo:
+          proximos++;
+          break;
+        case VencimientoEstado.ok:
+          ok++;
+          break;
+        case VencimientoEstado.sinFecha:
+          sinFecha++;
+          break;
+      }
+    }
+
+    final total = specs.length;
+    if (total == 0) return const SizedBox.shrink();
+
+    // Un mini chip por categoría que tenga > 0.
+    final chips = <Widget>[
+      if (vencidos > 0)
+        _ChipResumen(
+          texto: '$vencidos vencido${vencidos == 1 ? "" : "s"}',
+          color: AppColors.accentRed,
+        ),
+      if (criticos > 0)
+        _ChipResumen(
+          texto: '$criticos por vencer',
+          color: AppColors.accentOrange,
+        ),
+      if (proximos > 0)
+        _ChipResumen(
+          texto: '$proximos próximo${proximos == 1 ? "" : "s"}',
+          color: AppColors.accentAmber,
+        ),
+      if (ok > 0)
+        _ChipResumen(
+          texto: '$ok OK',
+          color: AppColors.accentGreen,
+        ),
+      if (sinFecha > 0)
+        _ChipResumen(
+          texto: '$sinFecha sin fecha',
+          color: Colors.white38,
+        ),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'PAPELES DEL EQUIPO',
+                style: TextStyle(
+                  color: AppColors.accentGreen,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '($total)',
+                style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: chips),
+          const SizedBox(height: 8),
+          const Text(
+            'Mirá el detalle en "Mis Vencimientos".',
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChipResumen extends StatelessWidget {
+  final String texto;
+  final Color color;
+  const _ChipResumen({required this.texto, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Text(
+        texto,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
@@ -331,32 +484,69 @@ class _BloqueTelemetria extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    // Staleness check — si la última lectura tiene más de 60 min, los
+    // datos pueden estar desactualizados. Mostramos un texto chico
+    // debajo para que el chofer no confíe ciegamente en una autonomía
+    // calculada hace 8 horas. Pedido Santiago 2026-05-14.
+    final ultimaLectura =
+        (data['ULTIMA_LECTURA_COMBUSTIBLE'] as Timestamp?)?.toDate();
+    String? hintStaleness;
+    if (ultimaLectura != null) {
+      final dur = DateTime.now().difference(ultimaLectura);
+      if (dur.inMinutes < 5) {
+        hintStaleness = 'Actualizado hace un momento';
+      } else if (dur.inMinutes < 60) {
+        hintStaleness = 'Actualizado hace ${dur.inMinutes} min';
+      } else if (dur.inHours < 24) {
+        hintStaleness = '⚠ Última actualización hace ${dur.inHours} h';
+      } else {
+        hintStaleness = '⚠ Sin datos hace ${dur.inDays} día(s)';
+      }
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: Row(
+      child: Column(
         children: [
-          if (mostrarKm)
-            Expanded(
-              child: _DatoTelemetria(
-                icono: Icons.speed,
-                color: Colors.white70,
-                valor: '${km.toStringAsFixed(0)} km',
-                etiqueta: 'ODÓMETRO',
+          Row(
+            children: [
+              if (mostrarKm)
+                Expanded(
+                  child: _DatoTelemetria(
+                    icono: Icons.speed,
+                    color: Colors.white70,
+                    valor: '${km.toStringAsFixed(0)} km',
+                    etiqueta: 'ODÓMETRO',
+                  ),
+                ),
+              if (fuel != null)
+                Expanded(
+                  child: _DatoCombustible(porcentaje: fuel),
+                ),
+              if (auton != null)
+                Expanded(
+                  child: _DatoTelemetria(
+                    icono: Icons.route,
+                    color: AppColors.accentCyan,
+                    valor: '${auton.toStringAsFixed(0)} km',
+                    etiqueta: 'AUTONOMÍA',
+                  ),
+                ),
+            ],
+          ),
+          if (hintStaleness != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              hintStaleness,
+              style: TextStyle(
+                color: hintStaleness.startsWith('⚠')
+                    ? AppColors.accentAmber
+                    : Colors.white38,
+                fontSize: 10,
+                fontStyle: FontStyle.italic,
               ),
             ),
-          if (fuel != null)
-            Expanded(
-              child: _DatoCombustible(porcentaje: fuel),
-            ),
-          if (auton != null)
-            Expanded(
-              child: _DatoTelemetria(
-                icono: Icons.route,
-                color: AppColors.accentCyan,
-                valor: '${auton.toStringAsFixed(0)} km',
-                etiqueta: 'AUTONOMÍA',
-              ),
-            ),
+          ],
         ],
       ),
     );
@@ -458,59 +648,9 @@ class _DatoCombustible extends StatelessWidget {
   }
 }
 
-class _FilaVencimiento extends StatelessWidget {
-  final String etiqueta;
-  final dynamic fecha;
-  final String? url;
-  final String tituloVisor;
-
-  const _FilaVencimiento({
-    required this.etiqueta,
-    required this.fecha,
-    required this.url,
-    required this.tituloVisor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final tieneFecha = fecha != null && fecha.toString().isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Row(
-        children: [
-          AppFileThumbnail(url: url, tituloVisor: tituloVisor),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  etiqueta,
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 11,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  tieneFecha
-                      ? AppFormatters.formatearFecha(fecha)
-                      : 'Sin fecha',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          VencimientoBadge(fecha: fecha),
-        ],
-      ),
-    );
-  }
-}
+// `_FilaVencimiento` removido el 2026-05-14. La lista completa de
+// vencimientos del equipo se reemplazó por `_ResumenVencimientosEquipo`
+// para evitar duplicación contra la pantalla MIS VENCIMIENTOS.
 
 // =============================================================================
 // SELECTOR DE NUEVA UNIDAD (al solicitar cambio)

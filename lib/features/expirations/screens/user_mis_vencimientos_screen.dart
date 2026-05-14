@@ -39,6 +39,14 @@ class _UserMisVencimientosScreenState
   final RevisionService _revisionService = RevisionService();
   late final Stream<DocumentSnapshot> _empleadoStream;
 
+  /// Pasa a `true` si pasan más de 10s sin que llegue el primer
+  /// snapshot del stream. Mismo patrón que MI PERFIL/MI EQUIPO —
+  /// agregado en MIS VENCIMIENTOS el 2026-05-14 por consistencia
+  /// (antes mostraba "No se encontraron tus datos" que asustaba al
+  /// chofer con red lenta).
+  bool _conexionLenta = false;
+  Timer? _slowConnTimer;
+
   @override
   void initState() {
     super.initState();
@@ -46,11 +54,20 @@ class _UserMisVencimientosScreenState
         .collection(AppCollections.empleados)
         .doc(widget.dniUser)
         .snapshots();
+    _slowConnTimer = Timer(const Duration(seconds: 10), () {
+      if (mounted) setState(() => _conexionLenta = true);
+    });
     // Cuando el chofer abre la pantalla, reagendamos sus recordatorios
     // push locales (cancela los viejos primero para no acumular avisos
     // de papeles ya renovados). Es fire-and-forget: si falla el
     // permiso o la plataforma no soporta, no afecta la pantalla.
     unawaited(_reagendarRecordatoriosLocales());
+  }
+
+  @override
+  void dispose() {
+    _slowConnTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _reagendarRecordatoriosLocales() async {
@@ -135,6 +152,8 @@ class _UserMisVencimientosScreenState
     final fechaCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
+    // Dispose del controller cuando el dialog se cierra (cualquier
+    // motivo: tap CANCELAR, CONTINUAR, back de Android, scrim).
     showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
@@ -220,6 +239,18 @@ class _UserMisVencimientosScreenState
             onPressed: () {
               if (formKey.currentState!.validate()) {
                 final partes = fechaCtrl.text.split('/');
+                // Validación adicional: el FechaInputFormatter NO
+                // garantiza dígitos completos en cada parte. "12/04/aaaa"
+                // pasaría el length check (10 chars) pero rompería al
+                // construir la fecha. Nos defendemos con tryParseFecha.
+                if (partes.length != 3 ||
+                    AppFormatters.tryParseFecha(fechaCtrl.text) == null) {
+                  AppFeedback.warningOn(
+                    ScaffoldMessenger.of(context),
+                    'La fecha no es válida. Revisá DD/MM/AAAA.',
+                  );
+                  return;
+                }
                 final fechaS = '${partes[2]}-${partes[1]}-${partes[0]}';
                 Navigator.pop(dCtx);
                 _selectorArchivo(
@@ -237,7 +268,7 @@ class _UserMisVencimientosScreenState
           ),
         ],
       ),
-    );
+    ).whenComplete(() => fechaCtrl.dispose());
   }
 
   void _selectorArchivo({
@@ -380,12 +411,22 @@ class _UserMisVencimientosScreenState
               subtitle: snapshot.error.toString(),
             );
           }
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          // Sin data todavía: si pasaron <10s, spinner. Si pasaron >10s
+          // sin que Firestore responda, mostramos un fallback con un
+          // mensaje útil — antes tirábamos "No se encontraron tus datos"
+          // que asustaba al chofer con red lenta. Mismo patrón que MI
+          // PERFIL.
+          if (snapshot.connectionState == ConnectionState.waiting ||
+              !snapshot.hasData) {
+            if (_conexionLenta) {
+              return const _VencimientoOfflineFallback();
+            }
             return const AppLoadingState();
           }
-          if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const AppErrorState(
-              title: 'No se encontraron tus datos',
+          if (!snapshot.data!.exists) {
+            return const _VencimientoOfflineFallback(
+              motivo: 'Tu legajo no está disponible en este momento. '
+                  'Contactá a administración.',
             );
           }
 
@@ -407,6 +448,14 @@ class _UserMisVencimientosScreenState
           return ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             children: [
+              // Banner "Próximo a vencer" — calcula el papel más urgente
+              // del chofer + de su equipo y avisa arriba si hay alguno
+              // a < 30 días o vencido. Sin ruido si todo está OK.
+              _BannerProximoAVencer(
+                empleadoData: data,
+                patenteVehiculo: pVehiculo,
+                patenteEnganche: pEnganche,
+              ),
               const _SectionHeader('LICENCIAS Y CARNETS'),
               _CardVencimientoUser(
                 titulo: 'Licencia de Conducir',

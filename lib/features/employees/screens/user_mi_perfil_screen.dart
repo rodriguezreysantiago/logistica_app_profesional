@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -9,6 +10,7 @@ import '../../../core/services/prefs_service.dart';
 import '../../../core/services/storage_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
+import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/utils/password_hasher.dart';
 import '../../../shared/utils/phone_formatter.dart';
@@ -86,9 +88,26 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     }
   }
 
+  /// Update genérico de un campo del legajo (lo usa _DatosCard para
+  /// editar inline TELÉFONO y MAIL). Reusa el patrón estándar
+  /// `_ejecutarTarea` que ya muestra loading + feedback de error.
+  Future<void> _actualizarCampoEmpleado(String campo, String valor) {
+    return _ejecutarTarea(
+      tarea: () async => FirebaseFirestore.instance
+          .collection(AppCollections.empleados)
+          .doc(widget.dni)
+          .update({campo: valor}),
+      mensajeExito: 'Datos actualizados.',
+    );
+  }
+
   void _mostrarDialogoClave(String passwordActual) {
     final antCtrl = TextEditingController();
     final nvaCtrl = TextEditingController();
+    // Cacheamos el messenger del scaffold acá (NO adentro del onPressed)
+    // para evitar el riesgo del context "del padre del dialog" después
+    // de cerrar el dialog.
+    final messenger = ScaffoldMessenger.of(context);
 
     showDialog(
       context: context,
@@ -144,11 +163,11 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
               //    Antes se comparaba texto-plano vs hash, lo cual nunca era igual.
               if (!PasswordHasher.verify(
                   antCtrl.text, passwordActual)) {
-                AppFeedback.error(context, 'La contraseña actual es incorrecta');
+                AppFeedback.errorOn(messenger, 'La contraseña actual es incorrecta');
                 return;
               }
               if (nvaCtrl.text.trim().length < 4) {
-                AppFeedback.warning(context, 'Mínimo 4 caracteres');
+                AppFeedback.warningOn(messenger, 'Mínimo 4 caracteres');
                 return;
               }
               Navigator.pop(dCtx);
@@ -320,7 +339,11 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
               const SizedBox(height: 30),
               const _SectionTitle(label: 'Datos personales'),
               const SizedBox(height: 8),
-              _DatosCard(dni: widget.dni, data: data),
+              _DatosCard(
+                dni: widget.dni,
+                data: data,
+                onActualizarCampo: _actualizarCampoEmpleado,
+              ),
               const SizedBox(height: 30),
               ElevatedButton.icon(
                 onPressed: () =>
@@ -524,7 +547,16 @@ class _DatosCard extends StatelessWidget {
   final String dni;
   final Map<String, dynamic> data;
 
-  const _DatosCard({required this.dni, required this.data});
+  /// Callback que persiste el cambio inline en Firestore
+  /// (`{campo: valor}` sobre el doc del legajo). Lo provee el screen
+  /// para reusar `_ejecutarTarea` (loading + feedback estándar).
+  final Future<void> Function(String campo, String valor) onActualizarCampo;
+
+  const _DatosCard({
+    required this.dni,
+    required this.data,
+    required this.onActualizarCampo,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -551,18 +583,35 @@ class _DatosCard extends StatelessWidget {
             icon: Icons.assignment_ind,
           ),
           const _SeparadorTile(),
-          _InfoTile(
+          // TELÉFONO editable: el chofer puede actualizar su número de
+          // contacto sin pasar por la oficina (caso típico: cambió de
+          // chip o número). Mostramos sin el prefijo 549 (más legible),
+          // y al guardar lo normalizamos con PhoneFormatter.paraGuardar
+          // para que el bot WhatsApp lo pueda usar tal cual.
+          _InfoTileEditable(
             label: 'TELÉFONO',
-            // Mostramos sin el prefijo 549 que guardamos en Firestore
-            // (más legible para el chofer).
             valor: PhoneFormatter.paraMostrar(data['TELEFONO']?.toString()),
             icon: Icons.phone_android,
+            inputFormatters: [DigitOnlyFormatter()],
+            keyboardType: TextInputType.phone,
+            aplicarMayusculas: false,
+            hint: 'Ej. 2914567890 (sin 0 ni 15)',
+            onSave: (v) =>
+                onActualizarCampo('TELEFONO', PhoneFormatter.paraGuardar(v)),
           ),
           const _SeparadorTile(),
-          _InfoTile(
+          // MAIL editable: idem teléfono, el chofer puede corregir o
+          // actualizar su mail. Sin mayúsculas (los mails son case-
+          // insensitive pero por convención se guardan en lowercase).
+          _InfoTileEditable(
             label: 'MAIL',
             valor: (data['MAIL'] ?? '—').toString(),
             icon: Icons.alternate_email,
+            keyboardType: TextInputType.emailAddress,
+            aplicarMayusculas: false,
+            transformarLowercase: true,
+            hint: 'tu@email.com',
+            onSave: (v) => onActualizarCampo('MAIL', v),
           ),
         ],
       ),
@@ -623,6 +672,161 @@ class _SeparadorTile extends StatelessWidget {
       indent: 60,
       height: 1,
     );
+  }
+}
+
+/// Variante de [_InfoTile] que es tappable para editar el valor inline.
+///
+/// Mismo look & feel que el read-only para que la card mantenga
+/// consistencia visual, con un icono `edit_note` verde a la derecha
+/// que indica al chofer que puede tocarlo. Al hacer tap se abre un
+/// dialog modal con un `TextField` pre-cargado y seleccionado.
+///
+/// Diseño deliberado:
+/// - Mismo `_InfoTile` por dentro (icon + label + value en 2 líneas).
+/// - Trailing `edit_note` accentGreen → marca visual de "editable".
+/// - El callback `onSave` recibe el texto trimeado y transformado
+///   (mayúsculas o lowercase según flags). El parent decide cómo
+///   normalizarlo antes de persistir (ej. PhoneFormatter.paraGuardar).
+class _InfoTileEditable extends StatelessWidget {
+  final String label;
+  final String valor;
+  final IconData icon;
+  final ValueChanged<String> onSave;
+  final List<TextInputFormatter>? inputFormatters;
+  final TextInputType? keyboardType;
+  final bool aplicarMayusculas;
+  final bool transformarLowercase;
+  final String? hint;
+
+  const _InfoTileEditable({
+    required this.label,
+    required this.valor,
+    required this.icon,
+    required this.onSave,
+    this.inputFormatters,
+    this.keyboardType,
+    this.aplicarMayusculas = false,
+    this.transformarLowercase = false,
+    this.hint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: Colors.white54, size: 22),
+      title: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 10,
+          color: Colors.white54,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1,
+        ),
+      ),
+      subtitle: Text(
+        valor.isEmpty ? '—' : valor,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      trailing: const Icon(
+        Icons.edit_note,
+        color: AppColors.accentGreen,
+        size: 22,
+      ),
+      dense: true,
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      onTap: () => _mostrarDialogo(context),
+    );
+  }
+
+  void _mostrarDialogo(BuildContext context) {
+    // Si el valor actual es el placeholder "—" (sin dato cargado),
+    // arrancamos el TextField vacío para que el chofer no tenga que
+    // borrar el guion antes de tipear.
+    final textoInicial = (valor == '—' || valor == '-') ? '' : valor;
+    final controller = TextEditingController(text: textoInicial)
+      ..selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: textoInicial.length,
+      );
+
+    String transformar(String raw) {
+      var t = raw.trim();
+      if (aplicarMayusculas) t = t.toUpperCase();
+      if (transformarLowercase) t = t.toLowerCase();
+      return t;
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withAlpha(20)),
+        ),
+        title: Text(
+          'Editar $label',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: aplicarMayusculas
+              ? TextCapitalization.characters
+              : TextCapitalization.none,
+          keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: hint ?? 'Escribí el nuevo valor',
+            hintStyle: const TextStyle(color: Colors.white38),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.clear, color: Colors.white54),
+              tooltip: 'Vaciar campo',
+              onPressed: controller.clear,
+            ),
+          ),
+          onSubmitted: (_) {
+            Navigator.pop(dCtx);
+            onSave(transformar(controller.text));
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: const Text('CANCELAR',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(dCtx);
+              onSave(transformar(controller.text));
+            },
+            child: const Text('GUARDAR',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+      // Cuando el dialog se cierra (por cualquier vía: GUARDAR,
+      // CANCELAR, back, tap-outside) descartamos el controller para
+      // evitar el leak de memoria que motivó esta auditoría.
+    ).whenComplete(controller.dispose);
   }
 }
 

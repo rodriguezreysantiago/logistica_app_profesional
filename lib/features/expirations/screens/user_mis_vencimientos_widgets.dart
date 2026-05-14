@@ -59,7 +59,19 @@ class _CardVencimientoUser extends StatelessWidget {
           .where('campo', isEqualTo: campo)
           .snapshots(),
       builder: (context, snap) {
-        final enRevision = snap.hasData && snap.data!.docs.isNotEmpty;
+        // Filtro defensivo por estado=PENDIENTE. El admin BORRA el doc
+        // al aprobar/rechazar (revision_service.dart:399), así que en
+        // teoría todos los que existen están pendientes. Pero defensa
+        // explícita por si en el futuro se cambia el flow para
+        // conservar histórico (estado: APROBADO/RECHAZADO).
+        final docs = snap.data?.docs ?? const <QueryDocumentSnapshot>[];
+        final pendientes = docs.where((d) {
+          final raw = d.data();
+          if (raw is! Map<String, dynamic>) return false;
+          final estado = (raw['estado'] ?? 'PENDIENTE').toString();
+          return estado == 'PENDIENTE';
+        }).toList();
+        final enRevision = pendientes.isNotEmpty;
 
         return AppCard(
           margin: const EdgeInsets.symmetric(vertical: 4),
@@ -579,6 +591,245 @@ class _BotonDetectarFechaState extends State<_BotonDetectarFecha> {
             fontSize: 12,
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// _BannerProximoAVencer — resumen al tope de la pantalla
+// ============================================================================
+
+/// Banner en la cabecera de MIS VENCIMIENTOS que avisa cuál es el
+/// vencimiento más urgente del chofer (de sus papeles personales y
+/// los de su equipo). Sin ruido si todos los papeles están OK.
+///
+/// Pedido Santiago 2026-05-14: el chofer hoy escanea las cards una
+/// por una. Un banner arriba con el papel más urgente cambia la
+/// utilidad de la pantalla.
+class _BannerProximoAVencer extends StatefulWidget {
+  final Map<String, dynamic> empleadoData;
+  final String patenteVehiculo;
+  final String patenteEnganche;
+
+  const _BannerProximoAVencer({
+    required this.empleadoData,
+    required this.patenteVehiculo,
+    required this.patenteEnganche,
+  });
+
+  @override
+  State<_BannerProximoAVencer> createState() => _BannerProximoAVencerState();
+}
+
+class _BannerProximoAVencerState extends State<_BannerProximoAVencer> {
+  Stream<List<Map<String, dynamic>>> _equiposStream() async* {
+    final patentes = [
+      if (widget.patenteVehiculo.isNotEmpty &&
+          widget.patenteVehiculo != '-')
+        widget.patenteVehiculo,
+      if (widget.patenteEnganche.isNotEmpty &&
+          widget.patenteEnganche != '-')
+        widget.patenteEnganche,
+    ];
+    if (patentes.isEmpty) {
+      yield <Map<String, dynamic>>[];
+      return;
+    }
+    final docs = <Map<String, dynamic>>[];
+    for (final p in patentes) {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection(AppCollections.vehiculos)
+            .doc(p)
+            .get();
+        final data = snap.data();
+        if (data != null) docs.add(data);
+      } catch (_) {
+        // Best effort: si falla un equipo, seguimos con el resto.
+      }
+    }
+    yield docs;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _equiposStream(),
+      initialData: const [],
+      builder: (ctx, snap) {
+        final equipos = snap.data ?? const <Map<String, dynamic>>[];
+        final candidatos = _recolectarCandidatos(widget.empleadoData, equipos);
+        if (candidatos.isEmpty) return const SizedBox.shrink();
+
+        candidatos.sort((a, b) {
+          final aD = a.dias ?? 99999;
+          final bD = b.dias ?? 99999;
+          return aD.compareTo(bD);
+        });
+        final top = candidatos.first;
+        final estado = top.estado;
+
+        // Si todo está OK (días > 30) o sin fecha, no mostramos banner.
+        if (estado == VencimientoEstado.ok ||
+            estado == VencimientoEstado.sinFecha) {
+          return const SizedBox.shrink();
+        }
+
+        final color = estado.color;
+        final extras = candidatos
+                .where((c) =>
+                    c.estado != VencimientoEstado.ok &&
+                    c.estado != VencimientoEstado.sinFecha)
+                .length -
+            1;
+        final dias = top.dias;
+        final mensaje = switch (estado) {
+          VencimientoEstado.vencido =>
+            '${top.titulo} VENCIDO${dias != null ? " hace ${(-dias)} día(s)" : ""}',
+          VencimientoEstado.invalida =>
+            '${top.titulo} tiene una fecha inválida — revisalo con la oficina.',
+          VencimientoEstado.critico => '${top.titulo} vence en $dias día(s)',
+          VencimientoEstado.proximo => '${top.titulo} vence en $dias día(s)',
+          _ => top.titulo,
+        };
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(0, 0, 0, 12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                estado == VencimientoEstado.vencido
+                    ? Icons.error_outline
+                    : Icons.warning_amber_outlined,
+                color: color,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      mensaje,
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (extras > 0) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Y $extras papel(es) más por vencer pronto.',
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  List<_CandidatoVencimiento> _recolectarCandidatos(
+    Map<String, dynamic> empleado,
+    List<Map<String, dynamic>> equipos,
+  ) {
+    final out = <_CandidatoVencimiento>[];
+    AppDocsEmpleado.etiquetas.forEach((etiqueta, campoBase) {
+      final fecha = empleado['VENCIMIENTO_$campoBase']?.toString();
+      out.add(_buildCandidato('Tu $etiqueta', fecha));
+    });
+    for (final equipo in equipos) {
+      final tipo = (equipo['TIPO'] ?? '').toString();
+      final patente = (equipo['PATENTE'] ?? '').toString();
+      // AppVencimientos.forTipo devuelve la lista de VencimientoSpec
+      // según TIPO (TRACTOR/CHASIS o ENGANCHE) — el .campoFecha ya
+      // viene con prefijo "VENCIMIENTO_", lo leemos directo.
+      final specs = AppVencimientos.forTipo(tipo);
+      for (final spec in specs) {
+        final fecha = equipo[spec.campoFecha]?.toString();
+        out.add(_buildCandidato('${spec.etiqueta} de $patente', fecha));
+      }
+    }
+    return out;
+  }
+
+  _CandidatoVencimiento _buildCandidato(String titulo, String? fecha) {
+    final tieneFecha = fecha != null && fecha.isNotEmpty;
+    final dias =
+        tieneFecha ? AppFormatters.calcularDiasRestantes(fecha) : null;
+    final estado = calcularEstadoVencimiento(dias, tieneFecha: tieneFecha);
+    return _CandidatoVencimiento(
+      titulo: titulo,
+      dias: dias,
+      estado: estado,
+    );
+  }
+}
+
+class _CandidatoVencimiento {
+  final String titulo;
+  final int? dias;
+  final VencimientoEstado estado;
+  const _CandidatoVencimiento({
+    required this.titulo,
+    required this.dias,
+    required this.estado,
+  });
+}
+
+// ============================================================================
+// _VencimientoOfflineFallback — UI degradada cuando red está lenta
+// ============================================================================
+
+class _VencimientoOfflineFallback extends StatelessWidget {
+  final String? motivo;
+  const _VencimientoOfflineFallback({this.motivo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.cloud_off_outlined,
+            color: AppColors.accentAmber.withValues(alpha: 0.7),
+            size: 64,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            motivo == null ? 'Conexión lenta' : 'Sin datos',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            motivo ??
+                'Estamos teniendo problemas para traer tus vencimientos. '
+                    'Probá de nuevo en unos segundos o conectate a una mejor red.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ],
       ),
     );
   }
