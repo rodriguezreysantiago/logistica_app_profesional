@@ -430,6 +430,11 @@ class _AccesoChecklist extends StatelessWidget {
         String mensaje;
         IconData icono;
 
+        // Todos los textos arrancan con "Checklist" — Santiago 2026-05-14:
+        // "tendría que decir Checklist Pendiente para que se entienda
+        // bien de que se está hablando cuando clickea ahí". Antes algunos
+        // estados decían "Control" o solo "Pendiente" y el chofer no
+        // sabía a qué refería.
         if (completado) {
           color = AppColors.accentGreen;
           // .toLocal() defensivo: Timestamp.toDate() en Dart suele
@@ -438,19 +443,19 @@ class _AccesoChecklist extends StatelessWidget {
           final fechaDoc =
               (snap.data!.docs.first['FECHA'] as Timestamp).toDate().toLocal();
           mensaje =
-              'Control realizado (${AppFormatters.formatearFechaCorta(fechaDoc)})';
+              'Checklist realizado (${AppFormatters.formatearFechaCorta(fechaDoc)})';
           icono = Icons.check_circle;
         } else if (dia > 15) {
           color = AppColors.accentRed;
-          mensaje = 'VENCIDO: realizar control YA';
+          mensaje = 'Checklist VENCIDO: realizar YA';
           icono = Icons.warning_amber_rounded;
         } else if (dia > 10) {
           color = AppColors.accentOrange;
-          mensaje = 'Pendiente (vence el día 15)';
+          mensaje = 'Checklist pendiente (vence el día 15)';
           icono = Icons.fact_check_outlined;
         } else {
           color = Colors.white60;
-          mensaje = 'Checklist mensual pendiente';
+          mensaje = 'Checklist pendiente';
           icono = Icons.fact_check_outlined;
         }
 
