@@ -453,38 +453,10 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
     setState(() {});
   }
 
-  /// Sube un tramo una posición (swap con el anterior). Se llama
-  /// desde el botón "↑" del header del tramo, deshabilitado si es
-  /// el primero.
-  void _moverTramoArriba(int index) {
-    if (index <= 0 || index >= _tramos.length) return;
-    setState(() {
-      final t = _tramos.removeAt(index);
-      _tramos.insert(index - 1, t);
-    });
-  }
-
-  /// Baja un tramo una posición (swap con el siguiente).
-  void _moverTramoAbajo(int index) {
-    if (index < 0 || index >= _tramos.length - 1) return;
-    setState(() {
-      final t = _tramos.removeAt(index);
-      _tramos.insert(index + 1, t);
-    });
-  }
-
-  /// Inserta una copia del tramo justo después del original (no al
-  /// final de la lista — más intuitivo para multi-tramo donde el
-  /// orden importa). Hereda tarifa + producto + descripción; el
-  /// resto queda vacío para que el operador complete fechas/kg del
-  /// nuevo tramo.
-  void _duplicarTramo(int index) {
-    if (index < 0 || index >= _tramos.length) return;
-    setState(() {
-      final clone = _TramoEditState.cloneFrom(_tramos[index]);
-      _tramos.insert(index + 1, clone);
-    });
-  }
+  // _moverTramoArriba / _moverTramoAbajo / _duplicarTramo se quitaron
+  // 2026-05-14 junto con sus botones del header de TRAMO (Santiago:
+  // "innecesario"). Si en algún momento se vuelven a necesitar, mirar
+  // git history — la lógica era trivial (swap + insert con clone).
 
   /// Devuelve un mensaje de warning si el origen del tramo `actual`
   /// no encadena con el destino del tramo `anterior`. Devuelve null
@@ -969,22 +941,8 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
                   state: tramo,
                   warningFechasInternas: _validarFechasInternasTramo(tramo),
                   puedeEliminar: _tramos.length > 1,
-                  puedeSubir: index > 0,
-                  puedeBajar: index < _tramos.length - 1,
                   onEliminar: () {
                     _eliminarTramo(index);
-                    _programarGuardadoBorrador();
-                  },
-                  onSubir: () {
-                    _moverTramoArriba(index);
-                    _programarGuardadoBorrador();
-                  },
-                  onBajar: () {
-                    _moverTramoAbajo(index);
-                    _programarGuardadoBorrador();
-                  },
-                  onDuplicar: () {
-                    _duplicarTramo(index);
                     _programarGuardadoBorrador();
                   },
                   onCambio: () {
@@ -1073,24 +1031,9 @@ class _TramoEditState {
     );
   }
 
-  /// Clona un tramo existente para usarse como base de uno nuevo
-  /// (botón "duplicar tramo" del form). Se reusan los datos
-  /// **estructurales** que el operador no quiere volver a tipear:
-  /// tarifa, producto y descripción de carga. NO se copian: fechas
-  /// (cada tramo tiene las suyas), kg cargados/descargados, número
-  /// de remito ni archivo de remito — esos son específicos del
-  /// tramo nuevo y vienen vacíos.
-  ///
-  /// El nuevo state recibe `id` único distinto para no romper los
-  /// ValueKey del builder.
-  factory _TramoEditState.cloneFrom(_TramoEditState src) {
-    return _TramoEditState._(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      tarifa: src.tarifa,
-      producto: src.producto,
-      descripcionCarga: src.descripcionCargaCtrl.text,
-    );
-  }
+  // `cloneFrom` se quitó 2026-05-14 junto con el botón "duplicar tramo"
+  // (ver _TramoCard). Si vuelve a necesitarse, copiaba: tarifa, producto
+  // y descripcionCarga — fechas/kg/remito quedaban vacíos.
 
   factory _TramoEditState.fromTramoViaje(
     TramoViaje t,
@@ -1162,12 +1105,7 @@ class _TramoCard extends StatelessWidget {
   /// función al guardar para mostrar un resumen.
   final String? warningFechasInternas;
   final bool puedeEliminar;
-  final bool puedeSubir;
-  final bool puedeBajar;
   final VoidCallback onEliminar;
-  final VoidCallback onSubir;
-  final VoidCallback onBajar;
-  final VoidCallback onDuplicar;
   final VoidCallback onCambio;
 
   const _TramoCard({
@@ -1176,12 +1114,7 @@ class _TramoCard extends StatelessWidget {
     required this.state,
     required this.warningFechasInternas,
     required this.puedeEliminar,
-    required this.puedeSubir,
-    required this.puedeBajar,
     required this.onEliminar,
-    required this.onSubir,
-    required this.onBajar,
-    required this.onDuplicar,
     required this.onCambio,
   });
 
@@ -1210,40 +1143,11 @@ class _TramoCard extends StatelessWidget {
     return _SeccionCard(
       titulo: 'TRAMO $numero',
       icono: Icons.alt_route_outlined,
-      // Row con todas las acciones del tramo. Compactas (visualDensity
-      // compact + sin padding) para que entren las 4 en mobile.
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_upward,
-                color: Colors.white70, size: 18),
-            onPressed: puedeSubir ? onSubir : null,
-            tooltip: 'Mover tramo arriba',
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints(),
-            padding: const EdgeInsets.all(6),
-          ),
-          IconButton(
-            icon: const Icon(Icons.arrow_downward,
-                color: Colors.white70, size: 18),
-            onPressed: puedeBajar ? onBajar : null,
-            tooltip: 'Mover tramo abajo',
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints(),
-            padding: const EdgeInsets.all(6),
-          ),
-          IconButton(
-            icon: const Icon(Icons.content_copy_outlined,
-                color: AppColors.accentBlue, size: 18),
-            onPressed: onDuplicar,
-            tooltip: 'Duplicar tramo (copia tarifa y producto)',
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints(),
-            padding: const EdgeInsets.all(6),
-          ),
-          if (puedeEliminar)
-            IconButton(
+      // Botones "↑ ↓ duplicar" del header se quitaron 2026-05-14 por
+      // pedido de Santiago — innecesarios en la práctica. Queda solo
+      // el "eliminar" para el caso de tramo sobrante.
+      trailing: puedeEliminar
+          ? IconButton(
               icon: const Icon(Icons.delete_outline,
                   color: AppColors.accentRed, size: 18),
               onPressed: onEliminar,
@@ -1251,9 +1155,8 @@ class _TramoCard extends StatelessWidget {
               visualDensity: VisualDensity.compact,
               constraints: const BoxConstraints(),
               padding: const EdgeInsets.all(6),
-            ),
-        ],
-      ),
+            )
+          : null,
       children: [
         // Warning de fechas internas (descarga < carga). Lo ponemos
         // arriba del todo así el operador lo ve al volver a revisar
@@ -1726,7 +1629,21 @@ class _SeccionEstado extends StatelessWidget {
   }
 }
 
-class _SeccionChofer extends StatelessWidget {
+/// Selector de chofer con autocomplete (type-ahead). El operador
+/// tipea cualquier subcadena del nombre (ej. "PER" → PEREZ JUAN, etc.)
+/// y la lista se filtra en vivo. Reemplazó al `DropdownButtonFormField`
+/// el 2026-05-14 (Santiago: "tendría que tener un sistema donde vaya
+/// filtrando a medida que voy apretando las letras del nombre").
+///
+/// Stateful porque necesitamos manejar nuestro propio TextEditingController
+/// + FocusNode para:
+/// 1. Pre-cargar el nombre del chofer en modo edición.
+/// 2. Sincronizar el texto si `widget.nombre` cambia desde fuera (carga
+///    async del viaje).
+/// 3. Revertir el texto del field si el operador tipea algo y se va sin
+///    seleccionar — evita texto huérfano que no corresponde al chofer
+///    realmente asignado.
+class _SeccionChofer extends StatefulWidget {
   final String? dni;
   final String? nombre;
   final void Function(String dni, String nombre, String? vehiculo,
@@ -1737,6 +1654,53 @@ class _SeccionChofer extends StatelessWidget {
     required this.nombre,
     required this.onChanged,
   });
+
+  @override
+  State<_SeccionChofer> createState() => _SeccionChoferState();
+}
+
+class _SeccionChoferState extends State<_SeccionChofer> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.nombre ?? '');
+    _focusNode = FocusNode()..addListener(_onFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SeccionChofer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Caso típico: el form arrancó con `nombre = null` (alta o aún no
+    // se cargó el doc del viaje), después llega async y hay que sync
+    // el field. Solo lo hacemos si el field NO tiene foco — sino el
+    // operador estaría tipeando y le interrumpiríamos.
+    if (oldWidget.nombre != widget.nombre && !_focusNode.hasFocus) {
+      _controller.text = widget.nombre ?? '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus) {
+      // Si tipearon algo y se fueron sin seleccionar, restauramos el
+      // valor confirmado (evita inconsistencia visual: el field mostrando
+      // "PER" cuando en realidad está asignado "GARCIA MARIA").
+      final esperado = widget.nombre ?? '';
+      if (_controller.text != esperado) {
+        _controller.text = esperado;
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1750,10 +1714,9 @@ class _SeccionChofer extends StatelessWidget {
               .where('ROL', isEqualTo: 'CHOFER')
               .snapshots(),
           builder: (ctx, snap) {
-            // Orden alfabético por NOMBRE (case-insensitive, locale-aware).
-            // Lo hacemos client-side para evitar tener que crear índice
-            // compuesto (ROL ASC + NOMBRE ASC) en Firestore — son ~50
-            // choferes, el sort es instantáneo.
+            // Orden alfabético por NOMBRE (case-insensitive). Client-side
+            // para evitar tener que crear índice compuesto (ROL + NOMBRE)
+            // en Firestore — son ~50 choferes, el sort es instantáneo.
             final docs = List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
               snap.data?.docs ?? const [],
             )..sort((a, b) {
@@ -1761,34 +1724,121 @@ class _SeccionChofer extends StatelessWidget {
                 final nb = (b.data()['NOMBRE'] ?? '').toString().toUpperCase();
                 return na.compareTo(nb);
               });
-            final items = docs.map((d) {
-              final data = d.data();
-              final dn = (data['DNI'] ?? d.id).toString();
-              final nom = (data['NOMBRE'] ?? dn).toString();
-              return DropdownMenuItem(
-                value: dn,
-                child: Text(nom, overflow: TextOverflow.ellipsis),
-              );
-            }).toList();
-            return DropdownButtonFormField<String>(
-              initialValue: dni,
-              decoration: const InputDecoration(
-                labelText: 'Chofer',
-                border: OutlineInputBorder(),
-              ),
-              isExpanded: true,
-              items: items,
-              onChanged: (val) {
-                if (val == null) return;
-                final doc = docs.firstWhere(
-                  (d) => (d.data()['DNI'] ?? d.id).toString() == val,
-                );
-                final data = doc.data();
-                onChanged(
-                  val,
-                  (data['NOMBRE'] ?? val).toString(),
+
+            return RawAutocomplete<QueryDocumentSnapshot<Map<String, dynamic>>>(
+              textEditingController: _controller,
+              focusNode: _focusNode,
+              displayStringForOption: (d) =>
+                  (d.data()['NOMBRE'] ?? '').toString(),
+              optionsBuilder: (value) {
+                final q = value.text.trim().toUpperCase();
+                if (q.isEmpty) return docs;
+                // Match por subcadena en cualquier lugar del nombre
+                // ("PER" matchea "PEREZ" y "ALPER", "GAR" matchea
+                // "GARCIA" y "FERNANDEZ GARCIA", etc.).
+                return docs.where((d) {
+                  final n = (d.data()['NOMBRE'] ?? '').toString().toUpperCase();
+                  return n.contains(q);
+                });
+              },
+              onSelected: (d) {
+                final data = d.data();
+                final dn = (data['DNI'] ?? d.id).toString();
+                widget.onChanged(
+                  dn,
+                  (data['NOMBRE'] ?? dn).toString(),
                   data['VEHICULO']?.toString(),
                   data['ENGANCHE']?.toString(),
+                );
+                // Quitamos foco para que el listener acomode el texto
+                // si hace falta (en este caso ya quedó bien por la
+                // selección, pero también dispara la lógica del padre
+                // que pasa al próximo campo).
+                _focusNode.unfocus();
+              },
+              fieldViewBuilder: (ctx, ctrl, fn, onSubmit) {
+                return TextField(
+                  controller: ctrl,
+                  focusNode: fn,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: InputDecoration(
+                    labelText: 'Chofer',
+                    hintText: 'Tipeá para filtrar (ej. PEREZ)',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: ctrl.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            tooltip: 'Limpiar',
+                            onPressed: () {
+                              ctrl.clear();
+                              fn.requestFocus();
+                            },
+                          ),
+                  ),
+                );
+              },
+              optionsViewBuilder: (ctx, onSel, options) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation: 6,
+                    color: Theme.of(context).colorScheme.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(color: Colors.white.withAlpha(20)),
+                    ),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxHeight: 280,
+                        maxWidth: 360,
+                      ),
+                      child: ListView.builder(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        itemCount: options.length,
+                        itemBuilder: (ctx, idx) {
+                          final d = options.elementAt(idx);
+                          final data = d.data();
+                          final nom = (data['NOMBRE'] ?? '').toString();
+                          final esActual =
+                              (data['DNI'] ?? d.id).toString() == widget.dni;
+                          return InkWell(
+                            onTap: () => onSel(d),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    esActual
+                                        ? Icons.check_circle
+                                        : Icons.person_outline,
+                                    size: 16,
+                                    color: esActual
+                                        ? AppColors.accentGreen
+                                        : Colors.white54,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      nom,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
                 );
               },
             );
