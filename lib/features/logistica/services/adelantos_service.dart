@@ -54,10 +54,14 @@ class AdelantosService {
   /// pantalla LIQUIDACIÓN para sumar los adelantos del chofer en el
   /// mes elegido. Requiere índice compuesto
   /// `chofer_dni ASC + fecha ASC`.
+  ///
+  /// **Excluye soft-deleted por default** — un adelanto eliminado no
+  /// es deuda válida del chofer y no se suma a la liquidación.
   static Future<List<AdelantoChofer>> getAdelantosEnRango({
     required DateTime desde,
     required DateTime hasta,
     String? choferDni,
+    bool incluirEliminados = false,
   }) async {
     Query<Map<String, dynamic>> q = _col
         .where('fecha',
@@ -67,9 +71,11 @@ class AdelantosService {
       q = q.where('chofer_dni', isEqualTo: choferDni);
     }
     final snap = await q.get();
-    return snap.docs
+    final list = snap.docs
         .map((d) => AdelantoChofer.fromMap(d.id, d.data()))
         .toList();
+    if (incluirEliminados) return list;
+    return list.where((a) => !a.eliminado).toList();
   }
 
   /// Stream-version de [getAdelantosEnRango]. La pantalla LIQUIDACIÓN
@@ -80,17 +86,24 @@ class AdelantosService {
   /// Firestore no soporta `whereIn` + range query en el mismo índice
   /// (limitación conocida). Si la lista de DNIs es > 30, se rompería
   /// el `whereIn` directo igual.
+  ///
+  /// **Excluye soft-deleted por default** — un adelanto eliminado no
+  /// es deuda válida del chofer y no se suma a la liquidación.
   static Stream<List<AdelantoChofer>> streamAdelantosEnRango({
     required DateTime desde,
     required DateTime hasta,
     Set<String>? choferDnis,
+    bool incluirEliminados = false,
   }) {
     final q = _col.where('fecha',
         isGreaterThanOrEqualTo: Timestamp.fromDate(desde),
         isLessThanOrEqualTo: Timestamp.fromDate(hasta));
     return q.snapshots().map((snap) {
-      final adelantos =
+      var adelantos =
           snap.docs.map((d) => AdelantoChofer.fromMap(d.id, d.data())).toList();
+      if (!incluirEliminados) {
+        adelantos = adelantos.where((a) => !a.eliminado).toList();
+      }
       if (choferDnis == null) return adelantos;
       return adelantos.where((a) => choferDnis.contains(a.choferDni)).toList();
     });
@@ -300,15 +313,51 @@ class AdelantosService {
     );
   }
 
-  /// Hard-delete del adelanto. Idempotente (si no existe, no hace nada).
-  /// El operador puede borrar adelantos cargados por error. Si ya tenía
-  /// `numero_recibo` impreso, ese correlativo queda quemado (no se
-  /// reusa) — auditoría correcta.
-  static Future<void> eliminarAdelanto(String adelantoId) async {
+  /// **Soft delete** del adelanto. NO borra físicamente — marca el doc
+  /// con `eliminado: true` + metadata. Pedido Santiago 2026-05-14:
+  /// quedan visibles con filtro "Mostrar eliminados" para que se vea
+  /// por qué se quemó cada número de recibo. Idempotente (si ya
+  /// estaba eliminado, sobrescribe metadata).
+  ///
+  /// El `motivo` es opcional. Si es null o vacío string, se persiste
+  /// como cadena vacía — no rompe la lectura.
+  ///
+  /// Si tenía `numero_recibo` impreso, ese correlativo queda quemado
+  /// igual (el counter es server-side y no se reusa) — la diferencia
+  /// es que ahora se ve POR QUÉ.
+  static Future<void> eliminarAdelanto({
+    required String adelantoId,
+    required String eliminadoPorDni,
+    String? motivo,
+  }) async {
     if (adelantoId.isEmpty) {
       throw ArgumentError('adelantoId vacío.');
     }
-    await _col.doc(adelantoId).delete();
-    AppLogger.log('Adelanto eliminado: $adelantoId');
+    final motivoSan = (motivo ?? '').trim();
+    await _col.doc(adelantoId).set({
+      'eliminado': true,
+      'eliminado_en': FieldValue.serverTimestamp(),
+      'eliminado_por_dni': eliminadoPorDni,
+      'eliminado_motivo': motivoSan,
+    }, SetOptions(merge: true));
+    AppLogger.log(
+      'Adelanto soft-deleted: $adelantoId '
+      '(por $eliminadoPorDni${motivoSan.isEmpty ? "" : ", motivo: $motivoSan"})',
+    );
+  }
+
+  /// Revierte un soft delete previo. El operador puede haber eliminado
+  /// por error y querer recuperar. Limpia los 4 campos de eliminación.
+  static Future<void> restaurarAdelanto(String adelantoId) async {
+    if (adelantoId.isEmpty) {
+      throw ArgumentError('adelantoId vacío.');
+    }
+    await _col.doc(adelantoId).set({
+      'eliminado': false,
+      'eliminado_en': FieldValue.delete(),
+      'eliminado_por_dni': FieldValue.delete(),
+      'eliminado_motivo': FieldValue.delete(),
+    }, SetOptions(merge: true));
+    AppLogger.log('Adelanto restaurado: $adelantoId');
   }
 }

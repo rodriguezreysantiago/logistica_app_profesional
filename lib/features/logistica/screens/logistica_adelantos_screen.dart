@@ -49,6 +49,12 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
   DateTime? _fechaDesde;
   DateTime? _fechaHasta;
 
+  /// Si true, también muestra los adelantos eliminados (soft-delete).
+  /// Por default false — el caso operativo es "ver lo activo". Los
+  /// eliminados quedan en la base para auditoría (saber por qué se
+  /// quemó cada número de recibo) y se ven activando este chip.
+  bool _mostrarEliminados = false;
+
   @override
   void dispose() {
     _buscarFocus.dispose();
@@ -63,7 +69,7 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
   /// pendientes. El operador puede toggle pagado/pendiente por card.
   final Set<String> _deseleccionados = {};
 
-  bool _seleccionable(AdelantoChofer a) => !a.pagado;
+  bool _seleccionable(AdelantoChofer a) => !a.pagado && !a.eliminado;
   bool _seleccionado(AdelantoChofer a) =>
       _seleccionable(a) && !_deseleccionados.contains(a.id);
 
@@ -168,6 +174,31 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
               ],
             ),
           ),
+          // Filtro "Mostrar eliminados". Default OFF — los eliminados
+          // viven solo para auditoría (saber por qué se quemó cada
+          // número de recibo). Pedido Santiago 2026-05-14.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Mostrar eliminados'),
+                  selected: _mostrarEliminados,
+                  onSelected: (v) =>
+                      setState(() => _mostrarEliminados = v),
+                  selectedColor:
+                      AppColors.accentRed.withValues(alpha: 0.4),
+                  avatar: Icon(
+                    _mostrarEliminados
+                        ? Icons.visibility
+                        : Icons.visibility_off,
+                    size: 16,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: StreamBuilder<List<AdelantoChofer>>(
               stream: AdelantosService.streamAdelantos(),
@@ -256,6 +287,12 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
   /// el service.
   List<AdelantoChofer> _aplicarFiltro(List<AdelantoChofer> items) {
     Iterable<AdelantoChofer> it = items;
+    // Filtro de soft-delete: por default NO mostrar eliminados.
+    // El operador puede activar el chip "Mostrar eliminados" para
+    // ver auditoría de adelantos cancelados.
+    if (!_mostrarEliminados) {
+      it = it.where((a) => !a.eliminado);
+    }
     // Fecha desde (inclusive — comparamos contra inicio del día).
     if (_fechaDesde != null) {
       final desde = DateTime(
@@ -546,32 +583,112 @@ class _CardAdelanto extends StatelessWidget {
         : 'DNI ${adelanto.choferDni}';
     final yaImpreso = adelanto.numeroRecibo != null;
     final pagado = adelanto.pagado;
+    final eliminado = adelanto.eliminado;
 
     // Opacidad: pagados se ven más apagados que pendientes
-    // deseleccionados. Distingue 3 estados visuales:
+    // deseleccionados. Distingue 4 estados visuales:
     //   pendiente seleccionado    → 1.00 (normal)
     //   pendiente deseleccionado  → 0.55 (atenuado)
-    //   pagado                     → 0.40 (más atenuado, fuera de juego)
-    final double opacidad =
-        pagado ? 0.40 : (seleccionado ? 1.0 : 0.55);
+    //   pagado                    → 0.40 (más atenuado, fuera de juego)
+    //   eliminado                 → 0.35 (casi gris, banner rojo)
+    final double opacidad = eliminado
+        ? 0.35
+        : (pagado ? 0.40 : (seleccionado ? 1.0 : 0.55));
 
     return Opacity(
       opacity: opacidad,
       child: AppCard(
-        onTap: () => showDialog(
-          context: context,
-          builder: (_) => _AdelantoFormDialog(adelanto: adelanto),
-        ),
+        // Eliminados NO abren el form de edición — están "congelados".
+        onTap: eliminado
+            ? null
+            : () => showDialog(
+                  context: context,
+                  builder: (_) => _AdelantoFormDialog(adelanto: adelanto),
+                ),
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Banner de "ELIMINADO" arriba del todo si aplica. Muestra
+            // el motivo si lo hay (Santiago 2026-05-14: queremos saber
+            // por qué se quemó cada número de recibo).
+            if (eliminado) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.accentRed.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                      color:
+                          AppColors.accentRed.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.delete_forever,
+                        size: 14, color: AppColors.accentRed),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'ELIMINADO',
+                      style: TextStyle(
+                        color: AppColors.accentRed,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    if (adelanto.eliminadoEn != null) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        AppFormatters.formatearFechaHoraSinSegundos(
+                            adelanto.eliminadoEn!),
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () => _restaurar(context),
+                      icon: const Icon(Icons.restore, size: 14),
+                      label: const Text('RESTAURAR'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.accentBlue,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (adelanto.eliminadoMotivo != null &&
+                  adelanto.eliminadoMotivo!.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Motivo: ${adelanto.eliminadoMotivo!.trim()}',
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+            ],
             Row(
               children: [
-                // Checkbox solo para PENDIENTES. Los pagados muestran
-                // un ícono de candado fijo en su lugar — no
-                // seleccionables.
-                if (pagado)
+                // Checkbox solo para PENDIENTES no-eliminados. Los pagados
+                // muestran un ícono de check fijo. Los eliminados un ícono
+                // de basura.
+                if (eliminado)
+                  const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: Icon(Icons.delete_outline,
+                        color: AppColors.accentRed, size: 20),
+                  )
+                else if (pagado)
                   const SizedBox(
                     width: 28,
                     height: 28,
@@ -613,13 +730,14 @@ class _CardAdelanto extends StatelessWidget {
                     fontSize: 16,
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline,
-                      color: AppColors.accentRed),
-                  tooltip: 'Eliminar adelanto',
-                  onPressed: () => _confirmarEliminar(context),
-                  visualDensity: VisualDensity.compact,
-                ),
+                if (!eliminado)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        color: AppColors.accentRed),
+                    tooltip: 'Eliminar adelanto',
+                    onPressed: () => _confirmarEliminar(context),
+                    visualDensity: VisualDensity.compact,
+                  ),
               ],
             ),
           const SizedBox(height: 4),
@@ -647,9 +765,11 @@ class _CardAdelanto extends StatelessWidget {
               _ChipMedioPago(medio: adelanto.medioPago),
               // Chip tappeable de estado de pago. PENDIENTE = naranja,
               // PAGADO = verde con fecha. Tap → toggle (con feedback
-              // del service).
+              // del service). Si el adelanto está eliminado, NO es
+              // tappeable (no tiene sentido marcar pagado algo que
+              // ya cancelaste).
               InkWell(
-                onTap: onTogglePagado,
+                onTap: eliminado ? null : onTogglePagado,
                 child: _ChipEstadoPago(
                   pagado: pagado,
                   pagadoEn: adelanto.pagadoEn,
@@ -683,11 +803,17 @@ class _CardAdelanto extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: _BotonImprimirComprobante(adelanto: adelanto),
-            ),
+            // El botón de imprimir comprobante NO se muestra en
+            // adelantos eliminados — si el adelanto está cancelado,
+            // imprimirle un comprobante "queman" más papel sin sentido.
+            // Las reimpresiones de adelantos válidos sí están OK.
+            if (!eliminado) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: _BotonImprimirComprobante(adelanto: adelanto),
+              ),
+            ],
           ],
         ),
       ),
@@ -696,17 +822,48 @@ class _CardAdelanto extends StatelessWidget {
 
   Future<void> _confirmarEliminar(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
+    // Dialog con TextField opcional para motivo (Santiago 2026-05-14:
+    // "si se cancela un adelanto tendría que poner observación para
+    // cancelarlo no obligatorio").
+    final motivoCtrl = TextEditingController();
     final confirma = await showDialog<bool>(
       context: context,
       builder: (dCtx) => AlertDialog(
         backgroundColor: Theme.of(dCtx).colorScheme.surface,
         title: const Text('¿Eliminar adelanto?'),
-        content: Text(
-          'Adelanto de \$${AppFormatters.formatearMonto(adelanto.monto)} '
-          'a ${adelanto.choferNombre ?? "DNI ${adelanto.choferDni}"} '
-          'del ${AppFormatters.formatearFecha(adelanto.fecha)}.\n\n'
-          'Esta acción no se puede deshacer. '
-          '${adelanto.numeroRecibo != null ? "El número de recibo ${adelanto.numeroRecibo} queda quemado." : ""}',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Adelanto de \$${AppFormatters.formatearMonto(adelanto.monto)} '
+              'a ${adelanto.choferNombre ?? "DNI ${adelanto.choferDni}"} '
+              'del ${AppFormatters.formatearFecha(adelanto.fecha)}.',
+            ),
+            const SizedBox(height: 8),
+            Text(
+              adelanto.numeroRecibo != null
+                  ? 'El número de recibo ${adelanto.numeroRecibo} queda '
+                      'quemado, pero el adelanto va a quedar visible al '
+                      'activar "Mostrar eliminados" para ver el motivo.'
+                  : 'El adelanto va a quedar visible al activar '
+                      '"Mostrar eliminados".',
+              style:
+                  const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: motivoCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Motivo (opcional)',
+                hintText: 'Ej: cargado por error, monto equivocado, '
+                    'chofer rechazó',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+              autofocus: true,
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -725,10 +882,27 @@ class _CardAdelanto extends StatelessWidget {
     );
     if (confirma != true) return;
     try {
-      await AdelantosService.eliminarAdelanto(adelanto.id);
+      await AdelantosService.eliminarAdelanto(
+        adelantoId: adelanto.id,
+        eliminadoPorDni: PrefsService.dni,
+        motivo: motivoCtrl.text.trim().isEmpty ? null : motivoCtrl.text.trim(),
+      );
       AppFeedback.successOn(messenger, 'Adelanto eliminado.');
     } catch (e) {
       AppFeedback.errorOn(messenger, 'Error al eliminar: $e');
+    }
+  }
+
+  /// Restaura un adelanto eliminado (deshace el soft delete). El
+  /// operador lo encuentra activando "Mostrar eliminados" en la lista,
+  /// y desde la card eliminada puede tocar "RESTAURAR".
+  Future<void> _restaurar(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await AdelantosService.restaurarAdelanto(adelanto.id);
+      AppFeedback.successOn(messenger, 'Adelanto restaurado.');
+    } catch (e) {
+      AppFeedback.errorOn(messenger, 'Error al restaurar: $e');
     }
   }
 }

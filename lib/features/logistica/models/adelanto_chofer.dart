@@ -96,6 +96,21 @@ class AdelantoChofer {
   final DateTime? pagadoEn;
   final String? pagadoPorDni;
 
+  // ─── Soft delete ────────────────────────────────────────────────
+  /// `true` si el operador eliminó el adelanto desde la app. NO se
+  /// borra físicamente — queda para auditoría. La pantalla por
+  /// default oculta los eliminados (filtro "Mostrar eliminados"
+  /// desmarcado).
+  ///
+  /// Pedido Santiago 2026-05-14: si un adelanto se "quema" (cancela)
+  /// queremos saber por qué — el motivo va en `eliminadoMotivo`. Si
+  /// el adelanto tenía `numeroRecibo`, ese correlativo queda quemado
+  /// igual (el counter no se reusa) — pero ahora se ve el por qué.
+  final bool eliminado;
+  final DateTime? eliminadoEn;
+  final String? eliminadoPorDni;
+  final String? eliminadoMotivo;
+
   // ─── Auditoría ───────────────────────────────────────────────────
   final DateTime? creadoEn;
   final String? creadoPorDni;
@@ -117,6 +132,10 @@ class AdelantoChofer {
     this.pagado = false,
     this.pagadoEn,
     this.pagadoPorDni,
+    this.eliminado = false,
+    this.eliminadoEn,
+    this.eliminadoPorDni,
+    this.eliminadoMotivo,
     this.creadoEn,
     this.creadoPorDni,
     this.creadoPorNombre,
@@ -139,6 +158,12 @@ class AdelantoChofer {
       pagado: d['pagado'] == true,
       pagadoEn: (d['pagado_en'] as Timestamp?)?.toDate(),
       pagadoPorDni: d['pagado_por_dni']?.toString(),
+      // Compat retro: adelantos pre-soft-delete (2026-05-14) no tienen
+      // el campo `eliminado` → default false (visible).
+      eliminado: d['eliminado'] == true,
+      eliminadoEn: (d['eliminado_en'] as Timestamp?)?.toDate(),
+      eliminadoPorDni: d['eliminado_por_dni']?.toString(),
+      eliminadoMotivo: d['eliminado_motivo']?.toString(),
       creadoEn: (d['creado_en'] as Timestamp?)?.toDate(),
       creadoPorDni: d['creado_por_dni']?.toString(),
       creadoPorNombre: d['creado_por_nombre']?.toString(),
