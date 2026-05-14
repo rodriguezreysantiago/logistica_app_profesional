@@ -429,6 +429,9 @@ class _Punto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Orden Santiago 2026-05-14: la UBICACIÓN va arriba en bold (es
+    // lo más importante operativamente — define dónde físicamente
+    // se carga/descarga). La empresa abajo, atenuada, como contexto.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -443,7 +446,7 @@ class _Punto extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         Text(
-          empresa,
+          ubicacion,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
@@ -454,7 +457,7 @@ class _Punto extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         Text(
-          ubicacion,
+          empresa,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
