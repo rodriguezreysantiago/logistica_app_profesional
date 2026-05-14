@@ -393,6 +393,18 @@ Mandar al **propio número del bot** desde un teléfono que esté en `ADMIN_PHON
 
 Si los comandos no responden y vos sí estás en la whitelist, el bot está **caído** — no es problema de permisos.
 
+#### Comandos para CHOFERES (desde su WhatsApp)
+
+Cualquier chofer cuyo `EMPLEADOS.TELEFONO` matchee el número que manda al bot puede usar:
+
+- `/jornada` — *sin DNI*. El bot resuelve su DNI por su teléfono y le devuelve cómo va su jornada del día en lenguaje natural (cuántas horas manejó, cuántas le quedan antes del límite, cuánto le falta para la pausa de 4h, qué avisos recibió, hora mín. de arranque si cumplió 12h). Si está silenciado, también se lo dice.
+- `/ayuda` — lista los 2 comandos disponibles para chofer.
+
+**Restricciones**:
+- Si el chofer tipea `/jornada DNI_AJENO`, el bot ignora el DNI y le devuelve sus propios datos. No puede espiar a otros.
+- Si tipea cualquier comando admin (`/silenciar`, `/pausar`, etc.) → silencio total. Sin error visible para no exponer la existencia del comando.
+- Match teléfono: el `EMPLEADOS.TELEFONO` debe estar formateado con prefijo (ej. `5492914567890`). Si está mal cargado, el chofer no se reconoce y el bot lo ignora.
+
 ### El bot está corriendo pero choferes no responden
 
 Probablemente WhatsApp baneó el número. Síntomas:

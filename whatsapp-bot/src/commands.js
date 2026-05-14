@@ -68,10 +68,90 @@ function _esAdmin(fromNumber) {
 }
 
 /**
- * Detecta y ejecuta un comando admin. Devuelve `true` si el mensaje
- * fue manejado como comando (haya respondido o no), `false` si NO era
- * un comando — en cuyo caso el message_handler de Fase 3 lo procesa
- * normal.
+ * Whitelist de comandos disponibles para CHOFERES (no admins).
+ * Hoy: solo `/jornada` (ven sus propios datos) y `/ayuda` (lista
+ * adaptada a su rol). Si en el futuro abrimos más, agregar acá.
+ *
+ * Decisión Santiago 2026-05-14: el chofer puede tipear `/jornada`
+ * desde su WhatsApp y recibir cómo va su jornada del día sin
+ * necesidad de pasar por el admin.
+ */
+const COMANDOS_PERMITIDOS_CHOFER = new Set(['/jornada', '/ayuda', '/help']);
+
+/**
+ * Resuelve el chofer (DNI + datos) que envía un mensaje, buscándolo
+ * por su teléfono en `EMPLEADOS`. Devuelve null si:
+ *   - El teléfono no matchea ningún empleado.
+ *   - El empleado no es CHOFER (admins/planta/etc no se resuelven acá).
+ *   - El empleado está marcado ACTIVO=false.
+ *
+ * Match: igualdad estricta en la representación normalizada (solo
+ * dígitos), o sufijo de >= MIN_DIGITOS_PARA_MATCH dígitos. Mismo
+ * patrón que `_esAdmin` para tolerar `549...` vs `+549...`.
+ *
+ * Implementación: lee TODOS los empleados con ROL=CHOFER y filtra en
+ * memoria. Para Vecchi son ~50 chofers — query baratísimo (1 read por
+ * comando del chofer, no por chofer). Si la flota crece a > 500, se
+ * puede pasar a un índice por sufijo de teléfono.
+ */
+async function _resolverChoferPorTelefono(db, fromNumber) {
+  const fromDigits = String(fromNumber).replace(/\D+/g, '');
+  if (fromDigits.length < MIN_DIGITOS_PARA_MATCH) return null;
+
+  let snap;
+  try {
+    snap = await db
+      .collection('EMPLEADOS')
+      .where('ROL', '==', 'CHOFER')
+      .get();
+  } catch (e) {
+    log.warn(`No pude leer EMPLEADOS para resolver chofer: ${e.message}`);
+    return null;
+  }
+
+  for (const d of snap.docs) {
+    const data = d.data() || {};
+    if (data.ACTIVO === false) continue;
+    const telDigits = String(data.TELEFONO || '').replace(/\D+/g, '');
+    if (telDigits.length < MIN_DIGITOS_PARA_MATCH) continue;
+    if (telDigits === fromDigits) return _mapChofer(d.id, data);
+    const longer = telDigits.length >= fromDigits.length ?
+      telDigits :
+      fromDigits;
+    const shorter = telDigits.length < fromDigits.length ?
+      telDigits :
+      fromDigits;
+    if (
+      shorter.length >= MIN_DIGITOS_PARA_MATCH &&
+      longer.endsWith(shorter)
+    ) {
+      return _mapChofer(d.id, data);
+    }
+  }
+  return null;
+}
+
+function _mapChofer(docId, data) {
+  return {
+    dni: (data.DNI || docId).toString(),
+    nombre: (data.NOMBRE || '').toString(),
+    apodo: (data.APODO || '').toString(),
+    telefono: (data.TELEFONO || '').toString(),
+  };
+}
+
+/**
+ * Detecta y ejecuta un comando. Distingue 3 tipos de remitente:
+ *   1. Admin (en ADMIN_PHONES): puede ejecutar TODOS los comandos.
+ *   2. Chofer (en EMPLEADOS con ROL=CHOFER, ACTIVO=true): puede
+ *      ejecutar solo los de COMANDOS_PERMITIDOS_CHOFER (`/jornada`,
+ *      `/ayuda`).
+ *   3. Otro: silencio total (no responde nada para no exponer la
+ *      existencia del comando a un atacante).
+ *
+ * Devuelve `true` si el mensaje fue manejado como comando (haya
+ * respondido o no), `false` si NO era un comando — en cuyo caso el
+ * message_handler de Fase 3 lo procesa normal.
  */
 async function manejarSiEsComando(msg, contextos) {
   const texto = (msg.body || '').trim();
@@ -95,17 +175,33 @@ async function manejarSiEsComando(msg, contextos) {
     fromNumber = (msg.from || '').replace(/@(c\.us|lid)$/, '');
   }
 
-  if (!_esAdmin(fromNumber)) {
-    log.warn(`Comando recibido de no-admin ${fromNumber}: ${texto.slice(0, 40)}`);
-    // No respondemos para no exponer la existencia del comando.
-    return true;
-  }
-
   const partes = texto.split(/\s+/);
   const comando = partes[0].toLowerCase();
   const args = partes.slice(1);
 
-  log.info(`Comando admin recibido: ${comando} ${args.join(' ')} de ${fromNumber}`);
+  // Roles del remitente. Primero admin (whitelist hardcoded en .env)
+  // y, si no es admin, intentamos resolverlo como CHOFER.
+  const esAdmin = _esAdmin(fromNumber);
+  let chofer = null;
+  if (!esAdmin) {
+    chofer = await _resolverChoferPorTelefono(contextos.db, fromNumber);
+  }
+
+  if (!esAdmin && !chofer) {
+    log.warn(`Comando recibido de no-admin ni chofer ${fromNumber}: ${texto.slice(0, 40)}`);
+    // No respondemos para no exponer la existencia del comando.
+    return true;
+  }
+
+  // Si es CHOFER (no admin), restringir a la whitelist.
+  if (!esAdmin && chofer && !COMANDOS_PERMITIDOS_CHOFER.has(comando)) {
+    log.warn(`Chofer ${chofer.dni} intentó comando admin ${comando} — denegado.`);
+    // Tampoco respondemos — sino el chofer aprende qué comandos hay.
+    return true;
+  }
+
+  const rolLog = esAdmin ? 'admin' : `chofer:${chofer.dni}`;
+  log.info(`Comando ${rolLog} recibido: ${comando} ${args.join(' ')} de ${fromNumber}`);
 
   try {
     switch (comando) {
@@ -125,7 +221,15 @@ async function manejarSiEsComando(msg, contextos) {
         await _comandoTestAviso(msg, contextos, args);
         break;
       case '/jornada':
-        await _comandoJornada(msg, contextos, args);
+        // Para chofer pasamos su DNI; el comando ignora args (sino el
+        // chofer podría espiar a otros mandando /jornada DNI_AJENO).
+        // Para admin pasa los args originales.
+        await _comandoJornada(
+          msg,
+          contextos,
+          esAdmin ? args : [],
+          chofer
+        );
         break;
       case '/silenciar':
         await _comandoSilenciar(msg, contextos, args);
@@ -135,7 +239,7 @@ async function manejarSiEsComando(msg, contextos) {
         break;
       case '/ayuda':
       case '/help':
-        await _comandoAyuda(msg);
+        await _comandoAyuda(msg, esAdmin);
         break;
       default:
         await msg.reply(
@@ -283,20 +387,34 @@ async function _comandoForzarCron(msg, { cron, fs }) {
   }
 }
 
-async function _comandoAyuda(msg) {
+async function _comandoAyuda(msg, esAdmin) {
+  // Versión chofer (más corta + lenguaje natural). Solo se muestran
+  // los comandos que un chofer puede ejecutar.
+  if (!esAdmin) {
+    const txt = [
+      '*Comandos disponibles*',
+      '',
+      '/jornada — ver cómo va tu jornada del día (horas manejadas, ' +
+        'pausas, avisos).',
+      '/ayuda — este mensaje.',
+    ].join('\n');
+    await msg.reply(txt);
+    return;
+  }
+  // Versión admin completa.
   const txt = [
-    '*Comandos disponibles*',
+    '*Comandos del admin*',
     '',
-    '/estado                → resumen del bot.',
-    '/pausar [dur]          → pausar envíos. Ej: /pausar 24h',
-    '/reanudar              → reanudar envíos.',
-    '/forzar-cron           → correr el cron ahora.',
-    '/test-aviso DNI        → mensaje de prueba al DNI.',
-    '/jornada DNI           → estado del vigilador para ese chofer.',
-    '/silenciar DNI dur [m] → no mandar avisos a ese chofer. Ej: ' +
-      '/silenciar 12345678 2h taller',
-    '/desilenciar DNI       → revertir silenciado.',
-    '/ayuda                 → este mensaje.',
+    '/estado — resumen del bot.',
+    '/pausar 24h — pausar envíos por 24 horas (Ns/Nm/Nh/Nd, cap 30d).',
+    '/reanudar — reanudar envíos.',
+    '/forzar-cron — correr el cron ahora.',
+    '/test-aviso 12345678 — mandar prueba a ese DNI.',
+    '/jornada 12345678 — estado del vigilador para ese chofer.',
+    '/silenciar 12345678 2h en taller — no mandar avisos por ese ' +
+      'tiempo (motivo opcional).',
+    '/desilenciar 12345678 — quitar el silencio.',
+    '/ayuda — este mensaje.',
   ].join('\n');
   await msg.reply(txt);
 }
@@ -404,28 +522,37 @@ function _fmtFechaHoraCompacto(ts) {
 }
 
 /**
- * `/jornada <DNI>` → estado del vigilador para ese chofer en el día
- * actual ART. Es la versión "para WhatsApp" de
- * `scripts/diagnosticar_vigilador_chofer.js` — más compacta, sin
- * detalles de Sitrack stale.
+ * `/jornada [DNI]` → estado del vigilador.
  *
- * Mostramos:
- *   - Nombre + patente actual del chofer.
- *   - Total del día / jornada actual / continuo / pausa actual.
- *   - Flags de alertas del día (3:45, 11:30, 12:00, descanso corto).
- *   - Estado de silenciado (si aplica) — útil para que Santiago se
- *     acuerde si el chofer está mute.
- *   - Última actualización del poll Sitrack.
+ * Dos modos:
+ *   - **Admin**: pasa DNI explícito (`/jornada 12345678`). Sin DNI =
+ *     mensaje de uso. Output completo (todos los flags técnicos).
+ *   - **Chofer**: tipea solo `/jornada` (sin DNI). El bot resuelve su
+ *     propio DNI por su teléfono y le devuelve sus datos. Output
+ *     simplificado en lenguaje natural — "manejaste 8h25 hoy, te
+ *     quedan 3h35 antes del límite". Si tipea `/jornada DNI_AJENO`,
+ *     el manejador del switch lo descarta (espía bloqueada) — acá
+ *     siempre llega `args=[]` para chofer.
  *
- * Si no hay JORNADAS_CHOFER del día (chofer no manejó hoy o el cron
- * no lo vio), lo decimos explícito.
+ * Si no hay JORNADAS_CHOFER del día, decimos "sin actividad hoy" en
+ * lugar del tecnicismo "sin doc".
  */
-async function _comandoJornada(msg, { db }, args) {
-  const dni = (args[0] || '').replace(/\D+/g, '');
-  if (!dni) {
-    await msg.reply('Uso: /jornada <DNI>\nEj: /jornada 12345678');
-    return;
+async function _comandoJornada(msg, { db }, args, chofer) {
+  // Resolver el DNI a consultar.
+  let dni;
+  if (chofer) {
+    // Chofer pidió su propia jornada. El switch ya nos pasó args=[]
+    // pero por las dudas también ignoramos cualquier args que viniera.
+    dni = chofer.dni;
+  } else {
+    // Admin.
+    dni = (args[0] || '').replace(/\D+/g, '');
+    if (!dni) {
+      await msg.reply('Uso: /jornada <DNI>\nEj: /jornada 12345678');
+      return;
+    }
   }
+
   const fecha = _fechaArt();
   const docId = `${dni}_${fecha}`;
 
@@ -435,6 +562,14 @@ async function _comandoJornada(msg, { db }, args) {
     db.collection('BOT_SILENCIADOS_CHOFER').doc(dni).get(),
   ]);
 
+  // ─── Modo CHOFER ─────────────────────────────────────────
+  // Output amable, en lenguaje natural, sin tecnicismos.
+  if (chofer) {
+    return _replyJornadaChofer(msg, { chofer, jSnap, silSnap, fecha });
+  }
+
+  // ─── Modo ADMIN ──────────────────────────────────────────
+  // Output técnico completo (lo que ya teníamos).
   const lineas = [`*Jornada del chofer ${dni}* (${fecha})`];
 
   if (empSnap.exists) {
@@ -535,6 +670,125 @@ async function _comandoJornada(msg, { db }, args) {
   }
   if (j.ultima_patente) {
     lineas.push(`🚐 Patente: ${j.ultima_patente}`);
+  }
+
+  await msg.reply(lineas.join('\n'));
+}
+
+/**
+ * Output simplificado del `/jornada` para el chofer.
+ *
+ * Decisión de wording: tono cercano, en segunda persona, sin
+ * tecnicismos. Foco en lo que le importa al chofer:
+ *   - "Cuánto manejaste hoy / cuánto te queda antes del límite"
+ *   - "¿Estás cerca de tener que parar continuo? (4h)"
+ *   - "Si te avisamos algo, qué fue"
+ *   - "Si no podés arrancar todavía, hasta cuándo descansar"
+ *   - "Si te silenciamos los avisos, hasta cuándo"
+ *
+ * NO le mostramos: total_dia vs jornada_actual (le confunde), flags
+ * raw, último update Sitrack, último doc id, etc.
+ */
+async function _replyJornadaChofer(msg, { chofer, jSnap, silSnap, fecha }) {
+  const apodo = chofer.apodo || _primerNombreDe({ NOMBRE: chofer.nombre });
+  const saludo = apodo ? `Hola ${apodo}` : 'Hola';
+  const lineas = [`${saludo}, esta es tu jornada de hoy (${fecha}):`];
+  lineas.push('');
+
+  // Aviso de silencio — útil para que el chofer entienda por qué no
+  // recibe avisos del bot.
+  if (silSnap.exists) {
+    const s = silSnap.data() || {};
+    const hasta = s.silenciado_hasta;
+    const hastaMs = hasta && hasta.toMillis ? hasta.toMillis() : 0;
+    if (hastaMs > Date.now()) {
+      lineas.push(
+        `🔕 *Tus avisos del bot están silenciados* hasta las ` +
+        `${_fmtFechaHoraCompacto(hasta)} ART.`
+      );
+      lineas.push('');
+    }
+  }
+
+  if (!jSnap.exists) {
+    lineas.push('Hoy no manejaste todavía (o el sistema no detectó actividad).');
+    await msg.reply(lineas.join('\n'));
+    return;
+  }
+
+  const j = jSnap.data() || {};
+  const jornadaActualSeg = j.segundos_jornada_actual || 0;
+  const continuoSeg = j.segundos_continuo_actual || 0;
+  const pausaSeg = j.segundos_pausa_actual || 0;
+  const LIMITE_DIARIO_SEG = 12 * 3600;
+  const LIMITE_CONTINUO_SEG = 4 * 3600;
+
+  // Resumen general.
+  lineas.push(`🚛 Llevás manejado: *${_fmtSegCompacto(jornadaActualSeg)}*`);
+  const restanteDiario = LIMITE_DIARIO_SEG - jornadaActualSeg;
+  if (restanteDiario > 0) {
+    lineas.push(`   Te quedan ${_fmtSegCompacto(restanteDiario)} antes del límite de 12 hs.`);
+  } else {
+    lineas.push('   *Ya superaste las 12 hs diarias.* Tenés que parar.');
+  }
+  lineas.push('');
+
+  // Manejo continuo.
+  lineas.push(`⏱ Continuo sin pausa: *${_fmtSegCompacto(continuoSeg)}*`);
+  const restanteContinuo = LIMITE_CONTINUO_SEG - continuoSeg;
+  if (continuoSeg === 0 && pausaSeg > 0) {
+    lineas.push(`   Estás en pausa (${_fmtSegCompacto(pausaSeg)}).`);
+  } else if (restanteContinuo > 0) {
+    lineas.push(
+      `   Te quedan ${_fmtSegCompacto(restanteContinuo)} antes de tener que parar 15 min.`
+    );
+  } else {
+    lineas.push('   *Ya superaste las 4 hs continuas.* Tenés que parar.');
+  }
+
+  // Avisos enviados hoy. Solo los que importan al chofer (no el flag
+  // crudo). Lenguaje natural.
+  const avisos = [];
+  if (j.alerta_3_30_continua_enviada || j.alerta_3_45_continua_enviada) {
+    avisos.push('🟡 Te avisamos que faltaban 30 min para tu pausa de 4 hs.');
+  }
+  if (j.alerta_4_00_continua_enviada) {
+    avisos.push('🔴 Cumpliste 4 hs continuas sin pausa — quedaste en falta.');
+  }
+  if (j.alerta_11_30_diaria_enviada) {
+    avisos.push('🟡 Te avisamos que faltaban 30 min para el límite diario.');
+  }
+  if (j.alerta_12_00_diaria_enviada) {
+    avisos.push('🔴 Superaste las 12 hs diarias.');
+  }
+  if (j.aviso_descanso_corto_enviada) {
+    const desc = j.descanso_corto_segundos ?
+      _fmtSegCompacto(j.descanso_corto_segundos) :
+      'menos de 8 hs';
+    avisos.push(`🔴 Arrancaste con descanso corto (${desc} entre jornadas).`);
+  }
+  if (j.alerta_arranque_temprano_enviada) {
+    avisos.push('🔴 Arrancaste antes de la hora mínima de descanso.');
+  }
+  if (avisos.length > 0) {
+    lineas.push('');
+    lineas.push('*Avisos de hoy:*');
+    for (const a of avisos) {
+      lineas.push(a);
+    }
+  } else {
+    lineas.push('');
+    lineas.push('✓ Hoy no recibiste avisos del vigilador.');
+  }
+
+  // Hora mínima de arranque (si ya cumplió las 12h y el sistema
+  // calculó cuándo puede arrancar de nuevo).
+  if (j.hora_min_arranque_at) {
+    lineas.push('');
+    lineas.push(
+      `🌅 *No podés arrancar antes de las ` +
+      `${_fmtFechaHoraCompacto(j.hora_min_arranque_at)} ART.*`
+    );
   }
 
   await msg.reply(lineas.join('\n'));
