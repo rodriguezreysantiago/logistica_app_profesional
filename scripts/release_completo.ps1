@@ -78,9 +78,15 @@ $bumpScript = Join-Path $repoRoot 'scripts\bump_version.ps1'
 if (-not (Test-Path $bumpScript)) {
     throw "No encuentro $bumpScript"
 }
-$bumpArgs = @()
-if ($Version -ne '') { $bumpArgs += '-Version', $Version }
-if ($DryRun) { $bumpArgs += '-DryRun' }
+# Splat por hashtable. Antes era array (`@('-Version', $Version)`)
+# pero PowerShell lo pasaba como string posicional en lugar de
+# parámetro nombrado — bump_version.ps1 leía `-Version` como el valor
+# de su primer param y reventaba con "Version nueva '-Version' no
+# respeta MAJOR.MINOR.PATCH+BUILD". Hashtable splat sí pasa los
+# nombres correctamente. Bug fixeado 2026-05-13.
+$bumpArgs = @{}
+if ($Version -ne '') { $bumpArgs['Version'] = $Version }
+if ($DryRun) { $bumpArgs['DryRun'] = $true }
 
 if ($bumpArgs.Count -gt 0) {
     & $bumpScript @bumpArgs

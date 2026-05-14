@@ -56,6 +56,16 @@ $nMinor = [int]$matches[2]
 $nPatch = [int]$matches[3]
 $nBuild = [int]$matches[4]
 
+# Idempotencia: si pidieron bump a la versión que ya está, salir sin
+# tocar archivos. Útil cuando release_completo.ps1 se relanza con
+# `-Version X.Y.Z+B` y el bump del run anterior ya estaba commiteado
+# (sino los Set-Content reescriben los mismos archivos y git detecta
+# cambios espurios por line endings CRLF/LF).
+if ($Version -eq $verActual) {
+    Write-Host "Versión ya está en $Version — nada que bumpear." -ForegroundColor DarkGray
+    exit 0
+}
+
 # appVersion visible coincide 1:1 con el patch del pubspec
 # (decisión 2026-05-08: sacar el offset legacy que históricamente
 # era `patch + 6` y generaba mismatch entre pubspec y UI).
