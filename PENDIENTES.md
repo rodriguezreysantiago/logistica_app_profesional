@@ -7,6 +7,40 @@ Convención: orden cronológico (los próximos arriba). Sacar el ítem cuando se
 
 ---
 
+## 📅 2026-05-15 (jue) — Primera build iOS desde la Mac (cuenta Apple aprobada)
+
+**Contexto**: 2026-05-14 Apple aprobó la cuenta Developer
+(`santiagocoopertrans@gmail.com`, US$99/año). El proyecto iOS ya está
+configurado end-to-end desde la sesión 2026-05-06: bundle id
+`com.coopertrans.movil`, target iOS 16.0, `Info.plist` con permisos,
+`GoogleService-Info.plist` presente, `Podfile` con post_install
+forzando deployment_target. Solo falta:
+
+1. **Encender la Mac** + actualizar Xcode si hace falta (sigue las
+   instrucciones de `docs/SETUP_IOS_RELEASE.md`).
+2. **`git pull` + `pod install`** (con workaround Ruby 4.0 UTF-8).
+3. **Setear DEVELOPMENT_TEAM en Xcode** una sola vez (Signing &
+   Capabilities → Team → cuenta aprobada). Commitear el cambio
+   resultante de `project.pbxproj`.
+4. **`flutter run -d "iPhone 16 Pro"`** — primer arranque en simulador.
+5. **`./scripts/release_ios.sh`** — genera el IPA listo para subir.
+6. **Crear app en App Store Connect** la primera vez
+   (https://appstoreconnect.apple.com → Mis apps → "+" → bundle id
+   `com.coopertrans.movil`).
+7. **Subir IPA con Transporter** (drag & drop, login con la misma
+   cuenta) → esperar 10-30 min procesamiento → asignar a Internal
+   Testing en TestFlight.
+
+Guía completa: `docs/SETUP_IOS_RELEASE.md`. Cubre setup one-time,
+primer arranque, build IPA, TestFlight, troubleshooting,
+diferencias con Android.
+
+**Versión a probar**: la del último release Windows/Android
+(release lanzado al cerrar la sesión 2026-05-14 con todos los fixes
+del día — vigilador, /silenciar, autocomplete chofer, etc).
+
+---
+
 ## 📅 2026-05-16 (sáb) — Re-análisis de eventos Sitrack con ventana de 60h
 
 **Contexto**: el primer análisis se corrió el 2026-05-14 a las 32h del deploy
