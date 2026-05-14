@@ -2927,11 +2927,13 @@ const VIGILADOR_PAUSA_MIN_PARA_DESCANSO_SEGUNDOS = 4 * 3600;
 // 10 min = 2 ciclos completos del cron de 5 min.
 const VIGILADOR_DELTA_MAX_SEGUNDOS = 600;
 
-// Aviso nocturno "fin de jornada próxima" — flag para activarlo.
-// Decisión Vecchi 2026-05-07: se deja preparado pero apagado mientras
-// el bot no opera 24x7. Cuando el bot pase a operación nocturna,
-// poner en true y deployar.
-const AVISO_NOCTURNO_ACTIVO = false;
+// Aviso nocturno "fin de jornada próxima" — activado 2026-05-14
+// (Santiago). El bot opera con horario hábil que cubre las 23:30 ART
+// (WORKING_HOURS_END=24), entonces el mensaje sale en el momento.
+// Decisión Vecchi: choferes no pueden conducir 00:00–06:00, así que
+// el aviso a las 23:30 les da 30 min para buscar un lugar seguro
+// donde estacionar y dormir.
+const AVISO_NOCTURNO_ACTIVO = true;
 
 // Throttle del aviso "pasá el iButton" (drift CHOFER_NO_IDENTIFICADO).
 // El cron sitrackPosicionPoller corre cada 5 min — sin throttle, un
@@ -5785,10 +5787,22 @@ function _fechaArtPrevia(fechaArt: string): string {
 // activa (manejando) que la jornada está por terminar — los choferes
 // no pueden conducir 00:00–06:00 (decisión operativa Vecchi).
 //
-// DESHABILITADO POR DEFAULT (`AVISO_NOCTURNO_ACTIVO = false`) porque el
-// bot no opera 24x7 y no tendría sentido encolar mensajes que se
-// envían al día siguiente. Cuando el bot pase a operación nocturna,
-// poner el flag en true y deployar.
+// ACTIVADO el 2026-05-14 (Santiago). El bot tiene WORKING_HOURS_END=24
+// que cubre las 23:30 ART, así que el mensaje sale en el momento.
+// El TTL es 60 min — si por algún motivo el bot está caído, el aviso
+// expira a las 00:30 y no se manda fuera de tiempo.
+//
+// Filtros defensivos:
+//   - ignition === true (chofer está manejando ahora).
+//   - driverDni no vacío (chofer identificado por iButton).
+//   - poll Sitrack reciente (consultado_en hace ≤ 10 min, sino el
+//     snapshot puede estar stale y mandar avisos a choferes que ya
+//     pararon hace rato).
+//   - empleado activo + con TELEFONO.
+//
+// Anti-baneo: 6 variantes de mensaje rotadas con _rrPick. WhatsApp
+// detecta envíos masivos del mismo texto a múltiples destinatarios
+// como spam → ban risk si todos reciben el mismo string.
 
 export const avisoFinJornadaNocturna = onSchedule(
   {
@@ -5805,12 +5819,26 @@ export const avisoFinJornadaNocturna = onSchedule(
 
     const snap = await db.collection("SITRACK_POSICIONES").get();
     let avisados = 0;
+    let descartadosPollStale = 0;
 
     for (const d of snap.docs) {
       const data = d.data();
       const ignition = data.ignition === true;
       const driverDni = (data.driver_dni ?? "").toString().trim();
       if (!ignition || !driverDni) continue;
+
+      // Check de poll stale: si el último poll Sitrack es viejo (> 10
+      // min), no podemos confiar en `ignition === true` — el chofer
+      // puede haber apagado hace rato. Mismo umbral que el vigilador
+      // jornada (VIGILADOR_POLL_STALE_SEGUNDOS).
+      const polledEnMs =
+        (data.consultado_en as Timestamp | undefined)?.toMillis() ?? 0;
+      const polledHaceSegundos =
+        polledEnMs > 0 ? (Date.now() - polledEnMs) / 1000 : Infinity;
+      if (polledHaceSegundos > VIGILADOR_POLL_STALE_SEGUNDOS) {
+        descartadosPollStale++;
+        continue;
+      }
 
       const patente = d.id;
       const empSnap = await db.collection("EMPLEADOS").doc(driverDni).get();
@@ -5825,14 +5853,51 @@ export const avisoFinJornadaNocturna = onSchedule(
       const saludoNombre = apodo || _primerNombre(nombreFull) || "";
       const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
 
-      const mensaje =
+      // 6 variantes anti-baneo (decisión 2026-05-09).
+      const variantes = [
         `${saludo},\n\n` +
-        "Fin de jornada próximo. A las 00:00 no podés seguir " +
-        "conduciendo (descanso obligatorio hasta las 06:00).\n\n" +
-        `Buscá un lugar seguro para parar el ${patente} ahora y ` +
-        "descansá hasta mañana.\n\n" +
-        BANNER_TESTING +
-        "_Coopertrans Móvil — Mensaje automático._";
+          "Faltan 30 min para las 00:00. *Recordá que no podés seguir " +
+          "conduciendo entre las 00:00 y las 06:00.*\n\n" +
+          `Buscá un lugar seguro para parar el ${patente} ahora y ` +
+          "descansá hasta mañana.\n\n" +
+          BANNER_TESTING +
+          "_Coopertrans Móvil — Mensaje automático._",
+        `${saludo}.\n\n` +
+          "Fin de jornada próximo: en 30 min se cumple la medianoche y " +
+          "no se puede manejar hasta las 06:00 ART.\n\n" +
+          `Estacioná el ${patente} en un lugar seguro y cortá la jornada.\n\n` +
+          BANNER_TESTING +
+          "_Coopertrans Móvil — Mensaje automático._",
+        `${saludo}, atención.\n\n` +
+          "Quedan 30 min para las 00:00. Después de esa hora la " +
+          "conducción no está permitida hasta las 06:00.\n\n" +
+          `Frená el ${patente} en un lugar seguro y descansá. Mañana ` +
+          "retomás.\n\n" +
+          BANNER_TESTING +
+          "_Coopertrans Móvil — Mensaje automático._",
+        `${saludo}.\n\n` +
+          "Te paso el aviso de jornada nocturna: en 30 min son las " +
+          "00:00 — hora límite para detener el camión.\n\n" +
+          `Buscá dónde parar el ${patente} y descansá hasta las 06:00 ` +
+          "como mínimo.\n\n" +
+          BANNER_TESTING +
+          "_Coopertrans Móvil — Mensaje automático._",
+        `${saludo}, recordatorio.\n\n` +
+          "Estás cerca del corte nocturno (00:00 hs). Te quedan 30 min " +
+          "para encontrar un lugar seguro.\n\n" +
+          `Frená el ${patente} antes de la medianoche y arrancás ` +
+          "después de las 06:00.\n\n" +
+          BANNER_TESTING +
+          "_Coopertrans Móvil — Mensaje automático._",
+        `${saludo}.\n\n` +
+          "Por norma operativa, entre las 00:00 y las 06:00 no se " +
+          "puede manejar. Faltan 30 min.\n\n" +
+          `Estacioná el ${patente} en un lugar seguro ahora y cortá ` +
+          "la jornada.\n\n" +
+          BANNER_TESTING +
+          "_Coopertrans Móvil — Mensaje automático._",
+      ];
+      const mensaje = variantes[_rrPick(variantes.length)];
 
       await db.collection("COLA_WHATSAPP").add({
         telefono: tel,
@@ -5854,7 +5919,10 @@ export const avisoFinJornadaNocturna = onSchedule(
       avisados++;
     }
 
-    logger.info("[avisoFinJornadaNocturna] OK", { avisados });
+    logger.info("[avisoFinJornadaNocturna] OK", {
+      avisados,
+      descartadosPollStale,
+    });
   }
 );
 
