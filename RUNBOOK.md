@@ -385,6 +385,10 @@ Mandar al **propio número del bot** desde un teléfono que esté en `ADMIN_PHON
 - `/pausar [Nh|Nd]` — pausar envíos (opcional duración: `/pausar 24h`).
 - `/reanudar` — reanudar.
 - `/forzar-cron` — corre el ciclo del cron ahora (no espera 60min).
+- `/test-aviso DNI` — mensaje de prueba al teléfono del DNI indicado.
+- `/jornada DNI` — estado del vigilador para ese chofer (total día, jornada actual con marker "arrancó ayer" si cruzó medianoche, continuo, pausa, avisos enviados, hora_min_arranque si llegó a 12h, patente, silenciado si aplica).
+- `/silenciar DNI dur [motivo]` — suprime avisos del vigilador (Ns/Nm/Nh/Nd, cap 30d). Ej: `/silenciar 12345678 2h en taller`. Encola aviso al chofer "silenciado por X horas hasta DD/MM HH:MM ART, motivo: X". El cron `procesarSilenciadosExpirados` (cada 10 min) detecta cuando se cumple el plazo y encola "notificaciones reanudadas".
+- `/desilenciar DNI` — revierte un /silenciar previo. Si estaba activo, encola "se reanudaron las notificaciones".
 - `/ayuda` — lista comandos.
 
 Si los comandos no responden y vos sí estás en la whitelist, el bot está **caído** — no es problema de permisos.
@@ -1057,8 +1061,8 @@ Get-Content whatsapp-bot\logs\bot.out.log -Tail 50 -Wait   # Logs en vivo (punto
 Get-Content whatsapp-bot\logs\bot.err.log -Tail 50         # Errores
 
 # === Tests (deben pasar antes de cada deploy) ===
-flutter test                                    # 67/67 tests cliente
-cd whatsapp-bot ; npm test                      # 54/54 tests bot
+flutter test                                    # 275 tests cliente (al 2026-05-13)
+cd whatsapp-bot ; npm test                      # 120 tests bot
 cd functions ; npm run build                    # tsc limpio
 
 # === Firebase ===
@@ -1069,6 +1073,77 @@ firebase deploy --only firestore:rules          # deploy solo rules
 # === Git ===
 git log --oneline -20                           # últimos 20 commits
 git status -uno                                 # cambios sin .claude/
+```
+
+---
+
+## Scripts de probe APIs externas
+
+Patrón seguro: las credenciales viven SOLO en Secret Manager. Para correr scripts ad-hoc, levantar las creds a env vars del proceso PowerShell con `Get-Credential` (prompt nativo Windows que NO expone la pass a history ni a logs) y limpiar al final.
+
+### Probes Volvo Connect
+
+```powershell
+cd "C:\Users\Colo Logistica\coopertrans_movil"
+$cred = Get-Credential -Message "Volvo Connect" -UserName "018B1E992E"
+$env:VOLVO_USERNAME = $cred.UserName
+$env:VOLVO_PASSWORD = $cred.GetNetworkCredential().Password
+
+# Scores (eco-driving). Confirma si el módulo está activo en el contrato.
+node scripts/probar_volvo_scores_api.js
+
+# Driver API — actividad del tacógrafo (DRIVE/REST/WORK/AVAILABLE) +
+# forecast (timeLeftToDriveUntilBreak / DailyRest etc).
+# Estado al 2026-05-13: 200 OK pero solo 2 chofers registrados y
+# `activities: []` en histórico 7 días → bloqueado esperando que Volvo
+# active la transmisión por unidad.
+node scripts/probar_volvo_driver_api.js
+
+# Messaging API (HMI camión) + Tachograph Files API (.DDD legales).
+# Estado al 2026-05-13: Messaging 403 (fuera de contrato),
+# Tachograph 200 con archivos vacíos (mismo bloqueo que Driver).
+node scripts/probar_volvo_modulos_no_usados.js
+
+Remove-Item Env:VOLVO_USERNAME, Env:VOLVO_PASSWORD
+```
+
+### Probes Sitrack
+
+```powershell
+cd "C:\Users\Colo Logistica\coopertrans_movil"
+$cred = Get-Credential -Message "Sitrack" -UserName "ws41629VecchiSRL"
+$env:SITRACK_USERNAME = $cred.UserName
+$env:SITRACK_PASSWORD = $cred.GetNetworkCredential().Password
+
+# /v2/report — snapshot último estado de cada unidad (lo que ya consume
+# `sitrackPosicionPoller`). El script enumera eventos distintos +
+# campos ricos disponibles para Fase 1 ICM.
+node scripts/sitrack_listar_eventos.js
+
+# /files/reports — eventos acumulados desde la última invocación.
+# ACTIVADO desde 2026-05-13 (probe confirmó 988 KB con eventos reales).
+# El cron `sitrackEventosPoller` lo consume cada 5 min y persiste a
+# SITRACK_EVENTOS. Este probe es para diagnóstico ad-hoc.
+# OJO: cada llamada vacía el buffer del lado Sitrack — si lo corrés
+# manual, perdés eventos hasta el próximo poll del cron.
+node scripts/sitrack_probar_files_reports.js
+
+# Análisis ranking + cobertura por categoría de los últimos N horas
+# de SITRACK_EVENTOS. Ayuda a decidir qué consumidor armar primero
+# (vigilador jornada v2 / auto-poblar viajes / anti-robo combustible /
+# conducción peligrosa / fatiga MobileEye / mantenimiento / puertas).
+# Requiere serviceAccountKey.json en la raíz.
+node scripts/analizar_sitrack_eventos.js --horas 36
+
+Remove-Item Env:SITRACK_USERNAME, Env:SITRACK_PASSWORD
+```
+
+### Diagnóstico vigilador de jornada por chofer
+
+```powershell
+# Lee JORNADAS_CHOFER + SITRACK_POSICIONES + flags de alerta del día.
+# Equivalente a `/jornada DNI` por WhatsApp pero con más detalle.
+node scripts/diagnosticar_vigilador_chofer.js <DNI>
 ```
 
 ---
