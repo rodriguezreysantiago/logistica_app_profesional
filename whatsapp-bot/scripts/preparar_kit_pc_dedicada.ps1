@@ -9,6 +9,7 @@
 #
 #   bot-pc-dedicada/
 #   ├── LEEME.txt                 ← guía rápida
+#   ├── instalar_todo.ps1         ← instalador all-in-one (1 click)
 #   ├── serviceAccountKey.json    ← creds Firebase
 #   ├── .env                      ← config bot
 #   └── .wwebjs_auth/             ← sesión WhatsApp (evita reescaneo)
@@ -156,6 +157,18 @@ $copiadoSize = [math]::Round(
 )
 Write-Host "  OK .wwebjs_auth/ ($copiadoSize MB copiados)" -ForegroundColor Green
 
+# --- 6b. Copiar instalar_todo.ps1 al kit ---------------------------
+Write-Host ""
+Write-Host "[2b/4] Copiando instalador all-in-one al kit..." -ForegroundColor Cyan
+$srcInstalarTodo = Join-Path $PSScriptRoot 'instalar_todo_pc_dedicada.ps1'
+$dstInstalarTodo = Join-Path $DestinoPath 'instalar_todo.ps1'
+if (Test-Path $srcInstalarTodo) {
+    Copy-Item -Path $srcInstalarTodo -Destination $dstInstalarTodo
+    Write-Host "  OK instalar_todo.ps1 (instalador 1-click para la PC nueva)" -ForegroundColor Green
+} else {
+    Write-Host "  WARN no existe $srcInstalarTodo — sigo sin el (kit queda solo manual)" -ForegroundColor Yellow
+}
+
 # --- 7. Generar LEEME.txt -------------------------------------------
 Write-Host ""
 Write-Host "[3/4] Generando LEEME.txt..." -ForegroundColor Cyan
@@ -166,67 +179,75 @@ KIT PC DEDICADA - Bot WhatsApp Coopertrans Movil
 ================================================================
 
 Que hay en esta carpeta:
+  - instalar_todo.ps1        ★ Instalador AUTOMATICO (1 click).
   - serviceAccountKey.json   Credenciales Firebase (secret).
   - .env                     Config del bot (secret).
   - .wwebjs_auth/            Sesion WhatsApp YA escaneada
                              (evita tener que reescanear el QR).
+  - LEEME.txt                Este archivo.
 
 ================================================================
-PASO A PASO EN LA PC NUEVA
+CAMINO RAPIDO (RECOMENDADO) - todo de una pasada
+================================================================
+
+En la PC nueva, Windows 10/11:
+
+1) Descomprimir esta carpeta entera en cualquier lado (ej. Desktop).
+
+2) Click derecho sobre instalar_todo.ps1 -> Run with PowerShell
+   (si pide aceptar UAC, decir SI — necesita privilegios de admin
+    para registrar el servicio + Scheduled Task).
+
+   O equivalente desde PowerShell admin:
+       cd <ruta-del-kit-descomprimido>
+       Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+       .\instalar_todo.ps1
+
+   El script hace TODO esto solo (10-15 min):
+     a) Instala Node.js LTS y Git (via winget, si no estan).
+     b) Clona el repo en C:\coopertrans_movil.
+     c) Copia los 3 archivos del kit a sus paths del repo.
+     d) npm install en whatsapp-bot/ (baja Chromium ~150 MB).
+     e) Instala el servicio CoopertransMovilBot (NSSM, Automatic).
+     f) Configura Windows 24/7 (power, wake-on-lan, update window).
+     g) Instala el auto-update (Scheduled Task cada 5 min).
+     h) Smoke test final: chequea que el bot heartbeatea.
+
+3) Cuando termine, verificar en pantalla que dice "INSTALACION
+   COMPLETA" y que el smoke test no dio WARN.
+
+================================================================
+CAMINO MANUAL (solo si algo falla en el automatico)
 ================================================================
 
 1) Instalar Node.js 18+ y Git for Windows
-   - https://nodejs.org
+   - https://nodejs.org  (LTS)
    - https://git-scm.com/download/win
-   Despues abrir un PowerShell NUEVO y verificar:
+   Reabrir PowerShell y verificar:
        node --version
        git --version
 
 2) Clonar el repo en C:\
-   PowerShell normal:
        cd C:\
        git clone https://github.com/rodriguezreysantiago/logistica_app_profesional.git coopertrans_movil
        cd coopertrans_movil\whatsapp-bot
        npm install
 
-   (npm install baja Chromium ~150 MB, tarda varios min la 1ra vez.)
+3) Copiar los 3 archivos secret de esta carpeta al repo clonado:
+       serviceAccountKey.json   ->  C:\coopertrans_movil\
+       .env                     ->  C:\coopertrans_movil\whatsapp-bot\
+       .wwebjs_auth\            ->  C:\coopertrans_movil\whatsapp-bot\
 
-3) Copiar los 3 archivos de esta carpeta al repo clonado:
-       serviceAccountKey.json   →  C:\coopertrans_movil\
-       .env                     →  C:\coopertrans_movil\whatsapp-bot\
-       .wwebjs_auth\            →  C:\coopertrans_movil\whatsapp-bot\
-
-   IMPORTANTE: la sesion .wwebjs_auth ya esta escaneada — al copiarla
-   el bot arranca sin pedir QR. NO BORRARLA.
-
-4) Instalar el servicio en modo 24/7
-   PowerShell COMO ADMINISTRADOR:
+4) PowerShell COMO ADMINISTRADOR — corre los 3 scripts uno por uno:
        cd C:\coopertrans_movil\whatsapp-bot
        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
        .\scripts\instalar_servicio.ps1 -Auto
-
-5) Configurar Windows para 24/7
-   PowerShell COMO ADMINISTRADOR:
        .\scripts\setup_pc_24x7.ps1
-
-6) Instalar el AUTO-UPDATE (recomendado)
-   PowerShell COMO ADMINISTRADOR:
        .\scripts\instalar_auto_update.ps1
 
-   Esto agrega una Scheduled Task que cada 5 min:
-     - Hace git fetch + git pull si hay commits nuevos en whatsapp-bot/**
-     - npm install si package.json cambio
-     - Restart-Service CoopertransMovilBot
-     - Smoke test post-restart
-   A partir de aca, NO hace falta entrar mas a esta PC para deployar
-   cambios del bot — solo se pushea desde la PC de trabajo y se
-   actualiza solo en < 5 min.
-
-   Log del auto-update: logs\auto_update.log
-
-7) Verificar que arranco
+5) Verificar que arranco
        Get-Service CoopertransMovilBot       # Status: Running
-       Get-Content logs\bot.out.log -Tail 30 # buscar "WhatsApp listo para enviar"
+       Get-Content logs\bot.out.log -Tail 30 # "WhatsApp listo para enviar"
        Get-ScheduledTask -TaskName CoopertransMovilBotAutoUpdate  # Ready
 
 ================================================================

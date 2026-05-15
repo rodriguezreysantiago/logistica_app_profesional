@@ -10,6 +10,40 @@ mantenga corriendo 24 horas, 7 días, sin intervención manual.
 
 ---
 
+## Modo rápido (recomendado): instalador all-in-one
+
+Desde la PC origen, generar el kit con:
+
+```powershell
+cd C:\coopertrans_movil
+.\whatsapp-bot\scripts\preparar_kit_pc_dedicada.ps1 -DestinoPath "G:\Mi unidad\ClaudeCodeSync\bot-pc-dedicada" -Force
+```
+
+(El kit pesa ~683 MB — `.wwebjs_auth/` es la mayor parte. Subirlo a
+G:\ lo deja sincronizado a Drive y disponible en la PC dedicada sin
+pendrive.)
+
+En la PC dedicada nueva:
+
+1. Esperar que Drive sincronice la carpeta `bot-pc-dedicada/`.
+2. Click derecho sobre `instalar_todo.ps1` → **Run with PowerShell**
+   (UAC pide aceptar — el script necesita admin).
+3. Esperar 10-15 min. El instalador hace todo:
+   - Instala Node.js + Git (vía winget, si no están).
+   - Clona el repo en `C:\coopertrans_movil`.
+   - Copia los 3 archivos secret (`.env`, `serviceAccountKey.json`, `.wwebjs_auth/`).
+   - `npm install` en `whatsapp-bot/` (baja Chromium ~150 MB).
+   - Registra el servicio NSSM `CoopertransMovilBot` en modo Automatic.
+   - Configura Windows 24/7 (power plan, wake-on-lan, update window).
+   - Activa el auto-update (Scheduled Task cada 5 min).
+   - Smoke test final.
+4. Cuando termine, en la PC vieja: `Stop-Service CoopertransMovilBot` +
+   `Set-Service CoopertransMovilBot -StartupType Manual`.
+
+> El resto de este documento describe la instalación manual paso a paso
+> (útil para troubleshooting si el `instalar_todo.ps1` falla en algún
+> paso o si querés saber qué hace cada cosa por dentro).
+
 ## Hardware mínimo recomendado
 
 - **Cualquier PC con Windows 10/11** sirve — no necesita ser potente.
