@@ -72,4 +72,52 @@ cd ..
 echo "==> Generated.xcconfig:"
 cat ios/Flutter/Generated.xcconfig | grep -E "FLUTTER_ROOT|FLUTTER_APPLICATION_PATH"
 
+# 8. Manual Signing setup (opcional — solo si las env vars estan definidas)
+#
+# Workaround para cuentas Apple Developer recien aprobadas donde Apple Cloud
+# no puede comunicarse con el portal Apple para generar profiles automatica-
+# mente ("Communication with Apple failed: No profiles for X were found").
+#
+# Si las 3 env vars estan setadas, importamos el cert + profile pre-generados
+# y dejamos que xcodebuild use Manual Signing.
+#
+# Setup en Xcode Cloud (App Store Connect -> tu app -> Xcode Cloud ->
+# workflow -> Edit -> Custom Environment Variables):
+#   - IOS_DIST_CERT_P12_BASE64       (Secret) — base64 del .p12 exportado del Keychain
+#   - IOS_DIST_CERT_P12_PASSWORD     (Secret) — password con que se exporto el .p12
+#   - IOS_DIST_PROFILE_BASE64        (Secret) — base64 del .mobileprovision bajado del portal Apple
+if [ -n "$IOS_DIST_CERT_P12_BASE64" ] && [ -n "$IOS_DIST_CERT_P12_PASSWORD" ] && [ -n "$IOS_DIST_PROFILE_BASE64" ]; then
+    echo "==> Manual Signing detectado: importando cert + profile..."
+
+    # Crear keychain temporal solo para este build
+    KEYCHAIN_PATH="$HOME/build.keychain"
+    KEYCHAIN_PASSWORD="ci-temp-$(date +%s)"
+
+    security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security default-keychain -s "$KEYCHAIN_PATH"
+    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
+
+    # Decodear .p12 e importar
+    echo "$IOS_DIST_CERT_P12_BASE64" | base64 --decode > "$HOME/cert.p12"
+    security import "$HOME/cert.p12" \
+        -P "$IOS_DIST_CERT_P12_PASSWORD" \
+        -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+    rm "$HOME/cert.p12"
+
+    # Permitir que codesign acceda al cert sin password prompt
+    security set-key-partition-list -S apple-tool:,apple: \
+        -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+    # Instalar el provisioning profile
+    PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+    mkdir -p "$PROFILES_DIR"
+    echo "$IOS_DIST_PROFILE_BASE64" | base64 --decode > \
+        "$PROFILES_DIR/Coopertrans_Movil_App_Store.mobileprovision"
+
+    echo "==> Manual Signing OK: cert importado + profile instalado."
+else
+    echo "==> Manual Signing skip (env vars no definidas — usando Auto Signing)."
+fi
+
 echo "===== Setup Flutter completado, Xcode Cloud puede arrancar el build ====="

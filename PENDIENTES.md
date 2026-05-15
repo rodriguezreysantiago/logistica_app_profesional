@@ -7,37 +7,103 @@ Convención: orden cronológico (los próximos arriba). Sacar el ítem cuando se
 
 ---
 
-## 📅 2026-05-15 (jue) — Primera build iOS desde la Mac (cuenta Apple aprobada)
+## 📅 Post 2026-05-15 — Cerrar pipeline iOS via Xcode Cloud (desde Windows)
 
-**Contexto**: 2026-05-14 Apple aprobó la cuenta Developer
-(`santiagocoopertrans@gmail.com`, US$99/año). El proyecto iOS ya está
-configurado end-to-end desde la sesión 2026-05-06: bundle id
-`com.coopertrans.movil`, target iOS 16.0, `Info.plist` con permisos,
-`GoogleService-Info.plist` presente, `Podfile` con post_install
-forzando deployment_target. Solo falta:
+**Contexto** (2026-05-15): Apple desde 2026 exige iOS SDK 26 obligatorio
+para uploads a App Store / TestFlight. El MacBook Air 2020 Intel de
+Santiago **no soporta** Xcode 26 (requiere macOS 26 Tahoe, solo Apple
+Silicon). Decisión: descartar build local en Mac, migrar a **Xcode
+Cloud** (CI/CD de Apple, incluido en el Apple Developer Program).
 
-1. **Encender la Mac** + actualizar Xcode si hace falta (sigue las
-   instrucciones de `docs/SETUP_IOS_RELEASE.md`).
-2. **`git pull` + `pod install`** (con workaround Ruby 4.0 UTF-8).
-3. **Setear DEVELOPMENT_TEAM en Xcode** una sola vez (Signing &
-   Capabilities → Team → cuenta aprobada). Commitear el cambio
-   resultante de `project.pbxproj`.
-4. **`flutter run -d "iPhone 16 Pro"`** — primer arranque en simulador.
-5. **`./scripts/release_ios.sh`** — genera el IPA listo para subir.
-6. **Crear app en App Store Connect** la primera vez
-   (https://appstoreconnect.apple.com → Mis apps → "+" → bundle id
-   `com.coopertrans.movil`).
-7. **Subir IPA con Transporter** (drag & drop, login con la misma
-   cuenta) → esperar 10-30 min procesamiento → asignar a Internal
-   Testing en TestFlight.
+**Setup avanzado durante la sesión 2026-05-15** (todo commiteado):
+- App registrada en App Store Connect (`com.coopertrans.movil`).
+- Apple Distribution Cert + Provisioning Profile "Coopertrans Movil App
+  Store" creados manualmente en el portal Apple.
+- App Store Connect API Key creada (Issuer `2b70dc6f-0859-4830-925f-743881d5cf1c`,
+  Key ID `7K3A7243WL`, Admin role). **`.p8` backup en
+  `G:\Mi unidad\ClaudeCodeSync\secrets-ios\`**.
+- Xcode Cloud workflow "Build & Upload to TestFlight" configurado con
+  trigger **MANUAL** (no auto, para no quemar cuota).
+- `ios/ci_scripts/ci_post_clone.sh` con instalación Flutter + flutterfire
+  CLI + bloque opcional Manual Signing.
+- pbxproj con Manual Signing en Release apuntando a profile manual.
+- Acuerdos comerciales App Store Connect aceptados.
 
-Guía completa: `docs/SETUP_IOS_RELEASE.md`. Cubre setup one-time,
-primer arranque, build IPA, TestFlight, troubleshooting,
-diferencias con Android.
+**6 builds Xcode Cloud todos fallaron** con el mismo error:
 
-**Versión a probar**: la del último release Windows/Android
-(release lanzado al cerrar la sesión 2026-05-14 con todos los fixes
-del día — vigilador, /silenciar, autocomplete chofer, etc).
+```
+Account "Session Proxy Provider": Unable to authenticate with App Store Connect
+error: exportArchive Communication with Apple failed
+error: exportArchive No profiles for 'com.coopertrans.movil' were found
+```
+
+Causa: cuenta Apple Developer recién aprobada, Apple tarda 24-72h en
+propagar la API de signing al backend completo. La API Key creada NO se
+está usando (Apple Cloud sigue con el "Session Proxy Provider" interno).
+
+### Camino A — Esperar 48-72h y reintentar manual (sin esfuerzo)
+
+1. **Después del 2026-05-17** (≥72h post aprobación cuenta), abrir desde
+   cualquier PC (Windows también):
+   App Store Connect → Coopertrans Móvil → Xcode Cloud → workflow →
+   **Start Build** → branch `main`.
+2. Esperar ~30 min.
+3. Si funciona → archive + export + upload a TestFlight automático.
+4. Te llega mail "Build available in TestFlight".
+5. Instalás en iPhone via app TestFlight.
+
+### Camino B — Forzar Manual Signing con cert + profile pre-cargados
+
+Si el Camino A sigue fallando, este destraba 100% (workaround DIY que no
+depende de la API rota de Apple):
+
+1. **One-time desde la Mac** (única cosa que necesita la Mac):
+   Abrir Acceso a Llaveros → Mis Certificados → click derecho sobre
+   "Apple Distribution: Santiago Rodriguez Rey" → Exportar:
+   - Formato `.p12`, password `coopertrans2026` (o el que se elija).
+   - Guardar en `G:\Mi unidad\ClaudeCodeSync\secrets-ios\coopertrans_dist.p12`.
+
+2. **Desde cualquier PC** (Windows OK):
+   - Bajar el `.mobileprovision` desde
+     https://developer.apple.com/account/resources/profiles/list
+     → click "Coopertrans Movil App Store" → Download.
+   - Guardar en `G:\Mi unidad\ClaudeCodeSync\secrets-ios\Coopertrans_Movil_App_Store.mobileprovision`.
+
+3. **Convertir ambos a base64** (Windows PowerShell):
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("G:\Mi unidad\ClaudeCodeSync\secrets-ios\coopertrans_dist.p12")) | Set-Clipboard
+   ```
+   (Pegá el resultado en un .txt temporal. Repetí para el .mobileprovision.)
+
+4. **Subir 3 secret env vars al workflow Xcode Cloud**:
+   App Store Connect → Coopertrans Móvil → Xcode Cloud → workflow →
+   Edit → Custom Environment Variables → "+":
+   - `IOS_DIST_CERT_P12_BASE64` = (paste base64 del .p12) → **Secret** ✅
+   - `IOS_DIST_CERT_P12_PASSWORD` = `coopertrans2026` → **Secret** ✅
+   - `IOS_DIST_PROFILE_BASE64` = (paste base64 del .mobileprovision) → **Secret** ✅
+   - Save workflow.
+
+5. **Disparar build manual** → branch `main` → esperar 30 min.
+6. El `ci_post_clone.sh` detecta las 3 env vars y configura Manual
+   Signing automáticamente (importa cert al keychain, instala
+   profile en `~/Library/MobileDevice/Provisioning Profiles/`).
+7. xcodebuild encuentra todo localmente, NO trata de hablar con Apple.
+8. Build OK → IPA sube a TestFlight automático via Post-Action.
+
+### Pasos posteriores a primer build OK
+
+Crear grupo de Internal Testers en App Store Connect → Coopertrans Móvil
+→ tab TestFlight → Internal Testing → "+" → Name "Internal Testers" →
+agregar Santiago. Editar workflow Xcode Cloud → agregar Post-Action
+"TestFlight Internal Testing" apuntando a ese grupo.
+
+**Bajar app TestFlight** del App Store en el iPhone, login con
+`santiagocoopertrans@gmail.com` (o la otra cuenta si aceptaron la
+invitación que Santiago mandó), tap "Instalar" en Coopertrans Móvil.
+
+Memoria completa con todo el detalle: `claude-memory/project_ios_release.md`
+(en G: Drive) o ver `docs/SETUP_IOS_RELEASE.md` (queda como referencia
+histórica del flujo Mac local descartado).
 
 ---
 
