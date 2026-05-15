@@ -35,7 +35,7 @@ class IcmHubScreen extends StatelessWidget {
               child: LayoutBuilder(
                 builder: (ctx, constraints) {
                   final w = constraints.maxWidth;
-                  final cols = w >= 800 ? 3 : (w >= 540 ? 3 : 1);
+                  final cols = w >= 800 ? 4 : (w >= 540 ? 2 : 1);
                   return GridView.count(
                     crossAxisCount: cols,
                     crossAxisSpacing: 12,
@@ -50,6 +50,13 @@ class IcmHubScreen extends StatelessWidget {
                         ruta: AppRoutes.adminIcmRanking,
                       ),
                       _HubTile(
+                        titulo: 'REPORTE SEMANAL',
+                        subtitulo: 'KPIs + gráficos + top 5',
+                        icono: Icons.assessment_outlined,
+                        color: AppColors.accentGreen,
+                        ruta: AppRoutes.adminIcmReporteSemanal,
+                      ),
+                      _HubTile(
                         titulo: 'MAPA DE CALOR',
                         subtitulo: 'Lugares y horarios con más infracciones',
                         icono: Icons.map_outlined,
@@ -58,7 +65,7 @@ class IcmHubScreen extends StatelessWidget {
                       ),
                       _HubTile(
                         titulo: 'DETALLE POR CHOFER',
-                        subtitulo: 'Drill-down individual',
+                        subtitulo: 'Histórico individual + gráficos',
                         icono: Icons.person_search_outlined,
                         color: AppColors.accentTeal,
                         ruta: AppRoutes.adminIcmDetalleChofer,

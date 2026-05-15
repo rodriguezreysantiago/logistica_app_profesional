@@ -28,7 +28,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// Mismos que el resumen Molina diario (`resumenConductaManejoDiario`):
 /// salida de carril, sobrevelocidad in/out, frenada brusca, aceleración
 /// brusca, giro brusco, distancia frenado insuficiente, colisiones.
-const Set<int> _tiposInfraccionIcm = {
+const Set<int> kTiposInfraccionIcm = {
   8, 9, 66, 67, 267, 326, 383, 444, 1006, 1007,
 };
 
@@ -101,7 +101,7 @@ class IcmCalculator {
     for (final doc in snapEventos.docs) {
       final d = doc.data();
       final eventId = d['event_id'];
-      if (eventId is! int || !_tiposInfraccionIcm.contains(eventId)) continue;
+      if (eventId is! int || !kTiposInfraccionIcm.contains(eventId)) continue;
       final dni = (d['driver_dni'] ?? '').toString().trim();
       if (dni.isEmpty) continue; // ICM solo aplica a choferes identificados
       final nombre = (d['event_name'] ?? 'Evento $eventId').toString();

@@ -43,6 +43,11 @@ dependencies:
   # `csv` se removió (2026-04-28): los reportes exportan solo Excel.
   intl: ^0.20.2
 
+  # ================= GRÁFICOS =================
+  # Para los gráficos del módulo ICM (línea histórica, barras por tipo,
+  # pie de categorías). MIT, sin telemetría, ~250 KB.
+  fl_chart: ^0.69.0
+
   # ================= NOTIFICACIONES =================
   flutter_local_notifications: ^21.0.0
   # `timezone` viene transitiva con flutter_local_notifications pero la

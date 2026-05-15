@@ -31,6 +31,7 @@
   // unificado para gestión proactiva).
   static const String adminIcmHub = '/admin_icm';
   static const String adminIcmRanking = '/admin_icm_ranking';
+  static const String adminIcmReporteSemanal = '/admin_icm_reporte_semanal';
   static const String adminIcmMapaCalor = '/admin_icm_mapa_calor';
   static const String adminIcmDetalleChofer = '/admin_icm_detalle_chofer';
   // Pantallas Volvo restantes (mantienen `verAlertasVolvo` por ahora):

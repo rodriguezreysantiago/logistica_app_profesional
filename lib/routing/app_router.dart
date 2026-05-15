@@ -57,6 +57,7 @@ import '../features/empresas_empleadoras/screens/admin_empresas_empleadoras_scre
 
 import '../features/icm/screens/icm_hub_screen.dart';
 import '../features/icm/screens/icm_ranking_screen.dart';
+import '../features/icm/screens/icm_reporte_semanal_screen.dart';
 import '../features/icm/screens/icm_mapa_calor_screen.dart';
 import '../features/icm/screens/icm_detalle_chofer_screen.dart';
 
@@ -252,6 +253,11 @@ class AppRouter {
       case AppRoutes.adminIcmRanking:
         return _buildRoute(
           _protegerAdmin(const IcmRankingScreen()),
+          settings,
+        );
+      case AppRoutes.adminIcmReporteSemanal:
+        return _buildRoute(
+          _protegerAdmin(const IcmReporteSemanalScreen()),
           settings,
         );
       case AppRoutes.adminIcmMapaCalor:
