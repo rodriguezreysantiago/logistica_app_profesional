@@ -52,6 +52,14 @@ enum Capability {
   /// Acceso ADMIN + SUPERVISOR (mismo nivel que personal/flota: son los
   /// que arman la operación). Choferes y otros roles no entran.
   verLogistica,
+  /// Módulo ICM (Índice de Conducta de Manejo) — el módulo que YPF
+  /// audita en su Tablero ICM. Combina los eventos Sitrack peligrosos
+  /// de cada chofer (sobrevelocidad cartográfica, frenadas/aceleraciones
+  /// bruscas, salida de carril, etc.) en un puntaje 0-100 + ranking +
+  /// mapa de calor de infracciones. Acceso ADMIN + SUPERVISOR + SEG_HIGIENE
+  /// (este último es el destinatario natural — Molina es quien dialoga
+  /// con los choferes con peor desempeño).
+  verIcm,
 
   // ─── Acciones sobre personal ───
   crearEmpleado,
@@ -98,15 +106,13 @@ class Capabilities {
       Capability.verGomeria,
     },
     AppRoles.segHigiene: {
-      // Rol especializado de Seguridad e Higiene: monitorea conducta y
-      // eventos Volvo (alertas, eco-driving, descargas PTO, mapa). No
-      // gestiona personal, flota ni bot.
-      // Hoy las 4 pantallas Volvo (alertas, eco-driving, descargas, mapa)
-      // comparten una sola capability `verAlertasVolvo`. Si más adelante
-      // queremos darle solo eco-driving sin alertas, separamos en
-      // capabilities distintas y ajustamos los gates de las pantallas.
+      // Rol especializado de Seguridad e Higiene: monitorea conducta de
+      // manejo via el módulo ICM (que YPF audita) + posiciones Sitrack
+      // en tiempo real. Las alertas Volvo crudas NO van a este rol — ya
+      // las recibe consolidadas vía WhatsApp diario.
       Capability.verPanelAdmin,
-      Capability.verAlertasVolvo,
+      Capability.verIcm,
+      Capability.verAlertasVolvo, // mantiene Mapa Flota + Descargas PTO
     },
     AppRoles.supervisor: {
       Capability.verPanelAdmin,
@@ -120,6 +126,7 @@ class Capabilities {
       Capability.verAlertasVolvo,
       Capability.verGomeria,
       Capability.verLogistica,
+      Capability.verIcm,
       // Editar y crear personal/vehículos: sí. Pero NO puede asignar
       // rol ADMIN ni cambiar rol de admins existentes.
       Capability.crearEmpleado,

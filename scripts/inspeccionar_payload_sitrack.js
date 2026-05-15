@@ -28,6 +28,7 @@
 const path = require('path');
 const fsNode = require('fs');
 const https = require('https');
+const { execSync } = require('child_process');
 
 const botDir = path.resolve(__dirname, '..', 'whatsapp-bot');
 const botNodeModules = path.join(botDir, 'node_modules');
@@ -41,16 +42,51 @@ module.paths.unshift(botNodeModules);
 process.chdir(botDir);
 require('dotenv').config({ quiet: true });
 
-const SITRACK_USERNAME = process.env.SITRACK_USERNAME;
-const SITRACK_PASSWORD = process.env.SITRACK_PASSWORD;
+// Resolver credenciales Sitrack: primero env vars (path manual rápido),
+// sino gcloud secrets versions access (path standard prod — los secrets
+// viven en Secret Manager del proyecto coopertrans-movil).
+function leerSecret(nombre) {
+  try {
+    return execSync(
+      `gcloud secrets versions access latest --secret=${nombre} ` +
+      `--project=coopertrans-movil`,
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+  } catch (e) {
+    return null;
+  }
+}
+
+let SITRACK_USERNAME = process.env.SITRACK_USERNAME;
+let SITRACK_PASSWORD = process.env.SITRACK_PASSWORD;
+
 if (!SITRACK_USERNAME || !SITRACK_PASSWORD) {
-  console.error(
-    '❌ Faltan SITRACK_USERNAME / SITRACK_PASSWORD en whatsapp-bot/.env'
-  );
-  console.error('   (en producción viven en Secret Manager, pero para este');
-  console.error('   script local usan los mismos valores del .env del bot).');
+  console.log('🔑 Leyendo credenciales de Secret Manager via gcloud...');
+  SITRACK_USERNAME = SITRACK_USERNAME || leerSecret('SITRACK_USERNAME');
+  SITRACK_PASSWORD = SITRACK_PASSWORD || leerSecret('SITRACK_PASSWORD');
+}
+
+if (!SITRACK_USERNAME || !SITRACK_PASSWORD) {
+  console.error('');
+  console.error('❌ No se pudieron obtener las credenciales Sitrack.');
+  console.error('   Probé en este orden:');
+  console.error('   1) process.env.SITRACK_USERNAME / SITRACK_PASSWORD');
+  console.error('   2) gcloud secrets versions access SITRACK_USERNAME ' +
+                '--project=coopertrans-movil');
+  console.error('   3) gcloud secrets versions access SITRACK_PASSWORD ' +
+                '--project=coopertrans-movil');
+  console.error('');
+  console.error('   Si gcloud no está logueado, hacé:');
+  console.error('     gcloud auth login');
+  console.error('     gcloud config set project coopertrans-movil');
+  console.error('');
+  console.error('   Alternativa manual:');
+  console.error('     $env:SITRACK_USERNAME = "ws41629VecchiSRL"');
+  console.error('     $env:SITRACK_PASSWORD = "..."  # de Bitwarden');
+  console.error('     node scripts/inspeccionar_payload_sitrack.js');
   process.exit(1);
 }
+console.log(`🔑 Credenciales OK (usuario: ${SITRACK_USERNAME})`);
 
 const BASE_HOST = 'externalappgw.ar.sitrack.com';
 const AUTH_HEADER = 'Basic ' + Buffer.from(

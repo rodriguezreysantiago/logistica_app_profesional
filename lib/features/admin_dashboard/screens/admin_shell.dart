@@ -15,8 +15,8 @@ import '../../expirations/screens/admin_vencimientos_menu_screen.dart';
 import '../../reports/screens/admin_reports_screen.dart';
 import '../../revisions/screens/admin_revisiones_screen.dart';
 import '../../eco_driving/screens/admin_descargas_pto_screen.dart';
-import '../../eco_driving/screens/admin_eco_driving_screen.dart';
 import '../../fleet_map/screens/admin_mapa_flota_screen.dart';
+import '../../icm/screens/icm_hub_screen.dart';
 import '../../gomeria/screens/gomeria_hub_screen.dart';
 import '../../logistica/screens/logistica_hub_screen.dart';
 import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
@@ -25,7 +25,6 @@ import '../../vehicles/screens/admin_vehiculos_lista_screen.dart';
 
 import 'admin_estado_bot_screen.dart';
 import 'admin_panel_screen.dart';
-import 'admin_volvo_alertas_screen.dart';
 
 /// Shell principal del admin con navegación lateral.
 ///
@@ -139,32 +138,17 @@ class _AdminShellState extends State<AdminShell> {
           .snapshots(),
       build: () => const AdminMantenimientoScreen(),
     ),
+    // ─── ICM (Indice de Conducta de Manejo) ─────────────────────────
+    // Reemplaza a "Alertas" + "Eco-Driving" del menú admin (2026-05-15).
+    // Las alertas crudas se reparten consolidadas vía WhatsApp diario
+    // (Molina y Emmanuel reciben sus resúmenes); este módulo da la
+    // vista unificada para gestionar conducta de manejo a nivel YPF.
     _ShellSection(
-      label: 'Alertas',
-      icon: Icons.notifications_active_outlined,
-      iconActive: Icons.notifications_active,
-      requiredCapability: Capability.verAlertasVolvo,
-      // Badge: cuenta alertas pendientes (atendida == false). Single
-      // field where → no necesita índice compuesto. Las popula el
-      // poller cada 5 min desde el Vehicle Alerts API de Volvo.
-      badgeStream: FirebaseFirestore.instance
-          .collection(AppCollections.volvoAlertas)
-          .where('atendida', isEqualTo: false)
-          .limit(100)
-          .snapshots(),
-      build: () => const AdminVolvoAlertasScreen(),
-    ),
-    // ─── Bloque Volvo (Eco / Descargas / Mapa) ──────────────────────
-    // Agrupado después de Alertas porque las 4 pantallas comparten
-    // capability `verAlertasVolvo` y fuente de datos. No están como
-    // tile separado en el panel central — el tile "Alertas" cubre
-    // visualmente al bloque entero.
-    _ShellSection(
-      label: 'Eco-Driving',
-      icon: Icons.eco_outlined,
-      iconActive: Icons.eco,
-      requiredCapability: Capability.verAlertasVolvo,
-      build: () => const AdminEcoDrivingScreen(),
+      label: 'ICM',
+      icon: Icons.leaderboard_outlined,
+      iconActive: Icons.leaderboard,
+      requiredCapability: Capability.verIcm,
+      build: () => const IcmHubScreen(),
     ),
     _ShellSection(
       label: 'Descargas',

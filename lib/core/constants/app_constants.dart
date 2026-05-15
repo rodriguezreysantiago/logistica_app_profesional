@@ -23,11 +23,25 @@
   static const String adminRevisiones = '/admin_revisiones';
   static const String adminReportes = '/admin_reportes';
   static const String adminMantenimiento = '/admin_mantenimiento';
-  static const String adminVolvoAlertas = '/admin_volvo_alertas';
-  static const String adminEcoDriving = '/admin_eco_driving';
+  // ICM (Índice de Conducta de Manejo) — módulo que YPF audita en su
+  // Tablero ICM. Reemplaza a las pantallas legacy de "ALERTAS VOLVO"
+  // y "ECO-DRIVING" en el menú admin (deshabilitadas 2026-05-15 ya que
+  // las alertas crudas se reparten consolidadas vía WhatsApp diario
+  // entre Molina y Emmanuel — lo único que faltaba era un tablero
+  // unificado para gestión proactiva).
+  static const String adminIcmHub = '/admin_icm';
+  static const String adminIcmRanking = '/admin_icm_ranking';
+  static const String adminIcmMapaCalor = '/admin_icm_mapa_calor';
+  static const String adminIcmDetalleChofer = '/admin_icm_detalle_chofer';
+  // Pantallas Volvo restantes (mantienen `verAlertasVolvo` por ahora):
   static const String adminDescargasPto = '/admin_descargas_pto';
   static const String adminMapaVolvo = '/admin_mapa_volvo';
   static const String adminMapaFlota = '/admin_mapa_flota';
+  // Rutas legacy (en deprecación — quitadas del menú principal pero el
+  // case del router se mantiene unos releases por si alguien tiene un
+  // shortcut/bookmark, hasta limpieza definitiva):
+  static const String adminVolvoAlertas = '/admin_volvo_alertas';
+  static const String adminEcoDriving = '/admin_eco_driving';
   static const String syncDashboard = '/sync_dashboard';
   static const String adminEstadoBot = '/admin_estado_bot';
 

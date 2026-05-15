@@ -55,6 +55,11 @@ import '../features/expirations/screens/admin_vencimientos_calendario_screen.dar
 
 import '../features/empresas_empleadoras/screens/admin_empresas_empleadoras_screen.dart';
 
+import '../features/icm/screens/icm_hub_screen.dart';
+import '../features/icm/screens/icm_ranking_screen.dart';
+import '../features/icm/screens/icm_mapa_calor_screen.dart';
+import '../features/icm/screens/icm_detalle_chofer_screen.dart';
+
 class AppRouter {
   AppRouter._();
 
@@ -234,19 +239,44 @@ class AppRouter {
           settings,
         );
 
-      // ================= ALERTAS VOLVO =================
-      // Tablero de eventos del Vehicle Alerts API (IDLING, OVERSPEED,
-      // DISTANCE_ALERT, PTO, TELL_TALE, ALARM, etc.) populado por la
-      // scheduled function `volvoAlertasPoller` cada 5 min.
+      // ================= ICM (Indice de Conducta de Manejo) =================
+      // Hub + ranking + mapa de calor + drill-down. Reemplaza a las
+      // pantallas legacy "ALERTAS VOLVO" y "ECO-DRIVING" del menú admin
+      // (deshabilitadas 2026-05-15: las alertas crudas se reparten
+      // consolidadas vía WhatsApp diario entre Molina y Emmanuel).
+      case AppRoutes.adminIcmHub:
+        return _buildRoute(
+          _protegerAdmin(const IcmHubScreen()),
+          settings,
+        );
+      case AppRoutes.adminIcmRanking:
+        return _buildRoute(
+          _protegerAdmin(const IcmRankingScreen()),
+          settings,
+        );
+      case AppRoutes.adminIcmMapaCalor:
+        return _buildRoute(
+          _protegerAdmin(const IcmMapaCalorScreen()),
+          settings,
+        );
+      case AppRoutes.adminIcmDetalleChofer:
+        return _buildRoute(
+          _protegerAdmin(const IcmDetalleChoferScreen()),
+          settings,
+        );
+
+      // ================= ALERTAS VOLVO (LEGACY) =================
+      // Mantenido por compat para shortcuts viejos. NO está en el menú
+      // admin desde 2026-05-15. Quitar en limpieza posterior.
       case AppRoutes.adminVolvoAlertas:
         return _buildRoute(
           _protegerAdmin(const AdminVolvoAlertasScreen()),
           settings,
         );
 
-      // ================= ECO-DRIVING =================
-      // Resumen + ranking + drilldown de scores diarios de la Volvo Group
-      // Scores API. Populado por `volvoScoresPoller` 1x por día (04:00 ART).
+      // ================= ECO-DRIVING (LEGACY) =================
+      // Mantenido por compat para shortcuts viejos. NO está en el menú
+      // admin desde 2026-05-15. Quitar en limpieza posterior.
       case AppRoutes.adminEcoDriving:
         return _buildRoute(
           _protegerAdmin(const AdminEcoDrivingScreen()),

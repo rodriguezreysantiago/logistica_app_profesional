@@ -4746,6 +4746,12 @@ export const resumenConductaManejoDiario = onSchedule(
       tsMs: number;
       tipoLabel: string;
       origen: "sitrack" | "volvo";
+      // Si es evento de sobrevelocidad (event_id 8/9) y trae los campos
+      // cartográficos, calculamos el exceso real (gpsSpeed - cartLimit).
+      // Sirve para mostrar a Molina la peor sobrevelocidad del día por chofer.
+      sobreLimiteKmh?: number;
+      gpsSpeed?: number;
+      cartLimit?: number;
     }
     const eventos: EventoConducta[] = [];
 
@@ -4767,12 +4773,26 @@ export const resumenConductaManejoDiario = onSchedule(
       const patente = (d.asset_id ?? "").toString().trim().toUpperCase();
       const ts = d.report_date as Timestamp | undefined;
       const tsMs = ts?.toMillis?.() ?? 0;
+      // Sobrevelocidad detectada (event_id 8 = inicio, 9 = fin):
+      // calcular exceso vs cartografía Sitrack (que ES la cartografía YPF).
+      const gpsSpeed = typeof d.gps_speed === "number" ? d.gps_speed : null;
+      const cartLimit = typeof d.cartography_limit_speed === "number" ?
+        d.cartography_limit_speed :
+        null;
+      const sobreLimiteKmh =
+        (eventId === 8 || eventId === 9) &&
+        gpsSpeed !== null && cartLimit !== null && cartLimit > 0 ?
+          Math.max(0, gpsSpeed - cartLimit) :
+          undefined;
       eventos.push({
         patente,
         driverDni: (d.driver_dni ?? "").toString().trim(),
         tsMs,
         tipoLabel: (d.event_name ?? `Evento ${eventId}`).toString(),
         origen: "sitrack",
+        sobreLimiteKmh,
+        gpsSpeed: gpsSpeed ?? undefined,
+        cartLimit: cartLimit ?? undefined,
       });
     }
 
@@ -4821,6 +4841,11 @@ export const resumenConductaManejoDiario = onSchedule(
       atribuido: boolean;
       sitrack: Map<string, number>;
       volvo: Map<string, number>;
+      // Peor sobrevelocidad detectada en el día por este chofer/unidad
+      // (gpsSpeed - cartLimit más alto). Sirve para que Molina vea la
+      // gravedad además del conteo (ej. "12 sobrevelocidades, máx +35
+      // km/h sobre límite 60 km/h").
+      maxSobreLimite: { sobre: number; gpsSpeed: number; cartLimit: number } | null;
     }
     const grupos = new Map<string, Grupo>();
     for (const e of eventos) {
@@ -4846,6 +4871,7 @@ export const resumenConductaManejoDiario = onSchedule(
           atribuido: atribuidoPorAsig,
           sitrack: new Map(),
           volvo: new Map(),
+          maxSobreLimite: null,
         };
         grupos.set(key, g);
       } else if (!atribuidoPorAsig && keyDni !== "NO_ID") {
@@ -4857,6 +4883,21 @@ export const resumenConductaManejoDiario = onSchedule(
         g.sitrack.set(e.tipoLabel, (g.sitrack.get(e.tipoLabel) ?? 0) + 1);
       } else {
         g.volvo.set(e.tipoLabel, (g.volvo.get(e.tipoLabel) ?? 0) + 1);
+      }
+      // Trackeamos la peor sobrevelocidad para mostrarla resaltada.
+      if (
+        e.sobreLimiteKmh !== undefined &&
+        e.gpsSpeed !== undefined &&
+        e.cartLimit !== undefined &&
+        e.sobreLimiteKmh > 0 &&
+        (g.maxSobreLimite === null ||
+          e.sobreLimiteKmh > g.maxSobreLimite.sobre)
+      ) {
+        g.maxSobreLimite = {
+          sobre: e.sobreLimiteKmh,
+          gpsSpeed: e.gpsSpeed,
+          cartLimit: e.cartLimit,
+        };
       }
     }
 
@@ -4986,6 +5027,17 @@ export const resumenConductaManejoDiario = onSchedule(
         .sort((x, y) => y[1] - x[1]);
       for (const [t, c] of ordTipos) {
         lineas.push(`  • ${t}: ${c}`);
+      }
+      // Mostrar la peor sobrevelocidad detectada del día (si la hay).
+      // Sitrack genera el evento cuando la velocidad supera el límite
+      // cartográfico — incluimos el detalle (km/h alcanzados vs límite)
+      // para que Molina vea la gravedad además del conteo.
+      if (g.maxSobreLimite !== null) {
+        const m = g.maxSobreLimite;
+        lineas.push(
+          `    ↳ Peor exceso: ${m.gpsSpeed.toFixed(0)} km/h ` +
+          `(límite ${m.cartLimit.toFixed(0)} km/h, +${m.sobre.toFixed(0)})`
+        );
       }
       return lineas.join("\n");
     });
