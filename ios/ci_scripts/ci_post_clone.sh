@@ -89,6 +89,25 @@ cat ios/Flutter/Generated.xcconfig | grep -E "FLUTTER_ROOT|FLUTTER_APPLICATION_P
 if [ -n "$IOS_DIST_CERT_P12_BASE64" ] && [ -n "$IOS_DIST_CERT_P12_PASSWORD" ] && [ -n "$IOS_DIST_PROFILE_BASE64" ]; then
     echo "==> Manual Signing detectado: importando cert + profile..."
 
+    # Diagnostico: el build 7 fallo con "base64: stdin: (null): error decoding"
+    # porque el base64 pegado en App Store Connect tenia CRLF de Windows o
+    # se trunco. Limpiamos whitespace + chequeamos tamano antes de decodear.
+    CERT_B64_CLEAN=$(printf '%s' "$IOS_DIST_CERT_P12_BASE64" | tr -d '\r\n\t ')
+    PROFILE_B64_CLEAN=$(printf '%s' "$IOS_DIST_PROFILE_BASE64" | tr -d '\r\n\t ')
+
+    echo "   cert b64 length    : ${#CERT_B64_CLEAN} chars (raw ${#IOS_DIST_CERT_P12_BASE64})"
+    echo "   profile b64 length : ${#PROFILE_B64_CLEAN} chars (raw ${#IOS_DIST_PROFILE_BASE64})"
+    echo "   password length    : ${#IOS_DIST_CERT_P12_PASSWORD} chars"
+
+    if [ ${#CERT_B64_CLEAN} -lt 100 ]; then
+        echo "ERROR: IOS_DIST_CERT_P12_BASE64 vacio o muy corto (${#CERT_B64_CLEAN} chars). Revisar el secret en Xcode Cloud workflow."
+        exit 1
+    fi
+    if [ ${#PROFILE_B64_CLEAN} -lt 100 ]; then
+        echo "ERROR: IOS_DIST_PROFILE_BASE64 vacio o muy corto (${#PROFILE_B64_CLEAN} chars). Revisar el secret en Xcode Cloud workflow."
+        exit 1
+    fi
+
     # Crear keychain temporal solo para este build
     KEYCHAIN_PATH="$HOME/build.keychain"
     KEYCHAIN_PASSWORD="ci-temp-$(date +%s)"
@@ -98,8 +117,15 @@ if [ -n "$IOS_DIST_CERT_P12_BASE64" ] && [ -n "$IOS_DIST_CERT_P12_PASSWORD" ] &&
     security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
     security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
 
-    # Decodear .p12 e importar
-    echo "$IOS_DIST_CERT_P12_BASE64" | base64 --decode > "$HOME/cert.p12"
+    # Decodear .p12 e importar (printf '%s' evita newline final que corrompe base64)
+    printf '%s' "$CERT_B64_CLEAN" | base64 --decode > "$HOME/cert.p12"
+    CERT_SIZE=$(stat -f%z "$HOME/cert.p12" 2>/dev/null || wc -c < "$HOME/cert.p12")
+    echo "   cert.p12 decoded   : $CERT_SIZE bytes"
+    if [ "$CERT_SIZE" -lt 1000 ]; then
+        echo "ERROR: cert.p12 decoded vacio o muy chico ($CERT_SIZE bytes). El base64 esta corrupto."
+        exit 1
+    fi
+
     security import "$HOME/cert.p12" \
         -P "$IOS_DIST_CERT_P12_PASSWORD" \
         -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
@@ -112,8 +138,14 @@ if [ -n "$IOS_DIST_CERT_P12_BASE64" ] && [ -n "$IOS_DIST_CERT_P12_PASSWORD" ] &&
     # Instalar el provisioning profile
     PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
     mkdir -p "$PROFILES_DIR"
-    echo "$IOS_DIST_PROFILE_BASE64" | base64 --decode > \
-        "$PROFILES_DIR/Coopertrans_Movil_App_Store.mobileprovision"
+    PROFILE_PATH="$PROFILES_DIR/Coopertrans_Movil_App_Store.mobileprovision"
+    printf '%s' "$PROFILE_B64_CLEAN" | base64 --decode > "$PROFILE_PATH"
+    PROFILE_SIZE=$(stat -f%z "$PROFILE_PATH" 2>/dev/null || wc -c < "$PROFILE_PATH")
+    echo "   profile decoded    : $PROFILE_SIZE bytes"
+    if [ "$PROFILE_SIZE" -lt 1000 ]; then
+        echo "ERROR: profile decoded vacio o muy chico ($PROFILE_SIZE bytes). El base64 esta corrupto."
+        exit 1
+    fi
 
     echo "==> Manual Signing OK: cert importado + profile instalado."
 else
