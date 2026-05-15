@@ -209,9 +209,25 @@ PASO A PASO EN LA PC NUEVA
    PowerShell COMO ADMINISTRADOR:
        .\scripts\setup_pc_24x7.ps1
 
-6) Verificar que arranco
+6) Instalar el AUTO-UPDATE (recomendado)
+   PowerShell COMO ADMINISTRADOR:
+       .\scripts\instalar_auto_update.ps1
+
+   Esto agrega una Scheduled Task que cada 5 min:
+     - Hace git fetch + git pull si hay commits nuevos en whatsapp-bot/**
+     - npm install si package.json cambio
+     - Restart-Service CoopertransMovilBot
+     - Smoke test post-restart
+   A partir de aca, NO hace falta entrar mas a esta PC para deployar
+   cambios del bot — solo se pushea desde la PC de trabajo y se
+   actualiza solo en < 5 min.
+
+   Log del auto-update: logs\auto_update.log
+
+7) Verificar que arranco
        Get-Service CoopertransMovilBot       # Status: Running
        Get-Content logs\bot.out.log -Tail 30 # buscar "WhatsApp listo para enviar"
+       Get-ScheduledTask -TaskName CoopertransMovilBotAutoUpdate  # Ready
 
 ================================================================
 APAGAR EL BOT EN LA PC VIEJA
