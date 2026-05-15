@@ -4855,7 +4855,7 @@ export const resumenConductaManejoDiario = onSchedule(
         `${saludo},\n\n` +
         `🚧 *Conducta de manejo — ${fmtFecha}*\n\n` +
         "✅ Sin eventos: ningún tractor registró eventos de conducta " +
-        "peligrosa ayer (Sitrack + Volvo AEBS/ESP).\n\n" +
+        "peligrosa ayer.\n\n" +
         BANNER_TESTING +
         "_Coopertrans Móvil — Aviso automático._";
       await db.collection("COLA_WHATSAPP").add({
@@ -4908,6 +4908,17 @@ export const resumenConductaManejoDiario = onSchedule(
     });
 
     // ─── Construir bloques ─────────────────────────────────────────
+    // Mapeo de códigos técnicos a nombres legibles. Los eventos
+    // Sitrack ya vienen con `event_name` en español del catálogo
+    // ("Salida de carril", "Frenada brusca", etc.) → se usan tal cual.
+    // Los Volvo llegan como sigla técnica (AEBS, ESP) → traducir.
+    const ETIQUETAS_LEGIBLES: Record<string, string> = {
+      AEBS: "Frenado automático de emergencia",
+      ESP: "Control de estabilidad",
+    };
+    const traducir = (tipo: string): string =>
+      ETIQUETAS_LEGIBLES[tipo] ?? tipo;
+
     let huboAtribuidos = false;
     const bloques = gruposOrdenados.map((g) => {
       const lineas: string[] = [];
@@ -4922,18 +4933,21 @@ export const resumenConductaManejoDiario = onSchedule(
         if (g.atribuido) huboAtribuidos = true;
       }
       lineas.push(titulo);
-      if (g.sitrack.size > 0) {
-        lineas.push("  Sitrack:");
-        const ordTipos = [...g.sitrack.entries()].sort((x, y) => y[1] - x[1]);
-        for (const [t, c] of ordTipos) {
-          lineas.push(`    • ${t}: ${c}`);
-        }
+      // Merge Sitrack + Volvo en un solo mapa de eventos (sin distinguir
+      // fuente — para Molina es info de seguridad, no de qué sistema vino).
+      const todosLosEventos = new Map<string, number>();
+      for (const [t, c] of g.sitrack.entries()) {
+        const etiqueta = traducir(t);
+        todosLosEventos.set(etiqueta, (todosLosEventos.get(etiqueta) ?? 0) + c);
       }
-      if (g.volvo.size > 0) {
-        const partes = [...g.volvo.entries()]
-          .sort((x, y) => y[1] - x[1])
-          .map(([t, c]) => `${t}: ${c}`);
-        lineas.push(`  Volvo: ${partes.join(" · ")}`);
+      for (const [t, c] of g.volvo.entries()) {
+        const etiqueta = traducir(t);
+        todosLosEventos.set(etiqueta, (todosLosEventos.get(etiqueta) ?? 0) + c);
+      }
+      const ordTipos = [...todosLosEventos.entries()]
+        .sort((x, y) => y[1] - x[1]);
+      for (const [t, c] of ordTipos) {
+        lineas.push(`  • ${t}: ${c}`);
       }
       return lineas.join("\n");
     });

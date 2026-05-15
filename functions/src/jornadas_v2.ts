@@ -775,9 +775,9 @@ export async function armarResumenJornadasDiario(): Promise<void> {
     `${excesos.length} jornada${excesos.length === 1 ? "" : "s"} con ` +
     "incidencias:\n\n" +
     `${lineas.join("\n\n")}\n\n` +
-    "_Modelo: 3 bloques de 4 hs (3 h 45 manejo + 15 min pausa). " +
-    "Veda nocturna 00:00-06:00 ART. Cierre de jornada por 8 hs sin " +
-    "moverse en radio 1000 m._\n\n" +
+    "_Modelo de jornada: 3 bloques de 4 hs (3 h 45 manejo + 15 min " +
+    "pausa). Veda nocturna desde las 00:00 ART. La jornada se cierra " +
+    "después de 8 hs con el camión detenido._\n\n" +
     BANNER_TESTING + "_Coopertrans Móvil — Aviso automático._";
 
   await db().collection("COLA_WHATSAPP").add({
