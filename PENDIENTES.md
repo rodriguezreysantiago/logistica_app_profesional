@@ -7,6 +7,81 @@ Convención: orden cronológico (los próximos arriba). Sacar el ítem cuando se
 
 ---
 
+## 📅 2026-05-16 EOD — Cierre del día (iOS TestFlight operativo)
+
+**Logro del día**: 🎉 **App instalable en iPhone via TestFlight**.
+Build #11 Xcode Cloud con log 100% limpio (3 exports OK, 0 errores).
+TestFlight Internal Testing andando — Santiago ya tiene la app
+instalada en su iPhone.
+
+### Commits del día (4)
+- `5f97188` — `CFBundleIconName=AppIcon` en Info.plist (faltaba ícono
+  en TestFlight, requisito iOS 13+).
+- `14eb01a` — `ENABLE_APP_INTENTS_INTEGRATION=NO` en Podfile post_install
+  (apaga 19 warnings cosméticos por pod).
+- `cd585f0` — `install_profile_optional` en `ci_post_clone.sh` para
+  silenciar errores ruidosos del log (~200 errores de "No profiles
+  for..." en exports Ad Hoc + Development).
+- `a7acc95` — `NSLocationAlwaysAndWhenInUseUsageDescription` en
+  Info.plist (warning ITMS-90683 del email Apple post-upload).
+
+### Lo que se hizo en App Store Connect / portal Apple
+- 2 profiles nuevos creados en developer.apple.com:
+  - `Coopertrans Movil Ad Hoc` (NLN3W2KT9J-style)
+  - `Coopertrans Movil Development`
+  - Ambos con dummy UDID `00008101-001A2B3C4D5E6F70` (Apple no valida
+    que el UDID sea real, solo formato).
+- 2 secrets nuevos subidos al workflow Xcode Cloud:
+  - `IOS_ADHOC_PROFILE_BASE64`
+  - `IOS_DEV_PROFILE_BASE64`
+- Workflow ahora tiene **5 secrets** total (cert + password + 3 profiles).
+- Build #11 disparado → todo OK.
+- Grupo "Vecchi Choferes" creado en TestFlight Pruebas Externas (vacío
+  todavía).
+
+### Pendiente de push (sin pushear todavía)
+```powershell
+git push  # commit a7acc95 (Info.plist con NSLocationAlways...)
+```
+Sin esto, el próximo Build #12 vuelve a tirar el warning ITMS-90683
+(no bloquea, pero queda ruidoso).
+
+### Pendiente para próxima sesión — completar External Testing
+El Build #11 está OK en TestFlight Internal pero falta para External:
+
+1. **App Store Connect → Distribución → Información de la app**:
+   - Categoría principal: `Productividad` (o `Negocios`)
+   - Clasificación por edades: completar cuestionario respondiendo
+     "No"/"Ninguno" a todo → resultado `4+`.
+   - NO hace falta cargar Encryption Documentation (exenta por usar
+     solo cifrado estándar del OS — `ITSAppUsesNonExemptEncryption=false`).
+
+2. **TestFlight → "Información para las pruebas"** (sidebar Adicional):
+   - Email comentarios: `santiagocoopertrans@gmail.com`
+   - Información de contacto: nombre + email + tel
+   - Descripción Beta (~200 chars sobre qué hace la app)
+   - Política de privacidad: URL de Firebase Hosting (la misma que
+     Play Store)
+   - Qué probar: "Login con DNI + clave. Probar navegación general"
+   - Cuenta de prueba: DNI + clave de un admin/test
+
+3. **TestFlight → "Vecchi Choferes"** → tab Compilaciones → "+" →
+   agregar Build 11 → **Submit for Beta App Review** (1-2 días, primer
+   build external).
+
+4. Después de Beta Review aprobado:
+   - Cargar choferes vía CSV (sin header: `email,first_name,last_name`)
+     o vía Public Link (`testflight.apple.com/join/XXXXXX`).
+   - Solo Apple IDs válidos (típicamente Gmail).
+
+### Helpers iOS para futuro
+- `G:\Mi unidad\ClaudeCodeSync\secrets-ios\convertir_profiles_extra.ps1` —
+  convierte .mobileprovision a base64 limpio para subir como secret.
+- `G:\Mi unidad\ClaudeCodeSync\secrets-ios\README.md` — manual completo
+  con instrucciones de regeneración cert + 3 profiles.
+
+---
+
 ## 📅 2026-05-15 EOD — Cierre del día (lo que quedó deployable)
 
 Sesión gigante: 17 commits + bump 1.0.55+58 → 1.0.56+59. Lo que sigue
@@ -41,32 +116,6 @@ node scripts/limpiar_jornadas_chofer_legacy.js --apply
   (event_id 8/9).
 - Mensaje del cron `resumenExcesosJornadaDiario` (vigilador v2 con
   modelo bloques 3×4h).
-
----
-
-## 📅 Post 2026-05-15 — Build #9 Xcode Cloud (iOS Plan A)
-
-**Estado al cierre**: 8 builds previos fallaron — los primeros por
-backend Apple propagando cuenta nueva ("Communication with Apple
-failed"), después por base64 corrupto de los secrets en App Store
-Connect (paste duplicado).
-
-Cambios commiteados (ya están en `main`):
-- `d3b7155` — `ci_post_clone.sh` con `printf '%s' + tr -d '\r\n\t '` +
-  validación de longitudes y tamaños. Si vuelve a fallar, los logs
-  ahora dicen exactamente qué env var está mal.
-- Cert (`coopertrans_dist.p12`, password `coopertrans2026`) y profile
-  (`Coopertrans_Movil_App_Store.mobileprovision`) backupeados en
-  `G:\Mi unidad\ClaudeCodeSync\secrets-ios\`.
-- 3 secret env vars seteadas en el workflow Xcode Cloud
-  (`IOS_DIST_CERT_P12_BASE64`, `_PASSWORD`, `IOS_DIST_PROFILE_BASE64`).
-
-**Acción**: App Store Connect → Coopertrans Móvil → Xcode Cloud →
-workflow → Start Build → branch `main`. Esperar ~30 min.
-
-Si OK: mail "Build available in TestFlight" a `santiagocoopertrans@gmail.com`.
-Si falla: bajar logs y revisar — `cert b64 length: 0` indica secret
-no inyectado por Xcode Cloud (problema Apple, no nuestro).
 
 ---
 
@@ -120,12 +169,12 @@ instalado en la PC dedicada — RDP funciona out-of-the-box.
 Módulos activos pero feeds vacíos. Pedir a Volvo Argentina alta de 48
 choferes + activación transmisión por unidad.
 
-### iOS post-Build OK
-Una vez TestFlight Internal funcione:
-- Crear grupo "External Testing" en App Store Connect.
-- Compartir link de TestFlight a choferes con iPhone.
-- Listing público (capturas + descripción) cuando se quiera publicar
-  al App Store. Material similar a `docs/PLAY_STORE_LISTING.md`.
+### iOS — Listing público App Store (cuando se quiera publicar)
+- Capturas de pantalla (mínimo iPhone 6.7" y 6.5").
+- Descripción larga + corta + keywords.
+- Material similar a `docs/PLAY_STORE_LISTING.md` (reutilizable).
+- DSA Trader Status para distribución en EU (marcar "No comerciante"
+  para uso interno sin facturación a usuarios).
 
 ### Refinamientos ICM (no urgentes)
 - Cuando haya histórico de odómetros por patente (snapshot diario
