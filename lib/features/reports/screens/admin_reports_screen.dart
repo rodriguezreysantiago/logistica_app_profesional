@@ -10,6 +10,7 @@ import '../services/report_checklist.dart';
 import '../services/report_consumo.dart';
 import '../services/report_flota.dart';
 import '../services/report_gomeria.dart';
+import '../services/report_icm.dart';
 
 /// Centro de Reportes (admin).
 ///
@@ -43,6 +44,15 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await ReportGomeriaService.mostrarOpcionesYGenerar(context);
+    } catch (e) {
+      if (mounted) _mostrarSnack(messenger, 'Error: $e', esError: true);
+    }
+  }
+
+  Future<void> _ejecutarReporteIcm() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ReportIcmService.mostrarOpcionesYGenerar(context);
     } catch (e) {
       if (mounted) _mostrarSnack(messenger, 'Error: $e', esError: true);
     }
@@ -186,6 +196,17 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                 icono: Icons.tire_repair_rounded,
                 color: AppColors.accentTeal,
                 onTap: _generando ? null : _ejecutarReporteGomeria,
+              ),
+              const SizedBox(height: 12),
+              _ReportCard(
+                titulo: 'ICM Semanal (Conducta de Manejo)',
+                descripcion:
+                    'Resumen flota + detalle por chofer + top 5 mejores y '
+                    'peores. Basado en los mismos eventos Sitrack que YPF '
+                    'audita en su Tablero ICM.',
+                icono: Icons.leaderboard_rounded,
+                color: AppColors.accentRed,
+                onTap: _generando ? null : _ejecutarReporteIcm,
               ),
             ],
           ),

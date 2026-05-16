@@ -5388,6 +5388,230 @@ export const recomputeDashboardStats = onSchedule(
 //   `{ viajeId: string }` (legacy compat).
 // Output: `{ numero: number, esReimpresion: boolean }`
 
+// ============================================================================
+// recomputeIcmSemanalScheduled — agregados ICM semanales en `ICM_SEMANAL`
+// ============================================================================
+//
+// Cada lunes 6 AM ART calcula los agregados de la SEMANA ANTERIOR
+// (lun-dom que acaba de cerrar) y los persiste en `ICM_SEMANAL/{YYYY-WW}`.
+//
+// El cliente Flutter (módulo ICM) lee primero de esta colección (rápido,
+// ~50 docs históricos máximo) y solo cae al cálculo on-the-fly desde
+// SITRACK_EVENTOS para la semana actual que aún no cerró. Eso evita
+// recomputar 12 semanas de eventos cada vez que se abre el reporte.
+//
+// Schema del doc `ICM_SEMANAL/{YYYY-WW}`:
+//   {
+//     semana_id: string ("2026-W20" — ISO week format),
+//     semana_inicio_ts: Timestamp (lunes 00:00 ART),
+//     semana_fin_ts: Timestamp (siguiente lunes 00:00 ART),
+//     semana_label: string ("12-18 May"),
+//     icm_promedio: number (0-100),
+//     total_eventos: number,
+//     choferes_activos: number,
+//     choferes_verdes: number,    // ICM >= 80
+//     choferes_amarillos: number, // 60 <= ICM < 80
+//     choferes_rojos: number,     // ICM < 60
+//     choferes: [{ dni, nombre, icm, total_eventos, ratio_100km, categoria }],
+//     top_5_mejores: [{ dni, nombre, icm }],
+//     top_5_peores: [{ dni, nombre, icm }],
+//     calculado_en: Timestamp (server),
+//   }
+
+export const recomputeIcmSemanalScheduled = onSchedule(
+  {
+    // Lunes 6 AM ART — la semana que termina justo el domingo 23:59
+    // ya está cerrada y completa.
+    schedule: "0 6 * * 1",
+    timeZone: "America/Argentina/Buenos_Aires",
+    timeoutSeconds: 240,
+    memory: "512MiB",
+  },
+  async () => {
+    logger.info("[recomputeIcmSemanalScheduled] iniciando");
+
+    // ─── 1. Calcular rango de la SEMANA ANTERIOR en ART ────────────
+    // "Hoy" es el lunes 6 AM ART. La semana cerrada va del lunes
+    // anterior 00:00 al lunes actual 00:00.
+    const ahora = new Date();
+    const fechaArtHoy = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(ahora);
+    // Lunes actual 00:00 ART en epoch ms.
+    const lunesActualMs = Date.parse(`${fechaArtHoy}T00:00:00-03:00`);
+    const lunesAnteriorMs = lunesActualMs - 7 * 24 * 60 * 60 * 1000;
+
+    const semanaInicio = new Date(lunesAnteriorMs);
+    const semanaFin = new Date(lunesActualMs);
+
+    // ID ISO Week (ej. "2026-W20")
+    const semanaId = _isoWeekId(semanaInicio);
+    const semanaLabel = _semanaLabel(semanaInicio, semanaFin);
+
+    logger.info("[recomputeIcmSemanalScheduled] rango", {
+      semanaId,
+      semanaLabel,
+      desde: semanaInicio.toISOString(),
+      hasta: semanaFin.toISOString(),
+    });
+
+    // ─── 2. Lookup nombres de empleados ───────────────────────────
+    const empSnap = await db.collection("EMPLEADOS").get();
+    const nombrePorDni = new Map<string, string>();
+    for (const d of empSnap.docs) {
+      const data = d.data();
+      const dni = (data.DNI ?? d.id).toString();
+      const nombre = (data.NOMBRE ?? "").toString().trim();
+      if (nombre) nombrePorDni.set(dni, nombre);
+    }
+
+    // ─── 3. Cargar eventos peligrosos del rango ───────────────────
+    const evSnap = await db
+      .collection("SITRACK_EVENTOS")
+      .where("report_date", ">=", Timestamp.fromMillis(lunesAnteriorMs))
+      .where("report_date", "<", Timestamp.fromMillis(lunesActualMs))
+      .get();
+
+    interface AggChofer {
+      dni: string;
+      nombre: string;
+      totalEventos: number;
+      eventosPorTipo: Record<string, number>;
+    }
+    const porChofer = new Map<string, AggChofer>();
+    for (const d of evSnap.docs) {
+      const data = d.data();
+      const eventId = data.event_id;
+      if (typeof eventId !== "number" ||
+          !TIPOS_PELIGROSOS_SITRACK.has(eventId)) continue;
+      const dni = (data.driver_dni ?? "").toString().trim();
+      if (!dni) continue;
+      const nombreEv = (data.event_name ?? `Evento ${eventId}`).toString();
+      const agg: AggChofer = porChofer.get(dni) ?? {
+        dni,
+        nombre: nombrePorDni.get(dni) ?? `DNI ${dni}`,
+        totalEventos: 0,
+        eventosPorTipo: {} as Record<string, number>,
+      };
+      agg.totalEventos++;
+      agg.eventosPorTipo[nombreEv] =
+        (agg.eventosPorTipo[nombreEv] ?? 0) + 1;
+      porChofer.set(dni, agg);
+    }
+
+    // ─── 4. Calcular ICM por chofer (misma fórmula que cliente) ───
+    // Baseline km: 1 evento = 100 km (mientras no haya histórico de
+    // odómetros). FACTOR=5 → 4 ev/100km = ICM 80, 8 ev/100km = ICM 60.
+    interface ChoferAgg {
+      dni: string;
+      nombre: string;
+      icm: number;
+      total_eventos: number;
+      ratio_100km: number;
+      categoria: string;
+      eventos_por_tipo: Record<string, number>;
+    }
+    const FACTOR = 5;
+    const choferes: ChoferAgg[] = [];
+    for (const a of porChofer.values()) {
+      const km = a.totalEventos * 100;
+      const ratio = km > 0 ? a.totalEventos / (km / 100) : 0;
+      const icmRaw = km > 0 ? 100 - ratio * FACTOR : 100;
+      const icm = Math.max(0, Math.min(100, icmRaw));
+      const categoria =
+        icm >= 80 ? "BAJO" : (icm >= 60 ? "MEDIO" : "ALTO");
+      choferes.push({
+        dni: a.dni,
+        nombre: a.nombre,
+        icm: Number(icm.toFixed(2)),
+        total_eventos: a.totalEventos,
+        ratio_100km: Number(ratio.toFixed(2)),
+        categoria,
+        eventos_por_tipo: a.eventosPorTipo,
+      });
+    }
+
+    // ─── 5. Agregados flota ───────────────────────────────────────
+    const totalEventos = choferes.reduce((acc, c) => acc + c.total_eventos, 0);
+    const sumIcm = choferes.reduce((acc, c) => acc + c.icm, 0);
+    const icmPromedio = choferes.length > 0 ?
+      Number((sumIcm / choferes.length).toFixed(2)) :
+      0;
+    const verdes = choferes.filter((c) => c.categoria === "BAJO").length;
+    const amarillos = choferes.filter((c) => c.categoria === "MEDIO").length;
+    const rojos = choferes.filter((c) => c.categoria === "ALTO").length;
+
+    // Sort para top mejores/peores
+    const sortedAsc = [...choferes].sort((a, b) => a.icm - b.icm);
+    const top5Peores = sortedAsc.slice(0, 5).map((c) => ({
+      dni: c.dni, nombre: c.nombre, icm: c.icm,
+    }));
+    const top5Mejores = sortedAsc.slice(-5).reverse().map((c) => ({
+      dni: c.dni, nombre: c.nombre, icm: c.icm,
+    }));
+
+    // ─── 6. Persistir en ICM_SEMANAL/{YYYY-WW} ────────────────────
+    await db.collection("ICM_SEMANAL").doc(semanaId).set({
+      semana_id: semanaId,
+      semana_inicio_ts: Timestamp.fromMillis(lunesAnteriorMs),
+      semana_fin_ts: Timestamp.fromMillis(lunesActualMs),
+      semana_label: semanaLabel,
+      icm_promedio: icmPromedio,
+      total_eventos: totalEventos,
+      choferes_activos: choferes.length,
+      choferes_verdes: verdes,
+      choferes_amarillos: amarillos,
+      choferes_rojos: rojos,
+      choferes,
+      top_5_mejores: top5Mejores,
+      top_5_peores: top5Peores,
+      calculado_en: FieldValue.serverTimestamp(),
+    });
+
+    logger.info("[recomputeIcmSemanalScheduled] OK", {
+      semanaId,
+      icmPromedio,
+      totalEventos,
+      choferesActivos: choferes.length,
+      verdes, amarillos, rojos,
+    });
+  }
+);
+
+// Helper: ID semana ISO 8601 ("YYYY-WNN") de un Date.
+function _isoWeekId(d: Date): string {
+  // ISO 8601: la semana 1 es la que contiene el primer jueves del año.
+  const target = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (target.getUTCDay() + 6) % 7; // lunes=0 ... domingo=6
+  target.setUTCDate(target.getUTCDate() - dayNum + 3); // jueves de la semana
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(
+    ((target.getTime() - firstThursday.getTime()) / 86400000 -
+      3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7
+  );
+  const year = target.getUTCFullYear();
+  return `${year}-W${week.toString().padStart(2, "0")}`;
+}
+
+// Helper: label legible de una semana ("12-18 May" o cross-mes "30 Abr - 6 May").
+function _semanaLabel(inicio: Date, fin: Date): string {
+  const meses = [
+    "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+    "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+  ];
+  const finDom = new Date(fin.getTime() - 24 * 60 * 60 * 1000);
+  // Convertir a ART para extraer día/mes locales
+  const inicioArt = new Date(inicio.getTime() - 3 * 60 * 60 * 1000);
+  const finArt = new Date(finDom.getTime() - 3 * 60 * 60 * 1000);
+  if (inicioArt.getUTCMonth() === finArt.getUTCMonth()) {
+    return `${inicioArt.getUTCDate()}-${finArt.getUTCDate()} ` +
+      meses[inicioArt.getUTCMonth()];
+  }
+  return `${inicioArt.getUTCDate()} ${meses[inicioArt.getUTCMonth()]} - ` +
+    `${finArt.getUTCDate()} ${meses[finArt.getUTCMonth()]}`;
+}
+
 interface AsignarReciboInput {
   adelantoId?: unknown;
   viajeId?: unknown;

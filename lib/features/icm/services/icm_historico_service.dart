@@ -117,62 +117,158 @@ class IcmHistoricoService {
   }
 
   /// Devuelve las últimas N semanas con agregados de TODA la flota.
+  ///
+  /// Usa `ICM_SEMANAL/{YYYY-WW}` cuando la semana ya cerró y el cron
+  /// `recomputeIcmSemanalScheduled` la persistió. Solo recurre al
+  /// cálculo on-the-fly para la semana ACTUAL (que aún no cerró). Esto
+  /// evita procesar miles de eventos al abrir el reporte semanal.
   static Future<List<IcmSemanaFlota>> historicoFlota({
     required FirebaseFirestore db,
     required Map<String, String> nombrePorDni,
     int cantidadSemanas = 12,
   }) async {
     final semanas = _generarSemanas(cantidadSemanas);
+    final ahoraMs = DateTime.now().millisecondsSinceEpoch;
     final result = <IcmSemanaFlota>[];
     for (final s in semanas) {
-      final ranking = await IcmCalculator.calcularRanking(
-        db: db,
-        desdeMs: s.inicioMs,
-        hastaMs: s.finMs,
-        nombrePorDni: nombrePorDni,
-      );
-      var totalEventos = 0;
-      var verdes = 0;
-      var amarillos = 0;
-      var rojos = 0;
-      var sumIcm = 0.0;
-      for (final c in ranking) {
-        totalEventos += c.totalEventos;
-        sumIcm += c.icm;
-        switch (c.categoria) {
-          case CategoriaIcm.bajo:
-            verdes++;
-            break;
-          case CategoriaIcm.medio:
-            amarillos++;
-            break;
-          case CategoriaIcm.alto:
-            rojos++;
-            break;
-          case CategoriaIcm.sinDatos:
-            break;
-        }
+      final esSemanaActual = s.finMs > ahoraMs;
+      IcmSemanaFlota? cargada;
+      if (!esSemanaActual) {
+        cargada = await _leerIcmSemanalDoc(db, s);
       }
-      final icmProm =
-          ranking.isNotEmpty ? sumIcm / ranking.length : 0.0;
-      // Ranking viene del peor al mejor: top 5 peores = primeros 5,
-      // top 5 mejores = últimos 5 (invertidos).
-      final peores = ranking.take(5).toList();
-      final mejores = ranking.reversed.take(5).toList();
-      result.add(IcmSemanaFlota(
-        semanaInicio: s.inicio,
-        labelSemana: s.label,
-        totalEventos: totalEventos,
-        choferesActivos: ranking.length,
-        icmPromedio: icmProm,
-        choferesVerdes: verdes,
-        choferesAmarillos: amarillos,
-        choferesRojos: rojos,
-        top5Mejores: mejores,
-        top5Peores: peores,
-      ));
+      cargada ??= await _calcularSemanaOnTheFly(
+        db: db,
+        nombrePorDni: nombrePorDni,
+        semana: s,
+      );
+      result.add(cargada);
     }
     return result;
+  }
+
+  /// Lee `ICM_SEMANAL/{YYYY-WW}` si existe y mapea a `IcmSemanaFlota`.
+  /// Devuelve null si el doc no existe (cron no corrió todavía o falla).
+  static Future<IcmSemanaFlota?> _leerIcmSemanalDoc(
+    FirebaseFirestore db,
+    _Semana s,
+  ) async {
+    try {
+      final id = _isoWeekId(s.inicio);
+      final snap = await db.collection('ICM_SEMANAL').doc(id).get();
+      if (!snap.exists) return null;
+      final d = snap.data()!;
+      final mejores = ((d['top_5_mejores'] as List?) ?? const [])
+          .map((e) => _topItemAIcmChofer(
+              e as Map<String, dynamic>, CategoriaIcm.bajo))
+          .toList();
+      final peores = ((d['top_5_peores'] as List?) ?? const [])
+          .map((e) => _topItemAIcmChofer(
+              e as Map<String, dynamic>, CategoriaIcm.alto))
+          .toList();
+      return IcmSemanaFlota(
+        semanaInicio: s.inicio,
+        labelSemana: s.label,
+        totalEventos: (d['total_eventos'] as num?)?.toInt() ?? 0,
+        choferesActivos: (d['choferes_activos'] as num?)?.toInt() ?? 0,
+        icmPromedio: (d['icm_promedio'] as num?)?.toDouble() ?? 0.0,
+        choferesVerdes: (d['choferes_verdes'] as num?)?.toInt() ?? 0,
+        choferesAmarillos: (d['choferes_amarillos'] as num?)?.toInt() ?? 0,
+        choferesRojos: (d['choferes_rojos'] as num?)?.toInt() ?? 0,
+        top5Mejores: mejores,
+        top5Peores: peores,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static IcmChofer _topItemAIcmChofer(
+    Map<String, dynamic> e, CategoriaIcm catFallback,
+  ) {
+    final dni = (e['dni'] ?? '').toString();
+    final nombre = (e['nombre'] ?? 'DNI $dni').toString();
+    final icm = (e['icm'] as num?)?.toDouble() ?? 0.0;
+    return IcmChofer(
+      choferDni: dni,
+      choferNombre: nombre,
+      totalEventos: 0, // top items no cargan total — drill-down desde ranking
+      kmRecorridos: 0,
+      infraccionesPor100Km: 0,
+      icm: icm,
+      categoria: icm >= 80
+          ? CategoriaIcm.bajo
+          : (icm >= 60 ? CategoriaIcm.medio : CategoriaIcm.alto),
+      eventosPorTipo: const {},
+      patentes: const [],
+    );
+  }
+
+  /// Cálculo on-the-fly desde SITRACK_EVENTOS — fallback cuando el
+  /// agregado pre-calculado de ICM_SEMANAL no está disponible (semana
+  /// actual o cron no corrió).
+  static Future<IcmSemanaFlota> _calcularSemanaOnTheFly({
+    required FirebaseFirestore db,
+    required Map<String, String> nombrePorDni,
+    required _Semana semana,
+  }) async {
+    final ranking = await IcmCalculator.calcularRanking(
+      db: db,
+      desdeMs: semana.inicioMs,
+      hastaMs: semana.finMs,
+      nombrePorDni: nombrePorDni,
+    );
+    var totalEventos = 0;
+    var verdes = 0;
+    var amarillos = 0;
+    var rojos = 0;
+    var sumIcm = 0.0;
+    for (final c in ranking) {
+      totalEventos += c.totalEventos;
+      sumIcm += c.icm;
+      switch (c.categoria) {
+        case CategoriaIcm.bajo:
+          verdes++;
+          break;
+        case CategoriaIcm.medio:
+          amarillos++;
+          break;
+        case CategoriaIcm.alto:
+          rojos++;
+          break;
+        case CategoriaIcm.sinDatos:
+          break;
+      }
+    }
+    final icmProm = ranking.isNotEmpty ? sumIcm / ranking.length : 0.0;
+    final peores = ranking.take(5).toList();
+    final mejores = ranking.reversed.take(5).toList();
+    return IcmSemanaFlota(
+      semanaInicio: semana.inicio,
+      labelSemana: semana.label,
+      totalEventos: totalEventos,
+      choferesActivos: ranking.length,
+      icmPromedio: icmProm,
+      choferesVerdes: verdes,
+      choferesAmarillos: amarillos,
+      choferesRojos: rojos,
+      top5Mejores: mejores,
+      top5Peores: peores,
+    );
+  }
+
+  /// ID semana ISO 8601 ("YYYY-WNN"). Mismo algoritmo que el cron
+  /// server-side (`recomputeIcmSemanalScheduled._isoWeekId`).
+  static String _isoWeekId(DateTime d) {
+    final target = DateTime.utc(d.year, d.month, d.day);
+    final dayNum = (target.weekday + 6) % 7; // lunes=0 ... domingo=6
+    final thursday = target.add(Duration(days: 3 - dayNum));
+    final firstThursday = DateTime.utc(thursday.year, 1, 4);
+    final firstThursdayDayNum = (firstThursday.weekday + 6) % 7;
+    final week = 1 +
+        ((thursday.difference(firstThursday).inDays - 3 + firstThursdayDayNum) /
+                7)
+            .round();
+    return '${thursday.year}-W${week.toString().padLeft(2, '0')}';
   }
 
   /// Genera la lista de semanas (lunes 00:00 ART → siguiente lunes
