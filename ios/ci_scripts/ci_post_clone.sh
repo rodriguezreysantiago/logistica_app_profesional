@@ -147,7 +147,56 @@ if [ -n "$IOS_DIST_CERT_P12_BASE64" ] && [ -n "$IOS_DIST_CERT_P12_PASSWORD" ] &&
         exit 1
     fi
 
-    echo "==> Manual Signing OK: cert importado + profile instalado."
+    # ─── Profiles adicionales OPCIONALES (Ad Hoc + Development) ───────
+    # Xcode Cloud SIEMPRE genera los 3 tipos de export-archive (App Store
+    # + Ad Hoc + Development) en paralelo, independiente de la
+    # "Preparacion de la distribucion" elegida en el workflow. Si solo
+    # tenemos el profile App Store (caso original), los exports Ad Hoc
+    # y Development fallan con "No profiles for 'com.coopertrans.movil'
+    # were found" — son errores ruidosos en el log que NO afectan el
+    # build (el app-store export sigue OK), pero molestan.
+    #
+    # Si las env vars IOS_ADHOC_PROFILE_BASE64 y IOS_DEV_PROFILE_BASE64
+    # estan setadas, instalamos esos profiles tambien y los 3 exports
+    # succeed. Sin las env vars, el comportamiento es identico al
+    # anterior (solo App Store ok, los otros 2 fallan ruidosamente).
+    #
+    # Setup en Xcode Cloud (opcional):
+    #   IOS_ADHOC_PROFILE_BASE64  (Secret) — base64 del .mobileprovision
+    #     Ad Hoc bajado desde developer.apple.com/account/resources/profiles
+    #   IOS_DEV_PROFILE_BASE64    (Secret) — base64 del .mobileprovision
+    #     iOS App Development bajado del portal
+    install_profile_optional() {
+        local var_b64="$1"   # contenido base64 ya en variable
+        local nombre="$2"    # nombre del archivo para guardar
+        local etiqueta="$3"  # etiqueta legible para logs
+        if [ -z "$var_b64" ]; then
+            echo "   $etiqueta: skip (env var no seteada)"
+            return 0
+        fi
+        local b64_clean
+        b64_clean=$(printf '%s' "$var_b64" | tr -d '\r\n\t ')
+        if [ ${#b64_clean} -lt 100 ]; then
+            echo "   $etiqueta: ERROR base64 muy corto (${#b64_clean} chars), skip"
+            return 0
+        fi
+        local out_path="$PROFILES_DIR/$nombre"
+        printf '%s' "$b64_clean" | base64 --decode > "$out_path"
+        local sz
+        sz=$(stat -f%z "$out_path" 2>/dev/null || wc -c < "$out_path")
+        if [ "$sz" -lt 1000 ]; then
+            echo "   $etiqueta: ERROR profile decoded vacio ($sz bytes), skip"
+            rm -f "$out_path"
+            return 0
+        fi
+        echo "   $etiqueta: instalado ($sz bytes)"
+    }
+    install_profile_optional "$IOS_ADHOC_PROFILE_BASE64" \
+        "Coopertrans_Movil_Ad_Hoc.mobileprovision" "Ad Hoc profile"
+    install_profile_optional "$IOS_DEV_PROFILE_BASE64" \
+        "Coopertrans_Movil_Development.mobileprovision" "Development profile"
+
+    echo "==> Manual Signing OK: cert importado + profile(s) instalado(s)."
 else
     echo "==> Manual Signing skip (env vars no definidas — usando Auto Signing)."
 fi
