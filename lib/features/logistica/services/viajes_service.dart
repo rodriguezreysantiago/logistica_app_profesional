@@ -34,15 +34,22 @@ class ViajesService {
   /// Stream de todos los viajes activos, ordenados por fecha de carga
   /// descendente (más recientes arriba). Si `incluirInactivos = true`,
   /// trae también los soft-deleted — útil para auditoría.
+  ///
+  /// `limit` default 200 (auditoria 2026-05-16). Antes era null →
+  /// bajaba TODA la colección en cada rebuild del stream. Con 100
+  /// viajes/mes × 12 meses = 1200 docs → cada snapshot parseaba todo
+  /// (RAM mobile + Firestore reads). Para casos de reporte que sí
+  /// necesitan todo, el caller puede pasar `limit: 0` para forzar sin
+  /// limit o un numero alto explicito.
   static Stream<List<Viaje>> streamViajes({
     bool incluirInactivos = false,
-    int? limit,
+    int? limit = 200,
   }) {
     Query<Map<String, dynamic>> q = _col.orderBy('creado_en', descending: true);
     if (!incluirInactivos) {
       q = q.where('activo', isEqualTo: true);
     }
-    if (limit != null) q = q.limit(limit);
+    if (limit != null && limit > 0) q = q.limit(limit);
     return q.snapshots().map(
           (snap) => snap.docs.map((d) => Viaje.fromMap(d.id, d.data())).toList(),
         );

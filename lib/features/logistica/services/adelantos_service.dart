@@ -23,10 +23,13 @@ class AdelantosService {
   // ===========================================================================
 
   /// Stream de todos los adelantos, ordenados por fecha descendente
-  /// (más recientes arriba). Si `limit` se pasa, lo aplica.
-  static Stream<List<AdelantoChofer>> streamAdelantos({int? limit}) {
+  /// (más recientes arriba). `limit` default 300 (auditoria 2026-05-16).
+  /// Antes era null → bajaba TODA la colección en cada rebuild. Pasar
+  /// `limit: 0` para forzar sin limit en casos puntuales (reporte
+  /// historico completo).
+  static Stream<List<AdelantoChofer>> streamAdelantos({int? limit = 300}) {
     Query<Map<String, dynamic>> q = _col.orderBy('fecha', descending: true);
-    if (limit != null) q = q.limit(limit);
+    if (limit != null && limit > 0) q = q.limit(limit);
     return q.snapshots().map(
           (snap) =>
               snap.docs.map((d) => AdelantoChofer.fromMap(d.id, d.data())).toList(),

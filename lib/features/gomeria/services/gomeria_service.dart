@@ -1365,11 +1365,16 @@ class GomeriaService {
   ///
   /// Si [estado] es `null`, devuelve todas. Si [tipoUso] es `null`,
   /// devuelve todas las del estado dado. La pantalla complementa con
-  /// filtro client-side por código (CUB-XXXX) — el universo de cubiertas
-  /// es chico (<200 hoy, <1000 a futuro) y eso evita índices de texto.
+  /// filtro client-side por código (CUB-XXXX).
+  ///
+  /// `limit` default 2000 — el stock ya supera 1410 cubiertas (cohort
+  /// legacy + cargas nuevas). Sin limit cada rebuild del StreamBuilder
+  /// trae todos los docs (auditoria 2026-05-16). Pasar `limit: 0` para
+  /// forzar sin limit en casos de reporte.
   Stream<List<Cubierta>> streamCubiertasFiltradas({
     EstadoCubierta? estado,
     TipoUsoCubierta? tipoUso,
+    int? limit = 2000,
   }) {
     Query<Map<String, dynamic>> q = _db.collection(AppCollections.cubiertas);
     if (estado != null) {
@@ -1378,6 +1383,7 @@ class GomeriaService {
     if (tipoUso != null) {
       q = q.where('tipo_uso', isEqualTo: tipoUso.codigo);
     }
+    if (limit != null && limit > 0) q = q.limit(limit);
     return q.snapshots().map((s) => s.docs.map(Cubierta.fromDoc).toList());
   }
 

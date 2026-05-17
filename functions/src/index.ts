@@ -660,6 +660,53 @@ export const renombrarEmpleadoDni = onCall(
       (q) => q.where("estado", "==", "PENDIENTE")
     );
 
+    // Eventos Sitrack: snapshot del chofer en cada evento. Sin esto, el
+    // modulo ICM, el resumen Molina y la actividad del chofer veian
+    // data huerfana del DNI viejo. (Auditoria 2026-05-16.)
+    await actualizarReferencias("SITRACK_EVENTOS", "driver_dni");
+
+    // Jornadas v2 (vigilador de manejo). El cron cargarJornadaAbierta
+    // busca por chofer_dni — sin esta cascada, el chofer renombrado
+    // pierde su jornada abierta y el vigilador arranca una nueva al
+    // instante con cuota a cero.
+    await actualizarReferencias("JORNADAS", "chofer_dni");
+
+    // Adelantos al chofer. Sin esto el recibo se desasocia del nuevo
+    // legajo y el chofer ve "cero adelantos" en su perfil mientras los
+    // viejos siguen aplicados a otro DNI.
+    await actualizarReferencias("ADELANTOS_CHOFER", "chofer_dni");
+
+    // Throttle del aviso "pasá el iButton". Si la usa el cron sin
+    // updatear, el chofer renombrado vuelve a recibir spam cada 30 min
+    // como si fuera nuevo en el sistema.
+    await actualizarReferencias("META_AVISOS_NO_ID", "dni");
+
+    // BOT_SILENCIADOS_CHOFER: el docId es el DNI mismo (no un campo).
+    // Si el chofer estaba silenciado por el bot, hay que mover el doc.
+    try {
+      const silRef = db.collection("BOT_SILENCIADOS_CHOFER").doc(dniViejo);
+      const silSnap = await silRef.get();
+      if (silSnap.exists) {
+        await db.collection("BOT_SILENCIADOS_CHOFER")
+          .doc(dniNuevo)
+          .set(silSnap.data() ?? {});
+        await silRef.delete();
+        cascada.push({
+          coleccion: "BOT_SILENCIADOS_CHOFER", actualizados: 1, error: null,
+        });
+      } else {
+        cascada.push({
+          coleccion: "BOT_SILENCIADOS_CHOFER", actualizados: 0, error: null,
+        });
+      }
+    } catch (e) {
+      cascada.push({
+        coleccion: "BOT_SILENCIADOS_CHOFER",
+        actualizados: 0,
+        error: (e as Error).message,
+      });
+    }
+
     // ─── Step 3: borrar el doc viejo ───────────────────────────────
     await refViejo.delete();
 
