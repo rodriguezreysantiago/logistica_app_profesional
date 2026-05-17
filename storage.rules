@@ -64,12 +64,18 @@ service firebase.storage {
     // Soportamos dos paths legacy + nuevo (mayúsculas/minúsculas).
 
     match /PERFILES/{archivo} {
-      allow read: if isSignedIn();
+      // CRITICO (auditoria 2026-05-17): antes cualquier signedIn leia
+      // CUALQUIER foto de perfil — un chofer podia adivinar el DNI de
+      // otro y bajar su foto. Ahora: admin/supervisor todos, chofer
+      // solo SU foto (archivo arranca con su UID).
+      allow read: if isAdminOrSupervisor()
+        || (isSignedIn() && archivo.matches(request.auth.uid + '\\..*'));
       allow write: if isAdmin()
         || (isSignedIn() && archivo.matches(request.auth.uid + '\\..*'));
     }
     match /perfiles/{archivo} {
-      allow read: if isSignedIn();
+      allow read: if isAdminOrSupervisor()
+        || (isSignedIn() && archivo.matches(request.auth.uid + '\\..*'));
       allow write: if isAdmin()
         || (isSignedIn() && archivo.matches(request.auth.uid + '\\..*'));
     }
@@ -79,13 +85,23 @@ service firebase.storage {
     // ========================================================================
 
     match /vehiculos/{patente}/{archivo=**} {
+      // Foto de la unidad — operativa, no PII. Chofer la ve en "Mi
+      // equipo" para verificar que efectivamente es su unidad. Acceso
+      // amplio aceptable.
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
     // Comprobantes (RTO, Seguro, extintores) — el código sube a VEHICULOS
     // en mayúsculas para distinguirlo de la carpeta de fotos (minúsculas).
     match /VEHICULOS/{patente}/{archivo=**} {
-      allow read: if isSignedIn();
+      // Papeles del vehiculo — admin/supervisor todos, chofer solo
+      // los de SU unidad. Restriccion via lookup cross-namespace a
+      // Firestore (auditoria 2026-05-17).
+      allow read: if isAdminOrSupervisor()
+        || (isSignedIn() &&
+            firestore.exists(/databases/(default)/documents/EMPLEADOS/$(request.auth.uid)) &&
+            (firestore.get(/databases/(default)/documents/EMPLEADOS/$(request.auth.uid)).data.VEHICULO == patente
+             || firestore.get(/databases/(default)/documents/EMPLEADOS/$(request.auth.uid)).data.ENGANCHE == patente));
       allow write: if isAdmin();
     }
 

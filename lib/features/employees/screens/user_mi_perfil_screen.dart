@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:dio/dio.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,7 +14,6 @@ import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
 import '../../../shared/utils/formatters.dart';
-import '../../../shared/utils/password_hasher.dart';
 import '../../../shared/utils/phone_formatter.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../../../shared/widgets/foto_perfil_avatar.dart';
@@ -101,7 +102,50 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
     );
   }
 
-  void _mostrarDialogoClave(String passwordActual) {
+  /// Llama a la Cloud Function callable `cambiarContrasenaChofer` que
+  /// valida server-side la contrasena actual + hashea la nueva con bcrypt
+  /// + persiste. Patron HTTPS directo (mismo que actualizarRol) porque
+  /// `cloud_functions` no tiene impl Windows.
+  Future<void> _cambiarContrasenaCallable({
+    required String actual,
+    required String nueva,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw StateError('Sin sesion activa.');
+    }
+    final idToken = await user.getIdToken();
+    if (idToken == null || idToken.isEmpty) {
+      throw StateError('No se pudo obtener el token de sesion.');
+    }
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+    ));
+    const url = 'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/'
+        'cambiarContrasenaChofer';
+    final response = await dio.post<Map<String, dynamic>>(
+      url,
+      data: {
+        'data': {'actual': actual, 'nueva': nueva},
+      },
+      options: Options(
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        validateStatus: (_) => true,
+      ),
+    );
+    if (response.statusCode == null || response.statusCode! >= 400) {
+      final err = response.data?['error'] as Map<String, dynamic>?;
+      final msg = err?['message']?.toString() ??
+          'Error ${response.statusCode} al cambiar contrasena.';
+      throw StateError(msg);
+    }
+  }
+
+  void _mostrarDialogoClave() {
     final antCtrl = TextEditingController();
     final nvaCtrl = TextEditingController();
     // Cacheamos el messenger del scaffold acá (NO adentro del onPressed)
@@ -159,30 +203,25 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () {
-              // ✅ Verificación contra el hash almacenado (Bcrypt o SHA-256).
-              //    Antes se comparaba texto-plano vs hash, lo cual nunca era igual.
-              if (!PasswordHasher.verify(
-                  antCtrl.text, passwordActual)) {
-                AppFeedback.errorOn(messenger, 'La contraseña actual es incorrecta');
-                return;
-              }
-              if (nvaCtrl.text.trim().length < 4) {
-                AppFeedback.warningOn(messenger, 'Mínimo 4 caracteres');
+              // SEGURIDAD (auditoria 2026-05-17): la validacion de la
+              // contraseña actual + el hashing + el update ahora viven
+              // en la Cloud Function `cambiarContrasenaChofer`. Antes
+              // todo se hacia client-side y un atacante con DevTools
+              // podia saltarse el chequeo y escribir el hash directo.
+              // La rule de EMPLEADOS YA NO permite update de CONTRASEÑA
+              // desde cliente — solo Admin SDK (la callable).
+              if (nvaCtrl.text.trim().length < 6) {
+                AppFeedback.warningOn(messenger,
+                    'La nueva contrasena debe tener al menos 6 caracteres');
                 return;
               }
               Navigator.pop(dCtx);
-              // ✅ Guardamos el hash Bcrypt, no la contraseña en plano.
-              final nuevoHash =
-                  PasswordHasher.hashBcrypt(nvaCtrl.text);
-              // El callback no es async pero _ejecutarTarea devuelve un
-              // Future; lo descartamos explícito para que quede claro
-              // y para anticiparnos a versiones más estrictas del lint.
               unawaited(_ejecutarTarea(
-                tarea: () async => FirebaseFirestore.instance
-                    .collection(AppCollections.empleados)
-                    .doc(widget.dni)
-                    .update({'CONTRASEÑA': nuevoHash}),
-                mensajeExito: 'Contraseña actualizada correctamente',
+                tarea: () => _cambiarContrasenaCallable(
+                  actual: antCtrl.text,
+                  nueva: nvaCtrl.text,
+                ),
+                mensajeExito: 'Contrasena actualizada correctamente',
               ));
             },
             child: const Text('GUARDAR',
@@ -346,8 +385,7 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
               ),
               const SizedBox(height: 30),
               ElevatedButton.icon(
-                onPressed: () =>
-                    _mostrarDialogoClave(data['CONTRASEÑA'] ?? ''),
+                onPressed: () => _mostrarDialogoClave(),
                 icon: const Icon(Icons.password_rounded),
                 label: const Text(
                   'CAMBIAR MI CONTRASEÑA',

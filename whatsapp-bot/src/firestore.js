@@ -64,14 +64,22 @@ async function subirAStorage({ path, bytes, contentType }) {
     contentType: contentType || 'application/octet-stream',
     resumable: false, // archivos chicos, no necesitamos chunked upload
   });
-  // makePublic() convierte el archivo en world-readable. Equivalente
-  // a la URL firmada que devuelve `getDownloadURL` desde el SDK
-  // cliente — la app Flutter ya está acostumbrada a usar URLs públicas
-  // (todas las que llegan vía StorageService son así).
-  await file.makePublic();
-  return `https://storage.googleapis.com/${bucket.name}/${encodeURIComponent(
-    path
-  )}`;
+  // CRITICO (auditoria 2026-05-17): antes file.makePublic() dejaba
+  // las fotos enviadas por el chofer al bot (DNI, licencias, fotos
+  // privadas) world-readable con path predictable. Atacante externo
+  // sin auth podia iterar por timestamps y bajar fotos.
+  // Ahora generamos una signed URL con expiracion 7 dias — la app
+  // del admin la consume mientras dura, y el path queda inaccesible
+  // sin la URL firmada.
+  // Expiracion 90 dias: suficiente para que el admin revise las
+  // fotos en el flujo normal (revision → aprobacion). Si necesita
+  // mas, hay que re-generar la signed URL desde el doc cliente. No
+  // expones la URL en la app del chofer — solo el admin la consume.
+  const [signedUrl] = await file.getSignedUrl({
+    action: 'read',
+    expires: Date.now() + 90 * 24 * 60 * 60 * 1000,
+  });
+  return signedUrl;
 }
 
 /**

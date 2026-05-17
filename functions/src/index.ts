@@ -268,6 +268,85 @@ export const loginConDni = onCall(
 );
 
 // ============================================================================
+// cambiarContrasenaChofer — cambio self-service con validacion server-side
+// ============================================================================
+//
+// El chofer cambia su clave desde "Mi Perfil". Server-side validamos:
+//   1. Caller esta autenticado (request.auth.uid existe).
+//   2. La contraseña ACTUAL coincide con el hash bcrypt almacenado
+//      en EMPLEADOS/{uid}.CONTRASEÑA — sin esto, atacante con device
+//      fisico podria cambiar la pass sin saber la actual.
+//   3. La nueva tiene minimo 6 caracteres (mismo umbral que alta).
+//
+// Antes el cliente Flutter hacia el `update({'CONTRASEÑA': nuevoHash})`
+// directo via Firestore SDK. La rule lo permitia (CONTRASEÑA estaba
+// en hasOnly self-update). Auditoria 2026-05-17: CRITICO porque la
+// validacion de pass actual estaba SOLO en cliente (PasswordHasher.verify)
+// y podia bypassearse con DevTools. Ahora la rule rechaza el update de
+// CONTRASEÑA — solo este callable (Admin SDK) escribe el campo.
+
+export const cambiarContrasenaChofer = onCall(
+  { timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Sin sesion activa.");
+    }
+    const actual = (request.data?.actual ?? "").toString();
+    const nueva = (request.data?.nueva ?? "").toString();
+    if (actual.length === 0 || nueva.length === 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Faltan campos 'actual' o 'nueva'.",
+      );
+    }
+    if (nueva.length < 6) {
+      throw new HttpsError(
+        "invalid-argument",
+        "La nueva contrasena debe tener al menos 6 caracteres.",
+      );
+    }
+
+    // Leer doc del propio chofer.
+    const ref = db.collection("EMPLEADOS").doc(uid);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Legajo no encontrado.");
+    }
+    const data = snap.data() ?? {};
+    const hashActualRaw = data["CONTRASEÑA"];
+    const hashActual = typeof hashActualRaw === "string" ? hashActualRaw : "";
+    if (hashActual.length === 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        "El legajo no tiene contrasena cargada — contacta al admin.",
+      );
+    }
+
+    // Verificar la contrasena actual server-side con bcrypt/SHA legacy.
+    const ok = await verificarPassword(actual, hashActual);
+    if (!ok) {
+      logger.info("[cambiarContrasenaChofer] pass actual incorrecta", {
+        uidHash: hashId(uid),
+      });
+      throw new HttpsError(
+        "permission-denied",
+        "La contrasena actual es incorrecta.",
+      );
+    }
+
+    // Hashear la nueva con bcrypt cost 10 y persistir.
+    const nuevoHash = await bcrypt.hash(nueva, 10);
+    await ref.update({
+      "CONTRASEÑA": nuevoHash,
+      "fecha_ultima_actualizacion": FieldValue.serverTimestamp(),
+    });
+    logger.info("[cambiarContrasenaChofer] OK", { uidHash: hashId(uid) });
+    return { ok: true };
+  },
+);
+
+// ============================================================================
 // actualizarRolEmpleado
 // ============================================================================
 //

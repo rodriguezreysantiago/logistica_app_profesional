@@ -102,6 +102,16 @@ service cloud.firestore {
       // SEG_HIGIENE también — necesita resolver DNI → nombre en el módulo
       // ICM (icm_ranking_screen, icm_detalle_chofer_screen) y en el mapa
       // Volvo para mostrar quien manejaba cuando ocurrio un evento.
+      //
+      // NOTA SOBRE CONTRASEÑA (auditoria 2026-05-17): Firestore NO
+      // soporta field-level security. La rule permite al chofer leer
+      // SU doc entero, incluido el hash bcrypt. Si un chofer hostil
+      // toma el JWT y baja su doc, podria hacer brute-force OFFLINE
+      // contra el hash (bcrypt cost 10 ≈ 100ms/intento — viable para
+      // passwords debiles). MITIGACION FUTURA: mover CONTRASEÑA a
+      // subcoleccion `EMPLEADOS/{dni}/credenciales/main` con
+      // `read: if false`. Por ahora, la validacion de password fuerza
+      // minimo 6 chars al alta + comentario aqui para no olvidar.
       allow read: if isAdminOrSupervisor() || isSegHigiene() || isSelf(dni);
       // Crear y borrar: solo admin/supervisor (alta y baja).
       allow create, delete: if isAdminOrSupervisor();
@@ -109,16 +119,23 @@ service cloud.firestore {
       // El chofer (dueño del legajo) puede actualizar SOLO los campos
       // self-service de "Mi Perfil":
       //   - ARCHIVO_PERFIL: foto de perfil (sube nueva foto y actualiza URL).
-      //   - CONTRASEÑA: hash bcrypt nuevo cuando cambia su clave.
       //   - TELEFONO / MAIL: datos personales que el chofer puede actualizar
       //     desde la pantalla "Datos personales" de Mi Perfil. Si los omitimos
       //     acá, la edicion tira permission-denied silencioso y rompe la UX.
+      // CRITICO (auditoria 2026-05-17): CONTRASEÑA REMOVIDA de la
+      // whitelist. Antes un atacante con device fisico (turno
+      // compartido, dispositivo robado) podia entrar al perfil y
+      // cambiar el hash directo desde DevTools / cliente Firestore
+      // custom sin validar la contraseña actual. Ahora el cambio de
+      // pass DEBE pasar por la callable `cambiarContraseñaChofer`
+      // que valida server-side la actual con bcrypt antes de aceptar
+      // el nuevo hash (ver functions/src/index.ts).
       // Cualquier otro campo (DNI, rol, vencimientos, vehículo asignado,
       // etc.) está reservado a admin/supervisor.
       allow update: if isAdminOrSupervisor()
         || (isSelf(dni)
             && request.resource.data.diff(resource.data)
-                 .affectedKeys().hasOnly(['ARCHIVO_PERFIL', 'CONTRASEÑA',
+                 .affectedKeys().hasOnly(['ARCHIVO_PERFIL',
                                           'TELEFONO', 'MAIL']));
     }
 
@@ -147,7 +164,13 @@ service cloud.firestore {
     // ========================================================================
 
     match /REVISIONES/{doc} {
-      allow read: if isSignedIn();
+      // Read restringido (auditoria 2026-05-17): antes cualquier
+      // signedIn podia `where('dni'==otroDni').get()` y ver el
+      // historico de revisiones de cualquier chofer (URLs de
+      // archivos, observaciones, fechas). Ahora: admin/supervisor
+      // todos, chofer solo SUS revisiones.
+      allow read: if isAdminOrSupervisor()
+        || (isSignedIn() && resource.data.dni == request.auth.uid);
       // Chofer crea su propia solicitud al renovar un papel. Validamos
       // que el campo `dni` del doc coincida con el UID del JWT — sin esto
       // un chofer hostil puede falsificar revisiones a nombre de otro
@@ -167,7 +190,14 @@ service cloud.firestore {
     // ========================================================================
 
     match /CHECKLISTS/{doc} {
-      allow read: if isSignedIn();
+      // Read restringido (auditoria 2026-05-17): antes cualquier
+      // signedIn podia `where('DNI'==otroDni').get()` y ver checklists
+      // ajenos (foto del vehiculo, observaciones tipo "vi a tal en tal
+      // lado"). Ahora: admin/supervisor/segHigiene todos (Seg e Higiene
+      // los necesita para auditoria), chofer solo SUS checklists.
+      allow read: if isAdminOrSupervisor()
+        || isSegHigiene()
+        || (isSignedIn() && resource.data.DNI == request.auth.uid);
       // El chofer crea su checklist mensual. Validamos que el campo `DNI`
       // del payload coincida con el UID — sin esto un chofer puede subir
       // checklists falsos en nombre de otro (campo real en
