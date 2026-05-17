@@ -4483,23 +4483,36 @@ async function _encolarAvisoChoferNoIdentificado(
   ];
   const mensaje = variantes[_rrPick(variantes.length)];
 
-  await db.collection("COLA_WHATSAPP").add({
-    telefono: tel,
-    mensaje,
-    estado: "PENDIENTE",
-    encolado_en: FieldValue.serverTimestamp(),
-    expira_en: _expiraEnMinutos(TTL_PASA_IBUTTON_MIN),
-    enviado_en: null,
-    error: null,
-    intentos: 0,
-    origen: "sitrack_chofer_no_identificado",
-    destinatario_coleccion: "EMPLEADOS",
-    destinatario_id: choferDni,
-    campo_base: "SITRACK_DRIFT",
-    admin_dni: "BOT",
-    admin_nombre: "Bot Sitrack",
-    alert_patente: patente,
-  });
+  // Auditoria 2026-05-17: antes el throttle se seteaba SIEMPRE
+  // (incluso si el add a COLA_WHATSAPP fallaba), lo que dejaba al
+  // chofer sin recibir el aviso por 30 min. Ahora seteamos throttle
+  // SOLO si el add fue exitoso — si falla, el proximo poll reintenta.
+  try {
+    await db.collection("COLA_WHATSAPP").add({
+      telefono: tel,
+      mensaje,
+      estado: "PENDIENTE",
+      encolado_en: FieldValue.serverTimestamp(),
+      expira_en: _expiraEnMinutos(TTL_PASA_IBUTTON_MIN),
+      enviado_en: null,
+      error: null,
+      intentos: 0,
+      origen: "sitrack_chofer_no_identificado",
+      destinatario_coleccion: "EMPLEADOS",
+      destinatario_id: choferDni,
+      campo_base: "SITRACK_DRIFT",
+      admin_dni: "BOT",
+      admin_nombre: "Bot Sitrack",
+      alert_patente: patente,
+    });
+  } catch (e) {
+    logger.warn("[avisoChoferNoIdentificado] add a COLA fallo, no seteo throttle", {
+      choferDniHash: hashId(choferDni),
+      patente,
+      error: (e as Error).message,
+    });
+    return false;
+  }
 
   // Marcar throttle: 30 min hasta el próximo aviso a este chofer.
   // Set con merge:false → reemplaza el doc completo, no acumulamos basura.

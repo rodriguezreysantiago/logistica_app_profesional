@@ -632,7 +632,31 @@ export async function tickVigiladorJornada(): Promise<void> {
 
       await entrada.ref.update(j as unknown as Record<string, unknown>);
 
-      // Encolar avisos (todos los pendientes, no solo el ultimo)
+      // Encolar avisos (todos los pendientes, no solo el ultimo).
+      // Doble-check de silenciado JUST-IN-TIME (auditoria 2026-05-17):
+      // el set `silenciados` se cargo al inicio del tick. Si el admin
+      // tipea `/silenciar 12345 1h` en el WhatsApp entre el cargado y
+      // el momento de encolar, el chofer recibia 1 aviso justo despues
+      // del comando. Re-leemos el doc BOT_SILENCIADOS_CHOFER aca por
+      // si hubo cambio reciente. Costo: 1 read extra cuando el chofer
+      // tiene avisos pendientes (despreciable, los avisos son raros).
+      if (avisosPendientes.length > 0 && !silenciados.has(dni)) {
+        try {
+          const silSnap = await db().collection("BOT_SILENCIADOS_CHOFER").doc(dni).get();
+          if (silSnap.exists) {
+            const hasta = silSnap.data()?.silenciado_hasta;
+            const hastaMs = (hasta as FsTimestamp | undefined)?.toMillis() ?? 0;
+            if (hastaMs > Date.now()) {
+              silenciados.add(dni);
+            }
+          }
+        } catch {
+          // Si falla el lookup, mantenemos el set en memoria (fail-open
+          // pero solo si el lookup explicito falla — el set ya fue
+          // cargado al inicio del tick).
+        }
+      }
+
       for (const avisoTipo of avisosPendientes) {
         if (silenciados.has(dni)) {
           silenciadosCount++;
