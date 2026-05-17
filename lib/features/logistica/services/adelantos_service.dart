@@ -66,10 +66,17 @@ class AdelantosService {
     String? choferDni,
     bool incluirEliminados = false,
   }) async {
+    // CRITICO (auditoria 2026-05-17): antes usabamos `isLessThanOrEqualTo`
+    // que generaba doble cuenta en bordes de mes. Un adelanto del 1ro
+    // de junio a las 00:00:00 ART entraba en mayo (cuando filtro tenia
+    // hasta=1-jun 00:00) Y en junio (cuando filtro tenia desde=1-jun
+    // 00:00). El chofer veia descontado el mismo adelanto en 2 meses
+    // consecutivos. Ahora `isLessThan` consistente con la convencion
+    // [desde, hasta) que usa el resto del modulo (viajes_service).
     Query<Map<String, dynamic>> q = _col
         .where('fecha',
             isGreaterThanOrEqualTo: Timestamp.fromDate(desde),
-            isLessThanOrEqualTo: Timestamp.fromDate(hasta));
+            isLessThan: Timestamp.fromDate(hasta));
     if (choferDni != null) {
       q = q.where('chofer_dni', isEqualTo: choferDni);
     }
@@ -98,9 +105,11 @@ class AdelantosService {
     Set<String>? choferDnis,
     bool incluirEliminados = false,
   }) {
+    // Misma fix del bug de doble cuenta en bordes de mes — ver
+    // getAdelantosEnRango. Rango semi-abierto [desde, hasta).
     final q = _col.where('fecha',
         isGreaterThanOrEqualTo: Timestamp.fromDate(desde),
-        isLessThanOrEqualTo: Timestamp.fromDate(hasta));
+        isLessThan: Timestamp.fromDate(hasta));
     return q.snapshots().map((snap) {
       var adelantos =
           snap.docs.map((d) => AdelantoChofer.fromMap(d.id, d.data())).toList();

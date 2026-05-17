@@ -5817,10 +5817,16 @@ export const recomputeIcmSemanalScheduled = onSchedule(
     const KM_MIN = 50; // mismo umbral que cliente para evitar ICM ruidoso
     const choferes: ChoferAgg[] = [];
     for (const a of porChofer.values()) {
-      // Sumar km reales por patente.
+      // Sumar km reales por patente. Cap 5000 km/patente/semana defensivo
+      // contra reset de odometro Sitrack (auditoria 2026-05-17 — sin esto
+      // un chofer agresivo quedaba enmascarado como "verde 99" porque
+      // ratio = eventos / 500000km absurdos).
       let kmReales = 0;
       for (const t of a.odometroPorPatente.values()) {
-        if (t.max > t.min) kmReales += (t.max - t.min);
+        if (t.max > t.min) {
+          const delta = t.max - t.min;
+          if (delta <= 5000) kmReales += delta;
+        }
       }
       const km = kmReales >= KM_MIN ? kmReales : 0;
       const ratio = km > 0 ? a.totalEventos / (km / 100) : 0;

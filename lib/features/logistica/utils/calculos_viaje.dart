@@ -51,6 +51,13 @@ class CalculosViaje {
   /// inferior (más negativo), aunque en práctica los montos son
   /// siempre ≥ 0.
   static double redondearMultiploDe5Descendente(num monto) {
+    // Defensa contra NaN / Infinity (auditoria 2026-05-17): si por una
+    // via indirecta el monto llega como NaN/Inf (tarifa corrupta en
+    // Firebase Console, division por cero upstream, etc.) el `.floor()`
+    // tira `Unsupported operation: Infinity or NaN`. Como el form vive
+    // 100% client-side, el crash freezea la UX. Mejor devolver 0 y que
+    // el operador vea $0 que un crash.
+    if (monto.isNaN || monto.isInfinite) return 0;
     return (monto / 5).floor() * 5.0;
   }
 

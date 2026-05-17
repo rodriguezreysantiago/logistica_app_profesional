@@ -53,7 +53,17 @@ class LiquidacionService {
         .where('fecha_carga', isLessThan: Timestamp.fromDate(hasta));
 
     return q.snapshots().map((snap) {
-      var viajes = snap.docs.map((d) => Viaje.fromMap(d.id, d.data())).toList();
+      // Filtro defensivo (auditoria 2026-05-17): viajes legacy con
+      // estado 'CANCELADO' o 'POSTERGADO' (estados removidos 2026-05-14)
+      // tienen `activo: true` y siguen apareciendo. La factory
+      // Viaje.fromCodigo los mapea silenciosamente a `planeado` y se
+      // sumaban a la liquidacion. Filtramos por el campo raw ANTES de
+      // construir el modelo para no incluirlos.
+      var docs = snap.docs.where((d) {
+        final estadoRaw = (d.data()['estado'] ?? '').toString();
+        return estadoRaw != 'CANCELADO' && estadoRaw != 'POSTERGADO';
+      }).toList();
+      var viajes = docs.map((d) => Viaje.fromMap(d.id, d.data())).toList();
       if (choferDnis != null && choferDnis.isNotEmpty) {
         viajes = viajes.where((v) => choferDnis.contains(v.choferDni)).toList();
       }
