@@ -27,44 +27,61 @@
 
 const log = require('./logger');
 
-// Minimo de digitos para que un sufijo cuente como match. Argentina
-// tiene 10 (sin codigo pais) -- un numero corto como "4567890" NO
-// puede matchear con admin "5492914567890". Antes el match laxo
-// permitia que cualquier numero terminado en 7 digitos del admin
-// ejecute /pausar, /forzar-cron, etc.
+// Minimo de digitos para que un sufijo cuente como match en lookups
+// de CHOFER por TELEFONO (resolverChoferPorTelefono). El path de
+// _esAdmin NO usa esta constante — usa normalización canónica con
+// igualdad estricta, sin sufijos (auditoria 2026-05-17, fix CRITICO
+// del bypass por sufijo).
 const MIN_DIGITOS_PARA_MATCH = 10;
 
 /**
- * Devuelve la lista de teléfonos admin autorizados (solo dígitos).
+ * Devuelve la lista de teléfonos admin autorizados, normalizados a
+ * formato canónico (solo dígitos, con código país +54 9 si Argentina).
+ *
+ * Esperamos que el operador cargue ADMIN_PHONES con formato
+ * canónico — ej. "5492914567890,5491159876543". Si carga sin código
+ * país (ej. "2914567890"), se le antepone "549" para uniformar.
  */
 function _adminWhitelist() {
   const raw = process.env.ADMIN_PHONES || '';
   return raw
     .split(',')
     .map((s) => s.trim().replace(/\D+/g, ''))
-    .filter((s) => s.length >= MIN_DIGITOS_PARA_MATCH);
+    .filter((s) => s.length >= 10)
+    .map((s) => {
+      // Normalización defensiva: si viene sin +54 9, lo antepone.
+      // 10 dígitos → área(3) + abonado(7) → asumimos AR.
+      if (s.length === 10) return `549${s}`;
+      // 11 dígitos comenzando con 0 → 0(1) + área + abonado → quitar 0 + AR.
+      if (s.length === 11 && s.startsWith('0')) return `549${s.substring(1)}`;
+      return s;
+    });
 }
 
 /**
  * `true` si el teléfono que envió el mensaje está autorizado.
  *
- * Acepta: igualdad estricta, o sufijo de >= MIN_DIGITOS_PARA_MATCH
- * digitos. El sufijo es necesario porque whitelist puede tener
- * "5492914567890" (con codigo pais) y el numero entrante venir como
- * "2914567890" (sin codigo pais), o viceversa. Pero NUNCA se acepta
- * un sufijo corto: "4567890" NO matchea.
+ * Auditoria 2026-05-17 (CRITICO): el match anterior por "sufijo
+ * de 10 dígitos" era inseguro — cualquier número que terminara con
+ * los últimos 10 dígitos del admin podía ejecutar /pausar, /silenciar,
+ * etc. Ej: admin "5492944399123" y atacante "0000002944399123" — el
+ * `endsWith(shorter)` matcheaba el sufijo 10 y pasaba. Argentina tiene
+ * 10 dígitos sin código país pero la combinación área+abonado NO es
+ * única globalmente.
+ *
+ * Ahora normalizamos ambos lados al formato canónico (con +549) y
+ * exigimos IGUALDAD ESTRICTA. Sin sufijos, sin endsWith.
  */
 function _esAdmin(fromNumber) {
-  const fromDigits = String(fromNumber).replace(/\D+/g, '');
-  if (fromDigits.length < MIN_DIGITOS_PARA_MATCH) return false;
+  let fromDigits = String(fromNumber).replace(/\D+/g, '');
+  if (fromDigits.length < 10) return false;
+  // Normalizar igual que la whitelist.
+  if (fromDigits.length === 10) fromDigits = `549${fromDigits}`;
+  if (fromDigits.length === 11 && fromDigits.startsWith('0')) {
+    fromDigits = `549${fromDigits.substring(1)}`;
+  }
   const whitelist = _adminWhitelist();
-  return whitelist.some((w) => {
-    if (w === fromDigits) return true;
-    const longer = w.length >= fromDigits.length ? w : fromDigits;
-    const shorter = w.length < fromDigits.length ? w : fromDigits;
-    return shorter.length >= MIN_DIGITOS_PARA_MATCH &&
-      longer.endsWith(shorter);
-  });
+  return whitelist.includes(fromDigits);
 }
 
 /**
@@ -562,9 +579,13 @@ async function _comandoTestAviso(msg, { db, fs }, args) {
 }
 
 /**
- * Devuelve la fecha actual en formato YYYY-MM-DD ART. Mismo formato
- * que usa el cron `vigiladorJornadaChofer` para el doc id de
- * `JORNADAS_CHOFER` (`{dni}_{fechaArt}`).
+ * Devuelve la fecha actual en formato YYYY-MM-DD ART. Usado para
+ * mostrar al chofer "esta es tu jornada de hoy (FECHA)".
+ *
+ * Nota histórica: antes este formato era el sufijo del docId de
+ * `JORNADAS_CHOFER` (legacy v1). Desde el refactor v2 (2026-05-15)
+ * la jornada es lógica con docId `{dni}_{ts_inicio_ms}` y se busca
+ * por query — esta fecha es solo cosmética para el mensaje.
  */
 function _fechaArt() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -601,30 +622,28 @@ function _fmtFechaHoraCompacto(ts) {
 }
 
 /**
- * `/jornada [DNI]` → estado del vigilador.
+ * `/jornada [DNI]` → estado del vigilador v2 (refactor 2026-05-15).
+ *
+ * Lee de `JORNADAS` (nueva colección con modelo de bloques 3×4h +
+ * descanso 8h misma posición). ANTES (legacy v1) leía de
+ * `JORNADAS_CHOFER` con docId `{dni}_{YYYY-MM-DD}` — esa colección
+ * ya no se popula, por lo que el comando devolvía SIEMPRE "sin
+ * actividad" (auditoría 2026-05-17, crítico).
+ *
+ * Ahora busca la jornada abierta del chofer (`jornada_fin_ts == null`).
+ * Si no existe → "Sin jornada activa" (chofer no manejó o jornada
+ * cerrada por descanso 8h).
  *
  * Dos modos:
- *   - **Admin**: pasa DNI explícito (`/jornada 12345678`). Sin DNI =
- *     mensaje de uso. Output completo (todos los flags técnicos).
- *   - **Chofer**: tipea solo `/jornada` (sin DNI). El bot resuelve su
- *     propio DNI por su teléfono y le devuelve sus datos. Output
- *     simplificado en lenguaje natural — "manejaste 8h25 hoy, te
- *     quedan 3h35 antes del límite". Si tipea `/jornada DNI_AJENO`,
- *     el manejador del switch lo descarta (espía bloqueada) — acá
- *     siempre llega `args=[]` para chofer.
- *
- * Si no hay JORNADAS_CHOFER del día, decimos "sin actividad hoy" en
- * lugar del tecnicismo "sin doc".
+ *   - **Admin**: `/jornada <DNI>`. Output técnico completo.
+ *   - **Chofer**: solo `/jornada`. Output amable en segunda persona.
  */
 async function _comandoJornada(msg, { db }, args, chofer) {
   // Resolver el DNI a consultar.
   let dni;
   if (chofer) {
-    // Chofer pidió su propia jornada. El switch ya nos pasó args=[]
-    // pero por las dudas también ignoramos cualquier args que viniera.
     dni = chofer.dni;
   } else {
-    // Admin.
     dni = (args[0] || '').replace(/\D+/g, '');
     if (!dni) {
       await msg.reply('Uso: /jornada <DNI>\nEj: /jornada 12345678');
@@ -633,23 +652,29 @@ async function _comandoJornada(msg, { db }, args, chofer) {
   }
 
   const fecha = _fechaArt();
-  const docId = `${dni}_${fecha}`;
 
-  const [empSnap, jSnap, silSnap] = await Promise.all([
+  // Buscar jornada abierta (v2: chofer_dni == dni AND jornada_fin_ts == null).
+  // Requiere índice compuesto `chofer_dni ASC + jornada_fin_ts ASC` que ya
+  // está en firestore.indexes.json desde el refactor v2.
+  const [empSnap, jQuery, silSnap] = await Promise.all([
     db.collection('EMPLEADOS').doc(dni).get(),
-    db.collection('JORNADAS_CHOFER').doc(docId).get(),
+    db.collection('JORNADAS')
+      .where('chofer_dni', '==', dni)
+      .where('jornada_fin_ts', '==', null)
+      .limit(1)
+      .get(),
     db.collection('BOT_SILENCIADOS_CHOFER').doc(dni).get(),
   ]);
 
+  const jSnap = jQuery.empty ? null : jQuery.docs[0];
+
   // ─── Modo CHOFER ─────────────────────────────────────────
-  // Output amable, en lenguaje natural, sin tecnicismos.
   if (chofer) {
     return _replyJornadaChofer(msg, { chofer, jSnap, silSnap, fecha });
   }
 
-  // ─── Modo ADMIN ──────────────────────────────────────────
-  // Output técnico completo (lo que ya teníamos).
-  const lineas = [`*Jornada del chofer ${dni}* (${fecha})`];
+  // ─── Modo ADMIN — output técnico ─────────────────────────
+  const lineas = [`*Jornada del chofer ${dni}* (consulta ${fecha})`];
 
   if (empSnap.exists) {
     const e = empSnap.data() || {};
@@ -660,8 +685,6 @@ async function _comandoJornada(msg, { db }, args, chofer) {
     lineas.push('⚠ DNI no figura en EMPLEADOS.');
   }
 
-  // Estado de silencio — lo mostramos arriba del todo así no se
-  // pierde scrolling.
   if (silSnap.exists) {
     const s = silSnap.data() || {};
     const hasta = s.silenciado_hasta;
@@ -674,78 +697,60 @@ async function _comandoJornada(msg, { db }, args, chofer) {
     }
   }
 
-  if (!jSnap.exists) {
+  if (!jSnap) {
     lineas.push('');
     lineas.push(
-      'Sin doc JORNADAS_CHOFER del día — el chofer no tiene posición ' +
-      'activa con su DNI o todavía no manejó hoy.'
+      'Sin jornada activa — el chofer no manejó en las últimas horas, ' +
+      'ya completó su descanso de 8h, o no está identificado por iButton.'
     );
     await msg.reply(lineas.join('\n'));
     return;
   }
+
   const j = jSnap.data() || {};
-  const totalDia = j.segundos_total_dia || 0;
-  const jornadaActual = j.segundos_jornada_actual || 0;
-  const continuo = j.segundos_continuo_actual || 0;
-  const pausa = j.segundos_pausa_actual || 0;
+  // Campos v2 (ver `functions/src/jornadas_v2.ts:66+ JornadaDoc`).
+  const totalManejo = j.total_manejo_seg || 0;
+  const bloqueActualManejo = j.bloque_actual_manejo_seg || 0;
+  const bloqueActualPausa = j.bloque_actual_pausa_seg || 0;
+  const bloquesCompletos = j.bloques_completos || 0;
+  const estado = (j.estado || '').toString();
+  const descansoSeg = j.descanso_segundos || 0;
 
   lineas.push('');
-  lineas.push(`🚛 Total del día: ${_fmtSegCompacto(totalDia)}`);
-  if (jornadaActual > totalDia + 60) {
-    // Jornada arrancó el día anterior (cruzó medianoche).
-    lineas.push(
-      `🕓 Jornada actual: ${_fmtSegCompacto(jornadaActual)} ` +
-      '(arrancó ayer)'
-    );
-  } else {
-    lineas.push(`🕓 Jornada actual: ${_fmtSegCompacto(jornadaActual)}`);
-  }
-  lineas.push(`⏱ Continuo: ${_fmtSegCompacto(continuo)}`);
-  if (pausa > 0) {
-    lineas.push(`⏸ Pausa actual: ${_fmtSegCompacto(pausa)}`);
+  lineas.push(`🚛 Total manejo: ${_fmtSegCompacto(totalManejo)} · ` +
+    `Bloques completos: ${bloquesCompletos}/3`);
+  lineas.push(`⏱ Bloque actual: ${_fmtSegCompacto(bloqueActualManejo)} manejo` +
+    (bloqueActualPausa > 0 ?
+      ` · ${_fmtSegCompacto(bloqueActualPausa)} pausa` : ''));
+  lineas.push(`📍 Estado: ${estado || '—'}`);
+
+  if (descansoSeg > 0) {
+    lineas.push(`🛏 Descanso acumulado: ${_fmtSegCompacto(descansoSeg)} ` +
+      '(min 8h para cerrar jornada)');
   }
 
-  // Flags de alertas — compactas, una sola línea con las que se
-  // dispararon. Compat: el campo viejo `alerta_3_45_continua_enviada`
-  // (umbral 3:45h) fue reemplazado por `alerta_3_30_continua_enviada`
-  // el 2026-05-13. Mostramos cualquiera que esté seteado para que
-  // jornadas en curso al deploy se vean correctas.
+  // Flags de aviso enviados / infracciones detectadas.
   const flags = [];
-  if (j.alerta_3_30_continua_enviada || j.alerta_3_45_continua_enviada) {
-    flags.push('3:30');
-  }
-  if (j.alerta_4_00_continua_enviada) flags.push('4h-penalizado');
-  if (j.alerta_11_30_diaria_enviada) flags.push('11:30');
-  if (j.alerta_12_00_diaria_enviada) flags.push('12h-superado');
-  if (j.aviso_descanso_corto_enviada) {
-    const desc = j.descanso_corto_segundos
-      ? ` (descanso ${_fmtSegCompacto(j.descanso_corto_segundos)})`
-      : '';
-    flags.push(`descanso-corto${desc}`);
-  }
-  if (j.alerta_arranque_temprano_enviada) {
-    flags.push('arranque-temprano');
-  }
+  if (j.alerta_3_30_enviada) flags.push('3h30');
+  if (j.alerta_3_45_enviada) flags.push('3h45');
+  if (j.alerta_cuota_enviada) flags.push('cuota-cumplida');
+  if (j.alerta_veda_enviada) flags.push('veda-nocturna');
   if (flags.length > 0) {
     lineas.push(`🚨 Avisos enviados: ${flags.join(', ')}`);
   } else {
-    lineas.push('✓ Sin alertas hoy.');
+    lineas.push('✓ Sin alertas en esta jornada.');
+  }
+  const infracciones = [];
+  if (j.bloque_excedido) infracciones.push('bloque excedido (>4h sin pausa)');
+  if (j.cuota_excedida) infracciones.push('cuota excedida (>3 bloques)');
+  if (j.veda_excedida) infracciones.push('manejo en veda nocturna');
+  if (infracciones.length > 0) {
+    lineas.push(`⚠ Infracciones: ${infracciones.join(', ')}`);
   }
 
-  // Si llegó a 12h, mostrar la hora mínima de arranque calculada —
-  // así el operador puede chequear cuándo el chofer puede volver a
-  // manejar.
-  if (j.hora_min_arranque_at) {
-    lineas.push(
-      `🌅 Hora mín. arranque: ` +
-      `${_fmtFechaHoraCompacto(j.hora_min_arranque_at)} ART`
-    );
-  }
-
-  if (j.ultima_actualizacion_at) {
-    lineas.push(
-      `🛰 Último update: ${_fmtFechaHoraCompacto(j.ultima_actualizacion_at)} ART`
-    );
+  if (j.ultima_actualizacion_ts) {
+    lineas.push(`🛰 Último update: ` +
+      `${_fmtFechaHoraCompacto(j.ultima_actualizacion_ts)} ART`);
   }
   if (j.ultima_patente) {
     lineas.push(`🚐 Patente: ${j.ultima_patente}`);
@@ -789,85 +794,85 @@ async function _replyJornadaChofer(msg, { chofer, jSnap, silSnap, fecha }) {
     }
   }
 
-  if (!jSnap.exists) {
-    lineas.push('Hoy no manejaste todavía (o el sistema no detectó actividad).');
+  if (!jSnap) {
+    lineas.push(
+      'No tenés jornada activa ahora — o no manejaste en las últimas horas, ' +
+      'o ya terminaste tu descanso de 8 hs.'
+    );
     await msg.reply(lineas.join('\n'));
     return;
   }
 
+  // Modelo v2: bloques de 4h (3h45 manejo + 15 min pausa), 3 bloques
+  // por jornada, descanso 8h misma posición para cerrar.
   const j = jSnap.data() || {};
-  const jornadaActualSeg = j.segundos_jornada_actual || 0;
-  const continuoSeg = j.segundos_continuo_actual || 0;
-  const pausaSeg = j.segundos_pausa_actual || 0;
-  const LIMITE_DIARIO_SEG = 12 * 3600;
-  const LIMITE_CONTINUO_SEG = 4 * 3600;
+  const totalManejoSeg = j.total_manejo_seg || 0;
+  const bloqueActualManejo = j.bloque_actual_manejo_seg || 0;
+  const bloqueActualPausa = j.bloque_actual_pausa_seg || 0;
+  const bloquesCompletos = j.bloques_completos || 0;
+  const descansoSeg = j.descanso_segundos || 0;
+  const estado = (j.estado || '').toString();
 
-  // Resumen general.
-  lineas.push(`🚛 Llevás manejado: *${_fmtSegCompacto(jornadaActualSeg)}*`);
-  const restanteDiario = LIMITE_DIARIO_SEG - jornadaActualSeg;
-  if (restanteDiario > 0) {
-    lineas.push(`   Te quedan ${_fmtSegCompacto(restanteDiario)} antes del límite de 12 hs.`);
+  const BLOQUE_LIMITE_SEG = 3 * 3600 + 45 * 60; // 3h45
+  const BLOQUES_MAX = 3;
+  const DESCANSO_MIN_SEG = 8 * 3600;
+
+  // Resumen del bloque actual.
+  if (bloquesCompletos >= BLOQUES_MAX) {
+    lineas.push(`✅ *Cumpliste tus ${BLOQUES_MAX} bloques de manejo (11h15 total).*`);
+    lineas.push('   Estás en descanso obligatorio antes de la próxima jornada.');
   } else {
-    lineas.push('   *Ya superaste las 12 hs diarias.* Tenés que parar.');
+    lineas.push(`🚛 Bloque actual: ` +
+      `*${_fmtSegCompacto(bloqueActualManejo)}* manejado` +
+      ` (de ${_fmtSegCompacto(BLOQUE_LIMITE_SEG)} máximo)`);
+    const restanteBloque = BLOQUE_LIMITE_SEG - bloqueActualManejo;
+    if (restanteBloque > 0) {
+      lineas.push(`   Te quedan *${_fmtSegCompacto(restanteBloque)}* antes ` +
+        'de tu pausa obligatoria de 15 min.');
+    } else {
+      lineas.push('   *Te pasaste del límite del bloque.* Pará y descansá 15 min.');
+    }
+    if (bloqueActualPausa > 0) {
+      lineas.push(`   ⏸ Pausa actual: ${_fmtSegCompacto(bloqueActualPausa)}.`);
+    }
+    lineas.push('');
+    lineas.push(`📦 Bloques completos: ${bloquesCompletos}/${BLOQUES_MAX}`);
+    lineas.push(`🚛 Total del día: ${_fmtSegCompacto(totalManejoSeg)}`);
   }
-  lineas.push('');
 
-  // Manejo continuo.
-  lineas.push(`⏱ Continuo sin pausa: *${_fmtSegCompacto(continuoSeg)}*`);
-  const restanteContinuo = LIMITE_CONTINUO_SEG - continuoSeg;
-  if (continuoSeg === 0 && pausaSeg > 0) {
-    lineas.push(`   Estás en pausa (${_fmtSegCompacto(pausaSeg)}).`);
-  } else if (restanteContinuo > 0) {
-    lineas.push(
-      `   Te quedan ${_fmtSegCompacto(restanteContinuo)} antes de tener que parar 15 min.`
-    );
-  } else {
-    lineas.push('   *Ya superaste las 4 hs continuas.* Tenés que parar.');
+  // Estado de descanso (cuando está parado, mostramos progreso hacia las 8h).
+  if (descansoSeg > 0 && bloquesCompletos < BLOQUES_MAX) {
+    lineas.push('');
+    lineas.push(`🛏 Descanso acumulado: ${_fmtSegCompacto(descansoSeg)} ` +
+      `(necesitás ${_fmtSegCompacto(DESCANSO_MIN_SEG)} para cerrar jornada)`);
   }
 
-  // Avisos enviados hoy. Solo los que importan al chofer (no el flag
-  // crudo). Lenguaje natural.
+  // Avisos enviados — los que importan al chofer en lenguaje natural.
   const avisos = [];
-  if (j.alerta_3_30_continua_enviada || j.alerta_3_45_continua_enviada) {
-    avisos.push('🟡 Te avisamos que faltaban 30 min para tu pausa de 4 hs.');
+  if (j.alerta_3_30_enviada) {
+    avisos.push('🟡 Te avisamos que faltaban 15 min para tu pausa obligatoria.');
   }
-  if (j.alerta_4_00_continua_enviada) {
-    avisos.push('🔴 Cumpliste 4 hs continuas sin pausa — quedaste en falta.');
+  if (j.alerta_3_45_enviada) {
+    avisos.push('🔴 Llegaste al límite del bloque — tenés que parar 15 min.');
   }
-  if (j.alerta_11_30_diaria_enviada) {
-    avisos.push('🟡 Te avisamos que faltaban 30 min para el límite diario.');
+  if (j.alerta_cuota_enviada) {
+    avisos.push('🔴 Cumpliste los 3 bloques. No podés manejar más hoy.');
   }
-  if (j.alerta_12_00_diaria_enviada) {
-    avisos.push('🔴 Superaste las 12 hs diarias.');
-  }
-  if (j.aviso_descanso_corto_enviada) {
-    const desc = j.descanso_corto_segundos ?
-      _fmtSegCompacto(j.descanso_corto_segundos) :
-      'menos de 8 hs';
-    avisos.push(`🔴 Arrancaste con descanso corto (${desc} entre jornadas).`);
-  }
-  if (j.alerta_arranque_temprano_enviada) {
-    avisos.push('🔴 Arrancaste antes de la hora mínima de descanso.');
+  if (j.alerta_veda_enviada) {
+    avisos.push('🌙 Estás manejando en horario de veda nocturna (00:00-06:00).');
   }
   if (avisos.length > 0) {
     lineas.push('');
-    lineas.push('*Avisos de hoy:*');
+    lineas.push('*Avisos de esta jornada:*');
     for (const a of avisos) {
       lineas.push(a);
     }
-  } else {
-    lineas.push('');
-    lineas.push('✓ Hoy no recibiste avisos del vigilador.');
   }
 
-  // Hora mínima de arranque (si ya cumplió las 12h y el sistema
-  // calculó cuándo puede arrancar de nuevo).
-  if (j.hora_min_arranque_at) {
+  // Estado descriptivo final.
+  if (estado === 'descanso_jornada') {
     lineas.push('');
-    lineas.push(
-      `🌅 *No podés arrancar antes de las ` +
-      `${_fmtFechaHoraCompacto(j.hora_min_arranque_at)} ART.*`
-    );
+    lineas.push('✅ Jornada cerrada por descanso de 8h.');
   }
 
   await msg.reply(lineas.join('\n'));

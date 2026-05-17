@@ -16,6 +16,7 @@
 // → cron_aviso_agrupado). Este módulo es el equivalente al ENVIAR para
 // los flujos que vienen de Cloud Functions y NO pasan por el cron.
 
+const admin = require('firebase-admin');
 const { aDdMmYyyyLocal, aLocalTime } = require('./fechas');
 
 // Banner que se muestra al final del mensaje mientras la app esté en
@@ -109,11 +110,11 @@ async function planificarEnvioAgrupado(db, docActual) {
 
   // Ventana: últimas 48hs. Cubre el caso típico (eventos del finde que
   // se mandan el lunes) sin meter docs viejos olvidados.
+  // Antes usabamos `new admin.firestore.Timestamp(seconds, nanos)` —
+  // constructor interno NO público del SDK que podía romper con
+  // upgrades. Mejor `Timestamp.fromMillis(...)` que es la API estable.
   const ventanaMs = 48 * 60 * 60 * 1000;
-  const cutoff = new admin.firestore.Timestamp(
-    Math.floor((Date.now() - ventanaMs) / 1000),
-    0
-  );
+  const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - ventanaMs);
 
   // Buscar otros PENDIENTE del mismo destinatario + origen.
   const snap = await db
@@ -338,7 +339,8 @@ function _fechaEventoDe(data) {
   return new Date();
 }
 
-const admin = require('firebase-admin');
+// `admin` ya fue requerido al top del archivo (linea 19) — antes
+// estaba duplicado acá al final, riesgo de race en module init.
 
 module.exports = {
   planificarEnvioAgrupado,

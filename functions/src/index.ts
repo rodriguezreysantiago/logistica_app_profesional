@@ -2614,6 +2614,39 @@ function _formatHoraArg(millis: number): string {
 }
 
 /**
+ * Helper de idempotencia ATOMICA para crons diarios. Usa Firestore
+ * `create()` que es atómico — tira ALREADY_EXISTS si el doc ya existe.
+ *
+ * Reemplaza el patron anterior `if ((await get()).exists) return; ...
+ * await set(...)` que tenia una ventana de race: si GCP retry-eaba
+ * entre el get y el set, el segundo run no veia el doc creado todavia
+ * → encolaba el mensaje 2 veces.
+ *
+ * Devuelve `true` si conseguimos el lock (debe continuar el cron),
+ * `false` si ya estaba tomado (skip).
+ */
+async function adquirirIdempotenciaDiaria(
+  histRef: FirebaseFirestore.DocumentReference,
+  tipo: string,
+): Promise<boolean> {
+  try {
+    await histRef.create({
+      tipo,
+      tomado_en: FieldValue.serverTimestamp(),
+    });
+    return true;
+  } catch (e) {
+    // Firestore code 6 = ALREADY_EXISTS. Mensaje también lo dice.
+    const msg = (e as Error).message || "";
+    const code = (e as { code?: number }).code;
+    if (code === 6 || msg.includes("ALREADY_EXISTS") || msg.includes("already exists")) {
+      return false;
+    }
+    throw e;
+  }
+}
+
+/**
  * Wrapper de fetch() con AbortController + timeout. Necesario porque
  * APIs externas (Volvo Connect, Sitrack) ocasionalmente cuelgan la
  * conexión sin cerrar — el `await fetch` se quedaba hasta el
@@ -3364,13 +3397,15 @@ export const resumenBotDiario = onSchedule(
   async () => {
     logger.info("[resumenBotDiario] iniciando");
 
-    // Idempotencia diaria.
+    // Idempotencia diaria ATOMICA (auditoria 2026-05-17): el patron viejo
+    // era get + skip + set al final, que tenia race con retry de GCP
+    // entre el get y el set → mensaje duplicado. Ahora `create()` es
+    // atomico: si ya existe tira ALREADY_EXISTS y el helper devuelve false.
     const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
     const histRef = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`bot_resumen_${hoyKey}_${MANTENIMIENTO_DESTINATARIO_DNI}`);
-    const histSnap = await histRef.get();
-    if (histSnap.exists) {
+    if (!(await adquirirIdempotenciaDiaria(histRef, "bot_resumen_diario"))) {
       logger.info("[resumenBotDiario] ya enviado hoy, skip");
       return;
     }
@@ -3422,13 +3457,10 @@ export const resumenBotDiario = onSchedule(
         admin_dni: "BOT",
         admin_nombre: "Bot watchdog",
       });
-      await histRef.set({
-        tipo: "bot_resumen_diario",
-        destinatario_dni: MANTENIMIENTO_DESTINATARIO_DNI,
-        fecha: hoyKey,
+      // Actualizar metadata del lock atomico (el create ya tomo el slot).
+      await histRef.update({
         cantidad_eventos: 0,
         cola_doc_id: colaRef.id,
-        creado_en: FieldValue.serverTimestamp(),
       });
       logger.info("[resumenBotDiario] OK (sin eventos)", { colaDocId: colaRef.id });
       return;
@@ -3507,16 +3539,13 @@ export const resumenBotDiario = onSchedule(
       admin_nombre: "Bot watchdog",
     });
 
-    await histRef.set({
-      tipo: "bot_resumen_diario",
-      destinatario_dni: adminDni,
-      fecha: hoyKey,
+    // Update metadata sobre el lock que ya tomamos al inicio.
+    await histRef.update({
       cantidad_eventos: evSnap.size,
       cantidad_caidas: totalCaidas,
       cantidad_recuperaciones: totalRecuperaciones,
       minutos_caido_total: minutosCaidoTotal,
       cola_doc_id: colaRef.id,
-      creado_en: FieldValue.serverTimestamp(),
     });
 
     logger.info("[resumenBotDiario] OK", {
@@ -4452,7 +4481,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
     const histRef = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`drifts_${hoyKey}_${MANTENIMIENTO_DESTINATARIO_DNI}`);
-    if ((await histRef.get()).exists) {
+    if (!(await adquirirIdempotenciaDiaria(histRef, "drifts_asignaciones"))) {
       logger.info("[resumenDriftsAsignacionesDiario] ya enviado hoy, skip");
       return;
     }
@@ -4593,9 +4622,8 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
     });
 
     // Marcar como enviado hoy (idempotencia — bloquea retries de GCP).
-    await histRef.set({
-      enviado_en: FieldValue.serverTimestamp(),
-      tipo: "drifts_asignaciones",
+    // Update metadata sobre el lock que ya tomamos al inicio.
+    await histRef.update({
       drifts_count: cantidad,
     });
 
@@ -4798,15 +4826,11 @@ export const resumenExcesosJornadaDiario = onSchedule(
     const histRef = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`excesos_jornada_${hoyKey}`);
-    if ((await histRef.get()).exists) {
+    if (!(await adquirirIdempotenciaDiaria(histRef, "excesos_jornada"))) {
       logger.info("[resumenExcesosJornadaDiario] ya enviado hoy, skip");
       return;
     }
     await jornadasV2.armarResumenJornadasDiario();
-    await histRef.set({
-      enviado_en: FieldValue.serverTimestamp(),
-      tipo: "excesos_jornada",
-    });
   }
 );
 
@@ -4868,12 +4892,13 @@ export const resumenConductaManejoDiario = onSchedule(
     logger.info("[resumenConductaManejoDiario] iniciando");
 
     // Idempotencia diaria — si GCP re-dispara el cron Molina recibe el
-    // mismo resumen 2 veces. Gate con docId determinístico por fecha.
+    // mismo resumen 2 veces. Lock ATOMICO con `adquirirIdempotenciaDiaria`
+    // — el create() es atomico, no hay ventana de race entre get y set.
     const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
     const histRefIdem = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`conducta_manejo_${hoyKey}`);
-    if ((await histRefIdem.get()).exists) {
+    if (!(await adquirirIdempotenciaDiaria(histRefIdem, "conducta_manejo_diario"))) {
       logger.info("[resumenConductaManejoDiario] ya enviado hoy, skip");
       return;
     }
@@ -5230,10 +5255,8 @@ export const resumenConductaManejoDiario = onSchedule(
       admin_nombre: "Bot resumen conducta",
     });
 
-    // Marcar como enviado hoy (idempotencia — bloquea reintentos).
-    await histRefIdem.set({
-      enviado_en: FieldValue.serverTimestamp(),
-      tipo: "conducta_manejo_diario",
+    // Update metadata sobre el lock que ya tomamos al inicio.
+    await histRefIdem.update({
       grupos: grupos.size,
       eventos: eventos.length,
     });

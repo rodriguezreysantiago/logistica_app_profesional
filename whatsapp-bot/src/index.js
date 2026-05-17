@@ -474,8 +474,17 @@ async function procesarSiguiente() {
     // "(parte i/N)" y delay anti-flood entre envíos. El waMessageId que
     // guardamos es el del PRIMER chunk — el que el chofer ve como
     // "principal" si responde con quote.
+    //
+    // Auditoria 2026-05-17 (CRITICO): antes si fallaba un chunk en
+    // mid-envio (chunk 2 de 3), el catch externo retri-encolaba el doc
+    // entero → al proximo poll el destinatario recibia parte 1 + 2 + 3
+    // de nuevo (parte 1 duplicada). Fix: marcar ENVIADO apenas el chunk
+    // 1 sale OK; si chunks subsiguientes fallan, anotar `chunks_parcial`
+    // pero NO retri-encolar — el operador puede ver el campo y decidir.
     const partes = partirMensajeLargo(mensajeFinal);
     let waMessageId = null;
+    let chunksEnviados = 0;
+    let chunkError = null;
     for (let i = 0; i < partes.length; i++) {
       if (i > 0) {
         // 2-3s entre partes: tiempo realista de un humano que escribió
@@ -483,16 +492,42 @@ async function procesarSiguiente() {
         // de tiempo en milisegundos = patrón de bot.
         await sleep(2000 + Math.floor(Math.random() * 1000));
       }
-      const id = await wa.enviarMensaje(wid, partes[i]);
-      if (i === 0) waMessageId = id;
+      try {
+        const id = await wa.enviarMensaje(wid, partes[i]);
+        if (i === 0) waMessageId = id;
+        chunksEnviados++;
+      } catch (chunkE) {
+        chunkError = chunkE;
+        log.error(`✗ Chunk ${i + 1}/${partes.length} de ${docId} falló: ` +
+          `${chunkE.message}`);
+        break;
+      }
     }
     if (partes.length > 1) {
       log.info(
-        `  ${docId}: mensaje partido en ${partes.length} chunks ` +
+        `  ${docId}: ${chunksEnviados}/${partes.length} chunks enviados ` +
         `(${mensajeFinal.length} chars total)`
       );
     }
-    await fs.marcarEnviado(docRef, { waMessageId });
+    if (chunksEnviados === 0) {
+      // No se envio nada — re-tirar para que el catch externo decida.
+      throw chunkError || new Error('Sin chunks enviados');
+    }
+    // Aunque haya habido falla en chunks subsiguientes, marcamos ENVIADO
+    // (el chofer ya recibio al menos el primer chunk — re-enviar todo
+    // duplicaria el chunk 1).
+    const meta = { waMessageId };
+    if (chunksEnviados < partes.length) {
+      meta.chunksParcial = {
+        enviados: chunksEnviados,
+        total: partes.length,
+        error: chunkError ? chunkError.message : 'desconocido',
+      };
+      log.warn(`⚠ Mensaje ${docId} parcial: ${chunksEnviados}/${partes.length}`);
+      health.registrarError('envio_parcial',
+        `${docId}: ${chunksEnviados}/${partes.length}`);
+    }
+    await fs.marcarEnviado(docRef, meta);
 
     // Marcar los docs agrupados como ENVIADO con `agrupado_en` apuntando
     // al doc principal — sin reenviar, queda traza para auditoría.
