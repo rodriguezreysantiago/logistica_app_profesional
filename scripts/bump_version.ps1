@@ -86,13 +86,26 @@ if ($DryRun) {
 }
 
 # --- Aplicar cambios ----------------------------------------------
+# IMPORTANTE: en PowerShell 5.1 `-Encoding UTF8` agrega BOM. pubspec.yaml
+# con BOM confunde parsers de YAML (algunos toleran, otros no) y
+# app_constants.dart con BOM puede confundir analizadores Dart. Usamos
+# UTF8Encoding sin BOM via [System.IO.File]::WriteAllText para evitarlo.
+function Write-Utf8NoBom {
+    param([string]$Path, [string]$Content)
+    [System.IO.File]::WriteAllText(
+        $Path,
+        $Content,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+}
+
 $pubContent = Get-Content $pubspec -Raw
 $pubContent = $pubContent -replace "version:\s*\S+", "version: $Version"
-Set-Content -Path $pubspec -Value $pubContent -NoNewline -Encoding UTF8
+Write-Utf8NoBom $pubspec $pubContent
 
 $constContent = Get-Content $appConstants -Raw
 $constContent = $constContent -replace "appVersion\s*=\s*'v [^']+'", "appVersion = '$appVer'"
-Set-Content -Path $appConstants -Value $constContent -NoNewline -Encoding UTF8
+Write-Utf8NoBom $appConstants $constContent
 
 $mainContent = Get-Content $mainCpp -Raw
 # Reemplaza el string del titulo. Tolerante con o sin acento, con

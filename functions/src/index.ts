@@ -1370,7 +1370,13 @@ export const telemetriaSnapshotScheduled = onSchedule(
       // --enable-ttl --project=coopertrans-movil`. 18 meses cubre
       // reportes anuales y comparativos año-a-año sin acumular
       // indefinidamente (snapshot diario × 127 vehículos × N años).
-      const expiraEnMs = fechaMidnight.getTime() + 18 * 30 * 24 * 60 * 60 * 1000;
+      // 18 meses calendario (no 18*30 dias = 540 dias = ~17.7 meses).
+      // Antes la cuenta erronea borraba ~8 dias antes de los 18 meses
+      // reales — para data anual y comparativos año-a-año hace falta el
+      // calendario exacto. Usamos setUTCMonth para evitar drift.
+      const ttl = new Date(fechaMidnight);
+      ttl.setUTCMonth(ttl.getUTCMonth() + 18);
+      const expiraEnMs = ttl.getTime();
       const doc: Record<string, unknown> = {
         patente,
         vin,
@@ -2094,7 +2100,12 @@ function buildAlertaDoc(
   // Las alertas son útiles para investigar incidentes recientes pero
   // no para histórico anual; 12 meses cubre auditorías y disputas
   // típicas con clientes/aseguradoras sin acumular sin tope.
-  const expiraEnMs = creadoMs + 12 * 30 * 24 * 60 * 60 * 1000;
+  // 12 meses calendario (no 12*30 dias = 360 dias = ~11.8 meses).
+  // Antes borraba ~5 dias antes del aniversario real — para auditorias
+  // anuales hace falta calendario exacto. setUTCMonth evita drift.
+  const ttl = new Date(creadoMs);
+  ttl.setUTCMonth(ttl.getUTCMonth() + 12);
+  const expiraEnMs = ttl.getTime();
   const doc: Record<string, unknown> = {
     vin,
     tipo,
@@ -5775,9 +5786,18 @@ export const recomputeIcmSemanalScheduled = onSchedule(
 );
 
 // Helper: ID semana ISO 8601 ("YYYY-WNN") de un Date.
+// Fix auditoria 2026-05-16: antes mezclaba UTC y local (`d.getFullYear()`
+// es local, `getUTCDay()`/`setUTCDate()` son UTC). En el borde de año
+// (semana 1 de enero o 52/53 en diciembre) el calculo podia dar
+// "2025-W01" cuando deberia ser "2026-W01" — los lectores client buscaban
+// el docId esperado y no encontraban (off-by-one silencioso).
+// Ahora usamos UTC consistente desde el primer paso.
 function _isoWeekId(d: Date): string {
   // ISO 8601: la semana 1 es la que contiene el primer jueves del año.
-  const target = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  // UTC consistente: getUTCFullYear / Month / Date desde el input.
+  const target = new Date(Date.UTC(
+    d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()
+  ));
   const dayNum = (target.getUTCDay() + 6) % 7; // lunes=0 ... domingo=6
   target.setUTCDate(target.getUTCDate() - dayNum + 3); // jueves de la semana
   const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));

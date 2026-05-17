@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../core/services/storage_service.dart';
@@ -1031,8 +1032,10 @@ class EmpleadoActions {
           motivo: 'Baja del empleado',
         );
       } catch (e) {
-        // ignore: avoid_print
-        print('darDeBaja empleado: cerrar asig vehículo falló: $e');
+        // Reportamos al logger con DNI hasheado (PII safe) en vez de
+        // print() crudo que dejaba el DNI plano en logcat / Crashlytics.
+        AppLogger.recordError(e, StackTrace.current,
+            reason: 'darDeBaja: cerrar asig vehiculo fallo');
       }
 
       // 2) Cerrar asignación de enganche (si tenía un enganche directo).
@@ -1047,8 +1050,8 @@ class EmpleadoActions {
             motivo: 'Baja del empleado dueño del enganche',
           );
         } catch (e) {
-          // ignore: avoid_print
-          print('darDeBaja empleado: cerrar asig enganche falló: $e');
+          AppLogger.recordError(e, StackTrace.current,
+              reason: 'darDeBaja: cerrar asig enganche fallo');
         }
       }
 
@@ -1063,8 +1066,10 @@ class EmpleadoActions {
         try {
           await FirebaseStorage.instance.refFromURL(url).delete();
         } catch (e) {
-          // ignore: avoid_print
-          print('darDeBaja empleado: no pude borrar $url: $e');
+          // No incluimos la URL en el log porque contiene un token de
+          // acceso temporal — solo la razon generica.
+          AppLogger.recordError(e, StackTrace.current,
+              reason: 'darDeBaja: borrar archivo Storage fallo');
         }
       }
 
