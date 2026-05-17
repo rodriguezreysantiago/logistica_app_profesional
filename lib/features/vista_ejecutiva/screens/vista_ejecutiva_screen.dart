@@ -263,6 +263,36 @@ class _TableroContent extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 24),
+        // Eficiencia operativa — card destacada full-width (mobile) o
+        // media pantalla (desktop). Va sola en su seccion porque es el
+        // KPI diferencial que YPF/Vecchi miran como indicador clave de
+        // operacion + conducta de los choferes.
+        const _SectionLabel('EFICIENCIA OPERATIVA'),
+        const SizedBox(height: 10),
+        if (esDesktop)
+          Row(
+            children: [
+              SizedBox(
+                width: MediaQuery.of(context).size.width * 0.45,
+                child: KpiGrandeCard.eficiencia(
+                  label: 'Eficiencia combustible · 30 días',
+                  kpi: kpis.eficienciaCombustible,
+                  icono: Icons.local_gas_station,
+                  onTap: () => Navigator.pushNamed(
+                      context, AppRoutes.adminEcoDriving),
+                ),
+              ),
+            ],
+          )
+        else
+          KpiGrandeCard.eficiencia(
+            label: 'Eficiencia combustible · 30 días',
+            kpi: kpis.eficienciaCombustible,
+            icono: Icons.local_gas_station,
+            onTap: () => Navigator.pushNamed(
+                context, AppRoutes.adminEcoDriving),
+          ),
+        const SizedBox(height: 24),
         // Sección 2: gráficos de tendencia.
         const _SectionLabel('TENDENCIAS'),
         const SizedBox(height: 10),

@@ -113,6 +113,53 @@ class KpiGrandeCard extends StatelessWidget {
     );
   }
 
+  /// Constructor a partir de `KpiEficiencia` (km/L promedio 30 días +
+  /// comparativa al período previo). Color verde si va bien (≥3.5 km/L
+  /// para flota de tractores), amarillo medio, rojo si es bajo.
+  /// Si no hay datos (flota sin Volvo Connect o cron sin correr),
+  /// muestra "—" con un sublabel explicativo.
+  factory KpiGrandeCard.eficiencia({
+    Key? key,
+    required String label,
+    required KpiEficiencia kpi,
+    required IconData icono,
+    VoidCallback? onTap,
+  }) {
+    final tieneDatos = kpi.diasConDatosActual > 0;
+    final v = kpi.variacionAbs;
+    final vTexto = v == null
+        ? null
+        : (v >= 0
+            ? '+${v.toStringAsFixed(2)} km/L'
+            : '${v.toStringAsFixed(2)} km/L');
+    final color = !tieneDatos
+        ? Colors.white54
+        : (kpi.kmPorLitroActual >= 3.5
+            ? AppColors.accentGreen
+            : (kpi.kmPorLitroActual >= 2.8
+                ? AppColors.accentAmber
+                : AppColors.accentRed));
+    final sublabel = !tieneDatos
+        ? 'Sin datos Volvo en los últimos 30 días'
+        : '${kpi.kmTotalesActual.toStringAsFixed(0)} km · '
+            'promedio de ${kpi.diasConDatosActual} día'
+            '${kpi.diasConDatosActual == 1 ? '' : 's'}';
+    return KpiGrandeCard(
+      key: key,
+      label: label,
+      valorTexto: tieneDatos
+          ? '${kpi.kmPorLitroActual.toStringAsFixed(2)} km/L'
+          : '—',
+      icono: icono,
+      color: color,
+      sublabel: sublabel,
+      variacion: v,
+      variacionTexto: vTexto,
+      mejorEsSubir: true,
+      onTap: onTap,
+    );
+  }
+
   /// Constructor a partir de `KpiSimple` (solo número, sin tendencia).
   factory KpiGrandeCard.simple({
     Key? key,

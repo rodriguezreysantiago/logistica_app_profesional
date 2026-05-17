@@ -19,6 +19,11 @@ class KpisVistaEjecutiva {
   final KpiSimple choferesActivos;
   final KpiSimple alertasCriticas;
 
+  /// Eficiencia combustible últimos 30 días (km/L promedio flota Volvo +
+  /// comparativa al período previo 30d). Calculado desde
+  /// `VOLVO_SCORES_DIARIOS` docs `_FLEET_*`.
+  final KpiEficiencia eficienciaCombustible;
+
   /// Línea ICM últimas 12 semanas (label + valor).
   /// Orden cronológico ascendente.
   final List<PuntoTendencia> tendenciaIcm;
@@ -38,6 +43,7 @@ class KpisVistaEjecutiva {
     required this.icmFlota,
     required this.choferesActivos,
     required this.alertasCriticas,
+    required this.eficienciaCombustible,
     required this.tendenciaIcm,
     required this.viajesPorSemana,
     required this.top5Mejores,
@@ -105,6 +111,59 @@ class KpiSimple {
   const KpiSimple({required this.valor, this.sublabel});
 }
 
+/// Eficiencia combustible (km/L) últimos 30 días + comparativa 30 días
+/// previos. Computado desde docs `_FLEET_*` de `VOLVO_SCORES_DIARIOS`.
+///
+/// Los KPIs operativos típicos para una flota de tractores semi-remolque
+/// rondan 2.5-3.5 km/L según carga, ruta y conducta. >3.5 es excelente.
+class KpiEficiencia {
+  /// km/L promedio de los últimos 30 días. 0 si no hay datos Volvo
+  /// (flota sin Volvo Connect o cron sin correr).
+  final double kmPorLitroActual;
+  final double kmPorLitroAnterior;
+  /// Diferencia absoluta (km/L). Positivo = mejoró, negativo = empeoró.
+  /// `null` si no hay base de comparación.
+  final double? variacionAbs;
+  /// Total km del período actual (para sublabel).
+  final double kmTotalesActual;
+  /// Cantidad de días con datos en el período actual (para subtitle
+  /// honesto: "promedio de N días" no "promedio de 30 días" cuando hay
+  /// huecos en el feed Volvo).
+  final int diasConDatosActual;
+
+  const KpiEficiencia({
+    required this.kmPorLitroActual,
+    required this.kmPorLitroAnterior,
+    required this.variacionAbs,
+    required this.kmTotalesActual,
+    required this.diasConDatosActual,
+  });
+
+  factory KpiEficiencia.fromValores({
+    required double actual,
+    required double anterior,
+    required double kmTotales,
+    required int diasConDatos,
+  }) {
+    final variacion = anterior == 0 ? null : actual - anterior;
+    return KpiEficiencia(
+      kmPorLitroActual: actual,
+      kmPorLitroAnterior: anterior,
+      variacionAbs: variacion,
+      kmTotalesActual: kmTotales,
+      diasConDatosActual: diasConDatos,
+    );
+  }
+
+  static const KpiEficiencia vacia = KpiEficiencia(
+    kmPorLitroActual: 0,
+    kmPorLitroAnterior: 0,
+    variacionAbs: null,
+    kmTotalesActual: 0,
+    diasConDatosActual: 0,
+  );
+}
+
 /// Un punto en una serie temporal (label visible + valor numérico).
 class PuntoTendencia {
   final String label;
@@ -146,6 +205,7 @@ class VistaEjecutivaService {
       _statsSnapshot(db),
       _tendenciaIcm(db, ahora, semanas: 12),
       _viajesPorSemana(db, ahora, semanas: 8),
+      _eficienciaCombustible(db, ahora),
     ]);
 
     final viajesMes = results[0] as KpiMes;
@@ -153,6 +213,7 @@ class VistaEjecutivaService {
     final stats = results[2] as Map<String, dynamic>;
     final tendIcm = results[3] as List<PuntoTendencia>;
     final viajesSem = results[4] as List<PuntoTendencia>;
+    final eficiencia = results[5] as KpiEficiencia;
 
     // De ICM_SEMANAL ya viene el top 5 mejores y peores — los
     // extraemos del doc de la última semana cerrada (que ya pedimos).
@@ -184,6 +245,7 @@ class VistaEjecutivaService {
             ? 'Todo al día'
             : '$vencidos vencidos · $pendientes revisiones',
       ),
+      eficienciaCombustible: eficiencia,
       tendenciaIcm: tendIcm,
       viajesPorSemana: viajesSem,
       top5Mejores: mejores,
@@ -391,6 +453,94 @@ class VistaEjecutivaService {
       ));
     }
     return result;
+  }
+
+  /// Eficiencia combustible (km/L) últimos 30 días + comparativa
+  /// vs los 30 días previos. Lee docs `_FLEET_*` de `VOLVO_SCORES_DIARIOS`
+  /// (1 doc por día, generados por el cron `volvoScoresPoller` 04:00 ART).
+  ///
+  /// Cálculo: km/L se computa ponderado por km del día —
+  ///   km/L = (Σ km del período) / (Σ litros del período)
+  ///   litros = km × (avgFuelConsumption_ml/100km / 1000) / 100
+  ///   simplificando: litros = km × avgFuelConsumption_ml / 100_000
+  ///
+  /// Devuelve `KpiEficiencia.vacia` si no hay docs en el rango (cron
+  /// no corrió aún o flota sin Volvo Connect).
+  static Future<KpiEficiencia> _eficienciaCombustible(
+    FirebaseFirestore db,
+    DateTime ahora,
+  ) async {
+    try {
+      // Traemos los últimos 60 días para tener ambos períodos en 1 query.
+      // El índice (es_fleet + fecha_ts DESC) ya existe en firestore.indexes.json.
+      final desdeMs = ahora
+          .subtract(const Duration(days: 60))
+          .millisecondsSinceEpoch;
+      final snap = await db
+          .collection('VOLVO_SCORES_DIARIOS')
+          .where('es_fleet', isEqualTo: true)
+          .where('fecha_ts',
+              isGreaterThanOrEqualTo:
+                  Timestamp.fromMillisecondsSinceEpoch(desdeMs))
+          .orderBy('fecha_ts', descending: true)
+          .limit(60)
+          .get();
+
+      if (snap.docs.isEmpty) return KpiEficiencia.vacia;
+
+      // Pivote: hace 30 días dividimos en "actual" (últimos 30) vs
+      // "previo" (días 31-60). Cada doc tiene `fecha_ts` (Timestamp).
+      final pivote = ahora.subtract(const Duration(days: 30));
+
+      double kmActual = 0;
+      double litrosActual = 0;
+      double kmPrevio = 0;
+      double litrosPrevio = 0;
+      int diasActual = 0;
+
+      for (final doc in snap.docs) {
+        final d = doc.data();
+        final fechaTs = (d['fecha_ts'] as Timestamp?)?.toDate();
+        if (fechaTs == null) continue;
+        final totalDistanceM = (d['totalDistance'] as num?)?.toDouble();
+        final avgFuelMlPer100Km =
+            (d['avgFuelConsumption'] as num?)?.toDouble();
+        // Si falta alguno de los crudos no podemos calcular litros del día.
+        if (totalDistanceM == null ||
+            avgFuelMlPer100Km == null ||
+            totalDistanceM <= 0 ||
+            avgFuelMlPer100Km <= 0) {
+          continue;
+        }
+        final kmDelDia = totalDistanceM / 1000;
+        // Litros consumidos en el día = km × (ml/100km) / 100_000
+        // (km × ml/100km / 100 = ml; /1000 = litros)
+        final litrosDelDia = kmDelDia * avgFuelMlPer100Km / 100000;
+
+        if (fechaTs.isAfter(pivote)) {
+          kmActual += kmDelDia;
+          litrosActual += litrosDelDia;
+          diasActual++;
+        } else {
+          kmPrevio += kmDelDia;
+          litrosPrevio += litrosDelDia;
+        }
+      }
+
+      final kmlActual = litrosActual > 0 ? kmActual / litrosActual : 0.0;
+      final kmlPrevio = litrosPrevio > 0 ? kmPrevio / litrosPrevio : 0.0;
+
+      return KpiEficiencia.fromValores(
+        actual: kmlActual,
+        anterior: kmlPrevio,
+        kmTotales: kmActual,
+        diasConDatos: diasActual,
+      );
+    } catch (_) {
+      // Si falla (sin índice, permisos, etc.), devolvemos vacía para
+      // no romper todo el tablero. UI lo muestra como "—".
+      return KpiEficiencia.vacia;
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────
