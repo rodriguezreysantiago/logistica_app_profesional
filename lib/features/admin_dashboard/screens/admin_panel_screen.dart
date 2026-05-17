@@ -111,6 +111,18 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
           // Logística → Gomería → Service → Alertas → Reportes → Sync →
           // Estado Bot. El mismo orden tiene que verse en cualquier
           // entrada del admin (rail/bottombar y panel central).
+          // VISTA EJECUTIVA al tope: es el panorama rápido (KPIs grandes
+          // + tendencias + top choferes) que el directivo / supervisor
+          // mira antes de meterse en módulos específicos.
+          if (Capabilities.can(
+              PrefsService.rol, Capability.verVistaEjecutiva))
+            const _AdminTile(
+              titulo: 'VISTA EJECUTIVA',
+              subtitulo: 'KPIs del mes, tendencias y top choferes',
+              icono: Icons.dashboard_customize_outlined,
+              color: AppColors.accentTeal,
+              ruta: AppRoutes.adminVistaEjecutiva,
+            ),
           if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
             const _AdminTile(
               titulo: 'PERSONAL',

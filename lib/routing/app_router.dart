@@ -61,6 +61,8 @@ import '../features/icm/screens/icm_reporte_semanal_screen.dart';
 import '../features/icm/screens/icm_mapa_calor_screen.dart';
 import '../features/icm/screens/icm_detalle_chofer_screen.dart';
 
+import '../features/vista_ejecutiva/screens/vista_ejecutiva_screen.dart';
+
 class AppRouter {
   AppRouter._();
 
@@ -237,6 +239,17 @@ class AppRouter {
       case AppRoutes.adminMantenimiento:
         return _buildRoute(
           _protegerAdmin(const AdminMantenimientoScreen()),
+          settings,
+        );
+
+      // ================= VISTA EJECUTIVA =================
+      // Tablero CEO con KPIs grandes (viajes del mes, ICM flota, choferes
+      // activos, alertas) + gráficos de tendencia + top 5 mejores choferes.
+      // Pensado como "homepage" para directivos y panorama operativo.
+      // Capability verVistaEjecutiva (admin + supervisor).
+      case AppRoutes.adminVistaEjecutiva:
+        return _buildRoute(
+          _protegerAdmin(const VistaEjecutivaScreen()),
           settings,
         );
 

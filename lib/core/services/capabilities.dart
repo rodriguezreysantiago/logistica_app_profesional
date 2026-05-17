@@ -60,6 +60,12 @@ enum Capability {
   /// (este último es el destinatario natural — Molina es quien dialoga
   /// con los choferes con peor desempeño).
   verIcm,
+  /// Vista Ejecutiva — tablero CEO con KPIs grandes (viajes del mes,
+  /// ICM flota, choferes activos, alertas críticas), gráficos de
+  /// tendencia (ICM 12 semanas, viajes/semana) y top 5 mejores choferes.
+  /// Pensada para el panorama rápido de gestión (Diego/Carlos, Santiago,
+  /// supervisores). Reusa el módulo ICM y los datos de viajes existentes.
+  verVistaEjecutiva,
 
   // ─── Acciones sobre personal ───
   crearEmpleado,
@@ -127,6 +133,7 @@ class Capabilities {
       Capability.verGomeria,
       Capability.verLogistica,
       Capability.verIcm,
+      Capability.verVistaEjecutiva,
       // Editar y crear personal/vehículos: sí. Pero NO puede asignar
       // rol ADMIN ni cambiar rol de admins existentes.
       Capability.crearEmpleado,
