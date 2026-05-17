@@ -844,10 +844,14 @@ class _ListaUnidadesLibres extends StatelessWidget {
 
       if (!context.mounted) return;
       AppFeedback.warningOn(messenger, 'Solicitud enviada. Aguarde aprobación de oficina.');
-    } catch (e) {
-      debugPrint('Error solicitud: $e');
+    } catch (e, s) {
       if (!context.mounted) return;
-      AppFeedback.errorOn(messenger, 'Error al enviar solicitud: $e');
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo enviar la solicitud. Probá de nuevo en un momento.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 }

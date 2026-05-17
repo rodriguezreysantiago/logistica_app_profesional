@@ -96,8 +96,13 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
         messenger,
         a.pagado ? 'Adelanto marcado como pendiente.' : 'Adelanto marcado como pagado.',
       );
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo cambiar el estado del adelanto. Probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 
@@ -886,12 +891,17 @@ class _CardAdelanto extends StatelessWidget {
         ],
       ),
     );
-    if (confirma != true) return;
+    if (confirma != true) {
+      motivoCtrl.dispose();
+      return;
+    }
+    final motivoTxt = motivoCtrl.text.trim();
+    motivoCtrl.dispose();
     try {
       await AdelantosService.eliminarAdelanto(
         adelantoId: adelanto.id,
         eliminadoPorDni: PrefsService.dni,
-        motivo: motivoCtrl.text.trim().isEmpty ? null : motivoCtrl.text.trim(),
+        motivo: motivoTxt.isEmpty ? null : motivoTxt,
       );
       AppFeedback.successOn(messenger, 'Adelanto eliminado.');
     } catch (e) {
@@ -973,7 +983,7 @@ class _AdelantoFormDialogState extends State<_AdelantoFormDialog> {
       backgroundColor: Theme.of(context).colorScheme.surface,
       title: Text(_esEdicion ? 'Editar adelanto' : 'Nuevo adelanto'),
       content: SizedBox(
-        width: 380,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 380.0),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,

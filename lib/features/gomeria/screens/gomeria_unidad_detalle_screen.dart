@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../constants/posiciones.dart';
@@ -345,7 +346,10 @@ class _InstalarCubiertaDialogState extends State<_InstalarCubiertaDialog> {
       backgroundColor: AppColors.background,
       title: Text('Instalar en ${widget.posicion.etiqueta}'),
       content: SizedBox(
-        width: 380,
+        // Anti-overflow (auditoria 2026-05-17): antes width: 380 pisaba
+        // viewports < 380dp (Samsung J4 / Moto E entry). Clamp al espacio
+        // disponible del AlertDialog (viewport - 80 insets), tope 380.
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 380.0),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -446,11 +450,15 @@ class _InstalarCubiertaDialogState extends State<_InstalarCubiertaDialog> {
         motivo: _motivoCtrl.text.trim().isEmpty ? null : _motivoCtrl.text,
       );
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (e, s) {
       setState(() => _guardando = false);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        AppFeedback.errorTecnicoOn(
+          ScaffoldMessenger.of(context),
+          usuario: 'No se pudo instalar la cubierta. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }
@@ -502,7 +510,7 @@ class _PosicionOcupadaDialogState extends State<_PosicionOcupadaDialog> {
           backgroundColor: AppColors.background,
           title: Text(widget.posicion.etiqueta),
           content: SizedBox(
-            width: 380,
+            width: (MediaQuery.of(ctx).size.width - 80).clamp(240.0, 380.0),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -644,11 +652,14 @@ class _PosicionOcupadaDialogState extends State<_PosicionOcupadaDialog> {
           const SnackBar(content: Text('Control registrado.')),
         );
       }
-    } catch (e) {
+    } catch (e, s) {
       setState(() => _operando = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+        AppFeedback.errorTecnicoOn(
+          ScaffoldMessenger.of(context),
+          usuario: 'No se pudo registrar el control. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
         );
       }
     }
@@ -674,11 +685,15 @@ class _PosicionOcupadaDialogState extends State<_PosicionOcupadaDialog> {
         motivo: _motivoCtrl.text.trim().isEmpty ? null : _motivoCtrl.text,
       );
       if (mounted) navigator.pop();
-    } catch (e) {
+    } catch (e, s) {
       setState(() => _operando = false);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        AppFeedback.errorTecnicoOn(
+          ScaffoldMessenger.of(context),
+          usuario: 'No se pudo rotar la cubierta. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }
@@ -723,11 +738,15 @@ class _PosicionOcupadaDialogState extends State<_PosicionOcupadaDialog> {
         destinoFinal: destino,
       );
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (e, s) {
       setState(() => _operando = false);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        AppFeedback.errorTecnicoOn(
+          ScaffoldMessenger.of(context),
+          usuario: 'No se pudo retirar la cubierta. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }
@@ -769,7 +788,7 @@ class _RegistrarControlDialogState extends State<_RegistrarControlDialog> {
       backgroundColor: AppColors.background,
       title: const Text('Registrar control'),
       content: SizedBox(
-        width: 360,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 360.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -857,7 +876,7 @@ class _SelectorPosicionDestinoDialog extends StatelessWidget {
       backgroundColor: AppColors.background,
       title: Text('Rotar ${instalada.cubiertaCodigo}'),
       content: SizedBox(
-        width: 380,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 380.0),
         child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
           stream: FirebaseFirestore.instance
               .collection(AppCollections.cubiertasInstaladas)

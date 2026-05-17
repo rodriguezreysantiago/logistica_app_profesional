@@ -347,6 +347,89 @@ export const cambiarContrasenaChofer = onCall(
 );
 
 // ============================================================================
+// resetearContrasenaEmpleadoAdmin — admin resetea pass de otro empleado
+// ============================================================================
+//
+// Caso de uso real: el chofer olvido la contraseña y no la puede recuperar
+// (no tiene email vinculado, no recuerda la actual). Antes del 2026-05-17
+// el admin no podia ayudarlo desde la app: la rule de EMPLEADOS rechaza
+// el update del campo CONTRASEÑA (lo escribe solo este callable y el
+// `cambiarContrasenaChofer`), y `cambiarContrasenaChofer` exige la actual.
+// Workaround manual: editar el doc Firestore desde la consola Web pegando
+// un hash bcrypt generado a mano — frictivo y peligroso (typo del hash =
+// chofer queda con clave invalida y nadie sabe).
+//
+// Auth: solo ADMIN o SUPERVISOR (los unicos que tienen capacidad de
+// gestionar empleados). El callable:
+//   1. Valida que el caller tenga rol admitido.
+//   2. Hashea la nueva pass con bcrypt cost 10 (mismo que self-service).
+//   3. Actualiza EMPLEADOS/{dni}.CONTRASEÑA via Admin SDK (sortea la rule).
+//   4. Revoca refresh tokens del afectado para forzar re-login.
+//   5. Loguea con dniHash (no DNI plano) para auditoria sin PII.
+//
+// El admin le pasa al chofer la nueva pass por canal seguro (en mano,
+// WhatsApp privado). El chofer puede cambiarla despues con `cambiarContrasenaChofer`.
+export const resetearContrasenaEmpleadoAdmin = onCall(
+  { timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const rolCaller = request.auth?.token?.rol;
+    if (!request.auth || (rolCaller !== "ADMIN" && rolCaller !== "SUPERVISOR")) {
+      logger.warn("[resetearContrasenaEmpleadoAdmin] sin auth admin/supervisor", {
+        uid: request.auth?.uid ?? "no-uid",
+        rol: rolCaller ?? "no-rol",
+      });
+      throw new HttpsError(
+        "permission-denied",
+        "Solo ADMIN o SUPERVISOR pueden resetear contrasenas.",
+      );
+    }
+
+    const dni = (request.data?.dni ?? "").toString().trim();
+    const nueva = (request.data?.nueva ?? "").toString();
+    if (!dni) {
+      throw new HttpsError("invalid-argument", "Falta `dni`.");
+    }
+    if (nueva.length < 6) {
+      throw new HttpsError(
+        "invalid-argument",
+        "La nueva contrasena debe tener al menos 6 caracteres.",
+      );
+    }
+
+    const ref = db.collection("EMPLEADOS").doc(dni);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      throw new HttpsError("not-found", `Empleado ${dni} no encontrado.`);
+    }
+
+    const nuevoHash = await bcrypt.hash(nueva, 10);
+    await ref.update({
+      "CONTRASEÑA": nuevoHash,
+      "fecha_ultima_actualizacion": FieldValue.serverTimestamp(),
+    });
+
+    // Revocar tokens del afectado para forzar re-login con la pass nueva.
+    // Si el usuario nunca tuvo Auth account (raro pero pasa con empleados
+    // nuevos sin login), revokeRefreshTokens tira — capturamos sin
+    // romper porque el reset igual sirve para el proximo login.
+    try {
+      await auth.revokeRefreshTokens(dni);
+    } catch (e) {
+      logger.info("[resetearContrasenaEmpleadoAdmin] sin Auth account, OK", {
+        dniHash: hashId(dni),
+        error: (e as Error).message,
+      });
+    }
+
+    logger.info("[resetearContrasenaEmpleadoAdmin] OK", {
+      adminHash: hashId(request.auth.uid),
+      dniHash: hashId(dni),
+    });
+    return { ok: true };
+  },
+);
+
+// ============================================================================
 // actualizarRolEmpleado
 // ============================================================================
 //
@@ -2289,9 +2372,17 @@ function buildAlertaDoc(
 //      (8-19 lunes a viernes, sin feriados): si la alerta es a las 23:00,
 //      el doc queda PENDIENTE hasta las 8:00 del siguiente día hábil.
 //
-// Idempotencia: el trigger `onCreate` se dispara UNA SOLA VEZ por docId.
-// Como el docId composite es `{vin}_{createdMs}_{tipo}` y el poller skipea
-// duplicados con getAll, el mismo evento NO genera dos triggers.
+// Idempotencia: los Firestore triggers son AT LEAST ONCE — GCP puede
+// reentregar el mismo evento (timeouts, rebalanceos). El poller del
+// volvoAlertasPoller ya skipea duplicados con getAll a nivel del doc
+// `VOLVO_ALERTAS`, pero ese mismo doc puede gatillar este trigger más
+// de una vez. Sin idempotencia, el chofer recibe el mismo mensaje 2-3
+// veces seguidas.
+//
+// Solución: claim atómico por alertId en `META_ALERTAS_VOLVO_NOTIFICADAS`
+// usando `create()` (tira ALREADY_EXISTS si ya existe). Si el claim
+// falla → es un retry, saltamos. Si encolar falla → borramos el claim
+// para que el retry pueda reintentar.
 //
 // Casos donde se hace skip silencioso (log, no se manda mensaje):
 //   - Severidad MEDIUM o LOW (solo HIGH gatilla notificación al instante).
@@ -2587,6 +2678,38 @@ export const onAlertaVolvoCreated = onDocumentCreated(
     ];
     const mensaje = variantes[_rrPick(variantes.length)];
 
+    // ─── Idempotencia atómica ──────────────────────────────────────
+    // Claim por alertId: si ya hay un doc con este ID, es un retry
+    // de Cloud Functions sobre el mismo evento — salimos antes de
+    // encolar de nuevo. Si encolar falla más abajo, borramos el
+    // claim para que el retry siguiente pueda reintentar.
+    const claimRef = db
+      .collection("META_ALERTAS_VOLVO_NOTIFICADAS")
+      .doc(event.params.alertId);
+    try {
+      await claimRef.create({
+        tomado_en: FieldValue.serverTimestamp(),
+        chofer_dni: choferDoc.id,
+        patente,
+        tipo,
+      });
+    } catch (e) {
+      const msg = (e as Error).message || "";
+      const code = (e as { code?: number }).code;
+      if (
+        code === 6 ||
+        msg.includes("ALREADY_EXISTS") ||
+        msg.includes("already exists")
+      ) {
+        logger.info(
+          "[onAlertaVolvoCreated] retry de evento ya procesado, skip",
+          { alertId: event.params.alertId },
+        );
+        return;
+      }
+      throw e;
+    }
+
     try {
       const colaRef = await db.collection("COLA_WHATSAPP").add({
         telefono: telefonoRaw,
@@ -2628,6 +2751,13 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         alertId: event.params.alertId,
         patente,
         error: (e as Error).message,
+      });
+      // Si fallo el encolado, borrar el claim para que el retry de
+      // GCF pueda reintentar (sin borrar, el retry verìa el claim y
+      // saltarìa, perdiendo el aviso al chofer).
+      await claimRef.delete().catch(() => {
+        // best-effort: si no se puede borrar, el siguiente retry
+        // tira ALREADY_EXISTS y skipea, pero al menos quedò log.
       });
       // No re-throw: el trigger no debe reintentar agresivamente.
       // Si el encolado falla, queda registro en el log y la alerta
@@ -3286,23 +3416,69 @@ export const backupFirestoreScheduled = onSchedule(
     // Mismas colecciones que scripts/backup_firestore.ps1 + VOLVO_SCORES_DIARIOS
     // que se sumó después de ese script. Si se agrega una colección nueva
     // operativa, sumarla acá Y al script ps1 (legacy de respaldo manual).
+    // Auditoria 2026-05-18 (CRITICO): la lista hardcoded estaba
+    // desactualizada — faltaban SITRACK_EVENTOS (base ICM YPF),
+    // VIAJES_LOGISTICA, ADELANTOS_CHOFER, JORNADAS, EMPRESAS_LOGISTICA,
+    // UBICACIONES_LOGISTICA, TARIFAS_LOGISTICA, ASIGNACIONES_ENGANCHE,
+    // CUBIERTAS*, EMPRESAS_EMPLEADORAS, ICM_SEMANAL, BOT_EVENTOS,
+    // BORRADORES_VIAJE, COUNTERS, META_AVISOS_NO_ID, ADELANTOS counter,
+    // SITRACK_POSICIONES, BOT_SILENCIADOS_CHOFER. Si Firestore perdia
+    // data, no habia recovery de la liquidacion/viajes/conducta.
+    //
+    // Se mantiene como lista explicita (no `collectionIds: []` que
+    // exportaria todas) para tener control auditable + costo predecible.
+    // Cualquier coleccion nueva debe sumarse aca.
     const collectionIds = [
+      // Personal + Flota
       "EMPLEADOS",
       "VEHICULOS",
       "REVISIONES",
       "CHECKLISTS",
+      "ASIGNACIONES_VEHICULO",
+      "ASIGNACIONES_ENGANCHE",
+      "EMPRESAS_EMPLEADORAS",
+      // Telemetria + Volvo + Sitrack
+      "TELEMETRIA_HISTORICO",
+      "MANTENIMIENTOS_AVISADOS",
+      "VOLVO_ALERTAS",
+      "VOLVO_SCORES_DIARIOS",
+      "SITRACK_POSICIONES",
+      "SITRACK_EVENTOS",
+      "JORNADAS",
+      // ICM
+      "ICM_SEMANAL",
+      // Logistica + Viajes + Adelantos
+      "EMPRESAS_LOGISTICA",
+      "UBICACIONES_LOGISTICA",
+      "TARIFAS_LOGISTICA",
+      "VIAJES_LOGISTICA",
+      "ADELANTOS_CHOFER",
+      "BORRADORES_VIAJE",
+      // Gomeria
+      "CUBIERTAS_MARCAS",
+      "CUBIERTAS_MODELOS",
+      "CUBIERTAS",
+      "CUBIERTAS_INSTALADAS",
+      "CUBIERTAS_RECAPADOS",
+      "CUBIERTAS_CONTROLES",
+      "CUBIERTAS_POSICIONES_ACTIVAS",
+      "CUBIERTAS_ACTIVAS",
+      "CUBIERTAS_PROVEEDORES",
+      // Bot WhatsApp + control + logs
       "COLA_WHATSAPP",
       "AVISOS_AUTOMATICOS_HISTORICO",
       "RESPUESTAS_BOT_AMBIGUAS",
-      "AUDITORIA_ACCIONES",
-      "TELEMETRIA_HISTORICO",
-      "MANTENIMIENTOS_AVISADOS",
       "BOT_HEALTH",
       "BOT_CONTROL",
+      "BOT_EVENTOS",
+      "BOT_SILENCIADOS_CHOFER",
+      "META_AVISOS_NO_ID",
+      "META_ALERTAS_VOLVO_NOTIFICADAS",
+      // Auditoria + sistema
+      "AUDITORIA_ACCIONES",
       "LOGIN_ATTEMPTS",
-      "ASIGNACIONES_VEHICULO",
-      "VOLVO_ALERTAS",
-      "VOLVO_SCORES_DIARIOS",
+      "COUNTERS",
+      "STATS",
       "META",
     ];
 
@@ -5835,15 +6011,17 @@ export const recomputeIcmSemanalScheduled = onSchedule(
     const KM_MIN = 50; // mismo umbral que cliente para evitar ICM ruidoso
     const choferes: ChoferAgg[] = [];
     for (const a of porChofer.values()) {
-      // Sumar km reales por patente. Cap 5000 km/patente/semana defensivo
-      // contra reset de odometro Sitrack (auditoria 2026-05-17 — sin esto
-      // un chofer agresivo quedaba enmascarado como "verde 99" porque
-      // ratio = eventos / 500000km absurdos).
+      // Sumar km reales por patente. Cap 10000 km/patente/semana
+      // defensivo contra reset de odometro Sitrack. Cap subido de 5000
+      // a 10000 en auditoria 2026-05-18 — choferes de larga distancia
+      // (BB→Mendoza, BB→Misiones) hacen 5500-7000 km/semana legitimo
+      // y quedaban como SIN_DATOS. 10000 sigue siendo > 2x la semana
+      // mas grande realista.
       let kmReales = 0;
       for (const t of a.odometroPorPatente.values()) {
         if (t.max > t.min) {
           const delta = t.max - t.min;
-          if (delta <= 5000) kmReales += delta;
+          if (delta <= 10000) kmReales += delta;
         }
       }
       const km = kmReales >= KM_MIN ? kmReales : 0;

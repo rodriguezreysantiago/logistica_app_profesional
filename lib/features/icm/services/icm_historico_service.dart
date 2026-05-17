@@ -118,14 +118,15 @@ class IcmHistoricoService {
           total++;
         }
       }
-      // Km reales = sum(max - min) por patente. Cap 5000 km/patente
+      // Km reales = sum(max - min) por patente. Cap 10000 km/patente
       // por semana defensivo contra reset de odometro Sitrack (mismo
-      // patron que icm_calculator).
+      // patron que icm_calculator). Cap subido de 5000 a 10000 para
+      // no descartar choferes de larga distancia (auditoria 2026-05-18).
       double kmReales = 0;
       for (final t in odometroPorPatente.values) {
         if (t.max > t.min) {
           final delta = t.max - t.min;
-          if (delta <= 5000) kmReales += delta;
+          if (delta <= 10000) kmReales += delta;
         }
       }
       // Mismo umbral que icm_calculator: si no hay km suficientes,

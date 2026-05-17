@@ -484,7 +484,7 @@ class _AltaCubiertaDialogState extends State<_AltaCubiertaDialog> {
       backgroundColor: AppColors.background,
       title: const Text('Nueva cubierta'),
       content: SizedBox(
-        width: 380,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 380.0),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,

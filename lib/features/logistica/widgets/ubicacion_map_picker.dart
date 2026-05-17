@@ -158,55 +158,60 @@ class _UbicacionMapPickerState extends State<UbicacionMapPicker> {
   ///   3. Pega el link en este dialog
   ///   4. App extrae lat/lng y centra el mapa
   Future<void> _pegarLinkGoogleMaps() async {
-    final url = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        final ctrl = TextEditingController();
-        return AlertDialog(
-          backgroundColor: AppColors.background,
-          title: const Text('Pegar link de Google Maps'),
-          content: SizedBox(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'Buscá el lugar en Google Maps web, copiá el enlace y pegalo acá. Se extraen automáticamente las coordenadas.',
-                  style: TextStyle(color: Colors.white60, fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: ctrl,
-                  autofocus: true,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'URL de Google Maps',
-                    hintText:
-                        'https://maps.app.goo.gl/... o https://www.google.com/maps/...',
+    final ctrl = TextEditingController();
+    final String? url;
+    try {
+      url = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            backgroundColor: AppColors.background,
+            title: const Text('Pegar link de Google Maps'),
+            content: SizedBox(
+              width: (MediaQuery.of(ctx).size.width - 80).clamp(240.0, 400.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Buscá el lugar en Google Maps web, copiá el enlace y pegalo acá. Se extraen automáticamente las coordenadas.',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
                   ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Acepta links largos (con @lat,lng) y links cortos (maps.app.goo.gl).',
-                  style: TextStyle(color: Colors.white38, fontSize: 11),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'URL de Google Maps',
+                      hintText:
+                          'https://maps.app.goo.gl/... o https://www.google.com/maps/...',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Acepta links largos (con @lat,lng) y links cortos (maps.app.goo.gl).',
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('CANCELAR'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text('USAR ESTE LINK'),
-            ),
-          ],
-        );
-      },
-    );
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCELAR'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('USAR ESTE LINK'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      ctrl.dispose();
+    }
     if (url == null || url.isEmpty) return;
     if (!mounted) return;
     setState(() => _confirmando = true);

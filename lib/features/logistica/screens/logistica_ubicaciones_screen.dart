@@ -709,67 +709,72 @@ class _FilaCoords extends StatelessWidget {
   Future<void> _pegarLinkGoogleMaps(BuildContext context) async {
     final ctrl = TextEditingController();
     final messenger = ScaffoldMessenger.of(context);
-    final result = await showDialog<({double lat, double lng})?>(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        backgroundColor: Theme.of(dCtx).colorScheme.surface,
-        title: const Text('Pegar link de Google Maps'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Pegá el link completo de Google Maps o las coordenadas:',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Ej. "https://www.google.com/maps/place/.../@-38.71,-62.27,15z" '
-              'o "-38.71, -62.27".',
-              style: TextStyle(color: Colors.white38, fontSize: 11),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                isDense: true,
-                hintText: 'Pegá acá…',
+    final ({double lat, double lng})? result;
+    try {
+      result = await showDialog<({double lat, double lng})?>(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+          backgroundColor: Theme.of(dCtx).colorScheme.surface,
+          title: const Text('Pegar link de Google Maps'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Pegá el link completo de Google Maps o las coordenadas:',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
               ),
+              const SizedBox(height: 4),
+              const Text(
+                'Ej. "https://www.google.com/maps/place/.../@-38.71,-62.27,15z" '
+                'o "-38.71, -62.27".',
+                style: TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  hintText: 'Pegá acá…',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dCtx).pop(null),
+              child: const Text('CANCELAR'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final input = ctrl.text;
+                if (GoogleMapsUrlParser.esShortUrl(input)) {
+                  // Las short URLs requerirían un HTTP request para
+                  // expandirlas — no vale la pena el flow, mejor que el
+                  // operador la abra en el browser primero.
+                  Navigator.of(dCtx).pop(null);
+                  AppFeedback.warningOn(
+                    messenger,
+                    'Es un link acortado (goo.gl). Abrilo en el browser '
+                    'para que se expanda, después copiá el link largo de '
+                    'la barra de direcciones y pegalo acá.',
+                  );
+                  return;
+                }
+                final coords = GoogleMapsUrlParser.extraer(input);
+                Navigator.of(dCtx).pop(coords);
+              },
+              child: const Text('APLICAR'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dCtx).pop(null),
-            child: const Text('CANCELAR'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final input = ctrl.text;
-              if (GoogleMapsUrlParser.esShortUrl(input)) {
-                // Las short URLs requerirían un HTTP request para
-                // expandirlas — no vale la pena el flow, mejor que el
-                // operador la abra en el browser primero.
-                Navigator.of(dCtx).pop(null);
-                AppFeedback.warningOn(
-                  messenger,
-                  'Es un link acortado (goo.gl). Abrilo en el browser '
-                  'para que se expanda, después copiá el link largo de '
-                  'la barra de direcciones y pegalo acá.',
-                );
-                return;
-              }
-              final coords = GoogleMapsUrlParser.extraer(input);
-              Navigator.of(dCtx).pop(coords);
-            },
-            child: const Text('APLICAR'),
-          ),
-        ],
-      ),
-    );
+      );
+    } finally {
+      ctrl.dispose();
+    }
     if (result == null) return;
     onLatManual?.call(result.lat);
     onLngManual?.call(result.lng);
@@ -855,7 +860,7 @@ class _AltaUbicacionDialogState extends State<_AltaUbicacionDialog> {
       backgroundColor: AppColors.background,
       title: const Text('Nueva ubicación'),
       content: SizedBox(
-        width: 400,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 400.0),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,

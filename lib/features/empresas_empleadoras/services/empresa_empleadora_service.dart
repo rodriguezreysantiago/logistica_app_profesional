@@ -10,6 +10,7 @@
 // colección y sin lógica de revisiones (las pólizas las carga ADMIN
 // directamente, no pasan por flujo de aprobación).
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -99,7 +100,16 @@ class EmpresaEmpleadoraService {
     final storagePath =
         'EMPRESAS_EMPLEADORAS/$cuit/${campoUrl}_$ts.$extension';
     final storageRef = _storage.ref(storagePath);
-    await storageRef.putData(bytes);
+    // Timeout 30s (auditoria 2026-05-17): sin esto, una red lenta o
+    // intermitente dejaba la UI esperando putData() para siempre.
+    await storageRef.putData(bytes).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        throw TimeoutException(
+          'La conexión es demasiado lenta para subir el archivo.',
+        );
+      },
+    );
     final url = await storageRef.getDownloadURL();
 
     final info = AppEmpresasEmpleadoras.infoPorCuit(cuit);

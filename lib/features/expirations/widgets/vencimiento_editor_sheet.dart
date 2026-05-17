@@ -131,8 +131,14 @@ class _EditorSheetBodyState extends State<_EditorSheetBody> {
 
       AppFeedback.successOn(messenger, '${widget.item.tipoDoc} actualizado con éxito');
       navigator.pop();
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error al guardar: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario:
+            'No se pudo guardar el vencimiento. Verificá tu conexión y probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
       if (mounted) setState(() => _subiendo = false);
     }
   }

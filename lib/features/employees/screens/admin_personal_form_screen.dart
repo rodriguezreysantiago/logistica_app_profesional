@@ -148,9 +148,14 @@ class _AdminPersonalFormScreenState
 
       AppFeedback.successOn(messenger, 'Empleado creado con éxito');
       navigator.pop();
-    } catch (e) {
+    } catch (e, s) {
       if (!mounted) return;
-      AppFeedback.errorOn(messenger, 'Error al guardar: $e');
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo crear el empleado. Probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
       setState(() => _guardando = false);
     }
   }

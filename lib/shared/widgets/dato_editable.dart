@@ -124,7 +124,7 @@ class DatoEditableTexto extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(controller.dispose);
   }
 }
 
@@ -226,7 +226,7 @@ class DatoEditableMiles extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(controller.dispose);
   }
 }
 
@@ -462,6 +462,6 @@ class DatoEditableEnumExtensible extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(controller.dispose);
   }
 }

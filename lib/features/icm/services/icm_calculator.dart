@@ -182,18 +182,22 @@ class IcmCalculator {
       final agg = entry.value;
 
       // Sumar km reales por patente (max - min del odómetro).
-      // Cap defensivo (auditoria 2026-05-17): si max - min > 5000 km
-      // en el rango de la semana, probable reset del odometro Sitrack
-      // (cambio de ECU, reset post-mantenimiento) — la diff seria
-      // absurda (ej. min=1000 post-reset, max=500000 pre-reset). Una
-      // semana realista para un tractor Vecchi son 3000-4500 km, asi
-      // que >5000 lo descartamos. Sin esto un chofer agresivo quedaba
-      // enmascarado como "verde 99" porque ratio = eventos / 500000km.
+      // Cap defensivo: si max - min > 10000 km en el rango de la
+      // semana, probable reset del odometro Sitrack (cambio de ECU,
+      // reset post-mantenimiento) — la diff seria absurda (ej. min=1000
+      // post-reset, max=500000 pre-reset).
+      //
+      // Cap subido de 5000 a 10000 en auditoria 2026-05-18: choferes
+      // de larga distancia (BB→Mendoza, BB→Misiones) hacen 5500-7000
+      // km/semana legitimamente. Con cap 5000 quedaban como SIN_DATOS
+      // — el ranking ICM no los mostraba aunque sean los MAS expuestos
+      // a infracciones. 10000 sigue siendo > 2x la semana mas grande
+      // realista, asi que solo dispara con resets reales del odometro.
       double kmReales = 0;
       for (final tracking in agg.odometroPorPatente.values) {
         if (tracking.max > tracking.min) {
           final delta = tracking.max - tracking.min;
-          if (delta <= 5000) {
+          if (delta <= 10000) {
             kmReales += delta;
           }
           // else: ignorado por probable reset — el ratio del chofer en

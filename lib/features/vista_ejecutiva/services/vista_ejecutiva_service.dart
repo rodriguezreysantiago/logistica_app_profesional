@@ -275,27 +275,36 @@ class VistaEjecutivaService {
   }
 
   /// Count de viajes con `fecha_carga` en [desde, hasta) y `activo=true`.
-  /// Usa `.count()` (count aggregation de Firestore) para no traer
-  /// los docs enteros — barato y rápido. Si la query no tiene índice,
-  /// Firestore tira error pidiéndolo (el indices.json ya tiene uno
-  /// para `activo + fecha_carga`).
+  ///
+  /// Auditoria 2026-05-17: antes contaba TAMBIEN viajes legacy con
+  /// `estado='CANCELADO'` o `'POSTERGADO'` (estados removidos 2026-05-14)
+  /// que siguen con `activo=true`. El KPI del tablero CEO mostraba 35
+  /// viajes/mes cuando los reales eran 28 + 7 cancelados. Fix: usar `.get()`
+  /// (no `.count()`) y filtrar client-side por `estado != CANCELADO/POSTERGADO`.
+  /// El extra fetch es aceptable (decenas de docs/mes vs miles).
   static Future<int> _contarViajesEnRango(
     FirebaseFirestore db,
     DateTime desde,
     DateTime hasta,
   ) async {
     try {
-      final agg = await db
+      final snap = await db
           .collection('VIAJES_LOGISTICA')
           .where('activo', isEqualTo: true)
           .where('fecha_carga',
               isGreaterThanOrEqualTo: Timestamp.fromDate(desde))
           .where('fecha_carga', isLessThan: Timestamp.fromDate(hasta))
-          .count()
           .get();
-      return agg.count ?? 0;
+      // Filtrar legacy CANCELADO/POSTERGADO (mismo patron que
+      // liquidacion_service y viajes_service).
+      var count = 0;
+      for (final d in snap.docs) {
+        final estadoRaw = (d.data()['estado'] ?? '').toString();
+        if (estadoRaw != 'CANCELADO' && estadoRaw != 'POSTERGADO') count++;
+      }
+      return count;
     } catch (_) {
-      // Fallback defensivo si el count falla (ej. sin índice): devolver
+      // Fallback defensivo si el query falla (ej. sin índice): devolver
       // 0 para no romper el tablero. El error queda en consola.
       return 0;
     }

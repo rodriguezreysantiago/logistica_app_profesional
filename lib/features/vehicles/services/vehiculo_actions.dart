@@ -72,8 +72,13 @@ class VehiculoActions {
         detalles: {'campo': campo, 'nuevo_valor': valor?.toString() ?? ''},
       ));
       AppFeedback.successOn(messenger, 'Actualizado: $campo');
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error al actualizar: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo actualizar $campo. Probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 
@@ -328,9 +333,15 @@ class VehiculoActions {
       if (context.mounted) {
         await dato(context, patente, dbCampo, downloadUrl);
       }
-    } catch (e) {
+    } catch (e, s) {
       if (context.mounted) {
-        AppFeedback.errorOn(messenger, 'Error al subir: $e');
+        AppFeedback.errorTecnicoOn(
+          messenger,
+          usuario:
+              'No se pudo subir el archivo. Verificá tu conexión y probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }
@@ -581,9 +592,14 @@ class VehiculoActions {
         ],
       ),
     );
-    if (confirmado != true) return;
+    if (confirmado != true) {
+      motivoCtrl.dispose();
+      return;
+    }
+    final motivoTxt = motivoCtrl.text;
+    motivoCtrl.dispose();
     if (!context.mounted) return;
-    await darDeBaja(context, patente: patente, motivo: motivoCtrl.text);
+    await darDeBaja(context, patente: patente, motivo: motivoTxt);
   }
 
   /// Confirm dialog para reactivar.

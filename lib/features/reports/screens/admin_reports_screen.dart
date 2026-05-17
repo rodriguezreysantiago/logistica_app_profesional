@@ -36,7 +36,12 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     try {
       await ReportChecklistService.mostrarOpcionesYGenerar(context);
     } catch (e) {
-      if (mounted) _mostrarSnack(messenger, 'Error: $e', esError: true);
+      if (mounted) {
+        _mostrarSnack(messenger,
+            'No se pudo generar el reporte de checklists. Probá de nuevo.',
+            esError: true);
+        debugPrint('admin_reports checklist error: $e');
+      }
     }
   }
 
@@ -45,7 +50,12 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     try {
       await ReportGomeriaService.mostrarOpcionesYGenerar(context);
     } catch (e) {
-      if (mounted) _mostrarSnack(messenger, 'Error: $e', esError: true);
+      if (mounted) {
+        _mostrarSnack(messenger,
+            'No se pudo generar el reporte de gomería. Probá de nuevo.',
+            esError: true);
+        debugPrint('admin_reports gomeria error: $e');
+      }
     }
   }
 
@@ -54,7 +64,12 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     try {
       await ReportIcmService.mostrarOpcionesYGenerar(context);
     } catch (e) {
-      if (mounted) _mostrarSnack(messenger, 'Error: $e', esError: true);
+      if (mounted) {
+        _mostrarSnack(messenger,
+            'No se pudo generar el reporte de ICM. Probá de nuevo.',
+            esError: true);
+        debugPrint('admin_reports icm error: $e');
+      }
     }
   }
 

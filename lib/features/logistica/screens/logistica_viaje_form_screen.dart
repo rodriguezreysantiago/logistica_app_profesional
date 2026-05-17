@@ -811,10 +811,15 @@ class _LogisticaViajeFormScreenState extends State<LogisticaViajeFormScreen> {
         _esEdicion ? 'Viaje actualizado.' : 'Viaje creado.',
       );
       Navigator.of(context).pop();
-    } catch (e) {
+    } catch (e, s) {
       if (mounted) {
         setState(() => _guardando = false);
-        AppFeedback.errorOn(messenger, 'Error al guardar: $e');
+        AppFeedback.errorTecnicoOn(
+          messenger,
+          usuario: 'No se pudo guardar el viaje. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }

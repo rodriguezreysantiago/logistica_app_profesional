@@ -462,23 +462,45 @@ class _BotonBajaReactivarEmpleado extends StatelessWidget {
     final activo = AppActivo.esActivo(data);
     final nombre = (data['NOMBRE'] ?? dni).toString();
     if (activo) {
-      return Center(
-        child: TextButton.icon(
-          onPressed: () => EmpleadoActions.confirmarYDarDeBaja(
-            context,
-            dni: dni,
-            nombreVisible: nombre,
-          ),
-          icon: const Icon(Icons.person_off_outlined,
-              color: AppColors.accentRed),
-          label: const Text(
-            'Dar de baja',
-            style: TextStyle(
-              color: AppColors.accentRed,
-              fontWeight: FontWeight.bold,
+      return Column(
+        children: [
+          Center(
+            child: TextButton.icon(
+              onPressed: () => EmpleadoActions.confirmarYResetearContrasena(
+                context,
+                dni: dni,
+                nombreVisible: nombre,
+              ),
+              icon: const Icon(Icons.lock_reset,
+                  color: AppColors.accentAmber),
+              label: const Text(
+                'Resetear contraseña',
+                style: TextStyle(
+                  color: AppColors.accentAmber,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ),
-        ),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => EmpleadoActions.confirmarYDarDeBaja(
+                context,
+                dni: dni,
+                nombreVisible: nombre,
+              ),
+              icon: const Icon(Icons.person_off_outlined,
+                  color: AppColors.accentRed),
+              label: const Text(
+                'Dar de baja',
+                style: TextStyle(
+                  color: AppColors.accentRed,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
       );
     }
 

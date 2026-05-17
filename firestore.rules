@@ -536,6 +536,20 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // META_ALERTAS_VOLVO_NOTIFICADAS — idempotencia onAlertaVolvoCreated
+    // ========================================================================
+    // Doc id = alertId del trigger Firestore. Garantiza que el chofer
+    // reciba el mensaje UNA SOLA vez aunque el trigger se reentregue
+    // (Firestore triggers son at-least-once). Lo escribe la Cloud
+    // Function `onAlertaVolvoCreated` con `create()` atómico — si ya
+    // existe, sabe que es un retry y skipea.
+    //
+    // Solo el server (Admin SDK) accede. Cliente bloqueado.
+    match /META_ALERTAS_VOLVO_NOTIFICADAS/{doc} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
     // LOGÍSTICA — catálogos para el futuro planeamiento de viajes
     // ========================================================================
     // Tres colecciones que arman el modelo de "rutas con precio":
@@ -602,6 +616,21 @@ service cloud.firestore {
     // para forzar que todo quede en histórico.
 
     match /VIAJES_LOGISTICA/{doc} {
+      allow read, create, update, delete: if isAdminOrSupervisor();
+    }
+
+    // ========================================================================
+    // BORRADORES_VIAJE — auto-save del form de viaje multi-tramo
+    // ========================================================================
+    // Cada borrador es 1 doc por operador. Cuando el form arranca, intenta
+    // recuperar el ultimo borrador suyo; cuando guarda OK, lo borra.
+    // Sin esta rule, el patron cae al fallback `if false` y el auto-save
+    // falla silenciosamente (catch en logistica_viaje_form_screen:142) —
+    // bug detectado en auditoria 2026-05-17.
+    //
+    // Acceso admin/supervisor (mismos que usan el modulo Logistica). No
+    // exponemos al chofer (no edita viajes).
+    match /BORRADORES_VIAJE/{doc} {
       allow read, create, update, delete: if isAdminOrSupervisor();
     }
 

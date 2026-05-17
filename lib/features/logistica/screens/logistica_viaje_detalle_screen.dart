@@ -703,8 +703,13 @@ class _BotoneraAcciones extends StatelessWidget {
       await ViajesService.eliminarViajeDefinitivo(v.id);
       AppFeedback.successOn(messenger, 'Viaje eliminado definitivamente.');
       navigator.pop();
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo eliminar el viaje. Probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 
@@ -755,7 +760,12 @@ class _BotoneraAcciones extends StatelessWidget {
         ],
       ),
     );
-    if (ok != true) return;
+    if (ok != true) {
+      motivoCtrl.dispose();
+      return;
+    }
+    final motivoTxt = motivoCtrl.text.trim();
+    motivoCtrl.dispose();
     if (!ctx.mounted) return;
     final messenger = ScaffoldMessenger.of(ctx);
     final navigator = Navigator.of(ctx);
@@ -763,12 +773,17 @@ class _BotoneraAcciones extends StatelessWidget {
       await ViajesService.borrarViaje(
         viajeId: v.id,
         borradoPorDni: PrefsService.dni,
-        motivo: motivoCtrl.text.trim().isEmpty ? null : motivoCtrl.text.trim(),
+        motivo: motivoTxt.isEmpty ? null : motivoTxt,
       );
       AppFeedback.successOn(messenger, 'Viaje borrado.');
       navigator.pop();
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo borrar el viaje. Probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 
@@ -780,8 +795,13 @@ class _BotoneraAcciones extends StatelessWidget {
         reactivadoPorDni: PrefsService.dni,
       );
       AppFeedback.successOn(messenger, 'Viaje reactivado.');
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo reactivar el viaje. Probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 }

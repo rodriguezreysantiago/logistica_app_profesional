@@ -41,6 +41,11 @@ class ViajesService {
   /// (RAM mobile + Firestore reads). Para casos de reporte que sí
   /// necesitan todo, el caller puede pasar `limit: 0` para forzar sin
   /// limit o un numero alto explicito.
+  ///
+  /// Auditoria 2026-05-17: filtra client-side los viajes legacy con
+  /// `estado='CANCELADO'` o `'POSTERGADO'` (estados removidos 2026-05-14).
+  /// Sin esto aparecian como PLANEADO en la lista — operador podia
+  /// re-asignar un viaje cancelado.
   static Stream<List<Viaje>> streamViajes({
     bool incluirInactivos = false,
     int? limit = 200,
@@ -50,13 +55,18 @@ class ViajesService {
       q = q.where('activo', isEqualTo: true);
     }
     if (limit != null && limit > 0) q = q.limit(limit);
-    return q.snapshots().map(
-          (snap) => snap.docs.map((d) => Viaje.fromMap(d.id, d.data())).toList(),
-        );
+    return q.snapshots().map((snap) {
+      final filtrados = snap.docs.where((d) {
+        final estadoRaw = (d.data()['estado'] ?? '').toString();
+        return estadoRaw != 'CANCELADO' && estadoRaw != 'POSTERGADO';
+      });
+      return filtrados.map((d) => Viaje.fromMap(d.id, d.data())).toList();
+    });
   }
 
   /// Stream de viajes filtrados por chofer. Útil para el tablero
   /// "viajes de Pérez Juan en el último mes".
+  /// Aplica el mismo filtro legacy CANCELADO/POSTERGADO que [streamViajes].
   static Stream<List<Viaje>> streamViajesPorChofer(
     String dni, {
     int? limit,
@@ -66,9 +76,13 @@ class ViajesService {
         .where('activo', isEqualTo: true)
         .orderBy('creado_en', descending: true);
     if (limit != null) q = q.limit(limit);
-    return q.snapshots().map(
-          (snap) => snap.docs.map((d) => Viaje.fromMap(d.id, d.data())).toList(),
-        );
+    return q.snapshots().map((snap) {
+      final filtrados = snap.docs.where((d) {
+        final estadoRaw = (d.data()['estado'] ?? '').toString();
+        return estadoRaw != 'CANCELADO' && estadoRaw != 'POSTERGADO';
+      });
+      return filtrados.map((d) => Viaje.fromMap(d.id, d.data())).toList();
+    });
   }
 
   static Stream<Viaje?> streamViaje(String id) {
@@ -493,7 +507,17 @@ class ViajesService {
     final metadata = SettableMetadata(
       contentType: contentType ?? 'application/octet-stream',
     );
-    await ref.putData(bytes, metadata);
+    // Timeout 30s (auditoria 2026-05-17): antes una red lenta o
+    // intermitente dejaba la UI colgada esperando putData() para
+    // siempre. Mismo umbral que StorageService.subirArchivo.
+    await ref.putData(bytes, metadata).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        throw TimeoutException(
+          'La conexión es demasiado lenta para subir el remito.',
+        );
+      },
+    );
     final url = await ref.getDownloadURL();
     return (url: url, path: path);
   }

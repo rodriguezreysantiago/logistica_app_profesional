@@ -294,9 +294,15 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
       });
 
       AppFeedback.infoOn(messenger, '${spec.etiqueta} cargado.');
-    } catch (e) {
+    } catch (e, s) {
       if (mounted) {
-        AppFeedback.errorOn(messenger, 'Error al subir: $e');
+        AppFeedback.errorTecnicoOn(
+          messenger,
+          usuario:
+              'No se pudo subir el archivo. Verificá tu conexión y probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     } finally {
       // Siempre reseteamos _isSaving — incluso si la subida falló o el
@@ -517,6 +523,60 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
     bool guardadoOk = false;
     try {
       final id = widget.vehiculoId.trim().toUpperCase();
+
+      // Race-condition guard (auditoria 2026-05-17): mientras el form
+      // estaba abierto, Volvo sync (o un admin paralelo) pudo haber
+      // bumped KM_ACTUAL a un valor MAYOR. Si pisamos sin chequear,
+      // perdemos esos km. Re-leemos el doc; si la DB tiene un km mas
+      // alto que el snapshot que cargamos al abrir (+100 de margen),
+      // avisamos antes de pisar.
+      //
+      // NOTA Windows: no usamos runTransaction (ver MEMORY: bugs en
+      // cloud_firestore desktop). El read + update no es atomico,
+      // pero la ventana es de milisegundos y este check ya cubre el
+      // caso real (sync corre cada 5 min, no en el milisegundo
+      // exacto del save).
+      final docRef = FirebaseFirestore.instance
+          .collection(AppCollections.vehiculos)
+          .doc(id);
+      final snapActual = await docRef.get();
+      final kmEnDb = (snapActual.data()?['KM_ACTUAL'] as num?)?.toDouble();
+      if (kmEnDb != null &&
+          _kmActualDb != null &&
+          kmEnDb > _kmActualDb! + 100 &&
+          kmEnDb > kmNuevo + 100) {
+        if (!mounted) return;
+        final confirmar = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Kilometraje actualizado por otro'),
+            content: Text(
+              'Mientras editabas, el km en la base subio de '
+              '${_kmActualDb!.toInt()} a ${kmEnDb.toInt()} '
+              '(probable sync Volvo o admin paralelo).\n\n'
+              'Vos vas a guardar ${kmNuevo.toInt()} — eso bajaria '
+              'el odometro y rompe calculos de gomeria y mantenimiento.\n\n'
+              'Cancela y refresca la pantalla, o confirma si sabes lo '
+              'que estas haciendo.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Si, pisar igual'),
+              ),
+            ],
+          ),
+        );
+        if (confirmar != true) {
+          if (mounted) setState(() => _isSaving = false);
+          return;
+        }
+      }
+
       final updates = <String, dynamic>{
         'MARCA': _marcaCtrl.text.trim().toUpperCase(),
         'MODELO': _modeloCtrl.text.trim().toUpperCase(),
@@ -542,18 +602,20 @@ class _AdminVehiculoFormScreenState extends State<AdminVehiculoFormScreen> {
         updates[spec.campoFecha] = _fechas[spec.campoFecha] ?? '';
         updates[spec.campoArchivo] = _urls[spec.campoArchivo] ?? '-';
       }
-      await FirebaseFirestore.instance
-          .collection(AppCollections.vehiculos)
-          .doc(id)
-          .update(updates);
+      await docRef.update(updates);
       guardadoOk = true;
 
       if (!mounted) return;
       AppFeedback.successOn(messenger, 'Ficha actualizada con éxito');
       navigator.pop();
-    } catch (e) {
+    } catch (e, s) {
       if (mounted) {
-        AppFeedback.errorOn(messenger, 'Error al guardar: $e');
+        AppFeedback.errorTecnicoOn(
+          messenger,
+          usuario: 'No se pudo guardar la ficha. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     } finally {
       // Solo reseteamos el flag si NO hicimos pop (si se hizo pop, la

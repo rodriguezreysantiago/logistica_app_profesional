@@ -133,31 +133,36 @@ class _MarcasTab extends StatelessWidget {
 
   Future<void> _abrirAltaMarca(BuildContext context) async {
     final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: const Text('Nueva marca'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Nombre de la marca',
-            hintText: 'Ej. Bridgestone',
+    final String? result;
+    try {
+      result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.background,
+          title: const Text('Nueva marca'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Nombre de la marca',
+              hintText: 'Ej. Bridgestone',
+            ),
+            textCapitalization: TextCapitalization.words,
           ),
-          textCapitalization: TextCapitalization.words,
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCELAR')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('GUARDAR'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('CANCELAR')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('GUARDAR'),
-          ),
-        ],
-      ),
-    );
+      );
+    } finally {
+      controller.dispose();
+    }
     if (result == null || result.isEmpty || !context.mounted) return;
     await FirebaseFirestore.instance
         .collection(AppCollections.cubiertasMarcas)
@@ -446,24 +451,29 @@ class _EditarModeloSheet extends StatelessWidget {
       trailing: const Icon(Icons.edit, color: Colors.white38, size: 18),
       onTap: () async {
         final ctrl = TextEditingController(text: valor);
-        final res = await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.background,
-            title: Text(etiqueta),
-            content: TextField(controller: ctrl, autofocus: true),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('CANCELAR'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-                child: const Text('GUARDAR'),
-              ),
-            ],
-          ),
-        );
+        final String? res;
+        try {
+          res = await showDialog<String>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.background,
+              title: Text(etiqueta),
+              content: TextField(controller: ctrl, autofocus: true),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('CANCELAR'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                  child: const Text('GUARDAR'),
+                ),
+              ],
+            ),
+          );
+        } finally {
+          ctrl.dispose();
+        }
         if (res != null && res != valor) await onSave(res);
       },
     );
@@ -484,35 +494,40 @@ class _EditarModeloSheet extends StatelessWidget {
       onTap: () async {
         final ctrl = TextEditingController(
             text: valor == null ? '' : AppFormatters.formatearMiles(valor));
-        final res = await showDialog<Object?>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.background,
-            title: Text(etiqueta),
-            content: TextField(
-              controller: ctrl,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              inputFormatters: [AppFormatters.inputMiles],
-              decoration: InputDecoration(suffixText: sufijo),
+        final Object? res;
+        try {
+          res = await showDialog<Object?>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.background,
+              title: Text(etiqueta),
+              content: TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [AppFormatters.inputMiles],
+                decoration: InputDecoration(suffixText: sufijo),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('CANCELAR'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, _Sentinela.borrar),
+                  child: const Text('BORRAR'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(
+                      ctx, AppFormatters.parsearMiles(ctrl.text)),
+                  child: const Text('GUARDAR'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('CANCELAR'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, _Sentinela.borrar),
-                child: const Text('BORRAR'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(
-                    ctx, AppFormatters.parsearMiles(ctrl.text)),
-                child: const Text('GUARDAR'),
-              ),
-            ],
-          ),
-        );
+          );
+        } finally {
+          ctrl.dispose();
+        }
         if (res == _Sentinela.borrar) {
           await onSave(null);
         } else if (res is int && res != valor) {
@@ -536,37 +551,42 @@ class _EditarModeloSheet extends StatelessWidget {
       onTap: () async {
         final ctrl = TextEditingController(
             text: valor == null ? '' : valor.toString());
-        final res = await showDialog<Object?>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.background,
-            title: Text(etiqueta),
-            content: TextField(
-              controller: ctrl,
-              autofocus: true,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(suffixText: sufijo),
+        final Object? res;
+        try {
+          res = await showDialog<Object?>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: AppColors.background,
+              title: Text(etiqueta),
+              content: TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(suffixText: sufijo),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('CANCELAR'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, _Sentinela.borrar),
+                  child: const Text('BORRAR'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(
+                      ctx,
+                      double.tryParse(
+                          ctrl.text.trim().replaceAll(',', '.'))),
+                  child: const Text('GUARDAR'),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('CANCELAR'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, _Sentinela.borrar),
-                child: const Text('BORRAR'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(
-                    ctx,
-                    double.tryParse(
-                        ctrl.text.trim().replaceAll(',', '.'))),
-                child: const Text('GUARDAR'),
-              ),
-            ],
-          ),
-        );
+          );
+        } finally {
+          ctrl.dispose();
+        }
         if (res == _Sentinela.borrar) {
           await onSave(null);
         } else if (res is double && res != valor) {

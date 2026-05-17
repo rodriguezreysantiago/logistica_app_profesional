@@ -69,8 +69,13 @@ class EmpleadoActions {
         detalles: {'campo': campo, 'nuevo_valor': valor?.toString() ?? ''},
       ));
       AppFeedback.successOn(messenger, 'Dato actualizado: $campo');
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error al actualizar: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo actualizar $campo. Probá de nuevo.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 
@@ -213,58 +218,62 @@ class EmpleadoActions {
     } else {
       final ctrl = TextEditingController();
       final formKey = GlobalKey<FormState>();
-      dniNuevo = await showDialog<String>(
-        context: context,
-        builder: (dCtx) => AlertDialog(
-          title: const Text('Cambiar DNI'),
-          content: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'DNI actual: $dniViejo',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: ctrl,
-                  autofocus: true,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
-                  decoration: const InputDecoration(
-                    labelText: 'DNI nuevo',
-                    prefixIcon: Icon(Icons.badge),
+      try {
+        dniNuevo = await showDialog<String>(
+          context: context,
+          builder: (dCtx) => AlertDialog(
+            title: const Text('Cambiar DNI'),
+            content: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'DNI actual: $dniViejo',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
-                  validator: (v) {
-                    final t = (v ?? '').trim();
-                    if (t.length < 7 || t.length > 8) {
-                      return 'Tiene que tener 7 u 8 dígitos';
-                    }
-                    if (t == dniViejo) return 'Es igual al DNI actual';
-                    return null;
-                  },
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: ctrl,
+                    autofocus: true,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [DigitOnlyFormatter(maxLength: 8)],
+                    decoration: const InputDecoration(
+                      labelText: 'DNI nuevo',
+                      prefixIcon: Icon(Icons.badge),
+                    ),
+                    validator: (v) {
+                      final t = (v ?? '').trim();
+                      if (t.length < 7 || t.length > 8) {
+                        return 'Tiene que tener 7 u 8 dígitos';
+                      }
+                      if (t == dniViejo) return 'Es igual al DNI actual';
+                      return null;
+                    },
+                  ),
+                ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dCtx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (formKey.currentState?.validate() ?? false) {
+                    Navigator.of(dCtx).pop(ctrl.text.trim());
+                  }
+                },
+                child: const Text('Continuar'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dCtx).pop(),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (formKey.currentState?.validate() ?? false) {
-                  Navigator.of(dCtx).pop(ctrl.text.trim());
-                }
-              },
-              child: const Text('Continuar'),
-            ),
-          ],
-        ),
-      );
+        );
+      } finally {
+        ctrl.dispose();
+      }
     }
 
     if (dniNuevo == null || dniNuevo.isEmpty) {
@@ -389,8 +398,13 @@ class EmpleadoActions {
       // Cierra el sheet de detalle del chofer viejo (el doc ya no existe).
       // El admin abre el del DNI nuevo desde la lista cuando quiera.
       navigator.pop();
-    } catch (e) {
-      AppFeedback.errorOn(messenger, 'Error al renombrar: $e');
+    } catch (e, s) {
+      AppFeedback.errorTecnicoOn(
+        messenger,
+        usuario: 'No se pudo renombrar el DNI. La operación se cancela.',
+        tecnico: e,
+        stack: s,
+      );
     }
   }
 
@@ -508,9 +522,15 @@ class EmpleadoActions {
       if (context.mounted) {
         await dato(context, id, dbCampo, downloadUrl);
       }
-    } catch (e) {
+    } catch (e, s) {
       if (context.mounted) {
-        AppFeedback.errorOn(messenger, 'Error al subir: $e');
+        AppFeedback.errorTecnicoOn(
+          messenger,
+          usuario:
+              'No se pudo subir el archivo. Verificá tu conexión y probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }
@@ -1211,9 +1231,14 @@ class EmpleadoActions {
         ],
       ),
     );
-    if (confirmado != true) return;
+    if (confirmado != true) {
+      motivoCtrl.dispose();
+      return;
+    }
+    final motivoTxt = motivoCtrl.text;
+    motivoCtrl.dispose();
     if (!context.mounted) return;
-    await darDeBaja(context, dni: dni, motivo: motivoCtrl.text);
+    await darDeBaja(context, dni: dni, motivo: motivoTxt);
   }
 
   /// Confirm dialog para reactivar.
@@ -1233,5 +1258,162 @@ class EmpleadoActions {
     if (ok != true) return;
     if (!context.mounted) return;
     await reactivar(context, dni: dni);
+  }
+
+  /// Resetea la contraseña de un empleado (caso: el empleado se la olvido).
+  /// Llama a la Cloud Function callable `resetearContrasenaEmpleadoAdmin`
+  /// que valida server-side que el caller sea ADMIN/SUPERVISOR. La pass
+  /// nueva queda hasheada con bcrypt. Revoca tokens del afectado para
+  /// forzar re-login.
+  ///
+  /// Patron HTTPS directo (mismo que `cambiarContrasenaChofer` en
+  /// user_mi_perfil) porque `cloud_functions` plugin no tiene impl
+  /// Windows. Auth via getIdToken().
+  static Future<void> resetearContrasenaCallable({
+    required String dni,
+    required String nueva,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw StateError('Sin sesion activa.');
+    }
+    final idToken = await user.getIdToken();
+    if (idToken == null || idToken.isEmpty) {
+      throw StateError('No se pudo obtener el token de sesion.');
+    }
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+    ));
+    const url =
+        'https://southamerica-east1-coopertrans-movil.cloudfunctions.net/'
+        'resetearContrasenaEmpleadoAdmin';
+    final response = await dio.post<Map<String, dynamic>>(
+      url,
+      data: {
+        'data': {'dni': dni, 'nueva': nueva},
+      },
+      options: Options(
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        validateStatus: (_) => true,
+      ),
+    );
+    if (response.statusCode == null || response.statusCode! >= 400) {
+      final err = response.data?['error'] as Map<String, dynamic>?;
+      final msg = err?['message']?.toString() ??
+          'Error ${response.statusCode} al resetear contrasena.';
+      throw StateError(msg);
+    }
+  }
+
+  /// Dialog UI que el admin abre desde el sheet de detalle del empleado.
+  /// Pide la nueva contrasena (twice + confirm), llama al callable, y
+  /// muestra feedback al admin para que se la pase al chofer.
+  static Future<void> confirmarYResetearContrasena(
+    BuildContext context, {
+    required String dni,
+    required String nombreVisible,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final nuevaCtrl = TextEditingController();
+    final repetirCtrl = TextEditingController();
+    String? errorTxt;
+
+    final confirmada = await showDialog<String?>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (sCtx, setSt) => AlertDialog(
+          backgroundColor: Theme.of(dCtx).colorScheme.surface,
+          title: const Text(
+            'Resetear contraseña',
+            style: TextStyle(color: Colors.white, fontSize: 18),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Vas a setearle una contraseña nueva a $nombreVisible. '
+                'El chofer va a tener que re-loguear y vos le tenes que '
+                'pasar la pass nueva en persona o por WhatsApp privado.',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nuevaCtrl,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Nueva contraseña',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: repetirCtrl,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Repetir contraseña',
+                ),
+              ),
+              if (errorTxt != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  errorTxt!,
+                  style: const TextStyle(color: AppColors.accentRed, fontSize: 12),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx),
+              child: const Text('CANCELAR',
+                  style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accentAmber,
+                foregroundColor: Colors.black,
+              ),
+              onPressed: () {
+                final a = nuevaCtrl.text;
+                final b = repetirCtrl.text;
+                if (a.length < 6) {
+                  setSt(() => errorTxt =
+                      'La contraseña debe tener al menos 6 caracteres.');
+                  return;
+                }
+                if (a != b) {
+                  setSt(() => errorTxt = 'Las contraseñas no coinciden.');
+                  return;
+                }
+                Navigator.pop(dCtx, a);
+              },
+              child: const Text('RESETEAR',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+    nuevaCtrl.dispose();
+    repetirCtrl.dispose();
+    if (confirmada == null || confirmada.isEmpty) return;
+    try {
+      await resetearContrasenaCallable(dni: dni, nueva: confirmada);
+      AppFeedback.successOn(
+        messenger,
+        'Contraseña reseteada. Pasale la nueva al chofer en persona.',
+      );
+    } catch (e) {
+      AppFeedback.errorOn(
+        messenger,
+        e is StateError ? e.message : 'Error: $e',
+      );
+    }
   }
 }

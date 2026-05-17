@@ -229,7 +229,10 @@ class _UserMiPerfilScreenState extends State<UserMiPerfilScreen> {
           ),
         ],
       ),
-    );
+    ).whenComplete(() {
+      antCtrl.dispose();
+      nvaCtrl.dispose();
+    });
   }
 
   void _mostrarOpcionesFoto() {

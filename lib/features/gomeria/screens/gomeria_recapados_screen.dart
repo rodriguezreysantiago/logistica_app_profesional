@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
+import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../constants/posiciones.dart';
@@ -381,7 +382,7 @@ class _EnviarRecapadoDialogState extends State<_EnviarRecapadoDialog> {
       backgroundColor: AppColors.background,
       title: const Text('Mandar a recapar'),
       content: SizedBox(
-        width: 380,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 380.0),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -564,11 +565,15 @@ class _EnviarRecapadoDialogState extends State<_EnviarRecapadoDialog> {
         notas: _notasCtrl.text.trim().isEmpty ? null : _notasCtrl.text,
       );
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (e, s) {
       setState(() => _guardando = false);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        AppFeedback.errorTecnicoOn(
+          ScaffoldMessenger.of(context),
+          usuario: 'No se pudo mandar la cubierta a recapar. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }
@@ -631,7 +636,7 @@ class _CerrarRecapadoDialogState extends State<_CerrarRecapadoDialog> {
       backgroundColor: AppColors.background,
       title: Text('Cerrar recapado ${widget.recapado.cubiertaCodigo}'),
       content: SizedBox(
-        width: 380,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 380.0),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -710,11 +715,15 @@ class _CerrarRecapadoDialogState extends State<_CerrarRecapadoDialog> {
         notas: _notasCtrl.text.trim().isEmpty ? null : _notasCtrl.text,
       );
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (e, s) {
       setState(() => _guardando = false);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        AppFeedback.errorTecnicoOn(
+          ScaffoldMessenger.of(context),
+          usuario: 'No se pudo cerrar el recapado. Probá de nuevo.',
+          tecnico: e,
+          stack: s,
+        );
       }
     }
   }

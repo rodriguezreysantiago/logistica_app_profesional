@@ -404,6 +404,7 @@ class _EditarEmpresaSheetBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final messenger = ScaffoldMessenger.of(context);
     Future<void> setCampo(String campo, dynamic valor) async {
       await LogisticaService.actualizarEmpresa(
         id: empresa.id,
@@ -506,12 +507,29 @@ class _EditarEmpresaSheetBody extends StatelessWidget {
                   inputFormatters: [CuitInputFormatter()],
                   // Persistimos con guiones también — operador puede
                   // leer el campo tal cual sin re-formatear server-side.
-                  onSave: (v) => setCampo(
-                    'cuit',
-                    v.trim().isEmpty
-                        ? null
-                        : CuitInputFormatter.formatear(v),
-                  ),
+                  onSave: (v) {
+                    // Validacion (auditoria 2026-05-17): mismo check que
+                    // el alta — sin esto el EDIT permitia CUIT incompleto
+                    // (ej "30-7042" → 4 digitos) y rompia reportes /
+                    // bsqueda por CUIT.
+                    final cuitRaw = v.trim();
+                    if (cuitRaw.isNotEmpty) {
+                      final digitos = cuitRaw.replaceAll(RegExp(r'\D'), '');
+                      if (digitos.length != 11) {
+                        AppFeedback.warningOn(
+                          messenger,
+                          'CUIT debe tener 11 digitos (formato XX-XXXXXXXX-X).',
+                        );
+                        return;
+                      }
+                    }
+                    setCampo(
+                      'cuit',
+                      cuitRaw.isEmpty
+                          ? null
+                          : CuitInputFormatter.formatear(cuitRaw),
+                    );
+                  },
                 ),
                 DatoEditableTexto(
                   etiqueta: 'Nombre del contacto (opcional)',
@@ -895,7 +913,7 @@ class _AltaEmpresaDialogState extends State<_AltaEmpresaDialog> {
             : 'Nuevo dador de transporte',
       ),
       content: SizedBox(
-        width: 360,
+        width: (MediaQuery.of(context).size.width - 80).clamp(240.0, 360.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1083,35 +1101,40 @@ class _BloqueProductos extends StatelessWidget {
   });
 
   Future<void> _agregar(BuildContext context) async {
-    final nuevo = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        final ctrl = TextEditingController();
-        return AlertDialog(
-          backgroundColor: AppColors.background,
-          title: const Text('Agregar producto'),
-          content: TextField(
-            controller: ctrl,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Nombre del producto',
-              hintText: 'Ej. Urea granulada',
+    final ctrl = TextEditingController();
+    final String? nuevo;
+    try {
+      nuevo = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            backgroundColor: AppColors.background,
+            title: const Text('Agregar producto'),
+            content: TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Nombre del producto',
+                hintText: 'Ej. Urea granulada',
+              ),
+              onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
             ),
-            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('CANCELAR'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text('AGREGAR'),
-            ),
-          ],
-        );
-      },
-    );
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCELAR'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('AGREGAR'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      ctrl.dispose();
+    }
     if (nuevo == null || nuevo.isEmpty) return;
     final nueva = [...productos, nuevo];
     await LogisticaService.setProductosDeEmpresa(
