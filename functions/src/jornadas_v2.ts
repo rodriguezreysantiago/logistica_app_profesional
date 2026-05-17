@@ -435,25 +435,51 @@ export async function tickVigiladorJornada(): Promise<void> {
   const snap = await db().collection("SITRACK_POSICIONES").limit(5000).get();
   const silenciados = await cargarSilenciados();
 
+  // Race condition fix (auditoria 2026-05-16): si por drift de
+  // CHOFER_DISTINTO un mismo DNI aparece en 2 patentes (chofer logueado
+  // con su iButton + otro tractor reportando su nombre legacy), antes
+  // procesabamos las 2 iteraciones y el segundo update PISABA el
+  // primero. Ahora deduplicamos por DNI antes del loop — nos quedamos
+  // con la patente que tiene reporte mas reciente (mejor proxy de
+  // "donde realmente esta el chofer ahora").
+  const choferesProcesados = new Map<string, {
+    docPos: typeof snap.docs[number];
+    polledMs: number;
+  }>();
+  for (const docPos of snap.docs) {
+    const data = docPos.data();
+    const dni = (data.driver_dni ?? "").toString().trim();
+    if (!dni) continue;
+    const polledMs =
+      (data.consultado_en as FsTimestamp | undefined)?.toMillis() ?? 0;
+    const previo = choferesProcesados.get(dni);
+    if (!previo || polledMs > previo.polledMs) {
+      choferesProcesados.set(dni, {docPos, polledMs});
+    }
+  }
+
   let evaluados = 0;
   let avisosEnviados = 0;
   let silenciadosCount = 0;
   let nuevasJornadas = 0;
   let cerradas = 0;
 
-  for (const docPos of snap.docs) {
+  for (const [dni, entry] of choferesProcesados.entries()) {
+    const docPos = entry.docPos;
     const data = docPos.data();
-    const dni = (data.driver_dni ?? "").toString().trim();
-    if (!dni) continue;
 
     const patente = docPos.id;
     const speed = typeof data.speed === "number" ? data.speed : 0;
+    // Default ignitionOn=FALSE (fail-closed). Antes el default era true
+    // — si SITRACK_POSICIONES no traia el campo `ignition`, considerabamos
+    // que el motor estaba encendido y inflabamos las jornadas con tiempo
+    // de tractores parados. Mejor no contar tiempo que no podemos
+    // confirmar que es manejo real.
     const ignitionOn =
-      typeof data.ignition === "boolean" ? data.ignition : true;
+      typeof data.ignition === "boolean" ? data.ignition : false;
     const lat = typeof data.lat === "number" ? data.lat : null;
     const lng = typeof data.lng === "number" ? data.lng : null;
-    const polledMs =
-      (data.consultado_en as FsTimestamp | undefined)?.toMillis() ?? 0;
+    const polledMs = entry.polledMs;
     const polledHaceSeg =
       polledMs > 0 ? (Date.now() - polledMs) / 1000 : Infinity;
     const pollStale = polledHaceSeg > POLL_STALE_SEGUNDOS;
@@ -482,9 +508,14 @@ export async function tickVigiladorJornada(): Promise<void> {
         DELTA_MAX_SEGUNDOS
       );
 
-      // Avisos a encolar después de actualizar el doc
-      let avisoTipo:
-        | "3h30" | "3h45" | "cuota" | "veda" | null = null;
+      // Avisos a encolar después de actualizar el doc. Lista (no scalar)
+      // — antes era un solo `avisoTipo` que se sobrescribia cuando se
+      // cruzaban varios umbrales en mismo tick (ej. cron retrasado o
+      // primer tick post-jornada vieja con 3h30 + 3h45 + cuota +
+      // veda simultaneos). Solo se mandaba el ultimo, los anteriores
+      // se perdian silenciosamente. Ahora encolamos TODOS los que se
+      // cumplen en este tick.
+      const avisosPendientes: Array<"3h30" | "3h45" | "cuota" | "veda"> = [];
 
       if (manejando) {
         // === Está manejando ===
@@ -503,14 +534,14 @@ export async function tickVigiladorJornada(): Promise<void> {
           j.bloque_actual_manejo_seg >= BLOQUE_ALERTA_TEMPRANA_SEGUNDOS &&
           !j.alerta_3_30_enviada
         ) {
-          avisoTipo = "3h30";
+          avisosPendientes.push("3h30");
           j.alerta_3_30_enviada = true;
         }
         if (
           j.bloque_actual_manejo_seg >= BLOQUE_LIMITE_SEGUNDOS &&
           !j.alerta_3_45_enviada
         ) {
-          avisoTipo = "3h45";
+          avisosPendientes.push("3h45");
           j.alerta_3_45_enviada = true;
         }
         if (
@@ -525,7 +556,7 @@ export async function tickVigiladorJornada(): Promise<void> {
           j.bloques_completos >= BLOQUES_POR_JORNADA &&
           !j.alerta_cuota_enviada
         ) {
-          avisoTipo = "cuota";
+          avisosPendientes.push("cuota");
           j.alerta_cuota_enviada = true;
           j.cuota_excedida = true;
         }
@@ -535,7 +566,7 @@ export async function tickVigiladorJornada(): Promise<void> {
         const enVeda =
           hora >= VEDA_NOCTURNA_DESDE_HORA && hora < VEDA_NOCTURNA_HASTA_HORA;
         if (enVeda && !j.alerta_veda_enviada) {
-          avisoTipo = "veda";
+          avisosPendientes.push("veda");
           j.alerta_veda_enviada = true;
           j.veda_excedida = true;
         }
@@ -601,20 +632,20 @@ export async function tickVigiladorJornada(): Promise<void> {
 
       await entrada.ref.update(j as unknown as Record<string, unknown>);
 
-      // Encolar aviso (si corresponde y chofer no está silenciado)
-      if (avisoTipo) {
+      // Encolar avisos (todos los pendientes, no solo el ultimo)
+      for (const avisoTipo of avisosPendientes) {
         if (silenciados.has(dni)) {
           silenciadosCount++;
           logger.info("[jornadas_v2.tick] aviso silenciado", {
             dni, patente, tipo: avisoTipo,
           });
-        } else {
-          if (avisoTipo === "3h30") await encolarAviso3h30(dni, patente);
-          else if (avisoTipo === "3h45") await encolarAviso3h45(dni, patente);
-          else if (avisoTipo === "cuota") await encolarAvisoCuotaCumplida(dni, patente);
-          else if (avisoTipo === "veda") await encolarAvisoVedaNocturna(dni, patente);
-          avisosEnviados++;
+          continue;
         }
+        if (avisoTipo === "3h30") await encolarAviso3h30(dni, patente);
+        else if (avisoTipo === "3h45") await encolarAviso3h45(dni, patente);
+        else if (avisoTipo === "cuota") await encolarAvisoCuotaCumplida(dni, patente);
+        else if (avisoTipo === "veda") await encolarAvisoVedaNocturna(dni, patente);
+        avisosEnviados++;
       }
     } catch (e) {
       logger.warn("[jornadas_v2.tick] falló para chofer", {

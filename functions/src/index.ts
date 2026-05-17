@@ -1020,7 +1020,7 @@ export const volvoProxy = onCall(
     ).toString("base64");
 
     try {
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         method: "GET",
         headers: {
           "Authorization": authHeader,
@@ -1126,7 +1126,7 @@ export const telemetriaSnapshotScheduled = onSchedule(
     while (intentos < maxIntentos) {
       intentos++;
       try {
-        const res = await fetch(url, {
+        const res = await fetchWithTimeout(url, {
           method: "GET",
           headers: {
             "Authorization": authHeader,
@@ -1739,7 +1739,7 @@ export const volvoAlertasPoller = onSchedule(
 
       let res: Response;
       try {
-        res = await fetch(url, {
+        res = await fetchWithTimeout(url, {
           method: "GET",
           headers: {
             "Authorization": authHeader,
@@ -2495,8 +2495,13 @@ export const onAlertaVolvoCreated = onDocumentCreated(
 let _rrCounter = 0;
 function _rrPick(len: number): number {
   if (len <= 0) return 0;
+  // Garantizar índice positivo en [0, len). Antes usabamos `| 0` que
+  // wrappea a int32 SIGNED — al cruzar 2^31 saltaba a -2^31 y `idx`
+  // podía dar negativo (en JS `(-3) % 8 = -3`, NO 5 como en otras
+  // lenguas). Eso producía `variantes[-3] = undefined` y mensajes
+  // vacios encolados. `>>> 0` wrappea unsigned y nunca da negativos.
   const idx = _rrCounter % len;
-  _rrCounter = (_rrCounter + 1) | 0; // wrap a int32 para no inflar
+  _rrCounter = (_rrCounter + 1) >>> 0;
   return idx;
 }
 
@@ -2525,6 +2530,30 @@ function _formatHoraArg(millis: number): string {
     hour12: false,
   });
   return fmt.format(new Date(millis));
+}
+
+/**
+ * Wrapper de fetch() con AbortController + timeout. Necesario porque
+ * APIs externas (Volvo Connect, Sitrack) ocasionalmente cuelgan la
+ * conexión sin cerrar — el `await fetch` se quedaba hasta el
+ * timeoutSeconds de la function (~60-240s), quemando billing y
+ * bloqueando reintentos. Con AbortController el fetch falla rápido
+ * (~20s) y el caller puede manejar la excepción / reintentar.
+ *
+ * Uso: igual a fetch, opcionalmente pasar `timeoutMs`.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = 20_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {...init, signal: controller.signal});
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -2661,7 +2690,7 @@ export const volvoScoresPoller = onSchedule(
 
       let res: Response;
       try {
-        res = await fetch(url, {
+        res = await fetchWithTimeout(url, {
           method: "GET",
           headers: { Authorization: authHeader, Accept: ACCEPT_SCORES },
         });
@@ -3523,7 +3552,7 @@ export const sitrackPosicionPoller = onSchedule(
     const url = `${SITRACK_BASE_AR}/v2/report`;
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await fetchWithTimeout(url, {
         method: "GET",
         headers: {
           "Authorization": authHeader,
@@ -3900,7 +3929,7 @@ export const sitrackEventosPoller = onSchedule(
     let res: Response;
     let bodyText = "";
     try {
-      res = await fetch(url, {
+      res = await fetchWithTimeout(url, {
         method: "GET",
         headers: {
           Authorization: authHeader,
@@ -4333,6 +4362,20 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
   async () => {
     logger.info("[resumenDriftsAsignacionesDiario] iniciando");
 
+    // Idempotencia diaria. Si GCP re-dispara el cron (retry, double
+    // trigger en la sliding window de las 8AM), saltamos en lugar de
+    // mandar el mismo resumen 2 veces a Santiago. Antes faltaba este
+    // gate y los 3 crons que corren a las 8:00 podian generar mensajes
+    // duplicados ante cualquier reintento.
+    const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
+    const histRef = db
+      .collection("AVISOS_AUTOMATICOS_HISTORICO")
+      .doc(`drifts_${hoyKey}_${MANTENIMIENTO_DESTINATARIO_DNI}`);
+    if ((await histRef.get()).exists) {
+      logger.info("[resumenDriftsAsignacionesDiario] ya enviado hoy, skip");
+      return;
+    }
+
     // ─── Leer drifts actuales ──────────────────────────────────────
     // Filtramos por drift_tipo != null en código (Firestore no tiene
     // operador "IS NOT NULL" — `where("drift_tipo", "!=", null)` no
@@ -4466,6 +4509,13 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
       campo_base: "DRIFT_ASIGNACIONES",
       admin_dni: "BOT",
       admin_nombre: "Cron resumen drifts",
+    });
+
+    // Marcar como enviado hoy (idempotencia — bloquea retries de GCP).
+    await histRef.set({
+      enviado_en: FieldValue.serverTimestamp(),
+      tipo: "drifts_asignaciones",
+      drifts_count: cantidad,
     });
 
     logger.info("[resumenDriftsAsignacionesDiario] encolado", {
@@ -4660,7 +4710,22 @@ export const resumenExcesosJornadaDiario = onSchedule(
     memory: "256MiB",
   },
   async () => {
+    // Idempotencia diaria (gate compartido para evitar duplicados ante
+    // retry de GCP). El destinatario real lo resuelve el modulo
+    // jornadas_v2 — usamos un docId generico por dia.
+    const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
+    const histRef = db
+      .collection("AVISOS_AUTOMATICOS_HISTORICO")
+      .doc(`excesos_jornada_${hoyKey}`);
+    if ((await histRef.get()).exists) {
+      logger.info("[resumenExcesosJornadaDiario] ya enviado hoy, skip");
+      return;
+    }
     await jornadasV2.armarResumenJornadasDiario();
+    await histRef.set({
+      enviado_en: FieldValue.serverTimestamp(),
+      tipo: "excesos_jornada",
+    });
   }
 );
 
@@ -4720,6 +4785,17 @@ export const resumenConductaManejoDiario = onSchedule(
   },
   async () => {
     logger.info("[resumenConductaManejoDiario] iniciando");
+
+    // Idempotencia diaria — si GCP re-dispara el cron Molina recibe el
+    // mismo resumen 2 veces. Gate con docId determinístico por fecha.
+    const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
+    const histRefIdem = db
+      .collection("AVISOS_AUTOMATICOS_HISTORICO")
+      .doc(`conducta_manejo_${hoyKey}`);
+    if ((await histRefIdem.get()).exists) {
+      logger.info("[resumenConductaManejoDiario] ya enviado hoy, skip");
+      return;
+    }
 
     // ─── Rango: día calendario AYER en ART ────────────────────────
     const ahora = new Date();
@@ -5071,6 +5147,14 @@ export const resumenConductaManejoDiario = onSchedule(
       campo_base: "CONDUCTA_MANEJO_DIARIO",
       admin_dni: "BOT",
       admin_nombre: "Bot resumen conducta",
+    });
+
+    // Marcar como enviado hoy (idempotencia — bloquea reintentos).
+    await histRefIdem.set({
+      enviado_en: FieldValue.serverTimestamp(),
+      tipo: "conducta_manejo_diario",
+      grupos: grupos.size,
+      eventos: eventos.length,
     });
 
     logger.info("[resumenConductaManejoDiario] OK", {
