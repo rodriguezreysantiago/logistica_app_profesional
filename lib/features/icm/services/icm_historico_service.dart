@@ -70,19 +70,19 @@ class IcmHistoricoService {
   /// al final — útil para gráfico de línea).
   ///
   /// `cantidadSemanas` default 12 (~3 meses) — balance entre suficiente
-  /// data para tendencia y cantidad de queries.
+  /// data para tendencia y cantidad de queries. Las N queries corren en
+  /// paralelo con Future.wait (antes eran secuenciales, ~12 round-trips
+  /// serializados por carga del detalle).
   static Future<List<IcmSemanaChofer>> historicoChofer({
     required FirebaseFirestore db,
     required String choferDni,
     int cantidadSemanas = 12,
   }) async {
     final semanas = _generarSemanas(cantidadSemanas);
-    final result = <IcmSemanaChofer>[];
-    for (final s in semanas) {
-      // Para mantener la query simple, traemos los eventos de la
-      // semana del chofer y agregamos client-side. Como una semana son
-      // típicamente 10-100 eventos por chofer, es chico.
-      final snap = await db
+    // Disparar las N queries en paralelo (1 round-trip a Firestore en
+    // vez de N serializados — performance crítica al abrir el detalle).
+    final snaps = await Future.wait(
+      semanas.map((s) => db
           .collection('SITRACK_EVENTOS')
           .where('driver_dni', isEqualTo: choferDni)
           .where('report_date',
@@ -90,19 +90,46 @@ class IcmHistoricoService {
                   Timestamp.fromMillisecondsSinceEpoch(s.inicioMs))
           .where('report_date',
               isLessThan: Timestamp.fromMillisecondsSinceEpoch(s.finMs))
-          .get();
+          .get()),
+    );
 
+    final result = <IcmSemanaChofer>[];
+    for (var i = 0; i < semanas.length; i++) {
+      final s = semanas[i];
       var total = 0;
-      for (final doc in snap.docs) {
-        final eventId = doc.data()['event_id'];
+      // Tracking del odómetro Sitrack por patente para km reales
+      // (idéntico patrón a icm_calculator.dart — los km del chofer en
+      // la semana son sum(max-min) sobre cada patente que manejó).
+      final odometroPorPatente = <String, _OdometroTracking>{};
+      for (final doc in snaps[i].docs) {
+        final d = doc.data();
+        final eventId = d['event_id'];
+        final patente = (d['asset_id'] ?? '').toString().trim().toUpperCase();
+        final odometer = (d['odometer'] as num?)?.toDouble();
+        if (patente.isNotEmpty && odometer != null && odometer > 0) {
+          final t = odometroPorPatente.putIfAbsent(
+            patente,
+            () => _OdometroTracking(),
+          );
+          if (odometer < t.min) t.min = odometer;
+          if (odometer > t.max) t.max = odometer;
+        }
         if (eventId is int && kTiposInfraccionIcm.contains(eventId)) {
           total++;
         }
       }
-      // Baseline km igual que el calculator principal (1 evento = 100 km).
-      final km = total * 100.0;
+      // Km reales = sum(max - min) por patente.
+      double kmReales = 0;
+      for (final t in odometroPorPatente.values) {
+        if (t.max > t.min) kmReales += (t.max - t.min);
+      }
+      // Mismo umbral que icm_calculator: si no hay km suficientes,
+      // categorizamos como sinDatos en lugar de inventar ICM falso.
+      final tieneKmReales = kmReales >= 50.0;
+      final km = tieneKmReales ? kmReales : 0.0;
       final ratio = km > 0 ? total / (km / 100.0) : 0.0;
-      final icm = km > 0 ? (100 - ratio * 5).clamp(0.0, 100.0) : 0.0;
+      final icm =
+          tieneKmReales ? (100 - ratio * 5).clamp(0.0, 100.0) : 0.0;
       result.add(IcmSemanaChofer(
         semanaInicio: s.inicio,
         labelSemana: s.label,
@@ -110,7 +137,7 @@ class IcmHistoricoService {
         kmRecorridos: km,
         infraccionesPor100Km: ratio,
         icm: icm,
-        categoria: _categorizar(icm, total),
+        categoria: _categorizar(icm, total, tieneKmReales),
       ));
     }
     return result;
@@ -309,12 +336,25 @@ class IcmHistoricoService {
         '${finDom.day} ${meses[finDom.month - 1]}';
   }
 
-  static CategoriaIcm _categorizar(double icm, int totalEventos) {
-    if (totalEventos == 0) return CategoriaIcm.bajo;
+  /// Categoriza el ICM 0-100. Si no hay km reales medidos, devolvemos
+  /// `sinDatos` en lugar de mentir con un ICM falso (antes con
+  /// `totalEventos==0` devolvíamos `bajo` lo que pintaba verde la
+  /// pantalla de detalle aún cuando no había actividad histórica).
+  static CategoriaIcm _categorizar(
+    double icm,
+    int totalEventos,
+    bool tieneKmReales,
+  ) {
+    if (!tieneKmReales) return CategoriaIcm.sinDatos;
     if (icm >= 80) return CategoriaIcm.bajo;
     if (icm >= 60) return CategoriaIcm.medio;
     return CategoriaIcm.alto;
   }
+}
+
+class _OdometroTracking {
+  double min = double.infinity;
+  double max = double.negativeInfinity;
 }
 
 class _Semana {

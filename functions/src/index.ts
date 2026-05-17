@@ -5473,36 +5473,70 @@ export const recomputeIcmSemanalScheduled = onSchedule(
       .where("report_date", "<", Timestamp.fromMillis(lunesActualMs))
       .get();
 
+    // Tracking del odómetro Sitrack por patente para cada chofer.
+    // km en rango = max - min para cada patente, sumado.
+    interface OdometroTracking {
+      min: number;
+      max: number;
+    }
     interface AggChofer {
       dni: string;
       nombre: string;
       totalEventos: number;
       eventosPorTipo: Record<string, number>;
+      odometroPorPatente: Map<string, OdometroTracking>;
     }
     const porChofer = new Map<string, AggChofer>();
     for (const d of evSnap.docs) {
       const data = d.data();
       const eventId = data.event_id;
-      if (typeof eventId !== "number" ||
-          !TIPOS_PELIGROSOS_SITRACK.has(eventId)) continue;
       const dni = (data.driver_dni ?? "").toString().trim();
       if (!dni) continue;
+      const patente = (data.asset_id ?? "").toString().trim().toUpperCase();
+      const odometer = typeof data.odometer === "number" ? data.odometer : null;
+
+      let agg = porChofer.get(dni);
+      if (!agg) {
+        agg = {
+          dni,
+          nombre: nombrePorDni.get(dni) ?? `DNI ${dni}`,
+          totalEventos: 0,
+          eventosPorTipo: {} as Record<string, number>,
+          odometroPorPatente: new Map<string, OdometroTracking>(),
+        };
+        porChofer.set(dni, agg);
+      }
+
+      // Acumular odómetros — incluye TODOS los eventos (no solo
+      // infracciones) para maximizar la ventana de km medible.
+      if (patente && odometer !== null && odometer > 0) {
+        let t = agg.odometroPorPatente.get(patente);
+        if (!t) {
+          t = {min: odometer, max: odometer};
+          agg.odometroPorPatente.set(patente, t);
+        } else {
+          if (odometer < t.min) t.min = odometer;
+          if (odometer > t.max) t.max = odometer;
+        }
+      }
+
+      // Infracciones solo cuentan si el evento está en la lista YPF.
+      if (typeof eventId !== "number" ||
+          !TIPOS_PELIGROSOS_SITRACK.has(eventId)) continue;
       const nombreEv = (data.event_name ?? `Evento ${eventId}`).toString();
-      const agg: AggChofer = porChofer.get(dni) ?? {
-        dni,
-        nombre: nombrePorDni.get(dni) ?? `DNI ${dni}`,
-        totalEventos: 0,
-        eventosPorTipo: {} as Record<string, number>,
-      };
       agg.totalEventos++;
       agg.eventosPorTipo[nombreEv] =
         (agg.eventosPorTipo[nombreEv] ?? 0) + 1;
-      porChofer.set(dni, agg);
     }
 
     // ─── 4. Calcular ICM por chofer (misma fórmula que cliente) ───
-    // Baseline km: 1 evento = 100 km (mientras no haya histórico de
-    // odómetros). FACTOR=5 → 4 ev/100km = ICM 80, 8 ev/100km = ICM 60.
+    // Km reales del chofer en la semana = suma(max - min) del odómetro
+    // Sitrack en eventos del chofer por cada patente que manejó.
+    // Refactor 2026-05-16: antes era `totalEventos × 100` que daba
+    // ratio = 1 → ICM = 95 para CUALQUIER chofer con eventos. Auditoria
+    // detecto que el reporte semanal a Molina tenia todos los choferes
+    // empatados en 95, sin valor de ranking.
+    // FACTOR=5 → 4 ev/100km = ICM 80, 8 ev/100km = ICM 60.
     interface ChoferAgg {
       dni: string;
       nombre: string;
@@ -5513,14 +5547,21 @@ export const recomputeIcmSemanalScheduled = onSchedule(
       eventos_por_tipo: Record<string, number>;
     }
     const FACTOR = 5;
+    const KM_MIN = 50; // mismo umbral que cliente para evitar ICM ruidoso
     const choferes: ChoferAgg[] = [];
     for (const a of porChofer.values()) {
-      const km = a.totalEventos * 100;
+      // Sumar km reales por patente.
+      let kmReales = 0;
+      for (const t of a.odometroPorPatente.values()) {
+        if (t.max > t.min) kmReales += (t.max - t.min);
+      }
+      const km = kmReales >= KM_MIN ? kmReales : 0;
       const ratio = km > 0 ? a.totalEventos / (km / 100) : 0;
-      const icmRaw = km > 0 ? 100 - ratio * FACTOR : 100;
+      const icmRaw = km > 0 ? 100 - ratio * FACTOR : 0;
       const icm = Math.max(0, Math.min(100, icmRaw));
-      const categoria =
-        icm >= 80 ? "BAJO" : (icm >= 60 ? "MEDIO" : "ALTO");
+      const categoria = km <= 0 ?
+        "SIN_DATOS" :
+        (icm >= 80 ? "BAJO" : (icm >= 60 ? "MEDIO" : "ALTO"));
       choferes.push({
         dni: a.dni,
         nombre: a.nombre,

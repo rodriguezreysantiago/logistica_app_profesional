@@ -96,20 +96,41 @@ class IcmCalculator {
             isLessThan: Timestamp.fromMillisecondsSinceEpoch(hastaMs))
         .get();
 
-    // Agrupador por chofer
+    // Agrupador por chofer — captura eventos + odómetros por patente
+    // para calcular km reales recorridos en el rango (max - min del
+    // odómetro Sitrack en los eventos del chofer en cada patente).
     final porChofer = <String, _AggChofer>{};
     for (final doc in snapEventos.docs) {
       final d = doc.data();
       final eventId = d['event_id'];
-      if (eventId is! int || !kTiposInfraccionIcm.contains(eventId)) continue;
       final dni = (d['driver_dni'] ?? '').toString().trim();
       if (dni.isEmpty) continue; // ICM solo aplica a choferes identificados
-      final nombre = (d['event_name'] ?? 'Evento $eventId').toString();
       final patente = (d['asset_id'] ?? '').toString().trim().toUpperCase();
-      final agg = porChofer.putIfAbsent(
-        dni,
-        () => _AggChofer(),
-      );
+      // `odometer` viene del cron `sitrackEventosPoller` (campo top-level
+      // en SITRACK_EVENTOS). Si no viene (eventos viejos pre-deploy o
+      // unidades sin reportar odómetro), lo ignoramos para el cálculo
+      // de km — el evento sigue contando como infracción pero no aporta
+      // al numerador del km.
+      final odometer = (d['odometer'] as num?)?.toDouble();
+
+      final agg = porChofer.putIfAbsent(dni, () => _AggChofer());
+
+      // Acumular odómetros del chofer en esta patente — incluye TODOS
+      // los eventos (no solo las infracciones) para tener la mayor
+      // ventana de km posible. Si un chofer manejó muchas patentes
+      // diferentes en el rango, cada una aporta sus km.
+      if (patente.isNotEmpty && odometer != null && odometer > 0) {
+        final tracking = agg.odometroPorPatente.putIfAbsent(
+          patente,
+          () => _OdometroTracking(),
+        );
+        if (odometer < tracking.min) tracking.min = odometer;
+        if (odometer > tracking.max) tracking.max = odometer;
+      }
+
+      // Las infracciones solo cuentan si el evento esta en la lista YPF.
+      if (eventId is! int || !kTiposInfraccionIcm.contains(eventId)) continue;
+      final nombre = (d['event_name'] ?? 'Evento $eventId').toString();
       agg.totalEventos++;
       agg.eventosPorTipo[nombre] = (agg.eventosPorTipo[nombre] ?? 0) + 1;
       if (patente.isNotEmpty) {
@@ -117,36 +138,38 @@ class IcmCalculator {
       }
     }
 
-    // ─── 2. Cargar km por chofer desde SITRACK_POSICIONES ───────
-    // Heurística: para cada chofer, sumamos los km recorridos por las
-    // patentes que más manejó. SITRACK_POSICIONES tiene 1 doc por
-    // patente con `odometer` actual; para un cálculo de km en rango
-    // necesitaríamos un histórico de odómetros, que hoy no guardamos.
+    // ─── 2. Construir IcmChofer por chofer ──────────────────────
+    // Km reales del chofer en el rango = suma de (max - min) del odómetro
+    // Sitrack por cada patente que manejó. Esto es la lectura REAL del
+    // odómetro del vehículo en eventos consecutivos, NO una heurística
+    // (refactor 2026-05-16 — antes era `totalEventos × 100` que daba
+    // ratio = 1 → ICM = 95 para CUALQUIER chofer con eventos, rompiendo
+    // la utilidad del ranking).
     //
-    // Aproximación: usamos la suma de eventos / 0.1 evt/km baseline
-    // cuando no podemos calcular km exactos. Esto es CONSERVADOR — el
-    // ICM resultante puede ser más permisivo que el YPF real. A medida
-    // que acumulemos histórico de odómetros, refinamos.
-    //
-    // Pendiente futuro: cuando haya histórico de odómetros por patente
-    // (snapshot diario), reemplazar este baseline por el cálculo real
-    // desde TELEMETRIA_HISTORICO.
-
-    // ─── 3. Construir IcmChofer por chofer ──────────────────────
+    // Si no hay datos de odómetro (eventos viejos pre-poller o unidades
+    // sin reportar km), fallback al baseline conservador 50 km/evento
+    // y marcamos categoría `sinDatos` para que la UI lo refleje en lugar
+    // de mentir con un ICM falso.
     final result = <IcmChofer>[];
     for (final entry in porChofer.entries) {
       final dni = entry.key;
       final agg = entry.value;
-      // Aproximación de km: usamos un baseline conservador de 100 km
-      // por evento si no tenemos odómetro real. Esto evita ICM 0 en
-      // choferes con pocos eventos y poco km medido.
-      final km = agg.totalEventos * 100.0; // baseline 1 evt = 100 km
-      final categoria = km < _kmMinimoParaIcm
-          ? CategoriaIcm.sinDatos
-          : _categorizar(_calcularIcm(agg.totalEventos, km));
-      final icm = km < _kmMinimoParaIcm
-          ? 0.0
-          : _calcularIcm(agg.totalEventos, km);
+
+      // Sumar km reales por patente (max - min del odómetro).
+      double kmReales = 0;
+      for (final tracking in agg.odometroPorPatente.values) {
+        if (tracking.max > tracking.min) {
+          kmReales += (tracking.max - tracking.min);
+        }
+      }
+
+      // Si hay datos reales y superan el umbral, usar km reales. Sino
+      // categoría sinDatos (no inventamos un ICM falso).
+      final tieneKmReales = kmReales >= _kmMinimoParaIcm;
+      final km = tieneKmReales ? kmReales : 0.0;
+      final icm = tieneKmReales ? _calcularIcm(agg.totalEventos, km) : 0.0;
+      final categoria =
+          tieneKmReales ? _categorizar(icm) : CategoriaIcm.sinDatos;
       final ratio =
           km > 0 ? (agg.totalEventos / (km / 100.0)) : 0.0;
 
@@ -190,4 +213,16 @@ class _AggChofer {
   int totalEventos = 0;
   final Map<String, int> eventosPorTipo = {};
   final Map<String, int> patentesCount = {};
+  /// Tracking del odómetro Sitrack en eventos del chofer por patente.
+  /// km en rango = max - min para cada patente.
+  final Map<String, _OdometroTracking> odometroPorPatente = {};
+}
+
+/// Min/max del odómetro Sitrack de un chofer en una patente para el
+/// rango analizado. Permite calcular km recorridos sin necesidad de
+/// snapshots históricos (la diferencia max-min en los eventos del rango
+/// nos da los km reales recorridos).
+class _OdometroTracking {
+  double min = double.infinity;
+  double max = double.negativeInfinity;
 }
