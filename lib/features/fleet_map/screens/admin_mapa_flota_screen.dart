@@ -28,8 +28,18 @@ import '../../../shared/widgets/app_widgets.dart';
 ///   gris si OFF) y frescura del último reporte (rojo si > 1h).
 /// - Tap en marker → bottom sheet con datos del tractor + chofer
 ///   (si está identificado por iButton) + odómetro + link a Maps.
+///
+/// Modo `embedded`: cuando se renderiza dentro de otra pantalla (ej.
+/// el tab "Mapa" del módulo Vista Ejecutiva), pasar `embedded: true`
+/// para que se omita el AppScaffold y el título — solo se devuelve el
+/// contenido (toolbar + mapa) para que viva en el body del shell padre.
 class AdminMapaFlotaScreen extends StatefulWidget {
-  const AdminMapaFlotaScreen({super.key});
+  /// Si `true`, no envuelve el contenido en `AppScaffold` (sin AppBar
+  /// propio). Pensado para embeber dentro de otra pantalla que ya tiene
+  /// su scaffold/título. Default false (uso standalone como ruta).
+  final bool embedded;
+
+  const AdminMapaFlotaScreen({super.key, this.embedded = false});
 
   @override
   State<AdminMapaFlotaScreen> createState() => _AdminMapaFlotaScreenState();
@@ -60,13 +70,17 @@ class _AdminMapaFlotaScreenState extends State<AdminMapaFlotaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return AppScaffold(
-      title: 'Mapa flota en vivo',
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance
-            .collection(AppCollections.sitrackPosiciones)
-            .snapshots(),
-        builder: (ctx, snap) {
+    final body = _buildBody();
+    if (widget.embedded) return body;
+    return AppScaffold(title: 'Mapa flota en vivo', body: body);
+  }
+
+  Widget _buildBody() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection(AppCollections.sitrackPosiciones)
+          .snapshots(),
+      builder: (ctx, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(
               child: CircularProgressIndicator(color: AppColors.accentGreen),
@@ -157,7 +171,6 @@ class _AdminMapaFlotaScreenState extends State<AdminMapaFlotaScreen> {
             ],
           );
         },
-      ),
     );
   }
 
