@@ -4964,6 +4964,11 @@ export const resumenExcesosJornadaDiario = onSchedule(
 //   444    Distancia frenado insuficiente
 //   1006   Advertencia de salida de carril (LDWS/cámara)
 //   1007   Detección de colisión
+// ⚠ ESPEJO CLIENT-SIDE en `lib/features/icm/services/icm_calculator.dart:
+//   kTiposInfraccionIcm`. Si agregas un tipo aca, AGREGALO TAMBIEN
+//   ALLA — sino el cliente (Vista Ejecutiva, ranking ICM) cuenta
+//   distinto que el cron y queda drift entre lo que ve Molina en
+//   WhatsApp y lo que ve admin en la app. Auditoria 2026-05-17.
 const TIPOS_PELIGROSOS_SITRACK = new Set<number>([
   8, 9, 66, 67, 267, 326, 383, 444, 1006, 1007,
 ]);

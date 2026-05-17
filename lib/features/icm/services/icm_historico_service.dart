@@ -358,15 +358,14 @@ class IcmHistoricoService {
   /// `sinDatos` en lugar de mentir con un ICM falso (antes con
   /// `totalEventos==0` devolvíamos `bajo` lo que pintaba verde la
   /// pantalla de detalle aún cuando no había actividad histórica).
+  /// Delega al helper publico `categorizarIcm` (icm_calculator) para
+  /// no duplicar los umbrales 80/60 (auditoria 2026-05-17).
   static CategoriaIcm _categorizar(
     double icm,
     int totalEventos,
     bool tieneKmReales,
   ) {
-    if (!tieneKmReales) return CategoriaIcm.sinDatos;
-    if (icm >= 80) return CategoriaIcm.bajo;
-    if (icm >= 60) return CategoriaIcm.medio;
-    return CategoriaIcm.alto;
+    return categorizarIcm(icm, tieneKmReales: tieneKmReales);
   }
 }
 

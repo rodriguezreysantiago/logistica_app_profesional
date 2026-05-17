@@ -28,13 +28,39 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// Mismos que el resumen Molina diario (`resumenConductaManejoDiario`):
 /// salida de carril, sobrevelocidad in/out, frenada brusca, aceleración
 /// brusca, giro brusco, distancia frenado insuficiente, colisiones.
+///
+/// ⚠ ESPEJO SERVER-SIDE en `functions/src/index.ts:TIPOS_PELIGROSOS_SITRACK`.
+/// Si agregás un tipo aca, AGREGALO TAMBIEN ALLA — sino el cron de
+/// `resumenConductaManejoDiario` (WhatsApp a Molina) y el de
+/// `recomputeIcmSemanalScheduled` (ICM_SEMANAL) usan distinto set y
+/// las cuentas no coinciden con el ICM del cliente (drift documentado
+/// en auditoria 2026-05-17).
 const Set<int> kTiposInfraccionIcm = {
   8, 9, 66, 67, 267, 326, 383, 444, 1006, 1007,
 };
 
 /// Categoría de riesgo según el rango de ICM. Alineado con YPF:
 /// Verde (bajo) = ≥ 80, Amarillo (medio) = 60-79, Rojo (alto) = < 60.
+///
+/// IMPORTANTE: los umbrales 80/60 estan REPETIDOS en:
+///   - functions/src/index.ts:5730 (recomputeIcmSemanalScheduled)
+///   - lib/features/vista_ejecutiva/services/vista_ejecutiva_service.dart:_categorizar
+///   - lib/features/icm/services/icm_historico_service.dart:_categorizar
+/// Si cambias los umbrales aca, CAMBIALOS EN LOS 3 LUGARES (auditoria
+/// 2026-05-17 — falta unificar en helper compartido, pendiente para
+/// proxima iteracion).
 enum CategoriaIcm { bajo, medio, alto, sinDatos }
+
+/// Helper publico para categorizar un ICM. Reusado por
+/// icm_calculator + icm_historico_service. (Vista ejecutiva tiene
+/// su variante porque devuelve 'verde'|'amarillo'|'rojo' strings —
+/// queda para refactor futuro.)
+CategoriaIcm categorizarIcm(double icm, {bool tieneKmReales = true}) {
+  if (!tieneKmReales) return CategoriaIcm.sinDatos;
+  if (icm >= 80) return CategoriaIcm.bajo;
+  if (icm >= 60) return CategoriaIcm.medio;
+  return CategoriaIcm.alto;
+}
 
 /// Resumen del ICM de un chofer en un rango.
 class IcmChofer {
@@ -225,9 +251,8 @@ class IcmCalculator {
   }
 
   static CategoriaIcm _categorizar(double icm) {
-    if (icm >= 80) return CategoriaIcm.bajo;
-    if (icm >= 60) return CategoriaIcm.medio;
-    return CategoriaIcm.alto;
+    // Usa el helper publico para no duplicar umbrales 80/60.
+    return categorizarIcm(icm);
   }
 }
 
