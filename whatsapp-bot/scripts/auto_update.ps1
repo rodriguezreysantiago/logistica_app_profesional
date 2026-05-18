@@ -12,7 +12,7 @@
 #        c) Restart-Service CoopertransMovilBot
 #        d) esperar 90s
 #        e) smoke test: chequear que el bot heartbeatea via bot_estado_remoto.js --json
-#        f) log resultado (OK / WARNING) — sin rollback automatico
+#        f) log resultado (OK / WARNING) - sin rollback automatico
 #   4. Si hay cambios pero NO tocan whatsapp-bot/** -> fast-forward sin restart (siempre util tener el repo al dia para scripts/diagnostico)
 #
 # Lockfile para evitar overlap si un deploy tarda mas que el intervalo de polling.
@@ -21,18 +21,18 @@
 
 $ErrorActionPreference = 'Stop'
 
-# ─── Paths absolutos (Scheduled Task corre sin cwd predecible) ──────
+# --- Paths absolutos (Scheduled Task corre sin cwd predecible) ------
 $BotDir   = "C:\coopertrans_movil\whatsapp-bot"
 $RepoRoot = "C:\coopertrans_movil"
 $LogDir   = Join-Path $BotDir "logs"
 $LogFile  = Join-Path $LogDir "auto_update.log"
 $LockFile = Join-Path $LogDir "auto_update.lock"
 
-# Verificacion temprana — si el path no existe, no es esta PC, salir silencioso
+# Verificacion temprana - si el path no existe, no es esta PC, salir silencioso
 if (-not (Test-Path $BotDir)) { exit 0 }
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 
-# ─── Helpers ────────────────────────────────────────────────────────
+# --- Helpers --------------------------------------------------------
 function Write-Log {
     param([string]$Level, [string]$Msg)
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -49,7 +49,7 @@ function Rotate-LogIfBig {
     }
 }
 
-# ─── Lockfile (anti-overlap) ────────────────────────────────────────
+# --- Lockfile (anti-overlap) ----------------------------------------
 if (Test-Path $LockFile) {
     $lockAge = (Get-Date) - (Get-Item $LockFile).LastWriteTime
     if ($lockAge.TotalMinutes -lt 30) {
@@ -67,14 +67,14 @@ try {
 
     Set-Location $RepoRoot
 
-    # ─── 1. git fetch (silencioso si falla por red) ─────────────────
+    # --- 1. git fetch (silencioso si falla por red) -----------------
     $fetchOut = git fetch origin main 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'WARN' "git fetch fallo (sin internet?): $fetchOut"
         exit 0
     }
 
-    # ─── 2. Chequear si hay commits nuevos ──────────────────────────
+    # --- 2. Chequear si hay commits nuevos --------------------------
     $localHead  = (git rev-parse HEAD).Trim()
     $remoteHead = (git rev-parse origin/main).Trim()
 
@@ -83,14 +83,14 @@ try {
         exit 0
     }
 
-    # ─── 3. Ver que archivos cambiaron entre localHead y remoteHead ─
+    # --- 3. Ver que archivos cambiaron entre localHead y remoteHead -
     $changedFiles = git diff --name-only $localHead $remoteHead
     $tocaBot = $changedFiles | Where-Object { $_ -like 'whatsapp-bot/*' }
     $tocaPkg = $changedFiles | Where-Object { $_ -eq 'whatsapp-bot/package.json' -or $_ -eq 'whatsapp-bot/package-lock.json' }
 
     Write-Log 'INFO' "Cambios detectados: $($localHead.Substring(0,7)) -> $($remoteHead.Substring(0,7)) ($($changedFiles.Count) archivos)"
 
-    # ─── 4. git pull --ff-only ──────────────────────────────────────
+    # --- 4. git pull --ff-only --------------------------------------
     $pullOut = git pull --ff-only origin main 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "git pull fallo: $pullOut"
@@ -104,7 +104,7 @@ try {
 
     Write-Log 'INFO' "Cambios tocan whatsapp-bot/**, iniciando deploy."
 
-    # ─── 5. npm install si package cambio ───────────────────────────
+    # --- 5. npm install si package cambio ---------------------------
     if ($tocaPkg) {
         Write-Log 'INFO' "package.json o package-lock.json cambio, corriendo npm install..."
         Set-Location $BotDir
@@ -117,7 +117,7 @@ try {
         Set-Location $RepoRoot
     }
 
-    # ─── 6. Restart-Service ─────────────────────────────────────────
+    # --- 6. Restart-Service -----------------------------------------
     $svc = Get-Service -Name CoopertransMovilBot -ErrorAction SilentlyContinue
     if (-not $svc) {
         Write-Log 'ERROR' "Servicio CoopertransMovilBot no existe en esta PC. Cancelado."
@@ -129,7 +129,7 @@ try {
     Write-Log 'INFO' "Restart-Service OK, esperando 90s para smoke test..."
     Start-Sleep -Seconds 90
 
-    # ─── 7. Smoke test via bot_estado_remoto.js --json ──────────────
+    # --- 7. Smoke test via bot_estado_remoto.js --json --------------
     Set-Location $RepoRoot
     $jsonOut = & node "scripts\bot_estado_remoto.js" --json 2>&1
     if ($LASTEXITCODE -ne 0) {

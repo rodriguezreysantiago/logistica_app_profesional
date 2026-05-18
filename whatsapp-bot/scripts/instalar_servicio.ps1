@@ -11,7 +11,7 @@
 #       * Servicio prendido al final de la instalacion
 #       * Aviso para correr setup_pc_24x7.ps1 (power settings, etc.)
 #     Si vas a usar este modo, ASEGURATE de que NINGUNA otra PC
-#     tenga el bot corriendo — sino se duplican mensajes y WhatsApp
+#     tenga el bot corriendo - sino se duplican mensajes y WhatsApp
 #     banea el numero.
 #
 # Otras props comunes a ambos modos:
@@ -178,7 +178,7 @@ if ($Auto) {
     # Delayed-auto-start: NSSM expone esto via la propiedad nativa
     # "DelayedAutoStart" del Service Control Manager.
     & $nssmExe set $serviceName DelayedAutoStart 1 | Out-Null
-    Write-Host "OK Servicio en modo AUTOMATIC (delayed) — arranca al boot." -ForegroundColor Green
+    Write-Host "OK Servicio en modo AUTOMATIC (delayed) - arranca al boot." -ForegroundColor Green
 } else {
     & $nssmExe set $serviceName Start SERVICE_DEMAND_START | Out-Null
 }
@@ -230,7 +230,7 @@ if ($Auto) {
 
 # --- 11. Resumen ---------------------------------------------------
 $svc = Get-Service -Name $serviceName
-$modoStr = if ($Auto) { 'AUTOMATIC (delayed) — 24/7' } else { 'MANUAL — multi-PC' }
+$modoStr = if ($Auto) { 'AUTOMATIC (delayed) - 24/7' } else { 'MANUAL - multi-PC' }
 
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "INSTALACION COMPLETA" -ForegroundColor Cyan

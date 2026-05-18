@@ -5,11 +5,11 @@
 #      por si es notebook).
 #
 #   2. Wake-on-LAN del Network Adapter (opcional, solo si la PC esta
-#      enchufada a Ethernet — para poder despertarla remoto si se cae).
+#      enchufada a Ethernet - para poder despertarla remoto si se cae).
 #
 #   3. Auto-restart de Windows Update solo en horario nocturno
 #      (3-5 AM) para minimizar downtime. NO desactiva Windows Update
-#      (eso es peligroso) — solo controla CUANDO reinicia.
+#      (eso es peligroso) - solo controla CUANDO reinicia.
 #
 #   4. Suprime el "menu de selecion de SO" del boot (si hay dual-boot
 #      no toca; si es Windows unico, acelera el boot 5 seg).
@@ -17,9 +17,9 @@
 # NO toca:
 #
 #   - Auto-login. Es preferible que pidas login manual al boot por
-#     seguridad — el bot corre como LocalSystem (no necesita user
+#     seguridad - el bot corre como LocalSystem (no necesita user
 #     logueado). Si igual queres auto-login, hace falta a mano:
-#       netplwiz → desmarcar "Users must enter a user name and
+#       netplwiz -> desmarcar "Users must enter a user name and
 #       password to use this computer".
 #
 #   - Wi-Fi. Si vas a usar Wi-Fi en la PC dedicada, recomendamos
@@ -60,7 +60,7 @@ Write-Host "[1/4] Configurando power settings (nunca suspender)..." -ForegroundC
 # powercfg.exe es la herramienta nativa de Windows para esto. Setea
 # todo a 0 (= nunca) para AC y DC. Aplica al esquema activo.
 #
-# /change <setting> <minutes> — 0 desactiva la accion.
+# /change <setting> <minutes> - 0 desactiva la accion.
 powercfg /change standby-timeout-ac 0
 powercfg /change standby-timeout-dc 0
 powercfg /change monitor-timeout-ac 0
@@ -81,7 +81,7 @@ Write-Host "  OK Hibernacion deshabilitada (libera ~RAM bytes en disco)" -Foregr
 Write-Host ""
 Write-Host "[2/4] Wake-on-LAN del Network Adapter (best effort)..." -ForegroundColor Cyan
 try {
-    # Habilitar WoL en todos los adapters Ethernet (no Wi-Fi —
+    # Habilitar WoL en todos los adapters Ethernet (no Wi-Fi -
     # Wi-Fi no soporta WoL universalmente).
     $eth = Get-NetAdapter -Physical | Where-Object {
         $_.MediaType -eq '802.3' -and $_.Status -eq 'Up'
@@ -104,11 +104,11 @@ try {
 
 # --- 3. Windows Update active hours --------------------------------
 Write-Host ""
-Write-Host "[3/4] Windows Update — restringir reinicios a horario nocturno..." -ForegroundColor Cyan
+Write-Host "[3/4] Windows Update - restringir reinicios a horario nocturno..." -ForegroundColor Cyan
 
 # Active hours = ventana en la que Windows NO reinicia automaticamente.
 # Setear de 6 AM a 23:59 deja solo 6 horas (00:00-06:00) en las que
-# puede reiniciar — minimo downtime para el bot. La key esta en
+# puede reiniciar - minimo downtime para el bot. La key esta en
 # HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings.
 $wuPath = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
 try {

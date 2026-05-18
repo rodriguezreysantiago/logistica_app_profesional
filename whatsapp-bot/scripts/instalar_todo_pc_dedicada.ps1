@@ -47,7 +47,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ─── Helpers ────────────────────────────────────────────────────────
+# --- Helpers --------------------------------------------------------
 function Write-Step {
     param([int]$N, [int]$Total, [string]$Msg)
     Write-Host ""
@@ -62,7 +62,7 @@ function Write-Fail  { param([string]$Msg) Write-Host "  FAIL $Msg" -ForegroundC
 function Refresh-Path {
     # Toma el PATH actualizado del registro (Machine + User) y lo aplica
     # al shell actual. Despues de instalar algo con winget, el PATH
-    # nuevo solo aparece en shells nuevos — esto evita tener que
+    # nuevo solo aparece en shells nuevos - esto evita tener que
     # cerrar y reabrir PowerShell.
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $userPath    = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -74,7 +74,7 @@ function Test-Command {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-# ─── 1. Admin check ─────────────────────────────────────────────────
+# --- 1. Admin check -------------------------------------------------
 $totalSteps = 11
 Write-Step 1 $totalSteps "Verificando privilegios de Administrador..."
 $isAdmin = ([Security.Principal.WindowsPrincipal] `
@@ -92,7 +92,7 @@ if (-not $isAdmin) {
 }
 Write-Ok "Estamos como Administrador."
 
-# ─── 2. Node.js ─────────────────────────────────────────────────────
+# --- 2. Node.js -----------------------------------------------------
 Write-Step 2 $totalSteps "Verificando Node.js..."
 if ($SkipNode) {
     Write-Skip "-SkipNode pasado, no chequeo."
@@ -118,7 +118,7 @@ if ($SkipNode) {
     Write-Ok "Node instalado: $(node --version)"
 }
 
-# ─── 3. Git ─────────────────────────────────────────────────────────
+# --- 3. Git ---------------------------------------------------------
 Write-Step 3 $totalSteps "Verificando Git..."
 if ($SkipGit) {
     Write-Skip "-SkipGit pasado, no chequeo."
@@ -144,12 +144,12 @@ if ($SkipGit) {
     Write-Ok "Git instalado: $(git --version)"
 }
 
-# ─── 4. Refresh PATH una vez mas por las dudas ─────────────────────
+# --- 4. Refresh PATH una vez mas por las dudas ---------------------
 Write-Step 4 $totalSteps "Refrescando PATH del shell..."
 Refresh-Path
 Write-Ok "PATH refrescado."
 
-# ─── 5. Clone del repo ──────────────────────────────────────────────
+# --- 5. Clone del repo ----------------------------------------------
 Write-Step 5 $totalSteps "Clone del repo en $RepoPath..."
 if (Test-Path (Join-Path $RepoPath '.git')) {
     Write-Skip "Repo ya esta clonado en $RepoPath, hago git pull..."
@@ -157,7 +157,7 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
     try {
         git pull --ff-only origin main 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) {
-            Write-Warn "git pull devolvio exit $LASTEXITCODE — sigo igual."
+            Write-Warn "git pull devolvio exit $LASTEXITCODE - sigo igual."
         } else {
             Write-Ok "Repo actualizado a HEAD: $((git rev-parse --short HEAD).Trim())"
         }
@@ -175,7 +175,7 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
     Write-Ok "Repo clonado en $RepoPath"
 }
 
-# ─── 6. Copiar los 3 archivos del kit ──────────────────────────────
+# --- 6. Copiar los 3 archivos del kit ------------------------------
 Write-Step 6 $totalSteps "Copiando archivos secret del kit a sus paths del repo..."
 $kitDir          = $PSScriptRoot
 $kitWwebjs       = Join-Path $kitDir '.wwebjs_auth'
@@ -207,7 +207,7 @@ if (Test-Path $kitEnv) {
 # .wwebjs_auth/
 if (Test-Path $kitWwebjs) {
     if (Test-Path $dstWwebjs) {
-        Write-Skip "$dstWwebjs ya existe — lo borro y reemplazo con la version del kit."
+        Write-Skip "$dstWwebjs ya existe - lo borro y reemplazo con la version del kit."
         Remove-Item -Path $dstWwebjs -Recurse -Force
     }
     # robocopy /MIR es mas rapido que Copy-Item con muchos archivos
@@ -223,7 +223,7 @@ if (Test-Path $kitWwebjs) {
     Write-Warn "Falta .wwebjs_auth/ en el kit. El bot va a pedir QR la primera vez que arranque."
 }
 
-# ─── 7. npm install ─────────────────────────────────────────────────
+# --- 7. npm install -------------------------------------------------
 Write-Step 7 $totalSteps "Instalando dependencias del bot (npm install)..."
 $botDir = Join-Path $RepoPath 'whatsapp-bot'
 Push-Location $botDir
@@ -239,11 +239,11 @@ try {
     Pop-Location
 }
 
-# ─── 8. Instalar servicio NSSM en modo Auto ─────────────────────────
+# --- 8. Instalar servicio NSSM en modo Auto -------------------------
 Write-Step 8 $totalSteps "Instalando el servicio CoopertransMovilBot (NSSM, modo Automatic)..."
 $instalarSvc = Join-Path $botDir 'scripts\instalar_servicio.ps1'
 if (-not (Test-Path $instalarSvc)) {
-    Write-Fail "No existe $instalarSvc — el repo esta corrupto o muy desactualizado."
+    Write-Fail "No existe $instalarSvc - el repo esta corrupto o muy desactualizado."
     exit 1
 }
 & $instalarSvc -Auto
@@ -253,7 +253,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Ok "Servicio instalado."
 
-# ─── 9. Configurar Windows 24/7 ─────────────────────────────────────
+# --- 9. Configurar Windows 24/7 -------------------------------------
 Write-Step 9 $totalSteps "Configurando Windows para operacion 24/7..."
 $setup247 = Join-Path $botDir 'scripts\setup_pc_24x7.ps1'
 if (Test-Path $setup247) {
@@ -263,13 +263,13 @@ if (Test-Path $setup247) {
     Write-Warn "$setup247 no existe. Skip (no critico)."
 }
 
-# ─── 10. Instalar auto-update ───────────────────────────────────────
+# --- 10. Instalar auto-update ---------------------------------------
 Write-Step 10 $totalSteps "Instalando auto-update del bot (Scheduled Task cada 5 min)..."
 $autoUpd = Join-Path $botDir 'scripts\instalar_auto_update.ps1'
 if (Test-Path $autoUpd) {
     & $autoUpd
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn "instalar_auto_update.ps1 devolvio exit $LASTEXITCODE — revisar a mano."
+        Write-Warn "instalar_auto_update.ps1 devolvio exit $LASTEXITCODE - revisar a mano."
     } else {
         Write-Ok "Auto-update activo."
     }
@@ -277,7 +277,7 @@ if (Test-Path $autoUpd) {
     Write-Warn "$autoUpd no existe. Skip (instalar a mano despues)."
 }
 
-# ─── 11. Smoke test ─────────────────────────────────────────────────
+# --- 11. Smoke test -------------------------------------------------
 Write-Step 11 $totalSteps "Smoke test: esperando que el bot heartbeatee..."
 Write-Host "  Esperando 60s para que el servicio termine de arrancar..." -ForegroundColor Cyan
 Start-Sleep -Seconds 60
@@ -303,7 +303,7 @@ if (-not $svc -or $svc.Status -ne 'Running') {
                     Write-Warn "Heartbeat existe pero no se pudo parsear el JSON: $_"
                 }
             } else {
-                Write-Warn "bot_estado_remoto.js devolvio exit $LASTEXITCODE — el bot puede no haber escrito heartbeat aun."
+                Write-Warn "bot_estado_remoto.js devolvio exit $LASTEXITCODE - el bot puede no haber escrito heartbeat aun."
             }
         } finally {
             Pop-Location
@@ -311,7 +311,7 @@ if (-not $svc -or $svc.Status -ne 'Running') {
     }
 }
 
-# ─── Resumen ────────────────────────────────────────────────────────
+# --- Resumen --------------------------------------------------------
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host "INSTALACION COMPLETA" -ForegroundColor Green
@@ -328,7 +328,7 @@ Write-Host "  Get-ScheduledTask -TaskName CoopertransMovilBotAutoUpdate" -Foregr
 Write-Host "  Get-Content $botDir\logs\bot.out.log -Tail 30" -ForegroundColor Gray
 Write-Host "  Get-Content $botDir\logs\auto_update.log -Tail 20" -ForegroundColor Gray
 Write-Host ""
-Write-Host "IMPORTANTE — apagar el bot en la PC vieja:" -ForegroundColor Yellow
+Write-Host "IMPORTANTE - apagar el bot en la PC vieja:" -ForegroundColor Yellow
 Write-Host "  (sino corren 2 en simultaneo y WhatsApp banea el numero)" -ForegroundColor Yellow
 Write-Host "  En la PC vieja, PowerShell admin:" -ForegroundColor White
 Write-Host "    Stop-Service CoopertransMovilBot" -ForegroundColor White

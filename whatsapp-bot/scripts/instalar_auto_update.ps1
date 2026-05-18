@@ -1,5 +1,5 @@
 # Instala la Scheduled Task que hace auto-update del bot desde git
-# cada N minutos. Diseñado para correr UNA VEZ en la PC dedicada del bot.
+# cada N minutos. Disenado para correr UNA VEZ en la PC dedicada del bot.
 #
 # Requiere PowerShell como Administrador (Register-ScheduledTask con
 # usuario SYSTEM y RunLevel Highest).
@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 $TaskName = 'CoopertransMovilBotAutoUpdate'
 $ScriptPath = 'C:\coopertrans_movil\whatsapp-bot\scripts\auto_update.ps1'
 
-# ─── Verificar admin ────────────────────────────────────────────────
+# --- Verificar admin ------------------------------------------------
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -29,7 +29,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     exit 1
 }
 
-# ─── Modo desinstalar ───────────────────────────────────────────────
+# --- Modo desinstalar -----------------------------------------------
 if ($Remove) {
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing) {
@@ -41,7 +41,7 @@ if ($Remove) {
     exit 0
 }
 
-# ─── Pre-checks ─────────────────────────────────────────────────────
+# --- Pre-checks -----------------------------------------------------
 if (-not (Test-Path $ScriptPath)) {
     Write-Host "ERROR: No existe $ScriptPath" -ForegroundColor Red
     Write-Host "       Ejecutar git pull en C:\coopertrans_movil primero." -ForegroundColor Yellow
@@ -55,7 +55,7 @@ if ($existing) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-# ─── Crear la task ──────────────────────────────────────────────────
+# --- Crear la task --------------------------------------------------
 $action = New-ScheduledTaskAction `
     -Execute 'powershell.exe' `
     -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""

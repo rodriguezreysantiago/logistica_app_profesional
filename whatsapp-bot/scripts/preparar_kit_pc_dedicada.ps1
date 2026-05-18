@@ -8,18 +8,18 @@
 # Que arma:
 #
 #   bot-pc-dedicada/
-#   ├── LEEME.txt                 ← guía rápida
-#   ├── instalar_todo.ps1         ← instalador all-in-one (1 click)
-#   ├── serviceAccountKey.json    ← creds Firebase
-#   ├── .env                      ← config bot
-#   └── .wwebjs_auth/             ← sesión WhatsApp (evita reescaneo)
+#   +-- LEEME.txt                 <- guia rapida
+#   +-- instalar_todo.ps1         <- instalador all-in-one (1 click)
+#   +-- serviceAccountKey.json    <- creds Firebase
+#   +-- .env                      <- config bot
+#   +-- .wwebjs_auth/             <- sesion WhatsApp (evita reescaneo)
 #
-# El repo del bot NO se empaqueta — la PC nueva lo clona con
-# `git clone` (ver LEEME.txt). Solo los 3 secretos que NO están en git.
+# El repo del bot NO se empaqueta - la PC nueva lo clona con
+# `git clone` (ver LEEME.txt). Solo los 3 secretos que NO estan en git.
 #
 # Que hace el script:
 #
-#   1. Detiene el servicio CoopertransMovilBot (sino .wwebjs_auth está
+#   1. Detiene el servicio CoopertransMovilBot (sino .wwebjs_auth esta
 #      lockeada por el process Node y no se puede copiar).
 #   2. Copia los 3 secretos a la carpeta destino con robocopy /B
 #      (backup mode = acceso a archivos del LocalSystem).
@@ -41,7 +41,7 @@
 # Flags opcionales:
 #   -DestinoPath <path>   Override del destino (default: <Desktop>\bot-pc-dedicada).
 #   -Force                Sobreescribir destino si ya existe (sin pregunta).
-#   -SinDetenerBot        NO detener el bot (más rápido pero la copia de
+#   -SinDetenerBot        NO detener el bot (mas rapido pero la copia de
 #                          .wwebjs_auth puede saltarse archivos lockeados).
 
 [CmdletBinding()]
@@ -86,7 +86,7 @@ Write-Host ""
 
 # --- 3. Verificar que existan los archivos -------------------------
 $faltantes = @()
-if (-not (Test-Path $srcWwebjs))     { $faltantes += '.wwebjs_auth/ (sesión WhatsApp)' }
+if (-not (Test-Path $srcWwebjs))     { $faltantes += '.wwebjs_auth/ (sesion WhatsApp)' }
 if (-not (Test-Path $srcEnv))        { $faltantes += '.env (config bot)' }
 if (-not (Test-Path $srcServiceAcc)) { $faltantes += 'serviceAccountKey.json (creds Firebase)' }
 if ($faltantes.Count -gt 0) {
@@ -109,7 +109,7 @@ if (Test-Path $DestinoPath) {
 }
 New-Item -ItemType Directory -Path $DestinoPath -Force | Out-Null
 
-# --- 5. Detener bot si está corriendo ------------------------------
+# --- 5. Detener bot si esta corriendo ------------------------------
 $botEstaba = $false
 if (-not $SinDetenerBot) {
     $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
@@ -118,9 +118,9 @@ if (-not $SinDetenerBot) {
         Stop-Service -Name $serviceName -ErrorAction Stop
         Start-Sleep -Seconds 3   # gracia para que libere los handles
         $botEstaba = $true
-        Write-Host "  OK bot detenido (volveré a arrancarlo al final)" -ForegroundColor Green
+        Write-Host "  OK bot detenido (volvere a arrancarlo al final)" -ForegroundColor Green
     } else {
-        Write-Host "[1/4] Bot ya estaba detenido — sigo." -ForegroundColor DarkGray
+        Write-Host "[1/4] Bot ya estaba detenido - sigo." -ForegroundColor DarkGray
     }
 } else {
     Write-Host "[1/4] -SinDetenerBot: NO detengo el bot (riesgo: archivos lockeados)" -ForegroundColor Yellow
@@ -137,16 +137,16 @@ Write-Host "  OK .env + serviceAccountKey.json" -ForegroundColor Green
 
 # .wwebjs_auth: 629 MB con archivos lockeables. Robocopy /B (backup
 # mode) ignora ACLs y locks transitorios. /MIR mira la copia
-# completa, /R:1 /W:1 reintentos rápidos, /NFL /NDL /NJH /NJS modo
-# silencioso. /XJ excluye junctions (no debería haber, pero por las
+# completa, /R:1 /W:1 reintentos rapidos, /NFL /NDL /NJH /NJS modo
+# silencioso. /XJ excluye junctions (no deberia haber, pero por las
 # dudas).
 $destWwebjs = Join-Path $DestinoPath '.wwebjs_auth'
 Write-Host "  Copiando .wwebjs_auth/ (~629 MB, tarda 1-2 min)..." -ForegroundColor Cyan
 $rc = robocopy $srcWwebjs $destWwebjs /MIR /B /R:1 /W:1 /NFL /NDL /NJH /NJS /XJ /NP
-# Robocopy: 0=nada, 1=copiados, 2=extras, 3=copiados+extras. Códigos
+# Robocopy: 0=nada, 1=copiados, 2=extras, 3=copiados+extras. Codigos
 # >= 8 son errores reales. <8 es OK.
 if ($LASTEXITCODE -ge 8) {
-    Write-Host "  ERROR: robocopy falló con código $LASTEXITCODE" -ForegroundColor Red
+    Write-Host "  ERROR: robocopy fallo con codigo $LASTEXITCODE" -ForegroundColor Red
     if ($botEstaba) { Start-Service -Name $serviceName }
     exit 1
 }
@@ -166,7 +166,7 @@ if (Test-Path $srcInstalarTodo) {
     Copy-Item -Path $srcInstalarTodo -Destination $dstInstalarTodo
     Write-Host "  OK instalar_todo.ps1 (instalador 1-click para la PC nueva)" -ForegroundColor Green
 } else {
-    Write-Host "  WARN no existe $srcInstalarTodo — sigo sin el (kit queda solo manual)" -ForegroundColor Yellow
+    Write-Host "  WARN no existe $srcInstalarTodo - sigo sin el (kit queda solo manual)" -ForegroundColor Yellow
 }
 
 # --- 7. Generar LEEME.txt -------------------------------------------
@@ -179,7 +179,7 @@ KIT PC DEDICADA - Bot WhatsApp Coopertrans Movil
 ================================================================
 
 Que hay en esta carpeta:
-  - instalar_todo.ps1        ★ Instalador AUTOMATICO (1 click).
+  - instalar_todo.ps1        * Instalador AUTOMATICO (1 click).
   - serviceAccountKey.json   Credenciales Firebase (secret).
   - .env                     Config del bot (secret).
   - .wwebjs_auth/            Sesion WhatsApp YA escaneada
@@ -195,7 +195,7 @@ En la PC nueva, Windows 10/11:
 1) Descomprimir esta carpeta entera en cualquier lado (ej. Desktop).
 
 2) Click derecho sobre instalar_todo.ps1 -> Run with PowerShell
-   (si pide aceptar UAC, decir SI — necesita privilegios de admin
+   (si pide aceptar UAC, decir SI - necesita privilegios de admin
     para registrar el servicio + Scheduled Task).
 
    O equivalente desde PowerShell admin:
@@ -238,7 +238,7 @@ CAMINO MANUAL (solo si algo falla en el automatico)
        .env                     ->  C:\coopertrans_movil\whatsapp-bot\
        .wwebjs_auth\            ->  C:\coopertrans_movil\whatsapp-bot\
 
-4) PowerShell COMO ADMINISTRADOR — corre los 3 scripts uno por uno:
+4) PowerShell COMO ADMINISTRADOR - corre los 3 scripts uno por uno:
        cd C:\coopertrans_movil\whatsapp-bot
        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
        .\scripts\instalar_servicio.ps1 -Auto
@@ -288,7 +288,7 @@ if ($botEstaba) {
     if ($svc.Status -eq 'Running') {
         Write-Host "  OK bot corriendo de nuevo" -ForegroundColor Green
     } else {
-        Write-Host "  WARN bot no arranco — Status=$($svc.Status). Revisar logs." -ForegroundColor Yellow
+        Write-Host "  WARN bot no arranco - Status=$($svc.Status). Revisar logs." -ForegroundColor Yellow
     }
 } else {
     Write-Host "[4/4] No habia que re-arrancar el bot." -ForegroundColor DarkGray
@@ -307,7 +307,7 @@ Write-Host "OK KIT LISTO" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Carpeta:    $DestinoPath" -ForegroundColor White
-Write-Host "Tamaño:    $totalSize MB" -ForegroundColor White
+Write-Host "Tamano:    $totalSize MB" -ForegroundColor White
 Write-Host ""
 Write-Host "Contenido:" -ForegroundColor Cyan
 Get-ChildItem -Path $DestinoPath | ForEach-Object {
@@ -324,10 +324,10 @@ Get-ChildItem -Path $DestinoPath | ForEach-Object {
     }
 }
 Write-Host ""
-Write-Host "Próximos pasos:" -ForegroundColor Yellow
+Write-Host "Proximos pasos:" -ForegroundColor Yellow
 Write-Host "  - Copiar la carpeta a un pendrive / OneDrive / Drive" -ForegroundColor White
 Write-Host "  - Llevarla a la PC dedicada y seguir el LEEME.txt" -ForegroundColor White
 Write-Host ""
-Write-Host "Comprimirla a zip (opcional, para subir a Drive más rápido):" -ForegroundColor Cyan
+Write-Host "Comprimirla a zip (opcional, para subir a Drive mas rapido):" -ForegroundColor Cyan
 $zipPath = "$DestinoPath.zip"
 Write-Host "  Compress-Archive -Path '$DestinoPath\*' -DestinationPath '$zipPath' -Force" -ForegroundColor White
