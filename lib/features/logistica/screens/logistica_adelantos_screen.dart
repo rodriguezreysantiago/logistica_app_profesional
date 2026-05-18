@@ -207,7 +207,21 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
           ),
           Expanded(
             child: StreamBuilder<List<AdelantoChofer>>(
-              stream: AdelantosService.streamAdelantos(),
+              // Si el operador filtro por rango de fechas, usamos el
+              // stream con rango server-side (auditoria 2026-05-18).
+              // Antes el stream default traia los 300 ultimos y el
+              // filtro client-side veria vacio si los 300 mas recientes
+              // estaban fuera del rango (acumulado de meses).
+              stream: (_fechaDesde != null || _fechaHasta != null)
+                  ? AdelantosService.streamAdelantosEnRango(
+                      desde: _fechaDesde ?? DateTime(2020),
+                      hasta: _fechaHasta != null
+                          ? DateTime(_fechaHasta!.year, _fechaHasta!.month,
+                              _fechaHasta!.day + 1)
+                          : DateTime.now().add(const Duration(days: 1)),
+                      incluirEliminados: _mostrarEliminados,
+                    )
+                  : AdelantosService.streamAdelantos(),
               builder: (ctx, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

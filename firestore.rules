@@ -219,10 +219,14 @@ service cloud.firestore {
     // ========================================================================
 
     match /AVISOS_VENCIMIENTOS/{doc} {
-      // Lectura: chofer ve su propio historial; admin ve todo.
-      // Por simplicidad permitimos a cualquier signedIn leer (los
-      // datos no son sensibles).
-      allow read: if isSignedIn();
+      // ALTO (auditoria 2026-05-18): antes era `allow read: if isSignedIn()`
+      // con el argumento "los datos no son sensibles". Un chofer con consola
+      // Firestore custom puede listar la colección entera y ver el historial
+      // operativo de TODOS los avisos: qué chofer recibió qué aviso, cuándo,
+      // por qué vencimiento. PII operativa de la flota completa. La app
+      // Flutter NO usa esta colección (solo bot + admin), así que cerrarla
+      // a admin/supervisor no rompe ningún flow del cliente.
+      allow read: if isAdminOrSupervisor();
       // Solo admin registra (lo dispara el botón "Avisar por WhatsApp").
       allow write: if isAdmin();
     }
@@ -550,6 +554,21 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // META_LOCKS — locks de tick para crons (server-only)
+    // ========================================================================
+    // Doc id = nombre del cron (ej. `vigilador_jornada`, `sitrack_poller`).
+    // Garantiza que dos invocaciones casi simultaneas del mismo cron no
+    // corran en paralelo (Cloud Functions tiene semantica at-least-once
+    // y retries de GCP). Se toma con `create()` atomico al inicio del
+    // tick y se libera en `finally`. Si el proceso crashea, queda como
+    // lock huerfano y el proximo tick lo roba tras N minutos.
+    //
+    // Solo el server (Admin SDK) accede. Cliente bloqueado.
+    match /META_LOCKS/{doc} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
     // LOGÍSTICA — catálogos para el futuro planeamiento de viajes
     // ========================================================================
     // Tres colecciones que arman el modelo de "rutas con precio":
@@ -664,12 +683,21 @@ service cloud.firestore {
     // razón social — la Póliza ART y el Formulario 931 son por empresa,
     // no por persona.
     //
-    // Lectura: cualquier usuario autenticado, así el chofer ve los docs
-    // de su empresa en MIS VENCIMIENTOS (read-only).
+    // Lectura: admin/supervisor/SEG_HIGIENE.
+    // CRITICO (auditoria 2026-05-18): antes era `allow read: if isSignedIn()`.
+    // Eso dejaba que CUALQUIER chofer leyera las URLs de PDFs de pólizas ART,
+    // F.931 (con sueldos confidenciales) y SCVO de TODAS las razones sociales
+    // — `getDownloadURL` devuelve URLs con token de larga vida que bypassean
+    // las rules de Storage. Mientras no exista el campo `EMPRESA_CUIT`
+    // denormalizado en EMPLEADOS para filtrar por empresa propia, restringimos
+    // a admin/supervisor/SEG_HIGIENE. La pantalla MIS VENCIMIENTOS del chofer
+    // ahora muestra placeholder "consultar oficina" en lugar de los datos
+    // — trade-off aceptable (Vecchi 2026-05-08: estos docs NO mandan
+    // WhatsApp al chofer).
     // Escritura: admin/supervisor (los mismos que ya manejan personal y
     // vencimientos). NO permitimos delete — es histórico.
     match /EMPRESAS_EMPLEADORAS/{cuit} {
-      allow read: if isSignedIn();
+      allow read: if isAdminOrSupervisor() || isSegHigiene();
       allow create, update: if isAdminOrSupervisor();
       allow delete: if false;
     }

@@ -40,6 +40,19 @@ service firebase.storage {
             || request.auth.token.rol == 'SUPERVISOR');
     }
 
+    function isSegHigiene() {
+      return isSignedIn() && request.auth.token.rol == 'SEG_HIGIENE';
+    }
+
+    // Nota auditoria 2026-05-18: pensado un helper `isEmpleadoDeEmpresa(cuit)`
+    // que comparara EMPLEADOS.{uid}.CUIT_EMPLEADOR == cuit, pero ese campo
+    // NO existe en los docs (EMPLEADOS.EMPRESA guarda el nombre como string,
+    // no el CUIT). Backfill pendiente. Mientras tanto, EMPRESAS_EMPLEADORAS
+    // pasa a admin/supervisor/seg_higiene only — los choferes pierden la
+    // vista de sus pólizas en MIS VENCIMIENTOS (placeholder "consultar
+    // oficina"), trade-off aceptable frente a la filtración de sueldos
+    // del F.931 entre razones sociales.
+
     // ========================================================================
     // RESPUESTAS_BOT — solo el bot sube (Admin SDK), admin las lee
     // ========================================================================
@@ -120,23 +133,31 @@ service firebase.storage {
     // EMPRESAS_EMPLEADORAS — Póliza ART y F.931 a nivel empresa
     // ========================================================================
     // Path: EMPRESAS_EMPLEADORAS/{cuit}/{archivo}
-    // Lectura: cualquier signedIn (cada empleado ve los docs de su
-    // empresa en MIS VENCIMIENTOS, read-only). Escritura: solo admin.
+    // CRITICO (auditoria 2026-05-18): antes era `allow read: if isSignedIn()`,
+    // dejando que CUALQUIER empleado bajara las pólizas ART, F.931 y SCVO
+    // de TODAS las razones sociales (sueldos confidenciales en F.931, datos
+    // de seguros). Ahora: admin/supervisor todos + solo empleados de la
+    // misma razón social.
     match /EMPRESAS_EMPLEADORAS/{cuit}/{archivo=**} {
-      allow read: if isSignedIn();
+      allow read: if isAdminOrSupervisor() || isSegHigiene();
       allow write: if isAdmin();
     }
 
     // ========================================================================
     // EMPLEADOS_DOCS / VEHICULOS_DOCS — auditoría (sube al guardar)
     // ========================================================================
+    // CRITICO (auditoria 2026-05-18): antes era `allow read: if isSignedIn()`,
+    // permitiendo que CUALQUIER chofer adivine el nombre de archivo (el path
+    // suele ser predecible: `{dni}_licencia_2026-03.pdf`) y baje PII grave
+    // (DNI escaneado, foto del chofer, licencia, ART, RTO). Ahora restringido
+    // a admin / supervisor / seg_higiene (los que gestionan vencimientos).
 
     match /EMPLEADOS_DOCS/{archivo=**} {
-      allow read: if isSignedIn();
+      allow read: if isAdminOrSupervisor() || isSegHigiene();
       allow write: if isAdmin();
     }
     match /VEHICULOS_DOCS/{archivo=**} {
-      allow read: if isSignedIn();
+      allow read: if isAdminOrSupervisor() || isSegHigiene();
       allow write: if isAdmin();
     }
 
@@ -145,7 +166,13 @@ service firebase.storage {
     // ========================================================================
 
     match /REVISIONES/{archivo} {
-      allow read: if isSignedIn();
+      // CRITICO (auditoria 2026-05-18): antes era `allow read: if isSignedIn()`
+      // — el path REVISIONES/{dni}_{campo}_{ts}.{ext} es predecible y dejaba
+      // que un chofer adivinara nombres y bajara comprobantes (licencia,
+      // psicofisico, DNI escaneado) de otros choferes. Ahora: admin/supervisor
+      // todos + chofer SOLO los suyos (archivo arranca con su UID).
+      allow read: if isAdminOrSupervisor()
+        || (isSignedIn() && archivo.matches(request.auth.uid + '_.*'));
       // Cualquier signedIn (chofer) puede subir su comprobante.
       // El admin lo aprueba/rechaza desde la app.
       //

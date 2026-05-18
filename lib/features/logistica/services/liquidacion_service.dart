@@ -123,8 +123,24 @@ class LiquidacionService {
         i,
         (i + 500 > viajeIds.length) ? viajeIds.length : i + 500,
       );
-      final batch = _db.batch();
+      // Race-condition guard (auditoria 2026-05-18): pre-fetch cada doc
+      // y solo actualizamos los que SIGUEN pendientes. Sin esto, dos
+      // operadores que liquidan en paralelo PISAN `liquidado_en` y
+      // `liquidado_por_dni` del primero → trazabilidad rota. La ventana
+      // de race se reduce de "tamaño del batch" a "milisegundos entre
+      // get y batch.commit". No usamos runTransaction porque la memoria
+      // del proyecto prohibe transacciones client-side en Windows
+      // (bugs cloud_firestore desktop).
+      final pendientes = <String>[];
       for (final id in chunk) {
+        final snap = await _viajes.doc(id).get();
+        if (snap.exists && (snap.data()?['liquidado'] != true)) {
+          pendientes.add(id);
+        }
+      }
+      if (pendientes.isEmpty) continue;
+      final batch = _db.batch();
+      for (final id in pendientes) {
         batch.update(_viajes.doc(id), {
           'liquidado': true,
           'liquidado_en': FieldValue.serverTimestamp(),
@@ -134,7 +150,7 @@ class LiquidacionService {
         });
       }
       await batch.commit();
-      totalActualizados += chunk.length;
+      totalActualizados += pendientes.length;
     }
     return totalActualizados;
   }
@@ -153,8 +169,20 @@ class LiquidacionService {
         i,
         (i + 500 > viajeIds.length) ? viajeIds.length : i + 500,
       );
-      final batch = _db.batch();
+      // Mismo guard que marcarLiquidadosBulk pero al reves: solo
+      // desmarcamos los que actualmente ESTAN liquidados — sin esto,
+      // un doble click reescribiria `actualizado_en` sobre viajes
+      // que ya estaban no-liquidados.
+      final liquidados = <String>[];
       for (final id in chunk) {
+        final snap = await _viajes.doc(id).get();
+        if (snap.exists && (snap.data()?['liquidado'] == true)) {
+          liquidados.add(id);
+        }
+      }
+      if (liquidados.isEmpty) continue;
+      final batch = _db.batch();
+      for (final id in liquidados) {
         batch.update(_viajes.doc(id), {
           'liquidado': false,
           'liquidado_en': null,
@@ -164,7 +192,7 @@ class LiquidacionService {
         });
       }
       await batch.commit();
-      totalActualizados += chunk.length;
+      totalActualizados += liquidados.length;
     }
     return totalActualizados;
   }

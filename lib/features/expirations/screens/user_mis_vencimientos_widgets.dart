@@ -193,6 +193,13 @@ class _CardVencimientoEmpresa extends StatelessWidget {
           .doc(cuitEmpresa)
           .snapshots(),
       builder: (context, snap) {
+        // CRITICO (auditoria 2026-05-18): la rule de EMPRESAS_EMPLEADORAS
+        // se cerro a admin/supervisor/seg_higiene. El chofer ya no puede
+        // leer este doc — el stream tira permission-denied. Mostramos
+        // placeholder en lugar de error tecnico crudo.
+        if (snap.hasError) {
+          return _placeholderSinEmpresa();
+        }
         final data = snap.data?.data() ?? const <String, dynamic>{};
         final fecha = data[campoFecha];
         final url = data[campoUrl]?.toString();

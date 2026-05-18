@@ -476,11 +476,35 @@ class ViajesService {
       await Future.wait(pathsRemitos.map(borrarRemitoStorage));
     }
 
+    // Desasociar adelantos que referenciaban este viaje (auditoria
+    // 2026-05-18): sin esto, el adelanto queda apuntando a un viajeId
+    // fantasma. La pantalla de detalle del adelanto rompia al querer
+    // resolver el viaje, y los reportes mostraban inconsistencias.
+    final adelantosQ = await _db
+        .collection(AppCollections.adelantosChofer)
+        .where('viaje_id', isEqualTo: viajeId)
+        .get();
+    if (adelantosQ.docs.isNotEmpty) {
+      final batch = _db.batch();
+      for (final ad in adelantosQ.docs) {
+        batch.update(ad.reference, {
+          'viaje_id': FieldValue.delete(),
+          'actualizado_en': FieldValue.serverTimestamp(),
+          'liberado_por_eliminar_viaje': viajeId,
+        });
+      }
+      await batch.commit();
+      AppLogger.log(
+        'Desasociados ${adelantosQ.docs.length} adelanto(s) del viaje $viajeId',
+      );
+    }
+
     // Hard-delete del doc.
     await _col.doc(viajeId).delete();
     AppLogger.log(
       'Viaje eliminado definitivamente: $viajeId '
-      '(remitos limpiados: ${pathsRemitos.length})',
+      '(remitos limpiados: ${pathsRemitos.length}, '
+      'adelantos liberados: ${adelantosQ.docs.length})',
     );
   }
 

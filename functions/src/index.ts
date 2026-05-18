@@ -125,10 +125,13 @@ export const loginConDni = onCall(
 
     if (!docSnap.exists) {
       logger.info("[login] DNI no existe", { dni });
-      throw new HttpsError(
-        "not-found",
-        "El usuario no existe o el DNI es incorrecto."
-      );
+      // ALTO (auditoria 2026-05-18): antes devolvia `not-found` con
+      // "El usuario no existe" — eso permitia enumerar qué DNIs son
+      // empleados activos sin gastar el rate limit (que solo cuenta
+      // password fallido por DNI existente). Ahora respuesta
+      // indistinguible de "password incorrecto" → atacante no puede
+      // separar "DNI valido" de "DNI invalido + password valido".
+      throw new HttpsError("permission-denied", "Usuario o contraseña incorrectos.");
     }
 
     const empleado = docSnap.data() ?? {};
@@ -194,7 +197,8 @@ export const loginConDni = onCall(
           `Cuenta bloqueada. Reintenta en ${mins} minutos.`;
         throw new HttpsError("permission-denied", msg);
       }
-      throw new HttpsError("permission-denied", "Contraseña incorrecta.");
+      // Mismo mensaje que cuando el DNI no existe — anti-enumeracion.
+      throw new HttpsError("permission-denied", "Usuario o contraseña incorrectos.");
     }
 
     // ─── Migración silenciosa SHA-256 → bcrypt ─────────────────────
@@ -233,12 +237,16 @@ export const loginConDni = onCall(
     const apodo = (empleado.APODO ?? "").toString().trim();
     const area = (empleado.AREA ?? "MANEJO").toString();
     // Normalizamos roles: el legacy USUARIO se trata como CHOFER.
-    // Lista válida nueva: CHOFER, PLANTA, SUPERVISOR, ADMIN.
+    // CRITICO (auditoria 2026-05-18): antes la lista local era
+    // ["CHOFER","PLANTA","SUPERVISOR","ADMIN"] — faltaban GOMERIA y
+    // SEG_HIGIENE. Los empleados con esos roles eran DEGRADADOS
+    // silenciosamente a CHOFER en el JWT → perdian acceso a gomeria,
+    // ICM, modulos admin segun capabilities. Reusamos ROLES_VALIDOS
+    // (la lista canonica usada por actualizarRolEmpleado).
     const rolRaw = (empleado.ROL ?? "CHOFER").toString().toUpperCase();
-    const rolesValidos = ["CHOFER", "PLANTA", "SUPERVISOR", "ADMIN"];
     let rol = rolRaw;
     if (rolRaw === "USUARIO" || rolRaw === "USER") rol = "CHOFER";
-    if (!rolesValidos.includes(rol)) rol = "CHOFER";
+    if (!ROLES_VALIDOS.includes(rol)) rol = "CHOFER";
 
     const token = await auth.createCustomToken(dni, {
       rol,
@@ -1929,6 +1937,17 @@ export const volvoAlertasPoller = onSchedule(
     memory: "256MiB",
   },
   async () => {
+    // Lock tick (auditoria 2026-05-18): el cron es cada 5 min con timeout
+    // 120s, pero un cold start + lookback puede tomar > 5 min en flotas
+    // con backlog. GCP at-least-once puede disparar 2 invocaciones
+    // simultaneas → ambas avanzan el cursor `ultimo_request_server_datetime`
+    // y pueden saltearse eventos. Lock evita esto.
+    const liberar = await adquirirLockTick(
+      "volvo_alertas_poller",
+      4 * 60 * 1000,
+    );
+    if (!liberar) return;
+    try {
     logger.info("[volvoAlertasPoller] iniciando ciclo");
 
     // ─── 1. Cursor: desde dónde poleamos ────────────────────────────
@@ -2057,6 +2076,9 @@ export const volvoAlertasPoller = onSchedule(
       duplicados: totalDuplicados,
       descartados: totalDescartados,
     });
+    } finally {
+      await liberar();
+    }
   }
 );
 
@@ -2856,6 +2878,59 @@ async function adquirirIdempotenciaDiaria(
 }
 
 /**
+ * Lock de tick para crons que NO deben correr en paralelo (pollers
+ * cada 5 min, vigilador, etc.). Cloud Functions tiene semantica
+ * at-least-once + retries de GCP → dos invocaciones del mismo cron
+ * pueden disparar simultaneamente. Sin lock, dos pollers compiten
+ * por avanzar el cursor en META → eventos perdidos o duplicados.
+ *
+ * Estrategia:
+ *   1. `create()` atomico en META_LOCKS/{nombre}.
+ *   2. Si ALREADY_EXISTS + `tomado_en` < `staleMs` → otro tick activo,
+ *      skip (devuelve null).
+ *   3. Si ALREADY_EXISTS + `tomado_en` >= `staleMs` → lock huerfano
+ *      (proceso anterior crasheo sin liberar), lo robamos.
+ *   4. Devuelve una funcion `liberar()` que el caller DEBE llamar
+ *      en finally para no dejar el lock tomado.
+ *
+ * Auditoria 2026-05-18.
+ */
+async function adquirirLockTick(
+  nombre: string,
+  staleMs: number,
+): Promise<(() => Promise<void>) | null> {
+  const lockRef = db.collection("META_LOCKS").doc(nombre);
+  try {
+    await lockRef.create({ tomado_en: FieldValue.serverTimestamp() });
+  } catch (e) {
+    const code = (e as { code?: number }).code;
+    const msg = (e as Error).message || "";
+    const yaExiste = code === 6 || msg.includes("ALREADY_EXISTS") ||
+      msg.includes("already exists");
+    if (!yaExiste) throw e;
+    const snap = await lockRef.get();
+    const tomadoEn = (snap.data()?.tomado_en as Timestamp | undefined);
+    const edadMs = tomadoEn ? Date.now() - tomadoEn.toMillis() : Infinity;
+    if (edadMs < staleMs) {
+      logger.info(`[${nombre}] otro tick en curso, skip`, {
+        edadSeg: Math.round(edadMs / 1000),
+      });
+      return null;
+    }
+    logger.warn(`[${nombre}] lock huerfano, robando`, {
+      edadSeg: Math.round(edadMs / 1000),
+    });
+    await lockRef.set({ tomado_en: FieldValue.serverTimestamp() });
+  }
+  return async () => {
+    await lockRef.delete().catch(() => {
+      // best-effort: si no se libera, el proximo tick lo robara
+      // como huerfano tras staleMs.
+    });
+  };
+}
+
+/**
  * Wrapper de fetch() con AbortController + timeout. Necesario porque
  * APIs externas (Volvo Connect, Sitrack) ocasionalmente cuelgan la
  * conexión sin cerrar — el `await fetch` se quedaba hasta el
@@ -3474,6 +3549,7 @@ export const backupFirestoreScheduled = onSchedule(
       "BOT_SILENCIADOS_CHOFER",
       "META_AVISOS_NO_ID",
       "META_ALERTAS_VOLVO_NOTIFICADAS",
+      "META_LOCKS",
       // Auditoria + sistema
       "AUDITORIA_ACCIONES",
       "LOGIN_ATTEMPTS",
@@ -3664,6 +3740,12 @@ export const resumenBotDiario = onSchedule(
       logger.info("[resumenBotDiario] ya enviado hoy, skip");
       return;
     }
+    // ALTO (auditoria 2026-05-18): si la encolada a COLA_WHATSAPP falla
+    // mas abajo (Firestore down, quota, etc), sin try/finally el lock
+    // queda tomado y el resumen del dia NO se reintenta → Santiago no
+    // recibe el resumen y solo se entera al notar la falta.
+    let exitoCron = false;
+    try {
 
     // Eventos de las últimas 24h.
     const desde = Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
@@ -3718,6 +3800,7 @@ export const resumenBotDiario = onSchedule(
         cola_doc_id: colaRef.id,
       });
       logger.info("[resumenBotDiario] OK (sin eventos)", { colaDocId: colaRef.id });
+      exitoCron = true;
       return;
     }
 
@@ -3810,6 +3893,17 @@ export const resumenBotDiario = onSchedule(
       minutosCaidoTotal,
       colaDocId: colaRef.id,
     });
+    exitoCron = true;
+    } finally {
+      if (!exitoCron) {
+        // Liberar el lock para que el proximo run intente de nuevo.
+        // Sin esto, una falla a mitad-cron dejaba el lock tomado y el
+        // resumen no se reenviaba hasta el dia siguiente.
+        await histRef.delete().catch(() => {
+          logger.warn("[resumenBotDiario] no pude liberar lock tras fallo");
+        });
+      }
+    }
   }
 );
 
@@ -3906,6 +4000,15 @@ export const sitrackPosicionPoller = onSchedule(
     memory: "256MiB",
   },
   async () => {
+    // Lock tick (auditoria 2026-05-18): cron cada 5 min, timeout 60s,
+    // pero un fetch lento + procesado de 50 chofers puede exceder.
+    // Sin lock dos ticks paralelos compiten en throttle/META_AVISOS_NO_ID.
+    const liberar = await adquirirLockTick(
+      "sitrack_posicion_poller",
+      4 * 60 * 1000,
+    );
+    if (!liberar) return;
+    try {
     logger.info("[sitrackPosicionPoller] iniciando ciclo");
 
     // ─── Auth Basic HTTPS ──────────────────────────────────────────
@@ -4238,6 +4341,9 @@ export const sitrackPosicionPoller = onSchedule(
       avisosEnviados,
       avisosDedup,
     });
+    } finally {
+      await liberar();
+    }
   }
 );
 
@@ -4284,6 +4390,17 @@ export const sitrackEventosPoller = onSchedule(
     memory: "512MiB",
   },
   async () => {
+    // Lock tick (auditoria 2026-05-18): timeout 240s > schedule 300s,
+    // edge case real. Dos ticks paralelos compiten por avanzar
+    // `META/sitrack_eventos_cursor` y procesan los mismos eventos
+    // (ya idempotente por sequentialId via getAll/set, pero
+    // desperdicia ops y deja el cursor inconsistente).
+    const liberar = await adquirirLockTick(
+      "sitrack_eventos_poller",
+      4 * 60 * 1000,
+    );
+    if (!liberar) return;
+    try {
     logger.info("[sitrackEventosPoller] iniciando ciclo");
 
     const authHeader = "Basic " + Buffer.from(
@@ -4535,6 +4652,9 @@ export const sitrackEventosPoller = onSchedule(
       bytes: bodyBytes,
       parseStrategy,
     });
+    } finally {
+      await liberar();
+    }
   }
 );
 
@@ -4936,7 +5056,21 @@ export const vigiladorJornadaChofer = onSchedule(
     memory: "256MiB",
   },
   async () => {
-    await jornadasV2.tickVigiladorJornada();
+    // Lock tick-level (auditoria 2026-05-18): al-least-once de GCP puede
+    // disparar dos invocaciones casi simultaneas. Sin lock, cargarJornadaAbierta
+    // + nuevaJornada NO son atomicas → dos ticks pueden ver "no hay jornada"
+    // para el mismo DNI y crear 2 docs distintos → el chofer recibe avisos
+    // 3h30/3h45/cuota/veda DOS VECES.
+    const liberar = await adquirirLockTick(
+      "vigilador_jornada",
+      4 * 60 * 1000,
+    );
+    if (!liberar) return;
+    try {
+      await jornadasV2.tickVigiladorJornada();
+    } finally {
+      await liberar();
+    }
   }
 );
 
@@ -5175,6 +5309,10 @@ export const resumenConductaManejoDiario = onSchedule(
       logger.info("[resumenConductaManejoDiario] ya enviado hoy, skip");
       return;
     }
+    // ALTO (auditoria 2026-05-18): liberar lock si la encolada falla,
+    // sino Molina no recibe el resumen del dia.
+    let exitoCron = false;
+    try {
 
     // ─── Rango: día calendario AYER en ART ────────────────────────
     const ahora = new Date();
@@ -5408,6 +5546,7 @@ export const resumenConductaManejoDiario = onSchedule(
         admin_nombre: "Bot resumen conducta",
       });
       logger.info("[resumenConductaManejoDiario] OK (sin eventos)");
+      exitoCron = true;
       return;
     }
 
@@ -5539,6 +5678,16 @@ export const resumenConductaManejoDiario = onSchedule(
       eventos: eventos.length,
       destinatario: SEG_HIGIENE_DESTINATARIO_DNI,
     });
+    exitoCron = true;
+    } finally {
+      if (!exitoCron) {
+        await histRefIdem.delete().catch(() => {
+          logger.warn(
+            "[resumenConductaManejoDiario] no pude liberar lock tras fallo",
+          );
+        });
+      }
+    }
   }
 );
 

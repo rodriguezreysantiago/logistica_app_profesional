@@ -35,6 +35,22 @@ class CalculosViaje {
 
   static const double comisionChoferDefaultPct = 18.0;
 
+  /// Redondeo a 2 decimales (centavos) — anti-float drift.
+  ///
+  /// Auditoria 2026-05-18: sumas de doubles como `12.30 + 4.50` daban
+  /// `16.799999999999997` y se persistian en Firestore tal cual. El
+  /// `monto_chofer_redondeado` salvaba el display final, pero `montoVecchi`,
+  /// `gastosTotal` y `liquidacionChofer` heredaban el error. Acumulado
+  /// sobre meses, los Excel de liquidacion mostraban totales con cola
+  /// de "...99999". Ahora todos los montos pasan por este helper antes
+  /// de salir de `calcular*` → maximo 2 decimales reales.
+  ///
+  /// Defensa contra NaN/Infinity (no deberian llegar, pero por las dudas).
+  static double _round2(double v) {
+    if (v.isNaN || v.isInfinite) return 0;
+    return (v * 100).round() / 100;
+  }
+
   /// Redondea un monto al múltiplo de 5 INMEDIATAMENTE INFERIOR.
   /// Quita centavos y baja al múltiplo de 5 más cercano por debajo.
   ///
@@ -167,12 +183,12 @@ class CalculosViaje {
       gastosTotal: gastosTot,
     );
     return MontosViaje(
-      montoVecchi: brutos.montoVecchi,
-      montoChofer: montoChofer,
+      montoVecchi: _round2(brutos.montoVecchi),
+      montoChofer: _round2(montoChofer),
       montoChoferRedondeado: redondeado,
       comisionChoferPct: pct,
-      gastosTotal: gastosTot,
-      liquidacionChofer: liquidacion,
+      gastosTotal: _round2(gastosTot),
+      liquidacionChofer: _round2(liquidacion),
     );
   }
 
@@ -238,12 +254,12 @@ class CalculosViaje {
       gastosTotal: gastosTot,
     );
     return MontosViaje(
-      montoVecchi: totalVecchi,
-      montoChofer: montoChofer,
+      montoVecchi: _round2(totalVecchi),
+      montoChofer: _round2(montoChofer),
       montoChoferRedondeado: redondeado,
       comisionChoferPct: pct,
-      gastosTotal: gastosTot,
-      liquidacionChofer: liquidacion,
+      gastosTotal: _round2(gastosTot),
+      liquidacionChofer: _round2(liquidacion),
     );
   }
 }

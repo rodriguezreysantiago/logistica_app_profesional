@@ -291,10 +291,13 @@ class AuthService {
         return 'Datos incompletos o inválidos.';
       case 'NOT_FOUND':
       case 'not-found':
-        return 'El usuario no existe o el DNI es incorrecto.';
+        // Por anti-enumeracion server-side, este caso ya no se devuelve
+        // (el callable lo mappea a permission-denied). Mantenido por
+        // compat con tokens viejos en transito.
+        return 'Usuario o contraseña incorrectos.';
       case 'PERMISSION_DENIED':
       case 'permission-denied':
-        return 'Credenciales incorrectas.';
+        return 'Usuario o contraseña incorrectos.';
       case 'FAILED_PRECONDITION':
       case 'failed-precondition':
         return 'El usuario no tiene contraseña configurada.';
