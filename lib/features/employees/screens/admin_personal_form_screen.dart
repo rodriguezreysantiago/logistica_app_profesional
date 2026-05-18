@@ -362,9 +362,17 @@ class _FormInput extends StatelessWidget {
       child: TextFormField(
         controller: controller,
         maxLength: maxLength,
-        keyboardType: isMail
-            ? TextInputType.emailAddress
-            : (isNumeric ? TextInputType.number : TextInputType.text),
+        // Contraseñas son case-sensitive — el keyboard no debe sugerir
+        // texto (autocorrect/autofill apuntan a la contra del usuario).
+        // `obscureText` muestra puntitos en lugar del plain text.
+        obscureText: isPassword,
+        autocorrect: !isPassword,
+        enableSuggestions: !isPassword,
+        keyboardType: isPassword
+            ? TextInputType.visiblePassword
+            : (isMail
+                ? TextInputType.emailAddress
+                : (isNumeric ? TextInputType.number : TextInputType.text)),
         textInputAction: textInputAction,
         // Formatters según el tipo de campo:
         // - Numérico (DNI, CUIL, teléfono): solo dígitos. El keyboardType
@@ -372,9 +380,13 @@ class _FormInput extends StatelessWidget {
         //   en paste, por eso el DigitOnlyFormatter es la red real.
         // - Texto con toUpperCase: mayúsculas vivas, evitando
         //   `textCapitalization` que rompe Backspace en Windows.
+        // - Contraseña: NUNCA forzar mayúsculas (auditoria 2026-05-18 —
+        //   Santiago no podia cargar "Apple2026Demo!" porque el campo
+        //   uppercaseaba todo y rompia el match contra bcrypt).
         inputFormatters: [
           if (isNumeric) DigitOnlyFormatter(maxLength: maxLength),
-          if (!isNumeric && toUpperCase) UpperCaseInputFormatter(),
+          if (!isNumeric && !isPassword && toUpperCase)
+            UpperCaseInputFormatter(),
         ],
         style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
