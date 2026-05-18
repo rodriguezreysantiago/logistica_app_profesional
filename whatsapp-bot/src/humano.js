@@ -123,6 +123,14 @@ const ORIGENES_TIME_SENSITIVE = new Set([
   'jornada_v2_bloque_excedido',
   'jornada_v2_cuota_cumplida',
   'jornada_v2_veda_nocturna',
+  // Vigilador de jornada v1 (legacy — refactor a v2 2026-05-15).
+  // Probablemente ya no se genera, pero por defensa lo dejamos
+  // como time-sensitive (cero costo).
+  'jornada_pausa_continua',
+  'jornada_continua_12h',
+  'jornada_continua_11h30',
+  'jornada_continua_3h45',
+  'jornada_continua_3h30',
   // Alertas Volvo y Sitrack en tiempo real
   'volvo_alert_high',
   'sitrack_chofer_no_identificado',
