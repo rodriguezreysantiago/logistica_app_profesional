@@ -955,7 +955,17 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-main().catch((e) => {
-  log.error(`Fatal: ${e.stack || e.message}`);
-  process.exit(1);
-});
+// Guard `require.main === module` (auditoria 2026-05-18): solo
+// arranca `main()` si el archivo se ejecuta como entrypoint
+// (`node src/index.js` o NSSM). Si alguien lo importa con
+// `require('./src/index.js')` para tests / lint / parse-check, NO
+// se inicializa el bot — antes un `node -e "require(...)"` para
+// verificar sintaxis booteaba todo el bot (WhatsApp Web + cron +
+// heartbeat) y dejaba el proceso vivo escribiendo heartbeats al
+// Firestore (incidente 2026-05-18).
+if (require.main === module) {
+  main().catch((e) => {
+    log.error(`Fatal: ${e.stack || e.message}`);
+    process.exit(1);
+  });
+}
