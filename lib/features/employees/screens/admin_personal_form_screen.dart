@@ -520,23 +520,49 @@ class _RoleSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final roles = AppRoles.todos.where((r) {
+      if (r == AppRoles.admin &&
+          !Capabilities.can(
+              PrefsService.rol, Capability.asignarRolAdmin)) {
+        return false;
+      }
+      return true;
+    }).toList();
+
     return DropdownButtonFormField<String>(
       initialValue: rol,
+      // isExpanded: true hace que el dropdown tome el ancho del parent,
+      // dando un BoxConstraints bounded al Row interno. Sin esto, el
+      // Row+Expanded del item seleccionado pegaba "RenderFlex unbounded
+      // width" al renderizar (incidente Santiago 2026-05-18).
+      isExpanded: true,
       decoration: const InputDecoration(
         prefixIcon: Icon(Icons.badge_outlined),
       ),
-      // Filtramos los roles disponibles segun capability del usuario
-      // logueado: si no tiene `asignarRolAdmin`, no puede ofrecer crear
-      // a otro empleado como ADMIN. Para SUPERVISOR queda CHOFER /
-      // PLANTA / SUPERVISOR como opciones disponibles.
-      items: AppRoles.todos.where((r) {
-        if (r == AppRoles.admin &&
-            !Capabilities.can(
-                PrefsService.rol, Capability.asignarRolAdmin)) {
-          return false;
-        }
-        return true;
-      }).map((r) {
+      // Para el item SELECCIONADO usamos un layout sin Expanded (texto
+      // simple) — el Row+Expanded original solo se usa para los items
+      // del DROPDOWN abierto, que sí tienen width bounded del menú.
+      selectedItemBuilder: (context) => roles.map((r) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_icono(r), size: 18, color: AppColors.accentGreen),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  AppRoles.etiquetas[r] ?? r,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+      items: roles.map((r) {
         return DropdownMenuItem(
           value: r,
           child: Row(
