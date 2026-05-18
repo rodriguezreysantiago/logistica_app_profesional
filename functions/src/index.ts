@@ -3477,6 +3477,9 @@ const AVISO_NO_ID_THROTTLE_SEGUNDOS = 30 * 60;
 
 const TTL_VOLVO_MANEJO_MIN = 120; // OVERSPEED, IDLING, HARSH, PTO
 const TTL_PASA_IBUTTON_MIN = 30; // CHOFER_NO_IDENTIFICADO Sitrack
+const TTL_RESUMEN_DIARIO_MIN = 24 * 60; // resumenes diarios — vence en 24h
+// Note: TTL_SILENCIO_REANUDADO esta inline en _expiraEnMinutos(60)
+// en el aviso `silencio_reanudado` (~linea 5370).
 
 function _expiraEnMinutos(minutos: number): Timestamp {
   return Timestamp.fromMillis(Date.now() + minutos * 60 * 1000);
@@ -3946,6 +3949,7 @@ export const resumenBotDiario = onSchedule(
           mensaje: mensajeOk,
           estado: "PENDIENTE",
           encolado_en: FieldValue.serverTimestamp(),
+          expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
           enviado_en: null,
           error: null,
           intentos: 0,
@@ -4028,6 +4032,7 @@ export const resumenBotDiario = onSchedule(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
+        expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -5086,6 +5091,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
           mensaje: mensajeOk,
           estado: "PENDIENTE",
           encolado_en: FieldValue.serverTimestamp(),
+          expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
           enviado_en: null,
           error: null,
           intentos: 0,
@@ -5164,6 +5170,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
+        expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -5725,6 +5732,7 @@ export const resumenConductaManejoDiario = onSchedule(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
+        expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -5846,6 +5854,7 @@ export const resumenConductaManejoDiario = onSchedule(
       mensaje,
       estado: "PENDIENTE",
       encolado_en: FieldValue.serverTimestamp(),
+      expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
       enviado_en: null,
       error: null,
       intentos: 0,

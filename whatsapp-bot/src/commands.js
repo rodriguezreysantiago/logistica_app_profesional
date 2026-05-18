@@ -1053,11 +1053,19 @@ async function _encolarMensajeChofer(
   if (!tel || tel === '-') return false;
 
   const admin = require('firebase-admin');
+  // TTL Fase 2 (2026-05-18): confirmaciones de silenciar/desilenciar
+  // son time-sensitive — si la confirmacion tarda mas de 15 min, el
+  // chofer ya esta operando con la suposicion equivocada. Mejor
+  // silencio que confirmacion tardia.
+  const expiraEn = admin.firestore.Timestamp.fromMillis(
+    Date.now() + 15 * 60 * 1000
+  );
   await db.collection(fs.COLECCION).add({
     telefono: tel,
     mensaje,
     estado: fs.ESTADO.pendiente,
     encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+    expira_en: expiraEn,
     enviado_en: null,
     error: null,
     intentos: 0,

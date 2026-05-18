@@ -48,6 +48,19 @@ export const BLOQUE_ALERTA_TEMPRANA_SEGUNDOS = 3 * 3600 + 30 * 60; // 3h30
 export const BLOQUE_LIMITE_SEGUNDOS = 3 * 3600 + 45 * 60; // 3h45 (fin bloque)
 export const BLOQUE_EXCEDIDO_SEGUNDOS = 4 * 3600; // 4h sin pausa = falta
 export const BLOQUES_POR_JORNADA = 3;
+
+// TTLs para avisos en COLA_WHATSAPP (Fase 2 - 2026-05-18).
+// Si el bot esta caido y el aviso se entrega despues del TTL, el
+// consumer lo descarta sin enviar (mejor silencio que mensaje
+// desactualizado / confuso para el chofer). Ver
+// whatsapp-bot/src/index.js linea ~318 (chequeo expira_en).
+const TTL_JORNADA_BLOQUE_MIN = 30;       // 3h30, 3h45, cuota cumplida
+const TTL_JORNADA_VEDA_MIN = 60;         // veda nocturna (dura horas)
+const TTL_RESUMEN_DIARIO_MIN = 24 * 60;  // resumen diario vale el dia
+
+function _expiraEnMin(min: number): FsTimestamp {
+  return Timestamp.fromMillis(Date.now() + min * 60 * 1000);
+}
 export const DESCANSO_MIN_SEGUNDOS = 8 * 3600;
 export const DESCANSO_RADIO_METROS = 1000;
 export const VEDA_NOCTURNA_DESDE_HORA = 0; // 00:00 ART
@@ -229,6 +242,7 @@ async function encolarAviso3h30(
     error: null,
     intentos: 0,
     origen: "jornada_v2_bloque_3h30",
+    expira_en: _expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -270,6 +284,7 @@ async function encolarAviso3h45(
     error: null,
     intentos: 0,
     origen: "jornada_v2_bloque_3h45",
+    expira_en: _expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -311,6 +326,7 @@ async function encolarAvisoCuotaCumplida(
     error: null,
     intentos: 0,
     origen: "jornada_v2_cuota_cumplida",
+    expira_en: _expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -354,6 +370,7 @@ async function encolarAvisoVedaNocturna(
     error: null,
     intentos: 0,
     origen: "jornada_v2_veda_nocturna",
+    expira_en: _expiraEnMin(TTL_JORNADA_VEDA_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -783,6 +800,7 @@ export async function armarResumenJornadasDiario(): Promise<void> {
     await db().collection("COLA_WHATSAPP").add({
       telefono: tel, mensaje, estado: "PENDIENTE",
       encolado_en: FieldValue.serverTimestamp(),
+      expira_en: _expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
       enviado_en: null, error: null, intentos: 0,
       origen: "resumen_jornadas_v2", destinatario_coleccion: "EMPLEADOS",
       destinatario_id: SEG_HIGIENE_DNI, campo_base: "JORNADA",
@@ -838,6 +856,7 @@ export async function armarResumenJornadasDiario(): Promise<void> {
   await db().collection("COLA_WHATSAPP").add({
     telefono: tel, mensaje, estado: "PENDIENTE",
     encolado_en: FieldValue.serverTimestamp(),
+    expira_en: _expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
     enviado_en: null, error: null, intentos: 0,
     origen: "resumen_jornadas_v2", destinatario_coleccion: "EMPLEADOS",
     destinatario_id: SEG_HIGIENE_DNI, campo_base: "JORNADA",

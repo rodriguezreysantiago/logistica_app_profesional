@@ -521,6 +521,13 @@ async function _runOnce(fs) {
           mensaje,
           estado: fs.ESTADO.pendiente,
           encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+          // TTL Fase 2 (2026-05-18): avisos individuales de
+          // vencimientos / service vienen del cron diario. Si por
+          // algun motivo el bot esta caido > 24h, el aviso ya no
+          // vale (manana se regenera otro con info nueva).
+          expira_en: admin.firestore.Timestamp.fromMillis(
+            Date.now() + 24 * 60 * 60 * 1000
+          ),
           enviado_en: null,
           error: null,
           intentos: 0,

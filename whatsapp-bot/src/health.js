@@ -474,6 +474,11 @@ async function _encolarAlertaColaCreciente(dni, pendientes, minutos) {
       `Mandá /estado al bot por WhatsApp para más info.`,
     estado: _fs.ESTADO.pendiente,
     encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+    // TTL Fase 2 (2026-05-18): alerta operativa - si llega 30 min
+    // tarde el problema seguramente ya cambio (o se resolvio solo).
+    expira_en: admin.firestore.Timestamp.fromMillis(
+      Date.now() + 30 * 60 * 1000
+    ),
     enviado_en: null,
     error: null,
     intentos: 0,
