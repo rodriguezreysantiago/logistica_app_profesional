@@ -155,7 +155,13 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
     Write-Skip "Repo ya esta clonado en $RepoPath, hago git pull..."
     Push-Location $RepoPath
     try {
-        git pull --ff-only origin main 2>&1 | Out-Host
+        # NO usar `2>&1 | Out-Host`: PS 5.1 con $EAP=Stop trata cada
+        # linea de stderr de un native command como RemoteException
+        # fatal. Git escribe "Cloning into..." y similares a stderr
+        # aunque NO sean errores (incidente Santiago 2026-05-18).
+        # `--quiet` silencia esa salida; los errores reales siguen
+        # apareciendo via $LASTEXITCODE.
+        git pull --ff-only --quiet origin main
         if ($LASTEXITCODE -ne 0) {
             Write-Warn "git pull devolvio exit $LASTEXITCODE - sigo igual."
         } else {
@@ -167,7 +173,7 @@ if (Test-Path (Join-Path $RepoPath '.git')) {
 } else {
     $parent = Split-Path $RepoPath -Parent
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-    git clone $RepoUrl $RepoPath 2>&1 | Out-Host
+    git clone --quiet $RepoUrl $RepoPath
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "git clone fallo (exit $LASTEXITCODE). Verificar conexion + permisos."
         exit 1
@@ -228,8 +234,11 @@ Write-Step 7 $totalSteps "Instalando dependencias del bot (npm install)..."
 $botDir = Join-Path $RepoPath 'whatsapp-bot'
 Push-Location $botDir
 try {
-    # --silent reduce ruido pero deja errores visibles
-    npm install --silent 2>&1 | Out-Host
+    # --silent reduce ruido. NO usar `2>&1 | Out-Host` con $EAP=Stop:
+    # npm escribe warnings a stderr (deprecaciones, peer deps, etc.)
+    # que NO son errores reales, pero PS 5.1 los convierte en
+    # RemoteException fatal y aborta el script.
+    npm install --silent
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "npm install fallo (exit $LASTEXITCODE)."
         exit 1
@@ -294,7 +303,10 @@ if (-not $svc -or $svc.Status -ne 'Running') {
     if (Test-Path $estadoScript) {
         Push-Location $RepoPath
         try {
-            $jsonOut = & node 'scripts\bot_estado_remoto.js' --json 2>&1
+            $jsonOut = & {
+                $ErrorActionPreference = 'Continue'
+                & node 'scripts\bot_estado_remoto.js' --json 2>&1
+            }
             if ($LASTEXITCODE -eq 0) {
                 try {
                     $health = $jsonOut | ConvertFrom-Json

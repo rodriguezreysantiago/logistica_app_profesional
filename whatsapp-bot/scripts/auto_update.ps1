@@ -68,7 +68,13 @@ try {
     Set-Location $RepoRoot
 
     # --- 1. git fetch (silencioso si falla por red) -----------------
-    $fetchOut = git fetch origin main 2>&1
+    # `2>&1` con $EAP=Stop en PS 5.1 convierte stderr en ErrorRecord
+    # y aborta. Usamos $EAP local 'Continue' para capturar stderr en
+    # variable como string sin crashear.
+    $fetchOut = & {
+        $ErrorActionPreference = 'Continue'
+        git fetch origin main 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'WARN' "git fetch fallo (sin internet?): $fetchOut"
         exit 0
@@ -91,7 +97,10 @@ try {
     Write-Log 'INFO' "Cambios detectados: $($localHead.Substring(0,7)) -> $($remoteHead.Substring(0,7)) ($($changedFiles.Count) archivos)"
 
     # --- 4. git pull --ff-only --------------------------------------
-    $pullOut = git pull --ff-only origin main 2>&1
+    $pullOut = & {
+        $ErrorActionPreference = 'Continue'
+        git pull --ff-only origin main 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'ERROR' "git pull fallo: $pullOut"
         exit 1
@@ -108,7 +117,10 @@ try {
     if ($tocaPkg) {
         Write-Log 'INFO' "package.json o package-lock.json cambio, corriendo npm install..."
         Set-Location $BotDir
-        $npmOut = npm install --silent 2>&1
+        $npmOut = & {
+            $ErrorActionPreference = 'Continue'
+            npm install --silent 2>&1
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-Log 'ERROR' "npm install fallo: $npmOut"
             exit 1
@@ -131,7 +143,10 @@ try {
 
     # --- 7. Smoke test via bot_estado_remoto.js --json --------------
     Set-Location $RepoRoot
-    $jsonOut = & node "scripts\bot_estado_remoto.js" --json 2>&1
+    $jsonOut = & {
+        $ErrorActionPreference = 'Continue'
+        & node "scripts\bot_estado_remoto.js" --json 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Log 'WARNING' "Smoke test fallo (script exit $LASTEXITCODE): $jsonOut"
         Write-Log 'WARNING' "DEPLOY HECHO pero estado del bot NO confirmado. Revisar manualmente."

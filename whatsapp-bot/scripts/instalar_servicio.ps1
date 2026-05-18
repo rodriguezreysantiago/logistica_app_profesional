@@ -141,8 +141,11 @@ New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($existing) {
     Write-Host "WARN  Servicio '$serviceName' ya existe. Lo voy a recrear..." -ForegroundColor Yellow
-    & $nssmExe stop $serviceName confirm 2>&1 | Out-Null
-    & $nssmExe remove $serviceName confirm 2>&1 | Out-Null
+    # Suprimir stderr con `2>$null` (NO `2>&1 | Out-Null`): en PS 5.1
+    # con $EAP=Stop, `2>&1` convierte stderr en ErrorRecord y aborta
+    # el script (incidente Santiago 2026-05-18).
+    & $nssmExe stop $serviceName confirm 2>$null > $null
+    & $nssmExe remove $serviceName confirm 2>$null > $null
     Start-Sleep -Seconds 2
 }
 
@@ -205,12 +208,12 @@ Write-Host "[ACL] Otorgando permisos a LocalSystem sobre carpetas del bot..." -F
 
 # Repo entero (necesita leer src/, node_modules/, .env, y escribir
 # logs/, .wwebjs_auth/, .wwebjs_cache/).
-icacls $repoRoot /grant 'NT AUTHORITY\SYSTEM:(OI)(CI)F' /T /C 2>&1 | Out-Null
+icacls $repoRoot /grant 'NT AUTHORITY\SYSTEM:(OI)(CI)F' /T /C 2>$null > $null
 Write-Host "  OK $repoRoot" -ForegroundColor DarkGray
 
 # Cache de puppeteer (Chromium descargado).
 if (Test-Path $puppeteerCache) {
-    icacls $puppeteerCache /grant 'NT AUTHORITY\SYSTEM:(OI)(CI)F' /T /C 2>&1 | Out-Null
+    icacls $puppeteerCache /grant 'NT AUTHORITY\SYSTEM:(OI)(CI)F' /T /C 2>$null > $null
     Write-Host "  OK $puppeteerCache" -ForegroundColor DarkGray
 } else {
     Write-Host "  SKIP $puppeteerCache (todavia no existe; correr node src/index.js una vez)" -ForegroundColor Yellow
