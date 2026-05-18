@@ -262,47 +262,14 @@ async function encolarAviso3h30(
   });
 }
 
-async function encolarAviso3h45(
-  dni: string, patente: string
-): Promise<void> {
-  const emp = await obtenerEmpleadoLite(dni);
-  if (!emp) return;
-  const variantes = [
-    `${emp.saludo},\n\n` +
-      "*PARÁ AHORA — fin de bloque.* Cumpliste 3 h 45 de manejo.\n\n" +
-      `Buscá un lugar seguro para el ${patente} y descansá al menos ` +
-      "20 minutos antes de seguir. Si llegás a las 4 h sin parar, queda " +
-      "registrado como falta.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
-    `${emp.saludo}.\n\n` +
-      "*Fin del bloque (3 h 45).* Tenés que parar 20 minutos ahora.\n\n" +
-      `Frená el ${patente} en un lugar seguro. Si pasás las 4 h sin pausa, ` +
-      "se registra incumplimiento del descanso obligatorio.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
-    `${emp.saludo}, urgente.\n\n` +
-      "*Llegaste al límite del bloque (3 h 45 manejando).* Detené el " +
-      `${patente} ya — descansá 20 minutos antes de retomar.\n\n` +
-      "El incumplimiento de la pausa queda registrado.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
-  ];
-  await db().collection("COLA_WHATSAPP").add({
-    telefono: emp.tel,
-    mensaje: variantes[rrPick(variantes.length)],
-    estado: "PENDIENTE",
-    encolado_en: FieldValue.serverTimestamp(),
-    enviado_en: null,
-    error: null,
-    intentos: 0,
-    origen: "jornada_v2_bloque_3h45",
-    expira_en: _expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
-    destinatario_coleccion: "EMPLEADOS",
-    destinatario_id: dni,
-    campo_base: "JORNADA",
-    admin_dni: "BOT",
-    admin_nombre: "Bot vigilador jornada v2",
-    alert_patente: patente,
-  });
-}
+// NOTA 2026-05-18 (decision Santiago): el aviso 3h45 ("PARÁ AHORA")
+// fue ELIMINADO porque era spam — ya avisamos a las 3h30 con "buscá
+// lugar seguro a descansar 20 min". Mandar otro 15 min despues
+// repite la misma info. La logica de medicion (BLOQUE_LIMITE_SEGUNDOS,
+// alerta_3_45_enviada) se MANTIENE intacta por backward-compat con
+// docs JORNADAS existentes y para que el cliente / commands.js pueda
+// seguir mostrando "🔴 alcanzaste el limite del bloque" si quiere.
+// Si en el futuro se quiere reactivar, ver git log de este archivo.
 
 async function encolarAvisoCuotaCumplida(
   dni: string, patente: string
@@ -538,11 +505,11 @@ export async function tickVigiladorJornada(): Promise<void> {
       // Avisos a encolar después de actualizar el doc. Lista (no scalar)
       // — antes era un solo `avisoTipo` que se sobrescribia cuando se
       // cruzaban varios umbrales en mismo tick (ej. cron retrasado o
-      // primer tick post-jornada vieja con 3h30 + 3h45 + cuota +
-      // veda simultaneos). Solo se mandaba el ultimo, los anteriores
-      // se perdian silenciosamente. Ahora encolamos TODOS los que se
-      // cumplen en este tick.
-      const avisosPendientes: Array<"3h30" | "3h45" | "cuota" | "veda"> = [];
+      // primer tick post-jornada vieja con cuota + veda simultaneos).
+      // Solo se mandaba el ultimo, los anteriores se perdian
+      // silenciosamente. Ahora encolamos TODOS los que se cumplen en
+      // este tick.
+      const avisosPendientes: Array<"3h30" | "cuota" | "veda"> = [];
 
       if (manejando) {
         // === Está manejando ===
@@ -564,13 +531,14 @@ export async function tickVigiladorJornada(): Promise<void> {
           avisosPendientes.push("3h30");
           j.alerta_3_30_enviada = true;
         }
-        if (
-          j.bloque_actual_manejo_seg >= BLOQUE_LIMITE_SEGUNDOS &&
-          !j.alerta_3_45_enviada
-        ) {
-          avisosPendientes.push("3h45");
-          j.alerta_3_45_enviada = true;
-        }
+        // Aviso 3h45 ELIMINADO 2026-05-18 (era spam, ya avisamos en 3h30).
+        // El flag alerta_3_45_enviada queda en el schema (backward-compat)
+        // pero ya no se setea ni se chequea. Si quieren reactivar, ver
+        // git log de jornadas_v2.ts.
+        //
+        // BLOQUE_LIMITE_SEGUNDOS (3h45) sigue siendo referencia conceptual
+        // del "fin de bloque" (lo usa commands.js /jornada para mostrar
+        // info), pero ya no dispara aviso.
         if (
           j.bloque_actual_manejo_seg >= BLOQUE_EXCEDIDO_SEGUNDOS &&
           !j.bloque_excedido
@@ -613,7 +581,8 @@ export async function tickVigiladorJornada(): Promise<void> {
             j.bloque_actual_manejo_seg = 0;
             // Reset alertas del bloque para el próximo
             j.alerta_3_30_enviada = false;
-            j.alerta_3_45_enviada = false;
+            // alerta_3_45_enviada queda como esta (false por default).
+            // El aviso fue eliminado 2026-05-18, ya no se setea.
             j.estado = "descanso_post_bloque";
           }
           // El bloque_actual_pausa_seg sigue acumulando hacia los 8h
@@ -693,7 +662,6 @@ export async function tickVigiladorJornada(): Promise<void> {
           continue;
         }
         if (avisoTipo === "3h30") await encolarAviso3h30(dni, patente);
-        else if (avisoTipo === "3h45") await encolarAviso3h45(dni, patente);
         else if (avisoTipo === "cuota") await encolarAvisoCuotaCumplida(dni, patente);
         else if (avisoTipo === "veda") await encolarAvisoVedaNocturna(dni, patente);
         avisosEnviados++;
