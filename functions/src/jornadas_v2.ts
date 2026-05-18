@@ -81,10 +81,10 @@ export const VEDA_NOCTURNA_HASTA_HORA = 6; // 06:00 ART (no se usa para alertar,
 export const DELTA_MAX_SEGUNDOS = 600;
 export const COLECCION = "JORNADAS";
 
-// Banner global de testing (mismo que el resto de avisos automáticos).
-const BANNER_TESTING =
-  "_⚠️ ETAPA DE TESTING: si recibís este mensaje por error o ves algo " +
-  "raro, avisá a Santiago (35244439)._\n\n";
+// Banner de testing eliminado 2026-05-18 — el bot ya opera 24/7 con
+// choferes reales. Si en algun momento se vuelve a necesitar, agregar
+// const BANNER_TESTING aca y pre-pendear en los mensajes que se quieran
+// marcar como prueba.
 
 // ─── Schema del doc JORNADAS/{dni}_{jornada_inicio_ms} ──────────────────────
 
@@ -268,16 +268,16 @@ async function encolarAviso3h30(
       "Llevás 3 h 30 min de manejo en este bloque. Buscá un lugar seguro " +
       `para detener el ${patente} a *descansar un mínimo de 20 minutos* ` +
       "antes de continuar.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}.\n\n` +
       "Aviso: llevás 3 h 30 manejando seguido. Frená el " +
       `${patente} en un lugar seguro y *descansá un mínimo de 20 minutos* ` +
       "antes de retomar.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}, atención.\n\n` +
       "Tu bloque actual llegó a 3 h 30 min. Buscá dónde parar y " +
       `*descansá un mínimo de 20 minutos* antes de continuar con el ${patente}.\n\n` +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
   ];
   await db().collection("COLA_WHATSAPP").add({
     telefono: emp.tel,
@@ -330,18 +330,18 @@ async function encolarAvisoBloqueExcedido(
       "*queda registrado como infracción.*\n\n" +
       `Frená el ${patente} en un lugar seguro AHORA y descansá los ` +
       "20 minutos reglamentarios antes de seguir.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}, atención.\n\n` +
       "*Cumpliste 4 horas sin tomar pausa.* Esto es *infracción " +
       "registrada* — el supervisor lo va a ver mañana.\n\n" +
       `Detené el ${patente} ya y descansá 20 min antes de continuar.\n\n` +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}, urgente.\n\n` +
       "*Manejo continuo > 4 horas detectado.* Esto figura como " +
       "*falta* en el reporte diario al supervisor.\n\n" +
       `Frená el ${patente} ahora mismo y descansá los 20 minutos ` +
       "reglamentarios.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
   ];
   await db().collection("COLA_WHATSAPP").add({
     telefono: emp.tel,
@@ -375,17 +375,17 @@ async function encolarAvisoCuotaCumplida(
       "*Estás cerca de las 12 horas de jornada diaria.* Frená el " +
       `${patente} en un lugar seguro y descansá *mínimo 8 horas de ` +
       "corrido* antes de seguir.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}.\n\n` +
       "*Llegás al límite de 12 horas de jornada.* Buscá dónde " +
       `estacionar el ${patente} — necesitás *mínimo 8 horas de descanso ` +
       "de corrido* antes de retomar.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}, atención.\n\n` +
       "*Tu jornada diaria está cerca de las 12 horas.* Detené el " +
       `${patente} en un lugar seguro y descansá *al menos 8 horas ` +
       "seguidas* antes de continuar.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
   ];
   await db().collection("COLA_WHATSAPP").add({
     telefono: emp.tel,
@@ -417,19 +417,19 @@ async function encolarAvisoVedaNocturna(
       "maneja después de las 00:00.\n\n" +
       `Detené el ${patente} en un lugar seguro y descansá. El ` +
       "incumplimiento queda registrado.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}.\n\n` +
       "*00:00 ART — veda nocturna activa.* Por norma de Vecchi no " +
       "podés seguir manejando.\n\n" +
       `Frená el ${patente} ahora en un lugar seguro y descansá hasta ` +
       "completar 8 h sin moverte.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}, urgente.\n\n` +
       "*Veda nocturna iniciada (00:00 ART).* No podés conducir hasta " +
       "que tengas 8 h de descanso completo.\n\n" +
       `Estacioná el ${patente} ahora — el incumplimiento se registra ` +
       "para Seg e Higiene.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+      "_Coopertrans Móvil — Mensaje automático._",
   ];
   await db().collection("COLA_WHATSAPP").add({
     telefono: emp.tel,
@@ -907,7 +907,7 @@ export async function armarResumenJornadasDiario(): Promise<void> {
       `📋 *Resumen jornadas — ${fmtFecha}*\n\n` +
       "✅ Sin incidencias: ninguna jornada cerrada ayer registró " +
       "exceso de bloque, cuota o veda nocturna.\n\n" +
-      BANNER_TESTING + "_Coopertrans Móvil — Aviso automático._";
+      "_Coopertrans Móvil — Aviso automático._";
     await db().collection("COLA_WHATSAPP").add({
       telefono: tel, mensaje, estado: "PENDIENTE",
       encolado_en: FieldValue.serverTimestamp(),
@@ -970,10 +970,11 @@ export async function armarResumenJornadasDiario(): Promise<void> {
     `${excesos.length} jornada${excesos.length === 1 ? "" : "s"} con ` +
     "incidencias:\n\n" +
     `${lineas.join("\n\n")}\n\n` +
-    "_Modelo de jornada: 3 bloques de 4 hs (3 h 45 manejo + 15 min " +
-    "pausa). Veda nocturna desde las 00:00 ART. La jornada se cierra " +
-    "después de 8 hs con el camión detenido._\n\n" +
-    BANNER_TESTING + "_Coopertrans Móvil — Aviso automático._";
+    "_Modelo de jornada: 3 bloques (3 h 45 manejo + 15 min pausa " +
+    "interna, al chofer le pedimos 20 min). Veda nocturna desde las " +
+    "00:00 ART. La jornada se cierra después de 8 hs con el camión " +
+    "detenido._\n\n" +
+    "_Coopertrans Móvil — Aviso automático._";
 
   await db().collection("COLA_WHATSAPP").add({
     telefono: tel, mensaje, estado: "PENDIENTE",

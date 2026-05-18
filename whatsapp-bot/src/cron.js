@@ -25,12 +25,10 @@ const health = require('./health');
 const fs = require('./firestore');
 const { aIsoLocal } = require('./fechas');
 
-// Banner que se muestra al final de los mensajes mientras la app esté
-// en etapa de prueba. Espejo del que cada builder define localmente —
-// duplicado acá para los avisos inline que no usan builder dedicado.
-const BANNER_TESTING =
-  '⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. ' +
-  'No tomes el contenido al 100%.\n\n';
+// Banner de etapa de prueba vaciado 2026-05-18 (decision Santiago).
+// Bot opera 24/7 en produccion con choferes reales. Constante queda
+// como '' para no romper concatenaciones existentes (no-op).
+const BANNER_TESTING = '';
 
 // Intervalo entre services programados de tractores Volvo, en KM.
 const INTERVALO_SERVICE_KM = 50000;

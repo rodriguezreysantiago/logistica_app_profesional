@@ -19,11 +19,10 @@
 const admin = require('firebase-admin');
 const { aDdMmYyyyLocal, aLocalTime } = require('./fechas');
 
-// Banner que se muestra al final del mensaje mientras la app esté en
-// etapa de prueba. Quitar cuando se pase a producción real.
-const BANNER_TESTING =
-  '⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. ' +
-  'No tomes el contenido al 100%.\n\n';
+// Banner de etapa de prueba vaciado 2026-05-18 (decision Santiago).
+// Bot opera 24/7 en produccion con choferes reales. Constante queda
+// como '' para no romper concatenaciones existentes (no-op).
+const BANNER_TESTING = '';
 
 /** Origenes que disparan agrupación al envío. */
 const ORIGENES_AGRUPABLES = new Set([

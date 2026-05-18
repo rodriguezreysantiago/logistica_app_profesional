@@ -8,12 +8,10 @@
 // Si modificás el copy, mantené coherencia con el tono "Te aviso desde
 // la oficina..." que usa el bot para los demás avisos.
 
-// Banner que se muestra al final del mensaje mientras la app esté en
-// etapa de prueba. Quitar (junto con su uso en FIRMA) cuando se pase a
-// producción real con todos los choferes/admins onboardeados.
-const BANNER_TESTING =
-  '⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. ' +
-  'No tomes el contenido al 100%.\n\n';
+// Banner de etapa de prueba vaciado 2026-05-18 (decision Santiago).
+// Bot opera 24/7 en produccion con choferes reales. Constante queda
+// como "" para no romper concatenaciones existentes (no-op).
+const BANNER_TESTING = '';
 
 const FIRMA =
   BANNER_TESTING +

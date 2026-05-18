@@ -77,14 +77,13 @@ const auth = getAuth();
 const MAX_INTENTOS_FALLIDOS = 3;
 const BLOQUEO_DURACION_MS = 15 * 60 * 1000; // 15 minutos
 
-// Banner que se inyecta al final de cada mensaje de WhatsApp generado
-// por estas funciones mientras la app esté en etapa de prueba. Quitar
-// cuando se pase a producción real con todos los choferes/admins
-// onboardeados (espejo del BANNER_TESTING que vive en los builders del
-// bot Node.js).
-const BANNER_TESTING =
-  "⚠️ *Etapa de prueba* — si ves un error o algo no encaja, avisanos. " +
-  "No tomes el contenido al 100%.\n\n";
+// Banner de etapa de prueba — vaciado 2026-05-18 (decision Santiago).
+// El bot opera 24/7 con choferes/admins reales onboardeados, ya no
+// aplica el disclaimer. Mantenemos la constante como string vacio para
+// no romper las ~25 concatenaciones existentes (concat con "" es no-op).
+// Si en el futuro se vuelve a necesitar marcar mensajes como "prueba",
+// restaurar el contenido aca.
+const BANNER_TESTING = "";
 
 // ============================================================================
 // loginConDni
