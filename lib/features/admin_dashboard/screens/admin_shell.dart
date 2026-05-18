@@ -515,61 +515,86 @@ class _AdminShellState extends State<AdminShell> {
   Future<void> _abrirSheetMas(
     List<MapEntry<int, _ShellSection>> otras,
   ) async {
+    // Fix 2026-05-18 (bug iOS reportado Santiago): antes el sheet usaba
+    // `Column` con `mainAxisSize.min` -> al haber muchas secciones
+    // (7+ items en "Mas"), los items que no entraban en el 50% default
+    // del sheet quedaban cortados sin scroll posible.
+    //
+    // Fix: `isScrollControlled: true` permite que el sheet crezca mas
+    // del 50%, `ConstrainedBox` lo cappea al 80% (que no tape la barra
+    // de status), y `Flexible + ListView` hace scrollable la lista de
+    // items cuando excede el alto disponible.
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetCtx) {
+        final screenH = MediaQuery.of(sheetCtx).size.height;
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Handle visual del sheet (gesto de cierre intuitivo).
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: screenH * 0.8,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle visual del sheet (gesto de cierre intuitivo).
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20),
-                  child: Text(
-                    'MÁS SECCIONES',
-                    style: TextStyle(
-                      color: AppColors.accentGreen,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      'MÁS SECCIONES',
+                      style: TextStyle(
+                        color: AppColors.accentGreen,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                ...otras.map(
-                  (e) => ListTile(
-                    leading: _buildIconWithBadge(
-                      e.value, e.key, esActiva: false,
+                  const SizedBox(height: 8),
+                  // Lista scrollable de secciones. Flexible la cappea al
+                  // alto disponible despues del handle + titulo.
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: otras
+                          .map(
+                            (e) => ListTile(
+                              leading: _buildIconWithBadge(
+                                e.value, e.key, esActiva: false,
+                              ),
+                              title: Text(
+                                e.value.label,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              onTap: () {
+                                Navigator.of(sheetCtx).pop();
+                                setState(() => _currentIndex = e.key);
+                              },
+                            ),
+                          )
+                          .toList(),
                     ),
-                    title: Text(
-                      e.value.label,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    onTap: () {
-                      Navigator.of(sheetCtx).pop();
-                      setState(() => _currentIndex = e.key);
-                    },
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
