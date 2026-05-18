@@ -113,11 +113,16 @@ class KpiGrandeCard extends StatelessWidget {
     );
   }
 
-  /// Constructor a partir de `KpiEficiencia` (km/L promedio 30 días +
-  /// comparativa al período previo). Color verde si va bien (≥3.5 km/L
-  /// para flota de tractores), amarillo medio, rojo si es bajo.
-  /// Si no hay datos (flota sin Volvo Connect o cron sin correr),
-  /// muestra "—" con un sublabel explicativo.
+  /// Constructor a partir de `KpiEficiencia` (L/100km promedio 30 días +
+  /// comparativa al período previo). Unidad estándar Argentina/Europa:
+  /// más bajo = mejor (menos litros por 100 km).
+  ///
+  /// Color verde si ≤30 L/100km (excelente para tractor cargado),
+  /// amarillo ≤40, rojo >40. Si no hay datos (flota sin Volvo Connect
+  /// o cron sin correr), muestra "—" con sublabel explicativo.
+  ///
+  /// Pasa `mejorEsSubir: false` al widget genérico porque en L/100km
+  /// `variacion < 0` (bajó el consumo) es bueno y se pinta verde.
   factory KpiGrandeCard.eficiencia({
     Key? key,
     required String label,
@@ -130,13 +135,13 @@ class KpiGrandeCard extends StatelessWidget {
     final vTexto = v == null
         ? null
         : (v >= 0
-            ? '+${v.toStringAsFixed(2)} km/L'
-            : '${v.toStringAsFixed(2)} km/L');
+            ? '+${v.toStringAsFixed(1)} L/100km'
+            : '${v.toStringAsFixed(1)} L/100km');
     final color = !tieneDatos
         ? Colors.white54
-        : (kpi.kmPorLitroActual >= 3.5
+        : (kpi.litrosPor100kmActual <= 30
             ? AppColors.accentGreen
-            : (kpi.kmPorLitroActual >= 2.8
+            : (kpi.litrosPor100kmActual <= 40
                 ? AppColors.accentAmber
                 : AppColors.accentRed));
     final sublabel = !tieneDatos
@@ -148,14 +153,15 @@ class KpiGrandeCard extends StatelessWidget {
       key: key,
       label: label,
       valorTexto: tieneDatos
-          ? '${kpi.kmPorLitroActual.toStringAsFixed(2)} km/L'
+          ? '${kpi.litrosPor100kmActual.toStringAsFixed(1)} L/100km'
           : '—',
       icono: icono,
       color: color,
       sublabel: sublabel,
       variacion: v,
       variacionTexto: vTexto,
-      mejorEsSubir: true,
+      // En L/100km, bajar es bueno → variación negativa se pinta verde.
+      mejorEsSubir: false,
       onTap: onTap,
     );
   }

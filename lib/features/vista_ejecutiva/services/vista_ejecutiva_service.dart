@@ -19,9 +19,10 @@ class KpisVistaEjecutiva {
   final KpiSimple choferesActivos;
   final KpiSimple alertasCriticas;
 
-  /// Eficiencia combustible últimos 30 días (km/L promedio flota Volvo +
+  /// Eficiencia combustible últimos 30 días (L/100km promedio flota Volvo +
   /// comparativa al período previo 30d). Calculado desde
-  /// `VOLVO_SCORES_DIARIOS` docs `_FLEET_*`.
+  /// `VOLVO_SCORES_DIARIOS` docs `_FLEET_*`. Métrica estándar AR/UE:
+  /// más bajo = mejor.
   final KpiEficiencia eficienciaCombustible;
 
   /// Línea ICM últimas 12 semanas (label + valor).
@@ -111,18 +112,23 @@ class KpiSimple {
   const KpiSimple({required this.valor, this.sublabel});
 }
 
-/// Eficiencia combustible (km/L) últimos 30 días + comparativa 30 días
+/// Eficiencia combustible (L/100km) últimos 30 días + comparativa 30 días
 /// previos. Computado desde docs `_FLEET_*` de `VOLVO_SCORES_DIARIOS`.
 ///
+/// Unidad: **L/100km** — métrica estándar Argentina/Europa.
+/// Más bajo = mejor (menos litros por 100 km recorridos).
+///
 /// Los KPIs operativos típicos para una flota de tractores semi-remolque
-/// rondan 2.5-3.5 km/L según carga, ruta y conducta. >3.5 es excelente.
+/// cargados rondan 30-40 L/100km. <30 es excelente, >40 es alto.
 class KpiEficiencia {
-  /// km/L promedio de los últimos 30 días. 0 si no hay datos Volvo
+  /// L/100km promedio de los últimos 30 días. 0 si no hay datos Volvo
   /// (flota sin Volvo Connect o cron sin correr).
-  final double kmPorLitroActual;
-  final double kmPorLitroAnterior;
-  /// Diferencia absoluta (km/L). Positivo = mejoró, negativo = empeoró.
-  /// `null` si no hay base de comparación.
+  final double litrosPor100kmActual;
+  final double litrosPor100kmAnterior;
+  /// Diferencia absoluta (L/100km). En L/100km **bajar es bueno**, así
+  /// que el signo se invierte semánticamente: `variacionAbs < 0` = mejoró
+  /// (consumió menos), `> 0` = empeoró (consumió más). La UI lo maneja
+  /// con `mejorEsSubir: false`. `null` si no hay base de comparación.
   final double? variacionAbs;
   /// Total km del período actual (para sublabel).
   final double kmTotalesActual;
@@ -132,8 +138,8 @@ class KpiEficiencia {
   final int diasConDatosActual;
 
   const KpiEficiencia({
-    required this.kmPorLitroActual,
-    required this.kmPorLitroAnterior,
+    required this.litrosPor100kmActual,
+    required this.litrosPor100kmAnterior,
     required this.variacionAbs,
     required this.kmTotalesActual,
     required this.diasConDatosActual,
@@ -147,8 +153,8 @@ class KpiEficiencia {
   }) {
     final variacion = anterior == 0 ? null : actual - anterior;
     return KpiEficiencia(
-      kmPorLitroActual: actual,
-      kmPorLitroAnterior: anterior,
+      litrosPor100kmActual: actual,
+      litrosPor100kmAnterior: anterior,
       variacionAbs: variacion,
       kmTotalesActual: kmTotales,
       diasConDatosActual: diasConDatos,
@@ -156,8 +162,8 @@ class KpiEficiencia {
   }
 
   static const KpiEficiencia vacia = KpiEficiencia(
-    kmPorLitroActual: 0,
-    kmPorLitroAnterior: 0,
+    litrosPor100kmActual: 0,
+    litrosPor100kmAnterior: 0,
     variacionAbs: null,
     kmTotalesActual: 0,
     diasConDatosActual: 0,
@@ -464,14 +470,17 @@ class VistaEjecutivaService {
     return result;
   }
 
-  /// Eficiencia combustible (km/L) últimos 30 días + comparativa
+  /// Eficiencia combustible (L/100km) últimos 30 días + comparativa
   /// vs los 30 días previos. Lee docs `_FLEET_*` de `VOLVO_SCORES_DIARIOS`
   /// (1 doc por día, generados por el cron `volvoScoresPoller` 04:00 ART).
   ///
-  /// Cálculo: km/L se computa ponderado por km del día —
-  ///   km/L = (Σ km del período) / (Σ litros del período)
-  ///   litros = km × (avgFuelConsumption_ml/100km / 1000) / 100
-  ///   simplificando: litros = km × avgFuelConsumption_ml / 100_000
+  /// Unidad: **L/100km** (métrica AR/UE — más bajo = mejor).
+  ///
+  /// Cálculo ponderado por km del día (los días de mucho rodaje pesan
+  /// más en el promedio):
+  ///   L/100km = (Σ litros del período / Σ km del período) × 100
+  ///   litros del día = km × avgFuelConsumption_ml / 100_000
+  ///     (km × ml/100km / 100 = ml; /1000 = L)
   ///
   /// Devuelve `KpiEficiencia.vacia` si no hay docs en el rango (cron
   /// no corrió aún o flota sin Volvo Connect).
@@ -536,12 +545,15 @@ class VistaEjecutivaService {
         }
       }
 
-      final kmlActual = litrosActual > 0 ? kmActual / litrosActual : 0.0;
-      final kmlPrevio = litrosPrevio > 0 ? kmPrevio / litrosPrevio : 0.0;
+      // L/100km = (litros / km) × 100. Más bajo = mejor.
+      final lpor100Actual =
+          kmActual > 0 ? (litrosActual / kmActual) * 100 : 0.0;
+      final lpor100Previo =
+          kmPrevio > 0 ? (litrosPrevio / kmPrevio) * 100 : 0.0;
 
       return KpiEficiencia.fromValores(
-        actual: kmlActual,
-        anterior: kmlPrevio,
+        actual: lpor100Actual,
+        anterior: lpor100Previo,
         kmTotales: kmActual,
         diasConDatos: diasActual,
       );
