@@ -42,8 +42,17 @@ type FsTimestamp = admin.firestore.Timestamp;
 
 export const UMBRAL_MOVIMIENTO_KMH = 15;
 export const POLL_STALE_SEGUNDOS = 10 * 60;
-export const PAUSA_BLOQUE_SEGUNDOS = 10 * 60; // 10 min internos; al chofer
-// le pedimos 15 min. El delta absorbe delay GPS Sitrack (~1-3 min).
+// Pausa entre bloques (decision Vecchi 2026-05-18):
+//   - Interno (lo que mide el sistema): 15 min — alineado con norma YPF.
+//   - Mensajes al chofer: pedimos 20 min — 5 min extra de margen para
+//     no quedar cortos por GPS lag de Sitrack (~1-3 min) + para que el
+//     chofer no pare justo 15 min y por delay aparezca 14:50 = falla.
+//   - Si el chofer obedece (para 20 min reales) -> sistema mide ~17-19 min
+//     -> >= 15 min -> bloque cerrado OK.
+//   - Si el chofer para solo 15 min -> sistema mide ~12-14 min ->
+//     < 15 min -> bloque NO cierra -> sigue manejando ese bloque hasta
+//     completar la pausa o llegar a 4h (infraccion).
+export const PAUSA_BLOQUE_SEGUNDOS = 15 * 60;
 export const BLOQUE_ALERTA_TEMPRANA_SEGUNDOS = 3 * 3600 + 30 * 60; // 3h30
 export const BLOQUE_LIMITE_SEGUNDOS = 3 * 3600 + 45 * 60; // 3h45 (fin bloque)
 export const BLOQUE_EXCEDIDO_SEGUNDOS = 4 * 3600; // 4h sin pausa = falta
@@ -220,20 +229,18 @@ async function encolarAviso3h30(
   if (!emp) return;
   const variantes = [
     `${emp.saludo},\n\n` +
-      "Llevás 3 h 30 min de manejo en este bloque. *Te quedan 15 min* " +
-      "para parar al menos 15 min y cerrar el bloque.\n\n" +
-      `Buscá un lugar seguro para frenar el ${patente} antes de las 3 h 45.\n\n` +
+      "Llevás 3 h 30 min de manejo en este bloque. Buscá un lugar seguro " +
+      `para detener el ${patente} a *descansar un mínimo de 20 minutos* ` +
+      "antes de continuar.\n\n" +
       BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}.\n\n` +
-      "Aviso: 3 h 30 manejando seguido. En 15 min cumplís el límite del " +
-      "bloque (3 h 45).\n\n" +
-      `Frená el ${patente} en un lugar seguro y descansá al menos 15 min ` +
+      "Aviso: llevás 3 h 30 manejando seguido. Frená el " +
+      `${patente} en un lugar seguro y *descansá un mínimo de 20 minutos* ` +
       "antes de retomar.\n\n" +
       BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}, atención.\n\n` +
-      "Tu bloque actual llegó a 3 h 30. Te quedan 15 min para buscar " +
-      "dónde parar y descansar 15 min.\n\n" +
-      `Después podés arrancar el bloque siguiente con el ${patente}.\n\n` +
+      "Tu bloque actual llegó a 3 h 30 min. Buscá dónde parar y " +
+      `*descansá un mínimo de 20 minutos* antes de continuar con el ${patente}.\n\n` +
       BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
   ];
   await db().collection("COLA_WHATSAPP").add({
@@ -264,17 +271,17 @@ async function encolarAviso3h45(
     `${emp.saludo},\n\n` +
       "*PARÁ AHORA — fin de bloque.* Cumpliste 3 h 45 de manejo.\n\n" +
       `Buscá un lugar seguro para el ${patente} y descansá al menos ` +
-      "15 min antes de seguir. Si llegás a las 4 h sin parar, queda " +
+      "20 minutos antes de seguir. Si llegás a las 4 h sin parar, queda " +
       "registrado como falta.\n\n" +
       BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}.\n\n` +
-      "*Fin del bloque (3 h 45).* Tenés que parar 15 min ahora.\n\n" +
+      "*Fin del bloque (3 h 45).* Tenés que parar 20 minutos ahora.\n\n" +
       `Frená el ${patente} en un lugar seguro. Si pasás las 4 h sin pausa, ` +
       "se registra incumplimiento del descanso obligatorio.\n\n" +
       BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
     `${emp.saludo}, urgente.\n\n` +
       "*Llegaste al límite del bloque (3 h 45 manejando).* Detené el " +
-      `${patente} ya — descansá 15 min antes de retomar.\n\n` +
+      `${patente} ya — descansá 20 minutos antes de retomar.\n\n` +
       "El incumplimiento de la pausa queda registrado.\n\n" +
       BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
   ];
@@ -305,7 +312,7 @@ async function encolarAvisoCuotaCumplida(
   const variantes = [
     `${emp.saludo},\n\n` +
       "*Cumpliste los 3 bloques de la jornada* (11 h 15 min de manejo " +
-      "neto + 45 min de pausas).\n\n" +
+      "neto + pausas).\n\n" +
       `Frená el ${patente} en un lugar seguro y descansá *mínimo 8 h ` +
       "sin moverte* antes de arrancar una nueva jornada.\n\n" +
       BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",

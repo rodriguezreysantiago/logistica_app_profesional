@@ -803,8 +803,9 @@ async function _replyJornadaChofer(msg, { chofer, jSnap, silSnap, fecha }) {
     return;
   }
 
-  // Modelo v2: bloques de 4h (3h45 manejo + 15 min pausa), 3 bloques
-  // por jornada, descanso 8h misma posición para cerrar.
+  // Modelo v2: bloques de 4h (3h45 manejo + 15 min pausa interna,
+  // al chofer le pedimos 20 min para tener margen anti GPS-lag),
+  // 3 bloques por jornada, descanso 8h misma posición para cerrar.
   const j = jSnap.data() || {};
   const totalManejoSeg = j.total_manejo_seg || 0;
   const bloqueActualManejo = j.bloque_actual_manejo_seg || 0;
@@ -828,9 +829,9 @@ async function _replyJornadaChofer(msg, { chofer, jSnap, silSnap, fecha }) {
     const restanteBloque = BLOQUE_LIMITE_SEG - bloqueActualManejo;
     if (restanteBloque > 0) {
       lineas.push(`   Te quedan *${_fmtSegCompacto(restanteBloque)}* antes ` +
-        'de tu pausa obligatoria de 15 min.');
+        'de tu pausa obligatoria de 20 min.');
     } else {
-      lineas.push('   *Te pasaste del límite del bloque.* Pará y descansá 15 min.');
+      lineas.push('   *Te pasaste del límite del bloque.* Pará y descansá 20 min.');
     }
     if (bloqueActualPausa > 0) {
       lineas.push(`   ⏸ Pausa actual: ${_fmtSegCompacto(bloqueActualPausa)}.`);
@@ -850,10 +851,10 @@ async function _replyJornadaChofer(msg, { chofer, jSnap, silSnap, fecha }) {
   // Avisos enviados — los que importan al chofer en lenguaje natural.
   const avisos = [];
   if (j.alerta_3_30_enviada) {
-    avisos.push('🟡 Te avisamos que faltaban 15 min para tu pausa obligatoria.');
+    avisos.push('🟡 Te avisamos que tenés que parar a descansar 20 min.');
   }
   if (j.alerta_3_45_enviada) {
-    avisos.push('🔴 Llegaste al límite del bloque — tenés que parar 15 min.');
+    avisos.push('🔴 Llegaste al límite del bloque — tenés que parar 20 min.');
   }
   if (j.alerta_cuota_enviada) {
     avisos.push('🔴 Cumpliste los 3 bloques. No podés manejar más hoy.');
