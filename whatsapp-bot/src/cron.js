@@ -730,98 +730,105 @@ async function _runOnce(fs) {
       'TACHO_OUT_OF_SCOPE_MODE_CHANGE',
     ]);
 
+    // REFACTOR 2026-05-18 — datos siempre frescos (ver service_diario arriba).
     const dniMantenimiento = process.env.ALERTAS_RESUMEN_DESTINATARIO_DNI;
     if (dniMantenimiento) {
-      const yaEnviadoMant = await hist.yaSeEnvioMantenimientoDiario(db, dniMantenimiento);
-      if (yaEnviadoMant) {
-        log.debug(`Mantenimiento diario ya enviado hoy a ${dniMantenimiento}, skip.`);
+      const empMant = await _obtenerDestinatarioConsolidado(db, dniMantenimiento, empleadosByDni);
+      if (!empMant) {
+        log.warn(
+          `ALERTAS_RESUMEN_DESTINATARIO_DNI=${dniMantenimiento} no existe en EMPLEADOS. ` +
+          `Mantenimiento diario no se envía hoy.`
+        );
       } else {
-        const empMant = await _obtenerDestinatarioConsolidado(db, dniMantenimiento, empleadosByDni);
-        if (!empMant) {
+        const telMantRaw = empMant.data.TELEFONO;
+        const telMant = normalizarTelefonoAWid(telMantRaw)
+          ? String(telMantRaw).trim()
+          : null;
+        if (!telMant) {
           log.warn(
-            `ALERTAS_RESUMEN_DESTINATARIO_DNI=${dniMantenimiento} no existe en EMPLEADOS. ` +
+            `Destinatario mantenimiento ${dniMantenimiento} sin TELEFONO válido. ` +
             `Mantenimiento diario no se envía hoy.`
           );
         } else {
-          const telMantRaw = empMant.data.TELEFONO;
-          const telMant = normalizarTelefonoAWid(telMantRaw)
-            ? String(telMantRaw).trim()
-            : null;
-          if (!telMant) {
-            log.warn(
-              `Destinatario mantenimiento ${dniMantenimiento} sin TELEFONO válido. ` +
-              `Mantenimiento diario no se envía hoy.`
-            );
-          } else {
-            const desdeMant = admin.firestore.Timestamp.fromMillis(
-              Date.now() - 24 * 60 * 60 * 1000
-            );
-            const mantSnap = await db
-              .collection('VOLVO_ALERTAS')
-              .where('creado_en', '>=', desdeMant)
-              .get();
+          // Doc ID deterministico: idempotencia basada en estado real.
+          const hoyArtIso = _fechaArtIso();
+          const idCola = `mantenimiento_diario_${hoyArtIso}_${dniMantenimiento}`;
+          const colaRef = db.collection(fs.COLECCION).doc(idCola);
 
-            const eventosMant = [];
-            for (const d of mantSnap.docs) {
-              const data = d.data();
-              const tipo = String(data.tipo || '').toUpperCase();
-              let esMant = TIPOS_MANT_DIRECTOS.has(tipo);
-              let subTipo = null;
-              if (!esMant && tipo === 'GENERIC') {
-                // Volvo entrega los GENERIC con subtipo en
-                // `detalle_generic.triggerType` (alertas HIGH como
-                // TELL_TALE) o en `detalle_generic.type` (alertas de
-                // mantenimiento). Leemos ambos defensivamente — sin
-                // esto el cron pierde TELL_TALE: Volvo lo manda en
-                // triggerType y este loop solo miraba type (bug
-                // detectado 2026-05-09: el resumen de Emma nunca
-                // incluía las luces de tablero).
-                const subType =
-                  String(data.detalle_generic?.triggerType ?? '').toUpperCase() ||
-                  String(data.detalle_generic?.type ?? '').toUpperCase() ||
-                  '';
-                if (SUBTIPOS_MANT_GENERIC.has(subType)) {
-                  esMant = true;
-                  subTipo = subType;
-                }
-              }
-              if (!esMant) continue;
-
-              const creadoEn = data.creado_en;
-              const fechaHora =
-                creadoEn && typeof creadoEn.toDate === 'function'
-                  ? creadoEn.toDate()
-                  : new Date();
-              eventosMant.push({
-                patente: String(data.patente || '—').trim(),
-                tipo,
-                subTipo,
-                choferNombre: data.chofer_nombre
-                  ? String(data.chofer_nombre).trim()
-                  : null,
-                fechaHora,
-              });
-            }
-
-            const mensajeMant = avisoAlertasVolvo.buildResumenMantenimientoDiario({
-              destinatarioNombre: aviso.resolverNombreSaludo(empMant.data),
-              eventos: eventosMant,
-            });
-
-            // Encolamos SIEMPRE — el builder devuelve mensaje
-            // "sin novedades" si eventosMant.length === 0 (decisión
-            // Santiago 2026-05-09: silencio es ambiguo).
-            if (!mensajeMant) {
-              // Defensivo: el builder siempre debería devolver string.
-              log.warn(
-                `Builder mantenimiento devolvio null inesperadamente. Skip.`
+          try {
+            const existing = await colaRef.get();
+            if (existing.exists && existing.data().estado === fs.ESTADO.enviado) {
+              log.debug(
+                `Mantenimiento diario ya ENTREGADO hoy a ${dniMantenimiento}, skip.`
               );
             } else {
-              try {
-                // Atómico: encolar + idempotencia en un mismo batch.
-                const colaRef = db.collection(fs.COLECCION).doc();
-                const batch = db.batch();
-                batch.set(colaRef, {
+              // Computar eventos frescos solo cuando vamos a generar.
+              const desdeMant = admin.firestore.Timestamp.fromMillis(
+                Date.now() - 24 * 60 * 60 * 1000
+              );
+              const mantSnap = await db
+                .collection('VOLVO_ALERTAS')
+                .where('creado_en', '>=', desdeMant)
+                .get();
+
+              const eventosMant = [];
+              for (const d of mantSnap.docs) {
+                const data = d.data();
+                const tipo = String(data.tipo || '').toUpperCase();
+                let esMant = TIPOS_MANT_DIRECTOS.has(tipo);
+                let subTipo = null;
+                if (!esMant && tipo === 'GENERIC') {
+                  // Volvo entrega los GENERIC con subtipo en
+                  // `detalle_generic.triggerType` (alertas HIGH como
+                  // TELL_TALE) o en `detalle_generic.type` (alertas de
+                  // mantenimiento). Leemos ambos defensivamente — sin
+                  // esto el cron pierde TELL_TALE: Volvo lo manda en
+                  // triggerType y este loop solo miraba type (bug
+                  // detectado 2026-05-09: el resumen de Emma nunca
+                  // incluía las luces de tablero).
+                  const subType =
+                    String(data.detalle_generic?.triggerType ?? '').toUpperCase() ||
+                    String(data.detalle_generic?.type ?? '').toUpperCase() ||
+                    '';
+                  if (SUBTIPOS_MANT_GENERIC.has(subType)) {
+                    esMant = true;
+                    subTipo = subType;
+                  }
+                }
+                if (!esMant) continue;
+
+                const creadoEn = data.creado_en;
+                const fechaHora =
+                  creadoEn && typeof creadoEn.toDate === 'function'
+                    ? creadoEn.toDate()
+                    : new Date();
+                eventosMant.push({
+                  patente: String(data.patente || '—').trim(),
+                  tipo,
+                  subTipo,
+                  choferNombre: data.chofer_nombre
+                    ? String(data.chofer_nombre).trim()
+                    : null,
+                  fechaHora,
+                });
+              }
+
+              const mensajeMant = avisoAlertasVolvo.buildResumenMantenimientoDiario({
+                destinatarioNombre: aviso.resolverNombreSaludo(empMant.data),
+                eventos: eventosMant,
+              });
+
+              // Encolamos SIEMPRE — el builder devuelve mensaje
+              // "sin novedades" si eventosMant.length === 0 (decisión
+              // Santiago 2026-05-09: silencio es ambiguo).
+              if (!mensajeMant) {
+                // Defensivo: el builder siempre debería devolver string.
+                log.warn(
+                  `Builder mantenimiento devolvio null inesperadamente. Skip.`
+                );
+              } else {
+                const accion = existing.exists ? 'REGENERADO' : 'ENCOLADO';
+                await colaRef.set({
                   telefono: telMant,
                   mensaje: mensajeMant,
                   estado: fs.ESTADO.pendiente,
@@ -846,23 +853,16 @@ async function _runOnce(fs) {
                     chofer: e.choferNombre,
                   })),
                 });
-                const regM = hist.prepararRegistroMantenimientoDiario(
-                  db, dniMantenimiento, {
-                    cantidadEventos: eventosMant.length,
-                    colaDocId: colaRef.id,
-                  });
-                batch.set(regM.ref, regM.data);
-                await batch.commit();
                 stats.encolados++;
                 log.info(
-                  `+ Encolado MANTENIMIENTO DIARIO: ${dniMantenimiento} ` +
-                  `(${eventosMant.length} eventos) -> ${colaRef.id}`
+                  `+ ${accion} MANTENIMIENTO DIARIO: ${dniMantenimiento} ` +
+                  `(${eventosMant.length} eventos) -> ${idCola}`
                 );
-              } catch (e) {
-                stats.errores++;
-                log.error(`No se pudo encolar mantenimiento diario: ${e.message}`);
               }
             }
+          } catch (e) {
+            stats.errores++;
+            log.error(`No se pudo encolar mantenimiento diario: ${e.message}`);
           }
         }
       }
@@ -882,36 +882,41 @@ async function _runOnce(fs) {
     // Destinatario configurable por env var para que rotar al
     // encargado no requiera cambios de código (mismo patrón que
     // SERVICE_DESTINATARIO_DNI).
+    // REFACTOR 2026-05-18 — datos siempre frescos (ver service_diario arriba).
     const dniDocumentacion = process.env.DOCUMENTACION_DESTINATARIO_DNI;
     if (dniDocumentacion) {
-      const yaEnviadoVencProx = await hist.yaSeEnvioVencimientosProximos(
+      const empDoc = await _obtenerDestinatarioConsolidado(
         db,
-        dniDocumentacion
+        dniDocumentacion,
+        empleadosByDni
       );
-      if (yaEnviadoVencProx) {
-        log.debug(
-          `Vencimientos próximos ya enviados hoy a ${dniDocumentacion}, skip.`
+      if (!empDoc) {
+        log.warn(
+          `DOCUMENTACION_DESTINATARIO_DNI=${dniDocumentacion} no existe en EMPLEADOS. ` +
+            `Resumen de vencimientos próximos no se envía hoy.`
         );
       } else {
-        const empDoc = await _obtenerDestinatarioConsolidado(
-          db,
-          dniDocumentacion,
-          empleadosByDni
-        );
-        if (!empDoc) {
+        const telDocRaw = empDoc.data.TELEFONO;
+        const telDoc = normalizarTelefonoAWid(telDocRaw)
+          ? String(telDocRaw).trim()
+          : null;
+        if (!telDoc) {
           log.warn(
-            `DOCUMENTACION_DESTINATARIO_DNI=${dniDocumentacion} no existe en EMPLEADOS. ` +
+            `Destinatario documentación ${dniDocumentacion} sin TELEFONO válido. ` +
               `Resumen de vencimientos próximos no se envía hoy.`
           );
         } else {
-          const telDocRaw = empDoc.data.TELEFONO;
-          const telDoc = normalizarTelefonoAWid(telDocRaw)
-            ? String(telDocRaw).trim()
-            : null;
-          if (!telDoc) {
-            log.warn(
-              `Destinatario documentación ${dniDocumentacion} sin TELEFONO válido. ` +
-                `Resumen de vencimientos próximos no se envía hoy.`
+          // Doc ID deterministico: idempotencia basada en estado real.
+          const hoyArtIso = _fechaArtIso();
+          const idColaV = `venc_proximos_${hoyArtIso}_${dniDocumentacion}`;
+          const colaRefV = db.collection(fs.COLECCION).doc(idColaV);
+
+          // Pre-chequeo: si ya fue ENVIADO hoy, skip antes de calcular
+          // items (evita 3 queries pesadas EMPLEADOS+VEHICULOS+EMPRESAS).
+          const existingV = await colaRefV.get();
+          if (existingV.exists && existingV.data().estado === fs.ESTADO.enviado) {
+            log.debug(
+              `Vencimientos próximos ya ENTREGADO hoy a ${dniDocumentacion}, skip.`
             );
           } else {
             // Etiquetas de los 4 docs por empresa — réplica de
@@ -1022,10 +1027,8 @@ async function _runOnce(fs) {
               );
             } else {
               try {
-                // Atómico: encolar + idempotencia en un mismo batch.
-                const colaRef = db.collection(fs.COLECCION).doc();
-                const batch = db.batch();
-                batch.set(colaRef, {
+                const accion = existingV.exists ? 'REGENERADO' : 'ENCOLADO';
+                await colaRefV.set({
                   telefono: telDoc,
                   mensaje: mensajeVencProx,
                   estado: fs.ESTADO.pendiente,
@@ -1066,18 +1069,11 @@ async function _runOnce(fs) {
                     })),
                   ],
                 });
-                const regV = hist.prepararRegistroVencimientosProximos(
-                  db, dniDocumentacion, {
-                    cantidadItems: totalItems,
-                    colaDocId: colaRef.id,
-                  });
-                batch.set(regV.ref, regV.data);
-                await batch.commit();
                 stats.encolados++;
                 log.info(
-                  `+ Encolado VENCIMIENTOS PRÓXIMOS: ${dniDocumentacion} ` +
+                  `+ ${accion} VENCIMIENTOS PRÓXIMOS: ${dniDocumentacion} ` +
                     `(${itemsPersonal.length} personal, ${itemsVehiculos.length} unidades, ` +
-                    `${itemsEmpresas.length} empresas) -> ${colaRef.id}`
+                    `${itemsEmpresas.length} empresas) -> ${idColaV}`
                 );
               } catch (e) {
                 stats.errores++;
@@ -1105,36 +1101,41 @@ async function _runOnce(fs) {
     // `EMPRESA_DOCS_ADMIN_DNI` sin valor → skip). Si más adelante
     // se decide darle este aviso a alguien, setear la env var con
     // su DNI y el cron lo enviará.
+    // REFACTOR 2026-05-18 — datos siempre frescos (ver service_diario arriba).
     const dniAdminEmpresas =
       process.env.EMPRESA_DOCS_ADMIN_DNI || '';
     if (dniAdminEmpresas) {
-      const yaEnviadoEmp = await hist.yaSeEnvioVencEmpresasAdmin(
+      const empAdmin = await _obtenerDestinatarioConsolidado(
         db,
-        dniAdminEmpresas
+        dniAdminEmpresas,
+        empleadosByDni
       );
-      if (yaEnviadoEmp) {
-        log.debug(
-          `Aviso docs empresa al admin ya enviado hoy a ${dniAdminEmpresas}, skip.`
+      if (!empAdmin) {
+        log.warn(
+          `Admin docs empresa DNI=${dniAdminEmpresas} no existe en EMPLEADOS. ` +
+            `Aviso no se envía hoy.`
         );
       } else {
-        const empAdmin = await _obtenerDestinatarioConsolidado(
-          db,
-          dniAdminEmpresas,
-          empleadosByDni
-        );
-        if (!empAdmin) {
+        const telAdmin = normalizarTelefonoAWid(empAdmin.data.TELEFONO)
+          ? String(empAdmin.data.TELEFONO).trim()
+          : null;
+        if (!telAdmin) {
           log.warn(
-            `Admin docs empresa DNI=${dniAdminEmpresas} no existe en EMPLEADOS. ` +
+            `Admin docs empresa ${dniAdminEmpresas} sin TELEFONO válido. ` +
               `Aviso no se envía hoy.`
           );
         } else {
-          const telAdmin = normalizarTelefonoAWid(empAdmin.data.TELEFONO)
-            ? String(empAdmin.data.TELEFONO).trim()
-            : null;
-          if (!telAdmin) {
-            log.warn(
-              `Admin docs empresa ${dniAdminEmpresas} sin TELEFONO válido. ` +
-                `Aviso no se envía hoy.`
+          // Doc ID deterministico: idempotencia basada en estado real.
+          const hoyArtIsoE = _fechaArtIso();
+          const idColaE = `venc_empresas_admin_${hoyArtIsoE}_${dniAdminEmpresas}`;
+          const colaRefE = db.collection(fs.COLECCION).doc(idColaE);
+
+          // Pre-chequeo: si ya fue ENVIADO hoy, skip antes de leer
+          // EMPRESAS_EMPLEADORAS (evita query pesada innecesaria).
+          const existingE = await colaRefE.get();
+          if (existingE.exists && existingE.data().estado === fs.ESTADO.enviado) {
+            log.debug(
+              `Aviso docs empresa al admin ya ENTREGADO hoy a ${dniAdminEmpresas}, skip.`
             );
           } else {
             const DOCS_EMPRESA = [
@@ -1227,10 +1228,8 @@ async function _runOnce(fs) {
             }
 
             try {
-              // Atómico: encolar + idempotencia en un mismo batch.
-              const colaRef = db.collection(fs.COLECCION).doc();
-              const batch = db.batch();
-              batch.set(colaRef, {
+              const accion = existingE.exists ? 'REGENERADO' : 'ENCOLADO';
+              await colaRefE.set({
                 telefono: telAdmin,
                 mensaje: mensajeAdmin,
                 estado: fs.ESTADO.pendiente,
@@ -1253,17 +1252,10 @@ async function _runOnce(fs) {
                   dias: it.dias,
                 })),
               });
-              const regE = hist.prepararRegistroVencEmpresasAdmin(
-                db, dniAdminEmpresas, {
-                  cantidadItems: items.length,
-                  colaDocId: colaRef.id,
-                });
-              batch.set(regE.ref, regE.data);
-              await batch.commit();
               stats.encolados++;
               log.info(
-                `+ Encolado VENC EMPRESAS ADMIN: ${dniAdminEmpresas} ` +
-                  `(${items.length} items) -> ${colaRef.id}`
+                `+ ${accion} VENC EMPRESAS ADMIN: ${dniAdminEmpresas} ` +
+                  `(${items.length} items) -> ${idColaE}`
               );
             } catch (e) {
               stats.errores++;
