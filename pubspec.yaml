@@ -143,6 +143,14 @@ dependencies:
   # Si está vacío, la app corre sin Sentry (modo dev/local).
   # Setup: ver RUNBOOK.md sección "Sentry — observabilidad".
   sentry_flutter: ^8.10.0
+  # package_info_plus lo usamos para normalizar el `release` que enviamos
+  # a Sentry. Sin esto, el SDK detecta el bundle ID nativo (que es
+  # distinto entre Windows / Android / iOS) y Sentry agrupa la misma
+  # release como 3 apps distintas. Con esto forzamos un formato único
+  # "com.coopertrans.movil@<version>+<build>". Era transitive de
+  # sentry_flutter, lo promovemos a explícito (mismo pin que ya estaba
+  # en pubspec.lock).
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   flutter_test:

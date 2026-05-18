@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -125,10 +126,31 @@ void main() async {
     AppLogger.log('SENTRY_DSN vacío → Sentry deshabilitado (modo dev)');
     runApp(_armarApp());
   } else {
+    // Release normalizado: sin esto, el SDK detecta el bundle ID nativo
+    // que varía entre plataformas (Windows="coopertrans_movil",
+    // Android/iOS="com.coopertrans.movil") y Sentry agrupa la misma
+    // release como 3 apps distintas. Forzamos formato único leyendo
+    // version+build de package_info_plus (que SÍ es consistente).
+    // Auditoría 2026-05-18: dashboard de Releases tenía mezclados
+    // "coopertrans_movil@1.0.58+61" (Win) con "com.coopertrans.movil@1.0.58+13" (iOS).
+    String? sentryRelease;
+    try {
+      final pi = await PackageInfo.fromPlatform();
+      sentryRelease =
+          'com.coopertrans.movil@${pi.version}+${pi.buildNumber}';
+    } catch (e) {
+      // Si PackageInfo falla (raro), dejamos que el SDK use su default
+      // detectado automáticamente. El crash tracking sigue funcionando.
+      AppLogger.log('PackageInfo falló: $e → Sentry usa release default');
+    }
+
     await SentryFlutter.init(
       (options) {
         options.dsn = sentryDsn;
         options.environment = sentryEnv;
+        if (sentryRelease != null) {
+          options.release = sentryRelease;
+        }
         // tracesSampleRate: 0.05 = 5% de transactions trackeadas para
         // perf monitoring. Bajado de 0.2 (2026-05-10) ahora que la app
         // está en producción interna con 90+ empleados — con 20% el
