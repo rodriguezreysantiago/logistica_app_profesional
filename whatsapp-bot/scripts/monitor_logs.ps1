@@ -1,0 +1,77 @@
+# Muestra los logs del bot en vivo (tail -f style).
+#
+# Pensado para correr en la PC dedicada al bot, donde no hay otra
+# actividad y conviene tener una ventana siempre visible con el flujo
+# del servicio.
+#
+# Comportamiento:
+#  - Espera a que aparezca bot.out.log (si el servicio aun no
+#    arranco). Sin bloquear cpu - sleep 1 seg entre chequeos.
+#  - Muestra las ultimas 100 lineas + sigue printeando lineas nuevas.
+#  - Colorea segun el nivel (INFO blanco, OK verde, WARN amarillo,
+#    ERROR rojo). El logger del bot prefija con esos tokens.
+#  - Si se cierra el bot, sigue leyendo (Get-Content -Wait nunca
+#    devuelve nada). Si se quiere salir, Ctrl+C.
+#
+# Uso manual:
+#   .\monitor_logs.ps1
+#
+# Auto-arranque al login: ver instalar_monitor_logs.ps1 (crea el
+# shortcut en la carpeta Startup del user).
+
+$ErrorActionPreference = 'Stop'
+
+$botDir = Split-Path $PSScriptRoot -Parent
+$logsDir = Join-Path $botDir 'logs'
+$outLog = Join-Path $logsDir 'bot.out.log'
+
+$Host.UI.RawUI.WindowTitle = 'Coopertrans Bot - Logs en vivo'
+
+Write-Host ''
+Write-Host '====================================================' -ForegroundColor Cyan
+Write-Host '  COOPERTRANS BOT - Logs en vivo' -ForegroundColor Cyan
+Write-Host '====================================================' -ForegroundColor Cyan
+Write-Host "  Archivo: $outLog" -ForegroundColor DarkGray
+Write-Host '  Ctrl+C para salir' -ForegroundColor DarkGray
+Write-Host '====================================================' -ForegroundColor Cyan
+Write-Host ''
+
+# Esperar a que el log exista. Pasa cuando el servicio recien arranca
+# y todavia no escribio nada.
+$primeraEspera = $true
+while (-not (Test-Path $outLog)) {
+    if ($primeraEspera) {
+        Write-Host '[INFO] Esperando que el servicio arranque y escriba bot.out.log...' -ForegroundColor Yellow
+        $primeraEspera = $false
+    }
+    Start-Sleep -Seconds 2
+}
+
+if (-not $primeraEspera) {
+    Write-Host '[INFO] Log aparecio, mostrando contenido...' -ForegroundColor Green
+    Write-Host ''
+}
+
+# Colorear cada linea segun el nivel detectado en el texto.
+# El logger del bot prefija con tokens como "INFO", "OK", "WARN", "ERROR".
+function Write-Color([string]$line) {
+    $color = 'White'
+    if ($line -match '\bERROR\b|FATAL|CRITICAL|fail|FAIL') {
+        $color = 'Red'
+    } elseif ($line -match '\bWARN\b|warning') {
+        $color = 'Yellow'
+    } elseif ($line -match '\bOK\b|listo|enviado|Heartbeat OK') {
+        $color = 'Green'
+    } elseif ($line -match '\bINFO\b|iniciando|cargand') {
+        $color = 'White'
+    } else {
+        $color = 'Gray'
+    }
+    Write-Host $line -ForegroundColor $color
+}
+
+# Get-Content -Wait sigue mostrando lineas nuevas a medida que se
+# escriben en el archivo. Equivalente a `tail -f` de Unix.
+Get-Content -Path $outLog -Wait -Tail 100 | ForEach-Object {
+    Write-Color $_
+}
