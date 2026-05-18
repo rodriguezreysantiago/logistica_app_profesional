@@ -17,7 +17,6 @@ import '../../revisions/screens/admin_revisiones_screen.dart';
 import '../../eco_driving/screens/admin_descargas_pto_screen.dart';
 import '../../fleet_map/screens/admin_mapa_flota_screen.dart';
 import '../../icm/screens/icm_hub_screen.dart';
-import '../../vista_ejecutiva/screens/vista_ejecutiva_screen.dart';
 import '../../gomeria/screens/gomeria_hub_screen.dart';
 import '../../logistica/screens/logistica_hub_screen.dart';
 import '../../sync_dashboard/screens/sync_dashboard_screen.dart';
@@ -71,16 +70,10 @@ class _AdminShellState extends State<AdminShell> {
       build: () => const AdminPanelScreen(),
       requiredCapability: Capability.verPanelAdmin,
     ),
-    // Vista Ejecutiva — segundo lugar (después de Inicio) porque es el
-    // próximo destino natural una vez el admin/directivo está en la
-    // home: "¿cómo viene el mes?".
-    _ShellSection(
-      label: 'Vista Ejecutiva',
-      icon: Icons.dashboard_customize_outlined,
-      iconActive: Icons.dashboard_customize,
-      build: () => const VistaEjecutivaScreen(),
-      requiredCapability: Capability.verVistaEjecutiva,
-    ),
+    // Vista Ejecutiva ELIMINADA del shell 2026-05-18 — sus secciones
+    // (Panorama del mes, Tendencias, Personas) estan integradas en
+    // INICIO arriba. Si el rol tiene capability verVistaEjecutiva,
+    // INICIO carga las secciones ricas automaticamente.
     _ShellSection(
       label: 'Personal',
       icon: Icons.badge_outlined,

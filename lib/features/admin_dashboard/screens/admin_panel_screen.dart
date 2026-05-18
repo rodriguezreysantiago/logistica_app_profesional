@@ -9,17 +9,29 @@ import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
+import '../../vista_ejecutiva/services/vista_ejecutiva_service.dart';
+import '../../vista_ejecutiva/widgets/kpi_grande_card.dart';
+import '../../vista_ejecutiva/widgets/tendencia_icm_chart.dart';
+import '../../vista_ejecutiva/widgets/top_choferes_lista.dart';
+import '../../vista_ejecutiva/widgets/viajes_semanales_chart.dart';
 
 /// Panel de administración — pantalla "Inicio" del shell admin.
 ///
-/// Muestra un **dashboard de operación** con métricas en tiempo real:
-/// choferes activos, unidades en flota, revisiones pendientes y
-/// vencimientos por urgencia (vencidos / próximos 7d / próximos 30d).
-/// Cada KPI es tappable y lleva a la sección correspondiente.
+/// REFACTOR 2026-05-18 (decisión Santiago): unificada con la antigua
+/// "Vista Ejecutiva" que duplicaba choferes activos + alertas. Ahora
+/// INICIO es UNA sola vista superadora con todo el dashboard:
 ///
-/// Debajo del dashboard, accesos directos compactos a las secciones
-/// principales (legacy del menú anterior — siguen siendo útiles para
-/// usuarios que ya tienen el flujo memorizado).
+///   - Saludo
+///   - HOY (alarmas operativas urgentes — rojo si críticas)
+///   - PANORAMA DEL MES (KPIs grandes con tendencia vs mes anterior)
+///   - FLOTA (estado general de unidades y vencimientos no urgentes)
+///   - TENDENCIAS (gráficos ICM 12 semanas + viajes 8 semanas)
+///   - PERSONAS (top 5 mejores + top 5 a mejorar)
+///   - ACCESOS RÁPIDOS (navegación a módulos)
+///   - Footer versión
+///
+/// Pantalla `vista_ejecutiva_screen.dart` eliminada en el mismo
+/// commit. Service + widgets reusados desde acá.
 class AdminPanelScreen extends StatefulWidget {
   const AdminPanelScreen({super.key});
 
@@ -32,6 +44,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
   late final Stream<QuerySnapshot<Map<String, dynamic>>>
       _revisionesPendientesStream;
 
+  /// KPIs ricos del mes (viajes, ICM, eficiencia, tendencias, top choferes).
+  /// Lazy: solo se carga si el rol tiene capability + 1 sola vez por entrada
+  /// a la pantalla. Pull-to-refresh lo recarga.
+  Future<KpisVistaEjecutiva>? _futureKpisRicos;
+  bool get _verKpisRicos =>
+      Capabilities.can(PrefsService.rol, Capability.verVistaEjecutiva);
+
   @override
   void initState() {
     super.initState();
@@ -39,11 +58,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     // (cada 5 min). Antes traíamos las 3 colecciones enteras (EMPLEADOS,
     // VEHICULOS, REVISIONES) y calculábamos KPIs O(N×M) client-side. Ahora
     // leemos UN solo doc — escala constante con el tamaño de la flota.
-    //
-    // Stale máx 5 min, totalmente aceptable para un dashboard administrativo
-    // (admin no monitorea cambios en tiempo real). Si nunca se ejecutó la
-    // function (primera vez post-deploy), el doc no existe y el cliente
-    // muestra "—" hasta el primer ciclo (~5 min).
     _statsStream = FirebaseFirestore.instance
         .collection('STATS')
         .doc('dashboard')
@@ -51,186 +65,503 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
     // EXCEPCIÓN: "Trámites pendientes" se lee EN VIVO (no del stats
     // stale). Cuando un chofer envía una revisión nueva, el admin
     // necesita verlo al toque, no esperar hasta 5 min al próximo
-    // ciclo del cron. Como típicamente hay 0-5 docs pendientes, el
-    // costo es despreciable (5 reads × N admins activos / hora ≈
-    // nada vs. la mejora UX). Reportado por Santiago 2026-05-12:
-    // chofer mandaba revisión, dashboard mostraba 0 hasta el próximo
-    // cron tick.
+    // ciclo del cron. Bug reportado por Santiago 2026-05-12.
     _revisionesPendientesStream = FirebaseFirestore.instance
         .collection('REVISIONES')
         .where('estado', isEqualTo: 'PENDIENTE')
         .snapshots();
-    // El listener de notificaciones push para revisiones nuevas vive
-    // en AdminShell (durante toda la sesion admin), no aca. Si lo
-    // duplicaramos en este State, el admin recibiria 2 push identicas
-    // por cada revision mientras este en "Inicio".
+
+    if (_verKpisRicos) {
+      _cargarKpisRicos();
+    }
+  }
+
+  void _cargarKpisRicos() {
+    setState(() {
+      _futureKpisRicos = VistaEjecutivaService.cargar(
+        db: FirebaseFirestore.instance,
+      );
+    });
+  }
+
+  Future<void> _refrescar() async {
+    if (_verKpisRicos) {
+      _cargarKpisRicos();
+      // Esperamos a que termine la carga para que el RefreshIndicator se
+      // mantenga visible mientras dura el fetch.
+      await _futureKpisRicos;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
       title: AppTexts.appName,
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        children: [
-          const _Saludo(),
-          const SizedBox(height: 16),
-          // ------- KPIs en vivo -------
-          // Stats genérico desde STATS/dashboard (cron 5 min) +
-          // override en vivo de "trámites pendientes" desde
-          // REVISIONES directo (sin esperar al cron) para que el
-          // admin vea las revisiones nuevas al toque.
-          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-            stream: _statsStream,
-            builder: (ctx, statsSnap) {
-              final stats = _Stats.fromDoc(statsSnap.data?.data());
-              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _revisionesPendientesStream,
-                builder: (ctx2, revSnap) {
-                  final statsFinal = revSnap.hasData
-                      ? stats.conRevisionesPendientes(revSnap.data!.docs.length)
-                      : stats;
-                  return _GridKPIs(stats: statsFinal);
-                },
-              );
-            },
-          ),
-          const SizedBox(height: 24),
-          // ------- Accesos directos (legacy) -------
-          const _SeccionLabel('Accesos rápidos'),
-          const SizedBox(height: 8),
-          // Cada tile aparece solo si el rol logueado tiene la
-          // capability correspondiente. SUPERVISOR ve la mayoría.
-          // SYNC OBSERVABILITY queda solo para ADMIN.
-          // Los tiles de Accesos rapidos replican el ORDEN y los NOMBRES
-          // del sidebar (NavigationRail / BottomBar) para mantener
-          // coherencia visual: el admin reconoce cada item por el mismo
-          // label en cualquier parte de la app.
-          // Orden alineado con el sidebar del shell (decisión Vecchi
-          // 2026-05-07): Personal → Flota → Revisiones → Vencimientos →
-          // Logística → Gomería → Service → Alertas → Reportes → Sync →
-          // Estado Bot. El mismo orden tiene que verse en cualquier
-          // entrada del admin (rail/bottombar y panel central).
-          // VISTA EJECUTIVA al tope: es el panorama rápido (KPIs grandes
-          // + tendencias + top choferes) que el directivo / supervisor
-          // mira antes de meterse en módulos específicos.
-          if (Capabilities.can(
-              PrefsService.rol, Capability.verVistaEjecutiva))
-            const _AdminTile(
-              titulo: 'VISTA EJECUTIVA',
-              subtitulo: 'KPIs del mes, tendencias y top choferes',
-              icono: Icons.dashboard_customize_outlined,
-              color: AppColors.accentTeal,
-              ruta: AppRoutes.adminVistaEjecutiva,
+      body: RefreshIndicator(
+        onRefresh: _refrescar,
+        color: AppColors.accentGreen,
+        backgroundColor: AppColors.surface,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          children: [
+            const _Saludo(),
+            const SizedBox(height: 16),
+            // ------- SECCIÓN 1: HOY (operativo urgente) -------
+            // Stats genérico desde STATS/dashboard (cron 5 min) +
+            // override en vivo de "trámites pendientes" desde
+            // REVISIONES directo.
+            StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: _statsStream,
+              builder: (ctx, statsSnap) {
+                final stats = _Stats.fromDoc(statsSnap.data?.data());
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _revisionesPendientesStream,
+                  builder: (ctx2, revSnap) {
+                    final statsFinal = revSnap.hasData
+                        ? stats.conRevisionesPendientes(revSnap.data!.docs.length)
+                        : stats;
+                    return _SeccionHoyFlota(stats: statsFinal);
+                  },
+                );
+              },
             ),
-          if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
-            const _AdminTile(
-              titulo: 'PERSONAL',
-              subtitulo: 'Lista de legajos y choferes',
-              icono: Icons.badge_outlined,
+            // ------- SECCIONES 2-5: KPIs ricos (mes, tendencias, personas) -------
+            if (_verKpisRicos) ...[
+              const SizedBox(height: 24),
+              _SeccionesEjecutivas(
+                future: _futureKpisRicos!,
+                onReintentar: _cargarKpisRicos,
+              ),
+            ],
+            const SizedBox(height: 24),
+            // ------- SECCIÓN 6: ACCESOS RÁPIDOS -------
+            const _SeccionLabel('Accesos rápidos'),
+            const SizedBox(height: 8),
+            // Cada tile aparece solo si el rol logueado tiene la
+            // capability correspondiente. Orden alineado con el sidebar
+            // del shell (decisión Vecchi 2026-05-07).
+            //
+            // Tile "VISTA EJECUTIVA" ELIMINADO 2026-05-18 — sus secciones
+            // están integradas en este mismo INICIO arriba.
+            if (Capabilities.can(PrefsService.rol, Capability.verListaPersonal))
+              const _AdminTile(
+                titulo: 'PERSONAL',
+                subtitulo: 'Lista de legajos y choferes',
+                icono: Icons.badge_outlined,
+                color: AppColors.accentBlue,
+                ruta: '/admin_personal_lista',
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verListaFlota))
+              const _AdminTile(
+                titulo: 'FLOTA',
+                subtitulo: 'Control de camiones y acoplados',
+                icono: Icons.local_shipping_outlined,
+                color: AppColors.accentPurple,
+                ruta: '/admin_vehiculos_lista',
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verRevisiones))
+              const _AdminTile(
+                titulo: 'REVISIONES',
+                subtitulo: 'Aprobar/rechazar trámites cargados por choferes',
+                icono: Icons.fact_check_outlined,
+                color: AppColors.accentTeal,
+                ruta: '/admin_revisiones',
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verVencimientos))
+              const _AdminTile(
+                titulo: 'VENCIMIENTOS',
+                subtitulo: 'Calendario, personal, flota y empresas',
+                icono: Icons.event_note,
+                color: AppColors.accentGreen,
+                ruta: '/admin_vencimientos_menu',
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verLogistica))
+              const _AdminTile(
+                titulo: 'LOGÍSTICA',
+                subtitulo: 'Empresas, ubicaciones y tarifas',
+                icono: Icons.route_outlined,
+                color: AppColors.accentGreen,
+                ruta: AppRoutes.adminLogisticaHub,
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verGomeria))
+              const _AdminTile(
+                titulo: 'GOMERÍA',
+                subtitulo: 'Stock, instalación y recapados de cubiertas',
+                icono: Icons.tire_repair,
+                color: AppColors.accentOrange,
+                ruta: AppRoutes.adminGomeriaHub,
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verMantenimiento))
+              const _AdminTile(
+                titulo: 'SERVICE',
+                subtitulo: 'Próximos services de la flota Volvo',
+                icono: Icons.build_circle_outlined,
+                color: AppColors.accentDeepOrange,
+                ruta: AppRoutes.adminMantenimiento,
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verIcm))
+              const _AdminTile(
+                titulo: 'ICM',
+                subtitulo: 'Conducta de Manejo: ranking, mapa de calor, drill-down',
+                icono: Icons.leaderboard_outlined,
+                color: AppColors.accentRed,
+                ruta: AppRoutes.adminIcmHub,
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verReportes))
+              const _AdminTile(
+                titulo: 'REPORTES',
+                subtitulo: 'Exportar Excel y analítica de flota',
+                icono: Icons.analytics_outlined,
+                color: AppColors.accentAmber,
+                ruta: '/admin_reportes',
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verSyncDashboard))
+              const _AdminTile(
+                titulo: 'SYNC',
+                subtitulo: 'Monitoreo en tiempo real de sincronización',
+                icono: Icons.monitor_heart_outlined,
+                color: AppColors.accentCyan,
+                ruta: AppRoutes.syncDashboard,
+              ),
+            if (Capabilities.can(PrefsService.rol, Capability.verEstadoBot))
+              const _AdminTile(
+                titulo: 'ESTADO BOT',
+                subtitulo: 'Bot WhatsApp: cola, cron, errores y heartbeat',
+                icono: Icons.smart_toy_outlined,
+                color: AppColors.accentLightGreen,
+                ruta: AppRoutes.adminEstadoBot,
+              ),
+            const SizedBox(height: 28),
+            // Footer con versión.
+            const Center(
+              child: Text(
+                '${AppTexts.appVersion} — Base Operativa',
+                style: TextStyle(
+                  color: Colors.white24,
+                  fontSize: 11,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// SECCIONES EJECUTIVAS (KPIs ricos del mes — antigua Vista Ejecutiva)
+// =============================================================================
+
+/// Envoltorio del FutureBuilder de los KPIs ricos. Si el future falla,
+/// muestra error con botón reintentar. Si está cargando, placeholder
+/// compacto (no bloquea las secciones de arriba que ya cargaron).
+class _SeccionesEjecutivas extends StatelessWidget {
+  final Future<KpisVistaEjecutiva> future;
+  final VoidCallback onReintentar;
+
+  const _SeccionesEjecutivas({
+    required this.future,
+    required this.onReintentar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<KpisVistaEjecutiva>(
+      future: future,
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(
+              child: CircularProgressIndicator(
+                color: AppColors.accentGreen,
+              ),
+            ),
+          );
+        }
+        if (snap.hasError) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Column(
+              children: [
+                const Icon(Icons.error_outline,
+                    color: AppColors.accentRed, size: 36),
+                const SizedBox(height: 8),
+                const Text(
+                  'No se pudieron cargar los KPIs del mes',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Text(
+                    snap.error.toString(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Colors.white38, fontSize: 11),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: onReintentar,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Reintentar'),
+                ),
+              ],
+            ),
+          );
+        }
+        final kpis = snap.data!;
+        return _SeccionesPanorama(kpis: kpis);
+      },
+    );
+  }
+}
+
+/// Renderiza las 4 secciones ricas:
+///   1. PANORAMA DEL MES (4 KPIs grandes + eficiencia)
+///   2. TENDENCIAS (2 gráficos)
+///   3. PERSONAS (top 5 mejores + top 5 a mejorar)
+class _SeccionesPanorama extends StatelessWidget {
+  final KpisVistaEjecutiva kpis;
+  const _SeccionesPanorama({required this.kpis});
+
+  @override
+  Widget build(BuildContext context) {
+    final esDesktop = MediaQuery.of(context).size.width >= 800;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _SeccionLabel('Panorama del mes'),
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: esDesktop ? 4 : 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: esDesktop ? 1.0 : 0.85,
+          children: [
+            KpiGrandeCard.mes(
+              label: 'Viajes del mes',
+              kpi: kpis.viajesDelMes,
+              icono: Icons.local_shipping,
+              color: AppColors.accentPurple,
+              mejorEsSubir: true,
+              onTap: () => Navigator.pushNamed(
+                  context, AppRoutes.adminLogisticaViajes),
+            ),
+            KpiGrandeCard.icm(
+              label: 'ICM flota',
+              kpi: kpis.icmFlota,
+              icono: Icons.leaderboard,
+              onTap: () => Navigator.pushNamed(
+                  context, AppRoutes.adminIcmReporteSemanal),
+            ),
+            KpiGrandeCard.simple(
+              label: 'Alertas críticas',
+              kpi: kpis.alertasCriticas,
+              icono: Icons.warning_amber_rounded,
+              color: kpis.alertasCriticas.valor > 0
+                  ? AppColors.accentRed
+                  : AppColors.accentGreen,
+              onTap: () => Navigator.pushNamed(
+                  context, AppRoutes.vencimientosCalendario),
+            ),
+            KpiGrandeCard.eficiencia(
+              label: 'Eficiencia 30d',
+              kpi: kpis.eficienciaCombustible,
+              icono: Icons.local_gas_station,
+              onTap: () => Navigator.pushNamed(
+                  context, AppRoutes.adminEcoDriving),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const _SeccionLabel('Tendencias'),
+        const SizedBox(height: 10),
+        if (esDesktop)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TendenciaIcmChart(
+                  puntos: kpis.tendenciaIcm,
+                  titulo: 'ICM promedio · últimas 12 semanas',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ViajesSemanalesChart(
+                  puntos: kpis.viajesPorSemana,
+                  titulo: 'Viajes por semana · últimas 8',
+                ),
+              ),
+            ],
+          )
+        else ...[
+          TendenciaIcmChart(
+            puntos: kpis.tendenciaIcm,
+            titulo: 'ICM promedio · últimas 12 semanas',
+          ),
+          const SizedBox(height: 10),
+          ViajesSemanalesChart(
+            puntos: kpis.viajesPorSemana,
+            titulo: 'Viajes por semana · últimas 8',
+          ),
+        ],
+        const SizedBox(height: 24),
+        const _SeccionLabel('Personas'),
+        const SizedBox(height: 10),
+        if (esDesktop)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TopChoferesLista(
+                  titulo: 'TOP 5 — MEJORES CHOFERES',
+                  icono: Icons.emoji_events,
+                  colorTitulo: AppColors.accentGreen,
+                  items: kpis.top5Mejores,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TopChoferesLista(
+                  titulo: 'TOP 5 — A MEJORAR',
+                  icono: Icons.priority_high,
+                  colorTitulo: AppColors.accentRed,
+                  items: kpis.top5Peores,
+                ),
+              ),
+            ],
+          )
+        else ...[
+          TopChoferesLista(
+            titulo: 'TOP 5 — MEJORES CHOFERES',
+            icono: Icons.emoji_events,
+            colorTitulo: AppColors.accentGreen,
+            items: kpis.top5Mejores,
+          ),
+          const SizedBox(height: 10),
+          TopChoferesLista(
+            titulo: 'TOP 5 — A MEJORAR',
+            icono: Icons.priority_high,
+            colorTitulo: AppColors.accentRed,
+            items: kpis.top5Peores,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// SECCIÓN HOY + FLOTA (KPIs operativos rápidos)
+// =============================================================================
+
+/// 2 sub-secciones combinadas:
+///   - HOY: 3 KPIs urgentes (pendientes, vencidos, vencen ≤ 7d).
+///     Bordes rojos si críticos.
+///   - FLOTA: 3 KPIs estado general (choferes, unidades, vencen ≤ 30d).
+class _SeccionHoyFlota extends StatelessWidget {
+  final _Stats stats;
+  const _SeccionHoyFlota({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    final esDesktop = MediaQuery.of(context).size.width >= 600;
+    final cols = esDesktop ? 3 : 2;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _SeccionLabel('Hoy'),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: cols,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: esDesktop ? 1.6 : 1.1,
+          children: [
+            _KpiCard(
+              label: 'Trámites pendientes',
+              valor:
+                  stats.cargando ? '…' : '${stats.revisionesPendientes}',
+              icon: Icons.fact_check_outlined,
+              color: stats.revisionesPendientes > 0
+                  ? AppColors.accentOrange
+                  : AppColors.accentGreen,
+              urgente: stats.revisionesPendientes > 0,
+              ruta: '/admin_revisiones',
+            ),
+            _KpiCard(
+              label: 'Vencidos',
+              valor: stats.cargando ? '…' : '${stats.vencidos}',
+              sublabel: 'sin renovar',
+              icon: Icons.error_outline,
+              color: stats.vencidos > 0
+                  ? AppColors.accentRed
+                  : AppColors.accentGreen,
+              urgente: stats.vencidos > 0,
+              ruta: '/vencimientos_calendario',
+            ),
+            _KpiCard(
+              label: 'Vencen ≤ 7 días',
+              valor: stats.cargando ? '…' : '${stats.proximos7}',
+              icon: Icons.warning_amber_rounded,
+              color: stats.proximos7 > 0
+                  ? AppColors.accentOrange
+                  : AppColors.accentGreen,
+              urgente: stats.proximos7 > 0,
+              ruta: '/vencimientos_calendario',
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const _SeccionLabel('Flota'),
+        const SizedBox(height: 8),
+        GridView.count(
+          crossAxisCount: cols,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: esDesktop ? 1.6 : 1.1,
+          children: [
+            _KpiCard(
+              label: 'Choferes activos',
+              valor: stats.cargando ? '…' : '${stats.choferesActivos}',
+              icon: Icons.badge,
               color: AppColors.accentBlue,
               ruta: '/admin_personal_lista',
             ),
-          if (Capabilities.can(PrefsService.rol, Capability.verListaFlota))
-            const _AdminTile(
-              titulo: 'FLOTA',
-              subtitulo: 'Control de camiones y acoplados',
-              icono: Icons.local_shipping_outlined,
+            _KpiCard(
+              label: 'Unidades en flota',
+              valor: stats.cargando ? '…' : '${stats.unidadesTotal}',
+              sublabel: stats.cargando
+                  ? null
+                  : '${stats.unidadesAsignadas} asignadas',
+              icon: Icons.local_shipping,
               color: AppColors.accentPurple,
               ruta: '/admin_vehiculos_lista',
             ),
-          if (Capabilities.can(PrefsService.rol, Capability.verRevisiones))
-            const _AdminTile(
-              titulo: 'REVISIONES',
-              subtitulo: 'Aprobar/rechazar trámites cargados por choferes',
-              icono: Icons.fact_check_outlined,
+            _KpiCard(
+              label: 'Vencen ≤ 30 días',
+              valor: stats.cargando ? '…' : '${stats.proximos30}',
+              icon: Icons.event_note,
               color: AppColors.accentTeal,
-              ruta: '/admin_revisiones',
+              ruta: '/vencimientos_calendario',
             ),
-          if (Capabilities.can(PrefsService.rol, Capability.verVencimientos))
-            const _AdminTile(
-              titulo: 'VENCIMIENTOS',
-              subtitulo: 'Calendario, personal, flota y empresas',
-              icono: Icons.event_note,
-              color: AppColors.accentGreen,
-              ruta: '/admin_vencimientos_menu',
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verLogistica))
-            const _AdminTile(
-              titulo: 'LOGÍSTICA',
-              subtitulo: 'Empresas, ubicaciones y tarifas',
-              icono: Icons.route_outlined,
-              color: AppColors.accentGreen,
-              ruta: AppRoutes.adminLogisticaHub,
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verGomeria))
-            const _AdminTile(
-              titulo: 'GOMERÍA',
-              subtitulo: 'Stock, instalación y recapados de cubiertas',
-              icono: Icons.tire_repair,
-              color: AppColors.accentOrange,
-              ruta: AppRoutes.adminGomeriaHub,
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verMantenimiento))
-            const _AdminTile(
-              titulo: 'SERVICE',
-              subtitulo: 'Próximos services de la flota Volvo',
-              icono: Icons.build_circle_outlined,
-              color: AppColors.accentDeepOrange,
-              ruta: AppRoutes.adminMantenimiento,
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verIcm))
-            const _AdminTile(
-              titulo: 'ICM',
-              subtitulo: 'Conducta de Manejo: ranking, mapa de calor, drill-down',
-              icono: Icons.leaderboard_outlined,
-              color: AppColors.accentRed,
-              ruta: AppRoutes.adminIcmHub,
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verReportes))
-            const _AdminTile(
-              titulo: 'REPORTES',
-              subtitulo: 'Exportar Excel y analítica de flota',
-              icono: Icons.analytics_outlined,
-              color: AppColors.accentAmber,
-              ruta: '/admin_reportes',
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verSyncDashboard))
-            const _AdminTile(
-              titulo: 'SYNC',
-              subtitulo: 'Monitoreo en tiempo real de sincronización',
-              icono: Icons.monitor_heart_outlined,
-              color: AppColors.accentCyan,
-              ruta: AppRoutes.syncDashboard,
-            ),
-          if (Capabilities.can(PrefsService.rol, Capability.verEstadoBot))
-            const _AdminTile(
-              titulo: 'ESTADO BOT',
-              subtitulo: 'Bot WhatsApp: cola, cron, errores y heartbeat',
-              icono: Icons.smart_toy_outlined,
-              color: AppColors.accentLightGreen,
-              ruta: AppRoutes.adminEstadoBot,
-            ),
-          const SizedBox(height: 28),
-          // Lee del único string fuente de versión (AppTexts.appVersion).
-          // Antes estaba hardcodeada como "v 1.0.7" y nunca se
-          // actualizaba con los bumps de pubspec — confundía al admin
-          // que no podía saber qué binario estaba corriendo.
-          // Como `appVersion` es const, la interpolación califica como
-          // const expression — el widget queda const también.
-          const Center(
-            child: Text(
-              '${AppTexts.appVersion} — Base Operativa',
-              style: TextStyle(
-                color: Colors.white24,
-                fontSize: 11,
-                letterSpacing: 1,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -240,14 +571,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen> {
 // =============================================================================
 
 /// Encabezado con saludo según hora del día + apodo o primer nombre del admin.
-///
-/// Resolución del nombre a saludar:
-///   1. Lee `EMPLEADOS/{dni}.APODO` (lectura única, cacheada en memoria
-///      para que no parpadee al volver al panel).
-///   2. Si no hay apodo cargado, fallback al algoritmo "segundo token"
-///      del `NOMBRE` (ej. "PEREZ JUAN" → "Juan"). Limitación conocida:
-///      con dos apellidos elige el segundo apellido en lugar del primer
-///      nombre — para esos casos hay que cargar el APODO desde el form.
 class _Saludo extends StatefulWidget {
   const _Saludo();
 
@@ -257,10 +580,7 @@ class _Saludo extends StatefulWidget {
 
 class _SaludoState extends State<_Saludo> {
   /// Inicializado SÍNCRONO desde `PrefsService.apodo` (cacheado al login)
-  /// para evitar el flicker "Buen día, Santiago" → "Buen día, Santi"
-  /// que pasaba cuando esto era un Future a Firestore. Si la cache está
-  /// vacía (admins legacy logueados pre-fix 2026-05-07), el lookup
-  /// async corre una vez y cachea el resultado para próximas sesiones.
+  /// para evitar el flicker "Buen día, Santiago" → "Buen día, Santi".
   late String _apodoResuelto = PrefsService.apodo.trim();
 
   @override
@@ -272,8 +592,7 @@ class _SaludoState extends State<_Saludo> {
   }
 
   /// Solo se invoca para admins que iniciaron sesión antes de que
-  /// PrefsService cacheara el APODO. Una vez resuelto, queda guardado
-  /// y la próxima sesión arranca síncrona.
+  /// PrefsService cacheara el APODO.
   Future<void> _resolverApodoLegacy() async {
     final dni = PrefsService.dni;
     if (dni.isEmpty) return;
@@ -284,9 +603,8 @@ class _SaludoState extends State<_Saludo> {
           .get();
       if (!mounted) return;
       final apodo = (snap.data()?['APODO'] ?? '').toString().trim();
-      if (apodo.isEmpty) return; // sin apodo cargado, mantenemos fallback
+      if (apodo.isEmpty) return;
       setState(() => _apodoResuelto = apodo);
-      // Cacheamos para próximas sesiones (fire-and-forget, no bloquea UI).
       unawaited(PrefsService.setApodo(apodo));
     } catch (_) {
       // Si Firestore falla o el doc no existe, dejamos el fallback.
@@ -301,7 +619,6 @@ class _SaludoState extends State<_Saludo> {
   }
 
   /// Para nombres "APELLIDO NOMBRE …", devuelve "Nombre" capitalizado.
-  /// Solo se usa como fallback cuando el APODO no está cargado.
   String? _primerNombre(String full) {
     final partes = full.trim().split(RegExp(r'\s+'));
     if (partes.length < 2) return null;
@@ -313,14 +630,11 @@ class _SaludoState extends State<_Saludo> {
   @override
   Widget build(BuildContext context) {
     final nombreFull = PrefsService.nombre;
-    // Prioridad: APODO si está cargado → fallback al segundo token.
     final nombre = _apodoResuelto.isNotEmpty
         ? _apodoResuelto
         : _primerNombre(nombreFull);
     final saludo =
         nombre != null ? '${_saludoHora()}, $nombre' : _saludoHora();
-    // Pasamos DateTime directo (no toIso8601String que es UTC y rompe
-    // entre 21:00 y 23:59 ART). formatearFecha ya acepta DateTime.
     final fechaHoy = AppFormatters.formatearFecha(DateTime.now());
 
     return Padding(
@@ -330,8 +644,6 @@ class _SaludoState extends State<_Saludo> {
         children: [
           Text(
             saludo,
-            // En iPhone SE/12 mini con apodos largos se salía del width.
-            // Ellipsiza a 1 línea para mantener prolijidad.
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -376,15 +688,12 @@ class _SeccionLabel extends StatelessWidget {
 }
 
 // =============================================================================
-// CÁLCULO DE MÉTRICAS
+// CÁLCULO DE MÉTRICAS (KPIs operativos rápidos desde STATS/dashboard)
 // =============================================================================
 
-/// Estadísticas agregadas que pinta el dashboard. Inmutable; se hidrata
-/// desde el doc `STATS/dashboard` que mantiene la Cloud Function
-/// `recomputeDashboardStats` (cada 5 min). Antes se calculaba
-/// client-side iterando 3 colecciones; el cálculo se movió a server-side
-/// para que escale con flotas grandes y para que N admins simultáneos no
-/// repitan el mismo cómputo en sus respectivos clientes.
+/// Estadísticas agregadas que pinta la sección "Hoy" + "Flota". Inmutable;
+/// se hidrata desde el doc `STATS/dashboard` que mantiene la Cloud Function
+/// `recomputeDashboardStats` (cada 5 min).
 class _Stats {
   final int choferesActivos;
   final int unidadesTotal;
@@ -394,10 +703,7 @@ class _Stats {
   final int proximos7;
   final int proximos30;
 
-  /// `true` mientras el snapshot de `STATS/dashboard` no llegó todavía,
-  /// o el doc no existe (primera vez después del deploy, antes del
-  /// primer ciclo de la function). Sirve para mostrar placeholders en
-  /// lugar de "0" mentiroso.
+  /// `true` mientras el snapshot de `STATS/dashboard` no llegó todavía.
   final bool cargando;
 
   const _Stats({
@@ -411,10 +717,6 @@ class _Stats {
     required this.cargando,
   });
 
-  /// Hidrata desde el doc `STATS/dashboard`. Si el doc no existe o no
-  /// llegó todavía, devuelve placeholders en estado `cargando`. Lectura
-  /// defensiva con `?? 0` por si el shape del doc cambia y le falta un
-  /// campo nuevo (mejor mostrar 0 que crashear).
   factory _Stats.fromDoc(Map<String, dynamic>? data) {
     if (data == null) {
       return const _Stats(
@@ -442,10 +744,8 @@ class _Stats {
     );
   }
 
-  /// Devuelve una copia con `revisionesPendientes` sobreescrito por
-  /// el count en vivo del stream de REVISIONES. Usado para corregir
-  /// el delay del cron (5 min) específicamente en ese contador, sin
-  /// tocar el resto que se queda con el valor del stats stale.
+  /// Override `revisionesPendientes` con el count en vivo del stream
+  /// de REVISIONES.
   _Stats conRevisionesPendientes(int cantidad) {
     return _Stats(
       choferesActivos: choferesActivos,
@@ -461,98 +761,8 @@ class _Stats {
 }
 
 // =============================================================================
-// GRID DE KPIs
+// KPI CARD (sección Hoy / Flota)
 // =============================================================================
-
-class _GridKPIs extends StatelessWidget {
-  final _Stats stats;
-  const _GridKPIs({required this.stats});
-
-  @override
-  Widget build(BuildContext context) {
-    final esDesktop = MediaQuery.of(context).size.width >= 600;
-    final cols = esDesktop ? 3 : 2;
-
-    final tarjetas = <Widget>[
-      _KpiCard(
-        label: 'Choferes activos',
-        valor: stats.cargando ? '…' : '${stats.choferesActivos}',
-        icon: Icons.badge,
-        color: AppColors.accentBlue,
-        ruta: '/admin_personal_lista',
-      ),
-      _KpiCard(
-        label: 'Unidades en flota',
-        valor: stats.cargando ? '…' : '${stats.unidadesTotal}',
-        sublabel: stats.cargando
-            ? null
-            : '${stats.unidadesAsignadas} asignadas',
-        icon: Icons.local_shipping,
-        color: AppColors.accentPurple,
-        ruta: '/admin_vehiculos_lista',
-      ),
-      _KpiCard(
-        label: 'Trámites pendientes',
-        valor:
-            stats.cargando ? '…' : '${stats.revisionesPendientes}',
-        icon: Icons.fact_check_outlined,
-        // Naranja si hay pendientes — no es error, pero requiere atención.
-        color: stats.revisionesPendientes > 0
-            ? AppColors.accentOrange
-            : AppColors.accentGreen,
-        urgente: stats.revisionesPendientes > 0,
-        ruta: '/admin_revisiones',
-      ),
-      _KpiCard(
-        label: 'Vencidos',
-        valor: stats.cargando ? '…' : '${stats.vencidos}',
-        sublabel: 'sin renovar',
-        icon: Icons.error_outline,
-        // Rojo si hay vencidos — esto sí es crítico.
-        color:
-            stats.vencidos > 0 ? AppColors.accentRed : AppColors.accentGreen,
-        urgente: stats.vencidos > 0,
-        ruta: '/vencimientos_calendario',
-      ),
-      _KpiCard(
-        label: 'Vencen ≤ 7 días',
-        valor: stats.cargando ? '…' : '${stats.proximos7}',
-        icon: Icons.warning_amber_rounded,
-        color: stats.proximos7 > 0
-            ? AppColors.accentOrange
-            : AppColors.accentGreen,
-        urgente: stats.proximos7 > 0,
-        ruta: '/vencimientos_calendario',
-      ),
-      _KpiCard(
-        label: 'Vencen ≤ 30 días',
-        valor: stats.cargando ? '…' : '${stats.proximos30}',
-        icon: Icons.event_note,
-        color: AppColors.accentTeal,
-        ruta: '/vencimientos_calendario',
-      ),
-    ];
-
-    return GridView.count(
-      crossAxisCount: cols,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      // Cards más anchas que altas; ratio ajustado para que el número
-      // grande tenga aire sin que la card crezca demasiado en alto.
-      //
-      // Historial:
-      // - 2026-05-08: 1.4 → 1.3 (overflow 5-6 px en iPhone con sublabel).
-      // - 2026-05-09: 1.3 → 1.1 + Flexible/FittedBox (el line-height de
-      //   iOS suma ~6 px en cards con sublabel y aún se zafaba en
-      //   iPhone 16 Pro). El fix combina ratio menor + el contenido
-      //   ahora cede cuando el alto disponible no alcanza.
-      childAspectRatio: esDesktop ? 1.6 : 1.1,
-      children: tarjetas,
-    );
-  }
-}
 
 class _KpiCard extends StatelessWidget {
   final String label;
@@ -562,8 +772,7 @@ class _KpiCard extends StatelessWidget {
   final Color color;
   final String? ruta;
 
-  /// Si es `true`, agrega un borde visible del color para que la card
-  /// destaque entre las que están en estado normal.
+  /// Si es `true`, agrega un borde visible del color para destacar.
   final bool urgente;
 
   const _KpiCard({
@@ -582,14 +791,6 @@ class _KpiCard extends StatelessWidget {
         ? () => Navigator.pushNamed(context, ruta!)
         : null;
 
-    // Layout defensivo contra overflow en iOS:
-    // - El bloque central (valor + sublabel) va envuelto en un FittedBox
-    //   externo (scaleDown) que escala uniformemente todo el bloque si
-    //   el alto del Expanded no alcanza. iOS deja <1 px de holgura por
-    //   rounding del line-height; sin el FittedBox externo no había
-    //   forma de que el Column interno cediera (mainAxisSize.min no
-    //   pasa constraints al child cuando el parent lo fuerza tight).
-    // - El label inferior queda en Flexible para ellipsizar si no entra.
     return AppCard(
       onTap: tap,
       padding: const EdgeInsets.all(14),
@@ -667,7 +868,7 @@ class _KpiCard extends StatelessWidget {
 }
 
 // =============================================================================
-// TILE DE ACCESO DIRECTO (legacy — secciones grandes del menú)
+// TILE DE ACCESO DIRECTO (sección Accesos rápidos)
 // =============================================================================
 
 class _AdminTile extends StatelessWidget {
@@ -719,10 +920,6 @@ class _AdminTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   subtitulo,
-                  // 2 líneas máximo: subtítulos como "Eventos en vivo de
-                  // la flota Volvo (IDLING, OVERSPEED, ...)" wrappeaban
-                  // a 3 líneas en iPhone SE haciendo cards de altura
-                  // dispar — feo al ojo.
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(

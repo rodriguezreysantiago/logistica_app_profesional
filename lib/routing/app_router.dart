@@ -16,6 +16,7 @@ import '../features/employees/screens/user_mi_perfil_screen.dart';
 import '../features/expirations/screens/user_mis_vencimientos_screen.dart';
 
 import '../features/admin_dashboard/screens/admin_shell.dart';
+import '../features/admin_dashboard/screens/admin_panel_screen.dart';
 import '../features/admin_dashboard/screens/admin_estado_bot_screen.dart';
 import '../features/admin_dashboard/screens/admin_volvo_alertas_screen.dart';
 import '../features/gomeria/constants/posiciones.dart';
@@ -61,7 +62,6 @@ import '../features/icm/screens/icm_reporte_semanal_screen.dart';
 import '../features/icm/screens/icm_mapa_calor_screen.dart';
 import '../features/icm/screens/icm_detalle_chofer_screen.dart';
 
-import '../features/vista_ejecutiva/screens/vista_ejecutiva_screen.dart';
 
 class AppRouter {
   AppRouter._();
@@ -242,14 +242,16 @@ class AppRouter {
           settings,
         );
 
-      // ================= VISTA EJECUTIVA =================
-      // Tablero CEO con KPIs grandes (viajes del mes, ICM flota, choferes
-      // activos, alertas) + gráficos de tendencia + top 5 mejores choferes.
-      // Pensado como "homepage" para directivos y panorama operativo.
-      // Capability verVistaEjecutiva (admin + supervisor).
+      // ================= VISTA EJECUTIVA (DEPRECATED) =================
+      // Eliminada 2026-05-18 (decisión Santiago): unificada con INICIO.
+      // Las secciones ricas (Panorama del mes, Tendencias, Personas)
+      // ahora viven directamente en AdminPanelScreen si el rol tiene
+      // verVistaEjecutiva. La ruta queda como redirect a INICIO para
+      // cubrir bookmarks viejos y deep-links de notificaciones que
+      // apunten a /admin_vista_ejecutiva.
       case AppRoutes.adminVistaEjecutiva:
         return _buildRoute(
-          _protegerAdmin(const VistaEjecutivaScreen()),
+          _protegerAdmin(const AdminPanelScreen()),
           settings,
         );
 
