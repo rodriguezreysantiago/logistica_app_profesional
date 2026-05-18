@@ -21,6 +21,14 @@
 
 $ErrorActionPreference = 'Stop'
 
+# Forzar UTF-8 en la consola y en stdout. El bot escribe los logs en
+# UTF-8 (con flechas, tildes, checks); PowerShell 5.1 por default lee
+# y muestra en Windows-1252 -> queda mojibake (e.g. la palabra
+# "Sesion" con tilde sale como "Sesi" + 2 chars basura). Setear
+# esto ANTES de cualquier Write-Host garantiza que se renderice bien.
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
 $botDir = Split-Path $PSScriptRoot -Parent
 $logsDir = Join-Path $botDir 'logs'
 $outLog = Join-Path $logsDir 'bot.out.log'
@@ -72,6 +80,10 @@ function Write-Color([string]$line) {
 
 # Get-Content -Wait sigue mostrando lineas nuevas a medida que se
 # escriben en el archivo. Equivalente a `tail -f` de Unix.
-Get-Content -Path $outLog -Wait -Tail 100 | ForEach-Object {
+#
+# -Encoding UTF8 es CRITICO: sino lee el archivo como Windows-1252 y
+# las flechas/tildes/checks salen como mojibake (chars basura tipo
+# "a-circunfleja + daga" en lugar de la flecha original).
+Get-Content -Path $outLog -Wait -Tail 100 -Encoding UTF8 | ForEach-Object {
     Write-Color $_
 }
