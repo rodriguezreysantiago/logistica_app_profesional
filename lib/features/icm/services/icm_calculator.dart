@@ -23,6 +23,7 @@
 // (semana, día, mes).
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 /// Tipos de evento Sitrack que cuentan como infracción para el ICM.
 /// Mismos que el resumen Molina diario (`resumenConductaManejoDiario`):
@@ -194,15 +195,35 @@ class IcmCalculator {
       // a infracciones. 10000 sigue siendo > 2x la semana mas grande
       // realista, asi que solo dispara con resets reales del odometro.
       double kmReales = 0;
-      for (final tracking in agg.odometroPorPatente.values) {
+      var capsAplicados = 0;
+      for (final entryPat in agg.odometroPorPatente.entries) {
+        final tracking = entryPat.value;
         if (tracking.max > tracking.min) {
           final delta = tracking.max - tracking.min;
           if (delta <= 10000) {
             kmReales += delta;
+          } else {
+            // else: ignorado por probable reset — el ratio del chofer en
+            // esta patente queda sin contar, pero las infracciones siguen.
+            // Loguear para diagnostico (auditoria 2026-05-18): cuando un
+            // chofer aparece SIN_DATOS y manejo solo en una patente con
+            // reset, sin este log no hay forma de saber por qué.
+            capsAplicados++;
+            debugPrint(
+              '[ICM] cap aplicado dni=${entry.key} patente=${entryPat.key} '
+              'delta=${delta.toStringAsFixed(0)}km '
+              '(min=${tracking.min.toStringAsFixed(0)} '
+              'max=${tracking.max.toStringAsFixed(0)}) '
+              '— probable reset de odometro Sitrack',
+            );
           }
-          // else: ignorado por probable reset — el ratio del chofer en
-          // esta patente queda sin contar, pero las infracciones siguen.
         }
+      }
+      if (capsAplicados > 0 && kmReales == 0) {
+        debugPrint(
+          '[ICM] dni=${entry.key} queda SIN_DATOS por todos los caps '
+          'aplicados ($capsAplicados patente(s) con delta > 10000km)',
+        );
       }
 
       // Si hay datos reales y superan el umbral, usar km reales. Sino

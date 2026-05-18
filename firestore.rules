@@ -984,6 +984,26 @@ service cloud.firestore {
     }
 
     // ========================================================================
+    // CUBIERTAS_KM_PENDIENTES — cola de reconciliación de km_acumulados
+    // ========================================================================
+    // Auditoría 2026-05-18: si una operación de retirar/rotar cubierta
+    // falla al actualizar `CUBIERTAS.km_acumulados` tras 3 reintentos
+    // exponenciales, el delta se persiste acá para reconciliación
+    // manual / cron futuro. Sin esto, los km perdidos no se recuperan
+    // → la cubierta parecía más nueva en reportes y se descartaba
+    // tarde.
+    //
+    // Crear: cualquier usuario que pueda operar gomería (el caller
+    // del retirar/rotar). Lectura: solo admin/supervisor (para
+    // diagnóstico). Update/delete: bloqueado client-side — la
+    // reconciliación va via callable o script manual.
+    match /CUBIERTAS_KM_PENDIENTES/{doc} {
+      allow read: if isAdminOrSupervisor();
+      allow create: if puedeOperarGomeria();
+      allow update, delete: if false;
+    }
+
+    // ========================================================================
     // VOLVO_SCORES_DIARIOS — scores de eco-driving (Volvo Group Scores API)
     // ========================================================================
     // La scheduled function `volvoScoresPoller` corre 1x por día a las 04:00
@@ -1042,6 +1062,28 @@ service cloud.firestore {
     // verificar la contraseña.
 
     match /LOGIN_ATTEMPTS/{dniHash} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
+    // LOGIN_ATTEMPTS_IP — rate limit por IP del login (cliente bloqueado)
+    // ========================================================================
+    // Suplemento al rate limit por DNI (auditoria 2026-05-18): sin esto,
+    // un atacante podía intentar 3 passwords sobre N DNIs distintos
+    // (cada uno con su propia cuota de 3 intentos) y nunca quedar
+    // bloqueado por la IP origen. Threshold: 10 intentos / 5 min por IP.
+    match /LOGIN_ATTEMPTS_IP/{ipHash} {
+      allow read, write: if false;
+    }
+
+    // ========================================================================
+    // PASS_CHANGE_ATTEMPTS — throttle de cambiarContrasenaChofer
+    // ========================================================================
+    // Auditoria 2026-05-18: sin esto, un device hostil con sesión activa
+    // podia brute-forcear la pass actual sin penalidad (bcrypt cost 10
+    // ≈ 100ms/intento). Mismo umbral que LOGIN_ATTEMPTS (3 intentos /
+    // 15 min). Doc id = hash del uid (no DNI plano).
+    match /PASS_CHANGE_ATTEMPTS/{uidHash} {
       allow read, write: if false;
     }
 

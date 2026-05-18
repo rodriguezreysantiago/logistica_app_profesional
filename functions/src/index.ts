@@ -119,6 +119,26 @@ export const loginConDni = onCall(
     // Validación extraída a función pura (testeable sin Firebase).
     const { dni, password } = validarInputLogin(request.data);
 
+    // ─── Rate limit por IP (auditoria 2026-05-18) ──────────────────
+    // Suplemento al rate limit por DNI: sin esto, un atacante podia
+    // probar 3 passwords sobre N DNIs distintos (cada uno con cuota
+    // propia de 3) y nunca quedar bloqueado por la IP origen. Ventana
+    // deslizante de 5 min, max 10 intentos fallidos por IP.
+    const ipRaw =
+      ((request.rawRequest?.ip ?? "") as string).toString() || "unknown";
+    const ipHash = hashId(ipRaw);
+    const ipBloqueoMin = await chequearBloqueoIp(ipHash);
+    if (ipBloqueoMin > 0) {
+      logger.warn("[login] IP bloqueada por rate limit", {
+        ipHash,
+        minutosRestantes: ipBloqueoMin,
+      });
+      throw new HttpsError(
+        "resource-exhausted",
+        `Demasiados intentos desde tu red. Reintentá en ${ipBloqueoMin} minutos.`,
+      );
+    }
+
     // ─── Lectura del legajo ────────────────────────────────────────
     const docRef = db.collection("EMPLEADOS").doc(dni);
     const docSnap = await docRef.get();
@@ -131,6 +151,9 @@ export const loginConDni = onCall(
       // password fallido por DNI existente). Ahora respuesta
       // indistinguible de "password incorrecto" → atacante no puede
       // separar "DNI valido" de "DNI invalido + password valido".
+      // Tambien contamos contra el rate limit por IP — sino enumerar
+      // DNIs no costaba nada.
+      await registrarIntentoFallidoIp(ipHash);
       throw new HttpsError("permission-denied", "Usuario o contraseña incorrectos.");
     }
 
@@ -179,6 +202,7 @@ export const loginConDni = onCall(
       // incrementa el contador Y devuelve si quedo bloqueado, asi no
       // hace falta un get() suelto previo (Bug M1: el chequeo previo
       // tenia ventana de race con esta tx).
+      await registrarIntentoFallidoIp(ipHash);
       const resultado = await registrarIntentoFallido(intentosRef);
       logger.info("[login] password incorrecto", {
         dniHash: hashId(dni),
@@ -314,6 +338,35 @@ export const cambiarContrasenaChofer = onCall(
         "La nueva contrasena debe tener al menos 6 caracteres.",
       );
     }
+    // Auditoria 2026-05-18: defensa contra "cambio a la misma pass" —
+    // accidental o intencional. Bcrypt no permite chequear igualdad sin
+    // verificar contra el hash, asi que el check real va abajo.
+    // Tambien rechazamos new == old en texto plano (mismo string).
+    if (nueva === actual) {
+      throw new HttpsError(
+        "invalid-argument",
+        "La nueva contrasena no puede ser igual a la actual.",
+      );
+    }
+
+    // Throttle anti-bruteforce de la pass actual (auditoria 2026-05-18).
+    // Reusa los mismos helpers de LOGIN_ATTEMPTS pero en una coleccion
+    // separada para no contaminar el rate limit del login. Sin esto, un
+    // device hostil con sesion activa podia probar 1000 passwords sin
+    // penalidad (bcrypt cost 10 ≈ 100ms/intento).
+    const intentosPassRef =
+      db.collection("PASS_CHANGE_ATTEMPTS").doc(hashId(uid));
+    const minBloqueoPass = await chequearBloqueoActivo(intentosPassRef);
+    if (minBloqueoPass > 0) {
+      logger.warn("[cambiarContrasenaChofer] bloqueado por rate limit", {
+        uidHash: hashId(uid),
+        minutosRestantes: minBloqueoPass,
+      });
+      throw new HttpsError(
+        "resource-exhausted",
+        `Demasiados intentos fallidos. Reintentá en ${minBloqueoPass} minutos.`,
+      );
+    }
 
     // Leer doc del propio chofer.
     const ref = db.collection("EMPLEADOS").doc(uid);
@@ -334,9 +387,18 @@ export const cambiarContrasenaChofer = onCall(
     // Verificar la contrasena actual server-side con bcrypt/SHA legacy.
     const ok = await verificarPassword(actual, hashActual);
     if (!ok) {
+      const resultado = await registrarIntentoFallido(intentosPassRef);
       logger.info("[cambiarContrasenaChofer] pass actual incorrecta", {
         uidHash: hashId(uid),
+        intentosFallidos: resultado.intentos,
+        bloqueadoMinRestantes: resultado.bloqueadoMinRestantes,
       });
+      if (resultado.bloqueadoMinRestantes > 0) {
+        throw new HttpsError(
+          "permission-denied",
+          `Demasiados intentos. Reintentá en ${resultado.bloqueadoMinRestantes} minutos.`,
+        );
+      }
       throw new HttpsError(
         "permission-denied",
         "La contrasena actual es incorrecta.",
@@ -349,6 +411,15 @@ export const cambiarContrasenaChofer = onCall(
       "CONTRASEÑA": nuevoHash,
       "fecha_ultima_actualizacion": FieldValue.serverTimestamp(),
     });
+    // Reset del contador de intentos tras cambio exitoso (best-effort).
+    try {
+      await intentosPassRef.delete();
+    } catch (e) {
+      logger.warn(
+        "[cambiarContrasenaChofer] no pude limpiar PASS_CHANGE_ATTEMPTS",
+        { uidHash: hashId(uid), error: (e as Error).message },
+      );
+    }
     logger.info("[cambiarContrasenaChofer] OK", { uidHash: hashId(uid) });
     return { ok: true };
   },
@@ -485,13 +556,16 @@ export const actualizarRolEmpleado = onCall(
     }
 
     // ─── Validación de input ───────────────────────────────────────
-    const dni = (request.data?.dni ?? "").toString().trim();
-    const rolNuevoRaw = request.data?.rol ?
-      request.data.rol.toString().toUpperCase() :
-      null;
-    const areaNuevaRaw = request.data?.area ?
-      request.data.area.toString().toUpperCase() :
-      null;
+    // Hardening (auditoria 2026-05-18): si el caller manda `rol: 0` /
+    // `rol: false` / `rol: null` con tipos raros, antes
+    // `request.data.rol.toString()` crasheaba (TypeError) y el callable
+    // devolvia "internal" en lugar de "invalid-argument". Coercion
+    // explicita con `String(... ?? '')`.
+    const dni = String(request.data?.dni ?? "").trim();
+    const rolRawStr = String(request.data?.rol ?? "").trim().toUpperCase();
+    const areaRawStr = String(request.data?.area ?? "").trim().toUpperCase();
+    const rolNuevoRaw = rolRawStr.length > 0 ? rolRawStr : null;
+    const areaNuevaRaw = areaRawStr.length > 0 ? areaRawStr : null;
 
     if (!dni) {
       throw new HttpsError("invalid-argument", "Falta `dni`.");
@@ -1054,6 +1128,70 @@ interface ResultadoIntentoFallido {
  *    devuelve `bloqueadoMinRestantes = duracion completa`.
  *  - Si todavia esta debajo del MAX, devuelve `bloqueadoMinRestantes = 0`.
  */
+// ──────────────────────────────────────────────────────────────────────────
+// Rate limit por IP (auditoria 2026-05-18)
+// ──────────────────────────────────────────────────────────────────────────
+// Suplemento al rate limit por DNI. Ventana DESLIZANTE de 5 min, max 10
+// intentos fallidos por IP. Si supera el max, bloquea 5 min adicionales.
+//
+// Diferencia con el throttle por DNI:
+//  - Por DNI: cuenta intentos CONSECUTIVOS a un DNI especifico (3 → 15 min).
+//  - Por IP: cuenta intentos en una VENTANA de tiempo, sin importar qué DNI.
+//
+// Threshold mas alto (10 vs 3) porque la IP puede ser compartida (NAT, oficina
+// con varios choferes) y queremos minimizar falsos positivos en operaciones
+// legitimas.
+const MAX_INTENTOS_IP = 10;
+const VENTANA_IP_MS = 5 * 60 * 1000;
+const BLOQUEO_IP_MS = 5 * 60 * 1000;
+
+async function chequearBloqueoIp(ipHash: string): Promise<number> {
+  const ref = db.collection("LOGIN_ATTEMPTS_IP").doc(ipHash);
+  const snap = await ref.get();
+  if (!snap.exists) return 0;
+  const data = snap.data() ?? {};
+  const bloqueadoHasta = data.bloqueadoHasta as Timestamp | undefined;
+  if (!bloqueadoHasta) return 0;
+  const restanteMs = bloqueadoHasta.toMillis() - Date.now();
+  if (restanteMs <= 0) return 0;
+  return Math.ceil(restanteMs / 60000);
+}
+
+async function registrarIntentoFallidoIp(ipHash: string): Promise<void> {
+  const ref = db.collection("LOGIN_ATTEMPTS_IP").doc(ipHash);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists ? snap.data() ?? {} : {};
+    const ahora = Date.now();
+    const ventanaInicio = data.ventanaInicio as Timestamp | undefined;
+    const intentosPrevios = Number(data.intentos ?? 0);
+    let intentos: number;
+    let ventanaInicioNueva: Timestamp;
+    if (!ventanaInicio || ahora - ventanaInicio.toMillis() > VENTANA_IP_MS) {
+      // Nueva ventana
+      intentos = 1;
+      ventanaInicioNueva = Timestamp.fromMillis(ahora);
+    } else {
+      intentos = (Number.isFinite(intentosPrevios) ? intentosPrevios : 0) + 1;
+      ventanaInicioNueva = ventanaInicio;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const update: { [k: string]: any } = {
+      intentos,
+      ventanaInicio: ventanaInicioNueva,
+      ultimoIntento: FieldValue.serverTimestamp(),
+    };
+    if (intentos >= MAX_INTENTOS_IP) {
+      update.bloqueadoHasta = Timestamp.fromMillis(ahora + BLOQUEO_IP_MS);
+    }
+    if (snap.exists) {
+      tx.update(ref, update);
+    } else {
+      tx.set(ref, update);
+    }
+  });
+}
+
 export async function registrarIntentoFallido(
   ref: DocumentReference,
   database: Firestore = db
@@ -1948,134 +2086,134 @@ export const volvoAlertasPoller = onSchedule(
     );
     if (!liberar) return;
     try {
-    logger.info("[volvoAlertasPoller] iniciando ciclo");
+      logger.info("[volvoAlertasPoller] iniciando ciclo");
 
-    // ─── 1. Cursor: desde dónde poleamos ────────────────────────────
-    const cursorRef = db.collection("META").doc("volvo_alertas_cursor");
-    const cursorSnap = await cursorRef.get();
-    const cursorData = cursorSnap.exists ? cursorSnap.data() ?? {} : {};
-    const ultimoServerTs = cursorData.ultimo_request_server_datetime as
+      // ─── 1. Cursor: desde dónde poleamos ────────────────────────────
+      const cursorRef = db.collection("META").doc("volvo_alertas_cursor");
+      const cursorSnap = await cursorRef.get();
+      const cursorData = cursorSnap.exists ? cursorSnap.data() ?? {} : {};
+      const ultimoServerTs = cursorData.ultimo_request_server_datetime as
       | Timestamp
       | undefined;
-    const starttime = ultimoServerTs ?
-      ultimoServerTs.toDate().toISOString() :
-      new Date(Date.now() - COLD_START_LOOKBACK_MS).toISOString();
-    const esColdStart = !ultimoServerTs;
+      const starttime = ultimoServerTs ?
+        ultimoServerTs.toDate().toISOString() :
+        new Date(Date.now() - COLD_START_LOOKBACK_MS).toISOString();
+      const esColdStart = !ultimoServerTs;
 
-    // ─── 2. Map VIN → patente desde VEHICULOS ───────────────────────
-    // Soft-delete: vehiculos dados de baja NO se mapean — sus alertas
-    // del API Volvo se descartan en lugar de crearse en VOLVO_ALERTAS.
-    const vehiculosSnap = await db.collection("VEHICULOS").get();
-    const vinToPatente = new Map<string, string>();
-    for (const doc of vehiculosSnap.docs) {
-      const data = doc.data();
-      if (data.ACTIVO === false) continue;
-      const vin = (data.VIN ?? "").toString().trim().toUpperCase();
-      if (vin && vin !== "-") {
-        vinToPatente.set(vin, doc.id);
+      // ─── 2. Map VIN → patente desde VEHICULOS ───────────────────────
+      // Soft-delete: vehiculos dados de baja NO se mapean — sus alertas
+      // del API Volvo se descartan en lugar de crearse en VOLVO_ALERTAS.
+      const vehiculosSnap = await db.collection("VEHICULOS").get();
+      const vinToPatente = new Map<string, string>();
+      for (const doc of vehiculosSnap.docs) {
+        const data = doc.data();
+        if (data.ACTIVO === false) continue;
+        const vin = (data.VIN ?? "").toString().trim().toUpperCase();
+        if (vin && vin !== "-") {
+          vinToPatente.set(vin, doc.id);
+        }
       }
-    }
 
-    // ─── 3. Auth Volvo ──────────────────────────────────────────────
-    const authHeader = "Basic " + Buffer.from(
-      `${volvoUsername.value()}:${volvoPassword.value()}`
-    ).toString("base64");
+      // ─── 3. Auth Volvo ──────────────────────────────────────────────
+      const authHeader = "Basic " + Buffer.from(
+        `${volvoUsername.value()}:${volvoPassword.value()}`
+      ).toString("base64");
 
-    // ─── 4. Loop de paginación ──────────────────────────────────────
-    const qsInicial = new URLSearchParams({ starttime });
-    let url = `${VOLVO_BASE}/alert/vehiclealerts?${qsInicial.toString()}`;
-    let totalRecibidos = 0;
-    let totalEscritos = 0;
-    let totalDuplicados = 0;
-    let totalDescartados = 0;
-    let nuevoServerDateTime: string | null = null;
-    let pages = 0;
+      // ─── 4. Loop de paginación ──────────────────────────────────────
+      const qsInicial = new URLSearchParams({ starttime });
+      let url = `${VOLVO_BASE}/alert/vehiclealerts?${qsInicial.toString()}`;
+      let totalRecibidos = 0;
+      let totalEscritos = 0;
+      let totalDuplicados = 0;
+      let totalDescartados = 0;
+      let nuevoServerDateTime: string | null = null;
+      let pages = 0;
 
-    while (pages < MAX_PAGES_PER_RUN) {
-      pages++;
+      while (pages < MAX_PAGES_PER_RUN) {
+        pages++;
 
-      let res: Response;
-      try {
-        res = await fetchWithTimeout(url, {
-          method: "GET",
-          headers: {
-            "Authorization": authHeader,
-            "Accept": ACCEPT_ALERTS,
+        let res: Response;
+        try {
+          res = await fetchWithTimeout(url, {
+            method: "GET",
+            headers: {
+              "Authorization": authHeader,
+              "Accept": ACCEPT_ALERTS,
+            },
+          });
+        } catch (e) {
+          logger.error("[volvoAlertasPoller] fetch falló", {
+            page: pages,
+            error: (e as Error).message,
+          });
+          return; // No actualizamos cursor, próximo run reintenta.
+        }
+
+        if (!res.ok) {
+          logger.warn("[volvoAlertasPoller] Volvo HTTP error", {
+            statusCode: res.status,
+            page: pages,
+          });
+          return; // Idem: no avanzamos cursor.
+        }
+
+        const body = (await res.json()) as AlertsApiResponse;
+        const response = body.alertsResponse ?? {};
+        const alerts = Array.isArray(response.alerts) ? response.alerts : [];
+        const moreData = response.moreDataAvailable === true;
+        const moreLink = response.moreDataAvailableLink;
+        const serverTs = response.requestServerDateTime;
+
+        // El requestServerDateTime de la PRIMER página es el que vamos a
+        // persistir como cursor. Las páginas siguientes traen el mismo
+        // valor o uno levemente distinto, pero usamos siempre la primera
+        // para que el cursor refleje el momento del primer fetch.
+        if (pages === 1 && serverTs) {
+          nuevoServerDateTime = serverTs;
+        }
+
+        totalRecibidos += alerts.length;
+
+        if (alerts.length > 0) {
+          const writeResult = await persistirAlertas(
+            alerts,
+            vinToPatente
+          );
+          totalEscritos += writeResult.escritos;
+          totalDuplicados += writeResult.duplicados;
+          totalDescartados += writeResult.descartados;
+        }
+
+        if (!moreData || !moreLink) break;
+        url = `${VOLVO_BASE}${moreLink}`;
+      }
+
+      // ─── 5. Persistir cursor ────────────────────────────────────────
+      if (nuevoServerDateTime) {
+        await cursorRef.set(
+          {
+            ultimo_request_server_datetime: Timestamp.fromDate(
+              new Date(nuevoServerDateTime)
+            ),
+            ultimo_exito_at: FieldValue.serverTimestamp(),
+            ultimo_recibidos: totalRecibidos,
+            ultimo_escritos: totalEscritos,
+            ultimo_duplicados: totalDuplicados,
+            ultimo_descartados: totalDescartados,
+            ultimo_paginas: pages,
           },
-        });
-      } catch (e) {
-        logger.error("[volvoAlertasPoller] fetch falló", {
-          page: pages,
-          error: (e as Error).message,
-        });
-        return; // No actualizamos cursor, próximo run reintenta.
-      }
-
-      if (!res.ok) {
-        logger.warn("[volvoAlertasPoller] Volvo HTTP error", {
-          statusCode: res.status,
-          page: pages,
-        });
-        return; // Idem: no avanzamos cursor.
-      }
-
-      const body = (await res.json()) as AlertsApiResponse;
-      const response = body.alertsResponse ?? {};
-      const alerts = Array.isArray(response.alerts) ? response.alerts : [];
-      const moreData = response.moreDataAvailable === true;
-      const moreLink = response.moreDataAvailableLink;
-      const serverTs = response.requestServerDateTime;
-
-      // El requestServerDateTime de la PRIMER página es el que vamos a
-      // persistir como cursor. Las páginas siguientes traen el mismo
-      // valor o uno levemente distinto, pero usamos siempre la primera
-      // para que el cursor refleje el momento del primer fetch.
-      if (pages === 1 && serverTs) {
-        nuevoServerDateTime = serverTs;
-      }
-
-      totalRecibidos += alerts.length;
-
-      if (alerts.length > 0) {
-        const writeResult = await persistirAlertas(
-          alerts,
-          vinToPatente
+          { merge: true }
         );
-        totalEscritos += writeResult.escritos;
-        totalDuplicados += writeResult.duplicados;
-        totalDescartados += writeResult.descartados;
       }
 
-      if (!moreData || !moreLink) break;
-      url = `${VOLVO_BASE}${moreLink}`;
-    }
-
-    // ─── 5. Persistir cursor ────────────────────────────────────────
-    if (nuevoServerDateTime) {
-      await cursorRef.set(
-        {
-          ultimo_request_server_datetime: Timestamp.fromDate(
-            new Date(nuevoServerDateTime)
-          ),
-          ultimo_exito_at: FieldValue.serverTimestamp(),
-          ultimo_recibidos: totalRecibidos,
-          ultimo_escritos: totalEscritos,
-          ultimo_duplicados: totalDuplicados,
-          ultimo_descartados: totalDescartados,
-          ultimo_paginas: pages,
-        },
-        { merge: true }
-      );
-    }
-
-    logger.info("[volvoAlertasPoller] OK", {
-      esColdStart,
-      paginas: pages,
-      recibidos: totalRecibidos,
-      escritos: totalEscritos,
-      duplicados: totalDuplicados,
-      descartados: totalDescartados,
-    });
+      logger.info("[volvoAlertasPoller] OK", {
+        esColdStart,
+        paginas: pages,
+        recibidos: totalRecibidos,
+        escritos: totalEscritos,
+        duplicados: totalDuplicados,
+        descartados: totalDescartados,
+      });
     } finally {
       await liberar();
     }
@@ -3550,6 +3688,9 @@ export const backupFirestoreScheduled = onSchedule(
       "META_AVISOS_NO_ID",
       "META_ALERTAS_VOLVO_NOTIFICADAS",
       "META_LOCKS",
+      "CUBIERTAS_KM_PENDIENTES",
+      "LOGIN_ATTEMPTS_IP",
+      "PASS_CHANGE_ATTEMPTS",
       // Auditoria + sistema
       "AUDITORIA_ACCIONES",
       "LOGIN_ATTEMPTS",
@@ -3581,8 +3722,29 @@ export const backupFirestoreScheduled = onSchedule(
         operationName: operation.name,
       });
     } catch (err) {
+      // Concurrencia: si el export anterior aun no termino (poco probable
+      // con schedule semanal, pero defensivo si Firestore quedo lento),
+      // GCP rechaza con FAILED_PRECONDITION o RESOURCE_EXHAUSTED.
+      // Auditoria 2026-05-18: skipear silencioso en lugar de fallar el
+      // run — el proximo schedule lo intentara de nuevo.
+      const code = (err as { code?: number | string }).code;
+      const msg = (err as Error).message || "";
+      const yaEnCurso =
+        code === 9 || // FAILED_PRECONDITION
+        code === 8 || // RESOURCE_EXHAUSTED
+        msg.includes("FAILED_PRECONDITION") ||
+        msg.includes("RESOURCE_EXHAUSTED") ||
+        msg.includes("already") ||
+        msg.includes("in progress");
+      if (yaEnCurso) {
+        logger.warn("[backupFirestoreScheduled] export anterior en curso, skip", {
+          code,
+          message: msg,
+        });
+        return;
+      }
       logger.error("[backupFirestoreScheduled] export FALLÓ", {
-        error: (err as Error).message,
+        error: msg,
         stack: (err as Error).stack,
       });
       // Re-throw para que GCP marque el run como FAILED. Cloud Monitoring
@@ -3747,41 +3909,123 @@ export const resumenBotDiario = onSchedule(
     let exitoCron = false;
     try {
 
-    // Eventos de las últimas 24h.
-    const desde = Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
-    const evSnap = await db
-      .collection("BOT_EVENTOS")
-      .where("detectadoEn", ">=", desde)
-      .orderBy("detectadoEn", "asc")
-      .get();
+      // Eventos de las últimas 24h.
+      const desde = Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
+      const evSnap = await db
+        .collection("BOT_EVENTOS")
+        .where("detectadoEn", ">=", desde)
+        .orderBy("detectadoEn", "asc")
+        .get();
 
-    // Lookup destinatario.
-    const adminDni = MANTENIMIENTO_DESTINATARIO_DNI;
-    const empSnap = await db.collection("EMPLEADOS").doc(adminDni).get();
-    const tel = empSnap.exists ?
-      (empSnap.data()?.TELEFONO ?? "").toString().trim() :
-      "";
-    if (!tel) {
-      logger.error("[resumenBotDiario] admin sin TELEFONO", {
-        adminDni,
-      });
-      return;
-    }
+      // Lookup destinatario.
+      const adminDni = MANTENIMIENTO_DESTINATARIO_DNI;
+      const empSnap = await db.collection("EMPLEADOS").doc(adminDni).get();
+      const tel = empSnap.exists ?
+        (empSnap.data()?.TELEFONO ?? "").toString().trim() :
+        "";
+      if (!tel) {
+        logger.error("[resumenBotDiario] admin sin TELEFONO", {
+          adminDni,
+        });
+        return;
+      }
 
-    // Sin eventos: mandamos "todo OK" igual (decisión Santiago
-    // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
-    // corrió y el bot estuvo sano las últimas 24h).
-    if (evSnap.empty) {
-      const fechaTxt = _formatFechaArg(Date.now());
-      const mensajeOk =
+      // Sin eventos: mandamos "todo OK" igual (decisión Santiago
+      // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
+      // corrió y el bot estuvo sano las últimas 24h).
+      if (evSnap.empty) {
+        const fechaTxt = _formatFechaArg(Date.now());
+        const mensajeOk =
         `🤖 *Resumen del bot — ${fechaTxt}*\n\n` +
         "✅ Sin caídas ni eventos en las últimas 24 h.\n\n" +
         BANNER_TESTING +
         "_Si dejaras de recibir este resumen a las 8 AM, " +
         "verificá que la Cloud Function `resumenBotDiario` esté activa._";
+        const colaRef = await db.collection("COLA_WHATSAPP").add({
+          telefono: tel,
+          mensaje: mensajeOk,
+          estado: "PENDIENTE",
+          encolado_en: FieldValue.serverTimestamp(),
+          enviado_en: null,
+          error: null,
+          intentos: 0,
+          origen: "cron_bot_resumen_diario",
+          destinatario_coleccion: "EMPLEADOS",
+          destinatario_id: adminDni,
+          campo_base: "BOT_RESUMEN_DIARIO",
+          admin_dni: "BOT",
+          admin_nombre: "Bot watchdog",
+        });
+        // Actualizar metadata del lock atomico (el create ya tomo el slot).
+        await histRef.update({
+          cantidad_eventos: 0,
+          cola_doc_id: colaRef.id,
+        });
+        logger.info("[resumenBotDiario] OK (sin eventos)", { colaDocId: colaRef.id });
+        exitoCron = true;
+        return;
+      }
+
+      // Armar mensaje.
+      const lineas: string[] = [];
+      let totalCaidas = 0;
+      let totalRecuperaciones = 0;
+      let minutosCaidoTotal = 0;
+
+      for (const doc of evSnap.docs) {
+        const d = doc.data();
+        const tipo = String(d.tipo ?? "");
+        const detectadoEn = d.detectadoEn as Timestamp | undefined;
+        if (!detectadoEn) continue;
+        const horaTxt = _formatHoraArg(detectadoEn.toMillis());
+        const fechaTxt = _formatFechaArg(detectadoEn.toMillis());
+        const pcId = (d.pcId ?? "?").toString();
+
+        if (tipo === "caida") {
+          totalCaidas++;
+          const minSinHb = d.minutosSinHeartbeat ?? "?";
+          lineas.push(
+            `🔴 *Caída detectada* — ${fechaTxt} ${horaTxt} (PC \`${pcId}\`, ` +
+          `${minSinHb} min sin heartbeat al detectar)`
+          );
+        } else if (tipo === "recuperado") {
+          totalRecuperaciones++;
+          const dur = typeof d.duracionMin === "number" ? d.duracionMin : null;
+          if (dur !== null) minutosCaidoTotal += dur;
+          const durTxt = dur !== null ? `${dur} min` : "?";
+          lineas.push(
+            `🟢 *Recuperado* — ${fechaTxt} ${horaTxt} (PC \`${pcId}\`, ` +
+          `caído ~${durTxt})`
+          );
+        } else {
+          lineas.push(`• ${tipo} ${fechaTxt} ${horaTxt}`);
+        }
+      }
+
+      const titulo =
+      totalCaidas === 0 && totalRecuperaciones > 0 ?
+        "🤖 *Resumen del bot — recuperaciones de caídas previas*" :
+        totalCaidas > 0 ?
+          `🤖 *Resumen del bot — ${totalCaidas} ` +
+          `caída${totalCaidas !== 1 ? "s" : ""} en últimas 24h*` :
+          "🤖 *Resumen del bot — eventos del día*";
+
+      const subtotal = minutosCaidoTotal > 0 ?
+        `\n\nTiempo total caído estimado: ${minutosCaidoTotal} min.` :
+        "";
+
+      const mensaje =
+      titulo + "\n\n" +
+      lineas.join("\n") +
+      subtotal + "\n\n" +
+      BANNER_TESTING +
+      "_Si hubo caídas que no detectaste, verificá el servicio (NSSM " +
+      "del bot) en la PC correspondiente._";
+
+      // Encolar.
       const colaRef = await db.collection("COLA_WHATSAPP").add({
         telefono: tel,
-        mensaje: mensajeOk,
+        mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
         enviado_en: null,
@@ -3794,106 +4038,24 @@ export const resumenBotDiario = onSchedule(
         admin_dni: "BOT",
         admin_nombre: "Bot watchdog",
       });
-      // Actualizar metadata del lock atomico (el create ya tomo el slot).
+
+      // Update metadata sobre el lock que ya tomamos al inicio.
       await histRef.update({
-        cantidad_eventos: 0,
+        cantidad_eventos: evSnap.size,
+        cantidad_caidas: totalCaidas,
+        cantidad_recuperaciones: totalRecuperaciones,
+        minutos_caido_total: minutosCaidoTotal,
         cola_doc_id: colaRef.id,
       });
-      logger.info("[resumenBotDiario] OK (sin eventos)", { colaDocId: colaRef.id });
+
+      logger.info("[resumenBotDiario] OK", {
+        eventos: evSnap.size,
+        caidas: totalCaidas,
+        recuperaciones: totalRecuperaciones,
+        minutosCaidoTotal,
+        colaDocId: colaRef.id,
+      });
       exitoCron = true;
-      return;
-    }
-
-    // Armar mensaje.
-    const lineas: string[] = [];
-    let totalCaidas = 0;
-    let totalRecuperaciones = 0;
-    let minutosCaidoTotal = 0;
-
-    for (const doc of evSnap.docs) {
-      const d = doc.data();
-      const tipo = String(d.tipo ?? "");
-      const detectadoEn = d.detectadoEn as Timestamp | undefined;
-      if (!detectadoEn) continue;
-      const horaTxt = _formatHoraArg(detectadoEn.toMillis());
-      const fechaTxt = _formatFechaArg(detectadoEn.toMillis());
-      const pcId = (d.pcId ?? "?").toString();
-
-      if (tipo === "caida") {
-        totalCaidas++;
-        const minSinHb = d.minutosSinHeartbeat ?? "?";
-        lineas.push(
-          `🔴 *Caída detectada* — ${fechaTxt} ${horaTxt} (PC \`${pcId}\`, ` +
-          `${minSinHb} min sin heartbeat al detectar)`
-        );
-      } else if (tipo === "recuperado") {
-        totalRecuperaciones++;
-        const dur = typeof d.duracionMin === "number" ? d.duracionMin : null;
-        if (dur !== null) minutosCaidoTotal += dur;
-        const durTxt = dur !== null ? `${dur} min` : "?";
-        lineas.push(
-          `🟢 *Recuperado* — ${fechaTxt} ${horaTxt} (PC \`${pcId}\`, ` +
-          `caído ~${durTxt})`
-        );
-      } else {
-        lineas.push(`• ${tipo} ${fechaTxt} ${horaTxt}`);
-      }
-    }
-
-    const titulo =
-      totalCaidas === 0 && totalRecuperaciones > 0 ?
-        "🤖 *Resumen del bot — recuperaciones de caídas previas*" :
-        totalCaidas > 0 ?
-          `🤖 *Resumen del bot — ${totalCaidas} ` +
-          `caída${totalCaidas !== 1 ? "s" : ""} en últimas 24h*` :
-          "🤖 *Resumen del bot — eventos del día*";
-
-    const subtotal = minutosCaidoTotal > 0 ?
-      `\n\nTiempo total caído estimado: ${minutosCaidoTotal} min.` :
-      "";
-
-    const mensaje =
-      titulo + "\n\n" +
-      lineas.join("\n") +
-      subtotal + "\n\n" +
-      BANNER_TESTING +
-      "_Si hubo caídas que no detectaste, verificá el servicio (NSSM " +
-      "del bot) en la PC correspondiente._";
-
-    // Encolar.
-    const colaRef = await db.collection("COLA_WHATSAPP").add({
-      telefono: tel,
-      mensaje,
-      estado: "PENDIENTE",
-      encolado_en: FieldValue.serverTimestamp(),
-      enviado_en: null,
-      error: null,
-      intentos: 0,
-      origen: "cron_bot_resumen_diario",
-      destinatario_coleccion: "EMPLEADOS",
-      destinatario_id: adminDni,
-      campo_base: "BOT_RESUMEN_DIARIO",
-      admin_dni: "BOT",
-      admin_nombre: "Bot watchdog",
-    });
-
-    // Update metadata sobre el lock que ya tomamos al inicio.
-    await histRef.update({
-      cantidad_eventos: evSnap.size,
-      cantidad_caidas: totalCaidas,
-      cantidad_recuperaciones: totalRecuperaciones,
-      minutos_caido_total: minutosCaidoTotal,
-      cola_doc_id: colaRef.id,
-    });
-
-    logger.info("[resumenBotDiario] OK", {
-      eventos: evSnap.size,
-      caidas: totalCaidas,
-      recuperaciones: totalRecuperaciones,
-      minutosCaidoTotal,
-      colaDocId: colaRef.id,
-    });
-    exitoCron = true;
     } finally {
       if (!exitoCron) {
         // Liberar el lock para que el proximo run intente de nuevo.
@@ -4009,54 +4171,54 @@ export const sitrackPosicionPoller = onSchedule(
     );
     if (!liberar) return;
     try {
-    logger.info("[sitrackPosicionPoller] iniciando ciclo");
+      logger.info("[sitrackPosicionPoller] iniciando ciclo");
 
-    // ─── Auth Basic HTTPS ──────────────────────────────────────────
-    const authHeader = "Basic " + Buffer.from(
-      `${sitrackUsername.value()}:${sitrackPassword.value()}`
-    ).toString("base64");
+      // ─── Auth Basic HTTPS ──────────────────────────────────────────
+      const authHeader = "Basic " + Buffer.from(
+        `${sitrackUsername.value()}:${sitrackPassword.value()}`
+      ).toString("base64");
 
-    // ─── Fetch ─────────────────────────────────────────────────────
-    const url = `${SITRACK_BASE_AR}/v2/report`;
-    let res: Response;
-    try {
-      res = await fetchWithTimeout(url, {
-        method: "GET",
-        headers: {
-          "Authorization": authHeader,
-          "Accept": "application/json",
-        },
-      });
-    } catch (e) {
-      logger.error("[sitrackPosicionPoller] fetch falló", {
-        error: (e as Error).message,
-      });
-      return;
-    }
+      // ─── Fetch ─────────────────────────────────────────────────────
+      const url = `${SITRACK_BASE_AR}/v2/report`;
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(url, {
+          method: "GET",
+          headers: {
+            "Authorization": authHeader,
+            "Accept": "application/json",
+          },
+        });
+      } catch (e) {
+        logger.error("[sitrackPosicionPoller] fetch falló", {
+          error: (e as Error).message,
+        });
+        return;
+      }
 
-    if (!res.ok) {
-      logger.warn("[sitrackPosicionPoller] HTTP error", {
-        statusCode: res.status,
-      });
-      return;
-    }
+      if (!res.ok) {
+        logger.warn("[sitrackPosicionPoller] HTTP error", {
+          statusCode: res.status,
+        });
+        return;
+      }
 
-    let reports: SitrackReportItem[];
-    try {
-      reports = (await res.json()) as SitrackReportItem[];
-    } catch (e) {
-      logger.error("[sitrackPosicionPoller] JSON parse falló", {
-        error: (e as Error).message,
-      });
-      return;
-    }
+      let reports: SitrackReportItem[];
+      try {
+        reports = (await res.json()) as SitrackReportItem[];
+      } catch (e) {
+        logger.error("[sitrackPosicionPoller] JSON parse falló", {
+          error: (e as Error).message,
+        });
+        return;
+      }
 
-    if (!Array.isArray(reports)) {
-      logger.warn("[sitrackPosicionPoller] respuesta no es array", {
-        tipo: typeof reports,
-      });
-      return;
-    }
+      if (!Array.isArray(reports)) {
+        logger.warn("[sitrackPosicionPoller] respuesta no es array", {
+          tipo: typeof reports,
+        });
+        return;
+      }
 
     // ─── Drift detection: leer asignaciones activas ────────────────
     // Cargamos en memoria todas las ASIGNACIONES_VEHICULO con hasta=null
@@ -4401,257 +4563,257 @@ export const sitrackEventosPoller = onSchedule(
     );
     if (!liberar) return;
     try {
-    logger.info("[sitrackEventosPoller] iniciando ciclo");
+      logger.info("[sitrackEventosPoller] iniciando ciclo");
 
-    const authHeader = "Basic " + Buffer.from(
-      `${sitrackUsername.value()}:${sitrackPassword.value()}`
-    ).toString("base64");
+      const authHeader = "Basic " + Buffer.from(
+        `${sitrackUsername.value()}:${sitrackPassword.value()}`
+      ).toString("base64");
 
-    const url = `${SITRACK_BASE_AR}/files/reports`;
-    let res: Response;
-    let bodyText = "";
-    try {
-      res = await fetchWithTimeout(url, {
-        method: "GET",
-        headers: {
-          Authorization: authHeader,
-          Accept: "application/json",
-        },
-      });
-      // /files/reports devuelve text/plain (probablemente NDJSON o
-      // array JSON). Leer todo el body antes de cerrar la conexión —
-      // la doc Sitrack es explícita: si cerramos antes de leer todos
-      // los bytes, en la próxima llamada se reenvía el bloque entero.
-      bodyText = await res.text();
-    } catch (e) {
-      logger.error("[sitrackEventosPoller] fetch falló", {
-        error: (e as Error).message,
-      });
-      return;
-    }
+      const url = `${SITRACK_BASE_AR}/files/reports`;
+      let res: Response;
+      let bodyText = "";
+      try {
+        res = await fetchWithTimeout(url, {
+          method: "GET",
+          headers: {
+            Authorization: authHeader,
+            Accept: "application/json",
+          },
+        });
+        // /files/reports devuelve text/plain (probablemente NDJSON o
+        // array JSON). Leer todo el body antes de cerrar la conexión —
+        // la doc Sitrack es explícita: si cerramos antes de leer todos
+        // los bytes, en la próxima llamada se reenvía el bloque entero.
+        bodyText = await res.text();
+      } catch (e) {
+        logger.error("[sitrackEventosPoller] fetch falló", {
+          error: (e as Error).message,
+        });
+        return;
+      }
 
-    // 400 errorCode 120: otra invocación en progreso. Lo loguamos y
-    // salimos — el próximo ciclo lo intenta de nuevo.
-    if (res.status === 400 && bodyText.includes("\"errorCode\":120")) {
-      logger.warn("[sitrackEventosPoller] otra invocación en progreso", {
-        body: bodyText.slice(0, 200),
-      });
-      return;
-    }
-    if (!res.ok) {
-      logger.warn("[sitrackEventosPoller] HTTP error", {
-        statusCode: res.status,
-        bodyHead: bodyText.slice(0, 500),
-      });
-      return;
-    }
+      // 400 errorCode 120: otra invocación en progreso. Lo loguamos y
+      // salimos — el próximo ciclo lo intenta de nuevo.
+      if (res.status === 400 && bodyText.includes("\"errorCode\":120")) {
+        logger.warn("[sitrackEventosPoller] otra invocación en progreso", {
+          body: bodyText.slice(0, 200),
+        });
+        return;
+      }
+      if (!res.ok) {
+        logger.warn("[sitrackEventosPoller] HTTP error", {
+          statusCode: res.status,
+          bodyHead: bodyText.slice(0, 500),
+        });
+        return;
+      }
 
-    const bodyBytes = Buffer.byteLength(bodyText, "utf8");
-    if (bodyBytes === 0) {
+      const bodyBytes = Buffer.byteLength(bodyText, "utf8");
+      if (bodyBytes === 0) {
       // Buffer vacío — caso normal cuando no hubo eventos nuevos.
       // Ojo: NO indica desactivación (ver script
       // sitrack_probar_files_reports.js para el matiz).
-      logger.info("[sitrackEventosPoller] sin eventos nuevos");
-      await db.collection("META").doc("sitrack_eventos_cursor").set({
-        ultimo_exito_at: FieldValue.serverTimestamp(),
-        ultimo_recibidos: 0,
-        ultimo_escritos: 0,
-        ultimo_descartados: 0,
-        ultimo_bytes: 0,
-      }, { merge: true });
-      return;
-    }
-
-    // Parseo defensivo. El sample observado en pruebas mostró:
-    //   {"reportId":"..."},\n{"reportId":"..."},\n...
-    // No vimos `[` al inicio — por las dudas probamos 3 estrategias:
-    //   1. JSON.parse del body completo (caso array JSON estándar).
-    //   2. Envolver con [...] por si vienen items separados por coma.
-    //   3. NDJSON: split por newline + parse cada línea.
-    let eventos: SitrackEventoItem[] = [];
-    let parseStrategy = "";
-    try {
-      const parsed = JSON.parse(bodyText);
-      if (Array.isArray(parsed)) {
-        eventos = parsed as SitrackEventoItem[];
-        parseStrategy = "json-array";
-      } else if (parsed && Array.isArray(parsed.reports)) {
-        eventos = parsed.reports as SitrackEventoItem[];
-        parseStrategy = "json-object-reports";
-      } else if (parsed && typeof parsed === "object") {
-        // Single object → array de 1.
-        eventos = [parsed as SitrackEventoItem];
-        parseStrategy = "json-single";
+        logger.info("[sitrackEventosPoller] sin eventos nuevos");
+        await db.collection("META").doc("sitrack_eventos_cursor").set({
+          ultimo_exito_at: FieldValue.serverTimestamp(),
+          ultimo_recibidos: 0,
+          ultimo_escritos: 0,
+          ultimo_descartados: 0,
+          ultimo_bytes: 0,
+        }, { merge: true });
+        return;
       }
-    } catch {
-      // Estrategia 2: envolver en array.
+
+      // Parseo defensivo. El sample observado en pruebas mostró:
+      //   {"reportId":"..."},\n{"reportId":"..."},\n...
+      // No vimos `[` al inicio — por las dudas probamos 3 estrategias:
+      //   1. JSON.parse del body completo (caso array JSON estándar).
+      //   2. Envolver con [...] por si vienen items separados por coma.
+      //   3. NDJSON: split por newline + parse cada línea.
+      let eventos: SitrackEventoItem[] = [];
+      let parseStrategy = "";
       try {
-        const wrapped = `[${bodyText.replace(/,\s*$/, "")}]`;
-        const parsed = JSON.parse(wrapped);
+        const parsed = JSON.parse(bodyText);
         if (Array.isArray(parsed)) {
           eventos = parsed as SitrackEventoItem[];
-          parseStrategy = "comma-wrapped";
+          parseStrategy = "json-array";
+        } else if (parsed && Array.isArray(parsed.reports)) {
+          eventos = parsed.reports as SitrackEventoItem[];
+          parseStrategy = "json-object-reports";
+        } else if (parsed && typeof parsed === "object") {
+        // Single object → array de 1.
+          eventos = [parsed as SitrackEventoItem];
+          parseStrategy = "json-single";
         }
       } catch {
-        // Estrategia 3: NDJSON.
-        const lineas = bodyText.split(/\r?\n/);
-        for (const linea of lineas) {
-          const t = linea.trim().replace(/,$/, "");
-          if (!t) continue;
-          try {
-            eventos.push(JSON.parse(t) as SitrackEventoItem);
-          } catch {
-            // saltamos línea malformada
+      // Estrategia 2: envolver en array.
+        try {
+          const wrapped = `[${bodyText.replace(/,\s*$/, "")}]`;
+          const parsed = JSON.parse(wrapped);
+          if (Array.isArray(parsed)) {
+            eventos = parsed as SitrackEventoItem[];
+            parseStrategy = "comma-wrapped";
           }
+        } catch {
+        // Estrategia 3: NDJSON.
+          const lineas = bodyText.split(/\r?\n/);
+          for (const linea of lineas) {
+            const t = linea.trim().replace(/,$/, "");
+            if (!t) continue;
+            try {
+              eventos.push(JSON.parse(t) as SitrackEventoItem);
+            } catch {
+            // saltamos línea malformada
+            }
+          }
+          parseStrategy = "ndjson-line-by-line";
         }
-        parseStrategy = "ndjson-line-by-line";
       }
-    }
 
-    if (eventos.length === 0) {
-      logger.warn("[sitrackEventosPoller] no se pudo parsear ningún evento", {
+      if (eventos.length === 0) {
+        logger.warn("[sitrackEventosPoller] no se pudo parsear ningún evento", {
+          bytes: bodyBytes,
+          bodyHead: bodyText.slice(0, 500),
+          parseStrategy,
+        });
+        return;
+      }
+
+      logger.info("[sitrackEventosPoller] eventos parseados", {
+        cantidad: eventos.length,
         bytes: bodyBytes,
-        bodyHead: bodyText.slice(0, 500),
         parseStrategy,
       });
-      return;
-    }
 
-    logger.info("[sitrackEventosPoller] eventos parseados", {
-      cantidad: eventos.length,
-      bytes: bodyBytes,
-      parseStrategy,
-    });
+      // ─── Persistir en SITRACK_EVENTOS ─────────────────────────────
+      // docId = reportId (UUID único por evento del lado Sitrack).
+      // Idempotente: si por algún motivo el mismo reportId llega 2 veces,
+      // sobrescribe sin duplicar (set sin merge — el evento es
+      // inmutable, no hay update).
+      //
+      // Batches de 500 ops (límite Firestore). Si llegan > 500, hacemos
+      // múltiples commits.
+      const BATCH_SIZE = 500;
+      let escritos = 0;
+      let descartados = 0;
+      let batch = db.batch();
+      let opsEnBatch = 0;
 
-    // ─── Persistir en SITRACK_EVENTOS ─────────────────────────────
-    // docId = reportId (UUID único por evento del lado Sitrack).
-    // Idempotente: si por algún motivo el mismo reportId llega 2 veces,
-    // sobrescribe sin duplicar (set sin merge — el evento es
-    // inmutable, no hay update).
-    //
-    // Batches de 500 ops (límite Firestore). Si llegan > 500, hacemos
-    // múltiples commits.
-    const BATCH_SIZE = 500;
-    let escritos = 0;
-    let descartados = 0;
-    let batch = db.batch();
-    let opsEnBatch = 0;
+      const parseTs = (s: string | undefined): Timestamp | null => {
+        if (!s) return null;
+        const d = new Date(s);
+        return Number.isFinite(d.getTime()) ? Timestamp.fromDate(d) : null;
+      };
 
-    const parseTs = (s: string | undefined): Timestamp | null => {
-      if (!s) return null;
-      const d = new Date(s);
-      return Number.isFinite(d.getTime()) ? Timestamp.fromDate(d) : null;
-    };
+      for (const e of eventos) {
+        const reportId = (e.reportId ?? "").toString().trim();
+        if (!reportId) {
+          descartados++;
+          continue;
+        }
 
-    for (const e of eventos) {
-      const reportId = (e.reportId ?? "").toString().trim();
-      if (!reportId) {
-        descartados++;
-        continue;
-      }
-
-      const doc: Record<string, unknown> = {
+        const doc: Record<string, unknown> = {
         // Identificación
-        report_id: reportId,
-        sequential_id: (e.sequentialId ?? "").toString(),
-        // Tiempo
-        report_date: parseTs(e.reportDate),
-        input_date: parseTs(e.inputDate),
-        recibido_en: FieldValue.serverTimestamp(),
-        // Activo
-        asset_id: (e.assetId ?? "").toString(),
-        asset_name: (e.assetName ?? "").toString(),
-        device_id: (e.deviceId ?? "").toString(),
-        holder_id: (e.holderId ?? "").toString(),
-        // Evento
-        event_id: typeof e.eventId === "number" ? e.eventId : null,
-        event_name: (e.eventName ?? "").toString(),
-        // Posición
-        latitude: typeof e.latitude === "number" ? e.latitude : null,
-        longitude: typeof e.longitude === "number" ? e.longitude : null,
-        location: (e.location ?? "").toString(),
-        area_type: (e.areaType ?? "").toString(),
-        heading: typeof e.heading === "number" ? e.heading : null,
-        speed: typeof e.speed === "number" ? e.speed : null,
-        gps_speed: typeof e.gpsSpeed === "number" ? e.gpsSpeed : null,
-        cartography_limit_speed:
+          report_id: reportId,
+          sequential_id: (e.sequentialId ?? "").toString(),
+          // Tiempo
+          report_date: parseTs(e.reportDate),
+          input_date: parseTs(e.inputDate),
+          recibido_en: FieldValue.serverTimestamp(),
+          // Activo
+          asset_id: (e.assetId ?? "").toString(),
+          asset_name: (e.assetName ?? "").toString(),
+          device_id: (e.deviceId ?? "").toString(),
+          holder_id: (e.holderId ?? "").toString(),
+          // Evento
+          event_id: typeof e.eventId === "number" ? e.eventId : null,
+          event_name: (e.eventName ?? "").toString(),
+          // Posición
+          latitude: typeof e.latitude === "number" ? e.latitude : null,
+          longitude: typeof e.longitude === "number" ? e.longitude : null,
+          location: (e.location ?? "").toString(),
+          area_type: (e.areaType ?? "").toString(),
+          heading: typeof e.heading === "number" ? e.heading : null,
+          speed: typeof e.speed === "number" ? e.speed : null,
+          gps_speed: typeof e.gpsSpeed === "number" ? e.gpsSpeed : null,
+          cartography_limit_speed:
           typeof e.cartographyLimitSpeed === "number" ?
             e.cartographyLimitSpeed :
             null,
-        // Zonas / geocercas (agregado 2026-05-15)
-        // Si la cuenta Sitrack tiene cargadas las capas de YPF (Vaca
-        // Muerta, Loma Campana, etc), estos 3 campos llegan en eventos
-        // de entrada/salida de zona. YPF audita exactamente esto.
-        zone_id: (e.zoneId ?? "").toString(),
-        zone_name: (e.zoneName ?? "").toString(),
-        zone_condition: (e.zoneCondition ?? "").toString(),
-        // Equipo
-        ignition: e.ignition === 1 || e.ignition === 0 ? e.ignition : null,
-        ignition_date: parseTs(e.ignitionDate),
-        odometer: typeof e.odometer === "number" ? e.odometer : null,
-        gps_odometer: typeof e.gpsOdometer === "number" ? e.gpsOdometer : null,
-        hourmeter: typeof e.hourmeter === "number" ? e.hourmeter : null,
-        device_hourmeter:
+          // Zonas / geocercas (agregado 2026-05-15)
+          // Si la cuenta Sitrack tiene cargadas las capas de YPF (Vaca
+          // Muerta, Loma Campana, etc), estos 3 campos llegan en eventos
+          // de entrada/salida de zona. YPF audita exactamente esto.
+          zone_id: (e.zoneId ?? "").toString(),
+          zone_name: (e.zoneName ?? "").toString(),
+          zone_condition: (e.zoneCondition ?? "").toString(),
+          // Equipo
+          ignition: e.ignition === 1 || e.ignition === 0 ? e.ignition : null,
+          ignition_date: parseTs(e.ignitionDate),
+          odometer: typeof e.odometer === "number" ? e.odometer : null,
+          gps_odometer: typeof e.gpsOdometer === "number" ? e.gpsOdometer : null,
+          hourmeter: typeof e.hourmeter === "number" ? e.hourmeter : null,
+          device_hourmeter:
           typeof e.deviceHourmeter === "number" ? e.deviceHourmeter : null,
-        // Chofer
-        driver_dni: (e.driverDocumentNumber ?? "").toString(),
-        driver_name: (e.driverName ?? "").toString(),
-        driver_last_name: (e.driverLastName ?? "").toString(),
-        // Calidad GPS
-        gps_validity: typeof e.gpsValidity === "number" ? e.gpsValidity : null,
-        gps_satellites:
+          // Chofer
+          driver_dni: (e.driverDocumentNumber ?? "").toString(),
+          driver_name: (e.driverName ?? "").toString(),
+          driver_last_name: (e.driverLastName ?? "").toString(),
+          // Calidad GPS
+          gps_validity: typeof e.gpsValidity === "number" ? e.gpsValidity : null,
+          gps_satellites:
           typeof e.gpsSatellites === "number" ? e.gpsSatellites : null,
-        // Hardware
-        battery_voltage:
+          // Hardware
+          battery_voltage:
           typeof e.batteryVoltage === "number" ? e.batteryVoltage : null,
-        backup_battery_voltage:
+          backup_battery_voltage:
           typeof e.backupBatteryVoltage === "number" ?
             e.backupBatteryVoltage :
             null,
-        backup_battery_charge_percentage:
+          backup_battery_charge_percentage:
           typeof e.backupBatteryChargePercentage === "number" ?
             e.backupBatteryChargePercentage :
             null,
-        // Trailer (en Vecchi hoy no instalado, lo dejamos por compat)
-        trailer_id: (e.trailerId ?? "").toString(),
-        trailer_name: (e.trailerName ?? "").toString(),
-      };
+          // Trailer (en Vecchi hoy no instalado, lo dejamos por compat)
+          trailer_id: (e.trailerId ?? "").toString(),
+          trailer_name: (e.trailerName ?? "").toString(),
+        };
 
-      batch.set(
-        db.collection("SITRACK_EVENTOS").doc(reportId),
-        doc,
-        { merge: false }
-      );
-      opsEnBatch++;
-      escritos++;
+        batch.set(
+          db.collection("SITRACK_EVENTOS").doc(reportId),
+          doc,
+          { merge: false }
+        );
+        opsEnBatch++;
+        escritos++;
 
-      if (opsEnBatch >= BATCH_SIZE) {
-        await batch.commit();
-        batch = db.batch();
-        opsEnBatch = 0;
+        if (opsEnBatch >= BATCH_SIZE) {
+          await batch.commit();
+          batch = db.batch();
+          opsEnBatch = 0;
+        }
       }
-    }
-    if (opsEnBatch > 0) {
-      await batch.commit();
-    }
+      if (opsEnBatch > 0) {
+        await batch.commit();
+      }
 
-    // ─── Health cursor ───────────────────────────────────────────
-    await db.collection("META").doc("sitrack_eventos_cursor").set({
-      ultimo_exito_at: FieldValue.serverTimestamp(),
-      ultimo_recibidos: eventos.length,
-      ultimo_escritos: escritos,
-      ultimo_descartados: descartados,
-      ultimo_bytes: bodyBytes,
-      ultimo_parse_strategy: parseStrategy,
-    }, { merge: true });
+      // ─── Health cursor ───────────────────────────────────────────
+      await db.collection("META").doc("sitrack_eventos_cursor").set({
+        ultimo_exito_at: FieldValue.serverTimestamp(),
+        ultimo_recibidos: eventos.length,
+        ultimo_escritos: escritos,
+        ultimo_descartados: descartados,
+        ultimo_bytes: bodyBytes,
+        ultimo_parse_strategy: parseStrategy,
+      }, { merge: true });
 
-    logger.info("[sitrackEventosPoller] OK", {
-      recibidos: eventos.length,
-      escritos,
-      descartados,
-      bytes: bodyBytes,
-      parseStrategy,
-    });
+      logger.info("[sitrackEventosPoller] OK", {
+        recibidos: eventos.length,
+        escritos,
+        descartados,
+        bytes: bodyBytes,
+        parseStrategy,
+      });
     } finally {
       await liberar();
     }
@@ -4873,118 +5035,122 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
       logger.info("[resumenDriftsAsignacionesDiario] ya enviado hoy, skip");
       return;
     }
+    // Liberar lock si la encolada falla (auditoria 2026-05-18).
+    let exitoCron = false;
+    try {
 
-    // ─── Leer drifts actuales ──────────────────────────────────────
-    // Filtramos por drift_tipo != null en código (Firestore no tiene
-    // operador "IS NOT NULL" — `where("drift_tipo", "!=", null)` no
-    // matchea docs sin el campo). Levantamos toda la colección (~55
-    // docs, batch única) y filtramos. .limit(5000) defensivo: la
-    // colección tiene 1 doc por patente, no debería crecer mucho.
-    const snap = await db.collection("SITRACK_POSICIONES").limit(5000).get();
-    const drifts = snap.docs
-      .map((d) => ({ patente: d.id, data: d.data() }))
-      .filter((x) => {
-        const tipo = (x.data.drift_tipo ?? "").toString();
-        return tipo.length > 0;
-      });
+      // ─── Leer drifts actuales ──────────────────────────────────────
+      // Filtramos por drift_tipo != null en código (Firestore no tiene
+      // operador "IS NOT NULL" — `where("drift_tipo", "!=", null)` no
+      // matchea docs sin el campo). Levantamos toda la colección (~55
+      // docs, batch única) y filtramos. .limit(5000) defensivo: la
+      // colección tiene 1 doc por patente, no debería crecer mucho.
+      const snap = await db.collection("SITRACK_POSICIONES").limit(5000).get();
+      const drifts = snap.docs
+        .map((d) => ({ patente: d.id, data: d.data() }))
+        .filter((x) => {
+          const tipo = (x.data.drift_tipo ?? "").toString();
+          return tipo.length > 0;
+        });
 
-    // ─── Lookup teléfono del admin ─────────────────────────────────
-    const adminDni = MANTENIMIENTO_DESTINATARIO_DNI;
-    const empSnap = await db.collection("EMPLEADOS").doc(adminDni).get();
-    const tel = empSnap.exists ?
-      (empSnap.data()?.TELEFONO ?? "").toString().trim() :
-      "";
-    if (!tel) {
-      logger.error(
-        "[resumenDriftsAsignacionesDiario] admin sin TELEFONO, no se puede notificar",
-        { adminDni, driftsCount: drifts.length }
-      );
-      return;
-    }
+      // ─── Lookup teléfono del admin ─────────────────────────────────
+      const adminDni = MANTENIMIENTO_DESTINATARIO_DNI;
+      const empSnap = await db.collection("EMPLEADOS").doc(adminDni).get();
+      const tel = empSnap.exists ?
+        (empSnap.data()?.TELEFONO ?? "").toString().trim() :
+        "";
+      if (!tel) {
+        logger.error(
+          "[resumenDriftsAsignacionesDiario] admin sin TELEFONO, no se puede notificar",
+          { adminDni, driftsCount: drifts.length }
+        );
+        return;
+      }
 
-    // ─── Armar mensaje ─────────────────────────────────────────────
-    const fechaTxt = _formatFechaArg(Date.now());
+      // ─── Armar mensaje ─────────────────────────────────────────────
+      const fechaTxt = _formatFechaArg(Date.now());
 
-    // Sin drifts: mandamos "todo OK" igual (decisión Santiago
-    // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
-    // corrió y todas las asignaciones están alineadas con el chofer
-    // físico que reporta Sitrack).
-    if (drifts.length === 0) {
-      const mensajeOk =
+      // Sin drifts: mandamos "todo OK" igual (decisión Santiago
+      // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
+      // corrió y todas las asignaciones están alineadas con el chofer
+      // físico que reporta Sitrack).
+      if (drifts.length === 0) {
+        const mensajeOk =
         `📋 *Resumen drifts asignaciones — ${fechaTxt}*\n\n` +
         "✅ Sin drifts: todas las asignaciones coinciden con el " +
         "chofer físico de Sitrack.\n\n" +
         BANNER_TESTING +
         "_Coopertrans Móvil — Aviso automático._";
-      await db.collection("COLA_WHATSAPP").add({
-        telefono: tel,
-        mensaje: mensajeOk,
-        estado: "PENDIENTE",
-        encolado_en: FieldValue.serverTimestamp(),
-        enviado_en: null,
-        error: null,
-        intentos: 0,
-        origen: "resumen_drifts_asignaciones",
-        destinatario_coleccion: "EMPLEADOS",
-        destinatario_id: adminDni,
-        campo_base: "DRIFTS_ASIGNACIONES_DIARIO",
-        admin_dni: "BOT",
-        admin_nombre: "Bot resumen diario",
-      });
-      logger.info("[resumenDriftsAsignacionesDiario] OK (sin drifts)");
-      return;
-    }
+        await db.collection("COLA_WHATSAPP").add({
+          telefono: tel,
+          mensaje: mensajeOk,
+          estado: "PENDIENTE",
+          encolado_en: FieldValue.serverTimestamp(),
+          enviado_en: null,
+          error: null,
+          intentos: 0,
+          origen: "resumen_drifts_asignaciones",
+          destinatario_coleccion: "EMPLEADOS",
+          destinatario_id: adminDni,
+          campo_base: "DRIFTS_ASIGNACIONES_DIARIO",
+          admin_dni: "BOT",
+          admin_nombre: "Bot resumen diario",
+        });
+        logger.info("[resumenDriftsAsignacionesDiario] OK (sin drifts)");
+        exitoCron = true;
+        return;
+      }
 
-    // Conteo por tipo (para el header).
-    const conteoPorTipo: Record<string, number> = {};
-    for (const x of drifts) {
-      const tipo = (x.data.drift_tipo ?? "").toString();
-      conteoPorTipo[tipo] = (conteoPorTipo[tipo] ?? 0) + 1;
-    }
-    const breakdown = Object.entries(conteoPorTipo)
-      .map(([tipo, n]) => `${n}× ${ETIQUETAS_DRIFT[tipo] ?? tipo}`)
-      .join(", ");
+      // Conteo por tipo (para el header).
+      const conteoPorTipo: Record<string, number> = {};
+      for (const x of drifts) {
+        const tipo = (x.data.drift_tipo ?? "").toString();
+        conteoPorTipo[tipo] = (conteoPorTipo[tipo] ?? 0) + 1;
+      }
+      const breakdown = Object.entries(conteoPorTipo)
+        .map(([tipo, n]) => `${n}× ${ETIQUETAS_DRIFT[tipo] ?? tipo}`)
+        .join(", ");
 
-    // Listar detalle, máx 10 ítems para no inflar el mensaje.
-    const MAX_DETALLE = 10;
-    const sorted = [...drifts].sort((a, b) =>
-      a.patente.localeCompare(b.patente)
-    );
-    const aMostrar = sorted.slice(0, MAX_DETALLE);
-    const restantes = sorted.length - aMostrar.length;
+      // Listar detalle, máx 10 ítems para no inflar el mensaje.
+      const MAX_DETALLE = 10;
+      const sorted = [...drifts].sort((a, b) =>
+        a.patente.localeCompare(b.patente)
+      );
+      const aMostrar = sorted.slice(0, MAX_DETALLE);
+      const restantes = sorted.length - aMostrar.length;
 
-    const bloques = aMostrar.map((x) => {
-      const tipo = (x.data.drift_tipo ?? "").toString();
-      const sitDni = (x.data.driver_dni ?? "").toString();
-      const sitApe = (x.data.driver_apellido ?? "").toString();
-      const asigDni = (x.data.asignacion_dni ?? "").toString();
-      const asigNom = (x.data.asignacion_nombre ?? "").toString();
+      const bloques = aMostrar.map((x) => {
+        const tipo = (x.data.drift_tipo ?? "").toString();
+        const sitDni = (x.data.driver_dni ?? "").toString();
+        const sitApe = (x.data.driver_apellido ?? "").toString();
+        const asigDni = (x.data.asignacion_dni ?? "").toString();
+        const asigNom = (x.data.asignacion_nombre ?? "").toString();
 
-      const fisico = sitDni ?
-        (sitApe ? `${sitApe} (DNI ${sitDni})` : `DNI ${sitDni}`) :
-        "(no se identificó)";
-      const asignado = asigDni ?
-        (asigNom ? `${asigNom} (DNI ${asigDni})` : `DNI ${asigDni}`) :
-        "(sin asignación)";
+        const fisico = sitDni ?
+          (sitApe ? `${sitApe} (DNI ${sitDni})` : `DNI ${sitDni}`) :
+          "(no se identificó)";
+        const asignado = asigDni ?
+          (asigNom ? `${asigNom} (DNI ${asigDni})` : `DNI ${asigDni}`) :
+          "(sin asignación)";
 
-      return `🚛 *${x.patente}*\n` +
+        return `🚛 *${x.patente}*\n` +
         `   Sistema: ${asignado}\n` +
         `   Físico (iButton): ${fisico}\n` +
         `   ⚠️ ${ETIQUETAS_DRIFT[tipo] ?? tipo}`;
-    });
+      });
 
-    const cantidad = drifts.length;
-    const cabecera =
+      const cantidad = drifts.length;
+      const cabecera =
       `🔍 *Drift de asignaciones — ${fechaTxt}*\n\n` +
       `${cantidad} ` +
       (cantidad === 1 ? "inconsistencia" : "inconsistencias") +
       ` chofer físico vs sistema (${breakdown}):\n\n`;
 
-    const cola = restantes > 0 ?
-      `\n\n_Y ${restantes} más. Resolvé desde Personal → ficha del chofer._` :
-      "\n\n_Resolvé desde Personal → ficha del chofer._";
+      const cola = restantes > 0 ?
+        `\n\n_Y ${restantes} más. Resolvé desde Personal → ficha del chofer._` :
+        "\n\n_Resolvé desde Personal → ficha del chofer._";
 
-    const mensaje =
+      const mensaje =
       cabecera +
       bloques.join("\n\n") +
       cola +
@@ -4992,35 +5158,45 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
       BANNER_TESTING +
       "_Aviso automático diario de drift — Coopertrans Móvil._";
 
-    // ─── Encolar en COLA_WHATSAPP ──────────────────────────────────
-    await db.collection("COLA_WHATSAPP").add({
-      telefono: tel,
-      mensaje,
-      estado: "PENDIENTE",
-      encolado_en: FieldValue.serverTimestamp(),
-      enviado_en: null,
-      error: null,
-      intentos: 0,
-      origen: "drift_diario",
-      destinatario_coleccion: "EMPLEADOS",
-      destinatario_id: adminDni,
-      campo_base: "DRIFT_ASIGNACIONES",
-      admin_dni: "BOT",
-      admin_nombre: "Cron resumen drifts",
-    });
+      // ─── Encolar en COLA_WHATSAPP ──────────────────────────────────
+      await db.collection("COLA_WHATSAPP").add({
+        telefono: tel,
+        mensaje,
+        estado: "PENDIENTE",
+        encolado_en: FieldValue.serverTimestamp(),
+        enviado_en: null,
+        error: null,
+        intentos: 0,
+        origen: "drift_diario",
+        destinatario_coleccion: "EMPLEADOS",
+        destinatario_id: adminDni,
+        campo_base: "DRIFT_ASIGNACIONES",
+        admin_dni: "BOT",
+        admin_nombre: "Cron resumen drifts",
+      });
 
-    // Marcar como enviado hoy (idempotencia — bloquea retries de GCP).
-    // Update metadata sobre el lock que ya tomamos al inicio.
-    await histRef.update({
-      drifts_count: cantidad,
-    });
+      // Marcar como enviado hoy (idempotencia — bloquea retries de GCP).
+      // Update metadata sobre el lock que ya tomamos al inicio.
+      await histRef.update({
+        drifts_count: cantidad,
+      });
 
-    logger.info("[resumenDriftsAsignacionesDiario] encolado", {
-      adminDni,
-      driftsCount: cantidad,
-      mostrados: aMostrar.length,
-      restantes,
-    });
+      logger.info("[resumenDriftsAsignacionesDiario] encolado", {
+        adminDni,
+        driftsCount: cantidad,
+        mostrados: aMostrar.length,
+        restantes,
+      });
+      exitoCron = true;
+    } finally {
+      if (!exitoCron) {
+        await histRef.delete().catch(() => {
+          logger.warn(
+            "[resumenDriftsAsignacionesDiario] no pude liberar lock tras fallo",
+          );
+        });
+      }
+    }
   }
 );
 
@@ -5232,7 +5408,21 @@ export const resumenExcesosJornadaDiario = onSchedule(
       logger.info("[resumenExcesosJornadaDiario] ya enviado hoy, skip");
       return;
     }
-    await jornadasV2.armarResumenJornadasDiario();
+    // Liberar lock si la encolada del modulo jornadas_v2 falla (auditoria
+    // 2026-05-18) — sino Molina no recibe el resumen del dia.
+    let exitoCron = false;
+    try {
+      await jornadasV2.armarResumenJornadasDiario();
+      exitoCron = true;
+    } finally {
+      if (!exitoCron) {
+        await histRef.delete().catch(() => {
+          logger.warn(
+            "[resumenExcesosJornadaDiario] no pude liberar lock tras fallo",
+          );
+        });
+      }
+    }
   }
 );
 
@@ -5314,24 +5504,24 @@ export const resumenConductaManejoDiario = onSchedule(
     let exitoCron = false;
     try {
 
-    // ─── Rango: día calendario AYER en ART ────────────────────────
-    const ahora = new Date();
-    const fechaArtAyer = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Argentina/Buenos_Aires",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date(ahora.getTime() - 24 * 60 * 60 * 1000));
-    const fechaArtHoy = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Argentina/Buenos_Aires",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(ahora);
-    // ART = UTC-3 todo el año (no tiene DST). Construimos el offset
-    // explícito para que el rango sea independiente del TZ del runtime.
-    const desdeMs = Date.parse(`${fechaArtAyer}T00:00:00-03:00`);
-    const hastaMs = Date.parse(`${fechaArtHoy}T00:00:00-03:00`);
+      // ─── Rango: día calendario AYER en ART ────────────────────────
+      const ahora = new Date();
+      const fechaArtAyer = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Argentina/Buenos_Aires",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(ahora.getTime() - 24 * 60 * 60 * 1000));
+      const fechaArtHoy = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Argentina/Buenos_Aires",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(ahora);
+      // ART = UTC-3 todo el año (no tiene DST). Construimos el offset
+      // explícito para que el rango sea independiente del TZ del runtime.
+      const desdeMs = Date.parse(`${fechaArtAyer}T00:00:00-03:00`);
+      const hastaMs = Date.parse(`${fechaArtHoy}T00:00:00-03:00`);
 
     interface EventoConducta {
       patente: string;
@@ -5820,10 +6010,24 @@ function _statsCalcularDiasRestantes(fecha: unknown): number | null {
   }
   if (!d || Number.isNaN(d.getTime())) return null;
   // Normalizar a midnight (mismo cálculo que cliente).
-  const vto = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const ahora = new Date();
-  const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-  const diffMs = vto.getTime() - hoy.getTime();
+  // Auditoria 2026-05-18: TZ-aware. Cloud Functions corre en UTC, asi
+  // que `new Date()` da hora UTC y `getDate()` UTC. Entre 21:00-23:59
+  // ART (00:00-02:59 UTC del dia siguiente) decia "1 dia menos" → los
+  // KPIs del dashboard adelantaban 3h los vencimientos. Calculamos
+  // "hoy" en TZ ART explicito via Intl.DateTimeFormat.
+  const fmtAr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const hoyArtStr = fmtAr.format(new Date()); // "YYYY-MM-DD"
+  const [hYY, hMM, hDD] = hoyArtStr.split("-").map((s) => parseInt(s, 10));
+  // Construimos las dos fechas en UTC midnight para que el diff sea
+  // estable independiente del runtime TZ.
+  const vto = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const hoy = Date.UTC(hYY, hMM - 1, hDD);
+  const diffMs = vto - hoy;
   return Math.floor(diffMs / (24 * 60 * 60 * 1000));
 }
 
@@ -6167,11 +6371,35 @@ export const recomputeIcmSemanalScheduled = onSchedule(
       // y quedaban como SIN_DATOS. 10000 sigue siendo > 2x la semana
       // mas grande realista.
       let kmReales = 0;
-      for (const t of a.odometroPorPatente.values()) {
+      let capsAplicados = 0;
+      for (const [patente, t] of a.odometroPorPatente.entries()) {
         if (t.max > t.min) {
           const delta = t.max - t.min;
-          if (delta <= 10000) kmReales += delta;
+          if (delta <= 10000) {
+            kmReales += delta;
+          } else {
+            capsAplicados++;
+            // Log diagnostico (auditoria 2026-05-18): sin esto, un chofer
+            // SIN_DATOS por cap silencioso es indistinguible de "no manejo
+            // esa semana" en el ranking ICM.
+            logger.warn(
+              "[recomputeIcmSemanal] cap aplicado por probable reset",
+              {
+                dniHash: hashId(a.dni),
+                patente,
+                deltaKm: Math.round(delta),
+                minKm: Math.round(t.min),
+                maxKm: Math.round(t.max),
+              },
+            );
+          }
         }
+      }
+      if (capsAplicados > 0 && kmReales === 0) {
+        logger.warn(
+          "[recomputeIcmSemanal] chofer queda SIN_DATOS por todos los caps",
+          { dniHash: hashId(a.dni), capsAplicados },
+        );
       }
       const km = kmReales >= KM_MIN ? kmReales : 0;
       const ratio = km > 0 ? a.totalEventos / (km / 100) : 0;

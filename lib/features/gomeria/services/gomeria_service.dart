@@ -585,16 +585,13 @@ class GomeriaService {
         'motivo_retiro': motivo.trim(),
     });
 
-    try {
-      await cubiertaRef.update({
-        'estado': destinoFinal.codigo,
-        if (kmRecorridos != null && kmRecorridos > 0)
-          'km_acumulados': cubierta.kmAcumulados + kmRecorridos,
-      });
-    } catch (e, st) {
-      AppLogger.recordError(e, st,
-          reason: 'CUBIERTAS.estado update tras retirar (no fatal)');
-    }
+    await _actualizarKmAcumuladosConRetry(
+      cubiertaRef: cubiertaRef,
+      cubiertaId: cubierta.id,
+      kmAcumuladosViejo: cubierta.kmAcumulados,
+      kmDelta: kmRecorridos ?? 0,
+      camposExtra: {'estado': destinoFinal.codigo},
+    );
 
     // Liberar locks (delete en doc inexistente es no-op).
     unawaited(_db
@@ -971,14 +968,12 @@ class GomeriaService {
       'motivo_retiro': motivoEtiqueta,
     });
     if (kmRecorridosA != null && kmRecorridosA > 0) {
-      try {
-        await cubiertaARef.update({
-          'km_acumulados': cubiertaA.kmAcumulados + kmRecorridosA,
-        });
-      } catch (e, st) {
-        AppLogger.recordError(e, st,
-            reason: 'CUBIERTAS.km_acumulados update tras rotar A (no fatal)');
-      }
+      await _actualizarKmAcumuladosConRetry(
+        cubiertaRef: cubiertaARef,
+        cubiertaId: cubiertaA.id,
+        kmAcumuladosViejo: cubiertaA.kmAcumulados,
+        kmDelta: kmRecorridosA,
+      );
     }
 
     if (destinoOriginal != null &&
@@ -996,15 +991,12 @@ class GomeriaService {
         'motivo_retiro': motivoEtiqueta,
       });
       if (kmRecorridosB != null && kmRecorridosB > 0) {
-        try {
-          await cubiertaBRef.update({
-            'km_acumulados': cubiertaB.kmAcumulados + kmRecorridosB,
-          });
-        } catch (e, st) {
-          AppLogger.recordError(e, st,
-              reason:
-                  'CUBIERTAS.km_acumulados update tras rotar B (no fatal)');
-        }
+        await _actualizarKmAcumuladosConRetry(
+          cubiertaRef: cubiertaBRef,
+          cubiertaId: cubiertaB.id,
+          kmAcumuladosViejo: cubiertaB.kmAcumulados,
+          kmDelta: kmRecorridosB,
+        );
       }
     }
 
@@ -1599,5 +1591,87 @@ class GomeriaService {
     final m = f.month.toString().padLeft(2, '0');
     final d = f.day.toString().padLeft(2, '0');
     return '${patente}_$y-$m-$d';
+  }
+
+  /// Actualiza `km_acumulados` de una cubierta sumando `kmDelta`. Si el
+  /// update falla con un error transitorio (red, permission timeout),
+  /// reintenta con backoff exponencial. Si las 3 veces fallan, persiste
+  /// el delta en `CUBIERTAS_KM_PENDIENTES/{cubiertaId}_{ts}` para que
+  /// un cron o una operación manual lo reconcilie despues.
+  ///
+  /// CRITICO (auditoria 2026-05-18): antes esta logica era un solo
+  /// `await update()` envuelto en try/catch que loggea y sigue. Si el
+  /// update fallaba, el km se perdia para siempre — la PROXIMA
+  /// instalacion + retiro NO re-sumaba los km perdidos. Estadistica
+  /// de vida util de la cubierta subestimada permanentemente →
+  /// reportes le decian a Vecchi "esta cubierta esta nueva" cuando
+  /// ya consumio 30k km no contabilizados.
+  ///
+  /// Reintentos: 200ms / 500ms / 1500ms (tipico fallo transitorio se
+  /// recupera en <1s).
+  Future<void> _actualizarKmAcumuladosConRetry({
+    required DocumentReference<Map<String, dynamic>> cubiertaRef,
+    required String cubiertaId,
+    required num kmAcumuladosViejo,
+    required num kmDelta,
+    Map<String, dynamic> camposExtra = const {},
+  }) async {
+    if (kmDelta <= 0) {
+      // Si no hay km que sumar, solo aplicamos los campos extra
+      // (estado, posicion final, etc.) sin reintento — un solo update
+      // sin la suma es bajo riesgo.
+      if (camposExtra.isNotEmpty) {
+        try {
+          await cubiertaRef.update(camposExtra);
+        } catch (e, st) {
+          AppLogger.recordError(e, st,
+              reason: 'CUBIERTAS update sin km (no fatal)');
+        }
+      }
+      return;
+    }
+    const delays = [200, 500, 1500];
+    Object? ultimoError;
+    StackTrace? ultimoStack;
+    for (var intento = 0; intento < delays.length; intento++) {
+      try {
+        await cubiertaRef.update({
+          ...camposExtra,
+          'km_acumulados': kmAcumuladosViejo + kmDelta,
+        });
+        return; // exito
+      } catch (e, st) {
+        ultimoError = e;
+        ultimoStack = st;
+        if (intento < delays.length - 1) {
+          await Future.delayed(Duration(milliseconds: delays[intento]));
+        }
+      }
+    }
+    // Las 3 veces fallaron: encolar para reconciliacion manual.
+    AppLogger.recordError(
+      ultimoError ?? 'Sin error capturado',
+      ultimoStack ?? StackTrace.current,
+      reason: 'CUBIERTAS km_acumulados 3 reintentos fallaron — '
+          'encolando en CUBIERTAS_KM_PENDIENTES',
+    );
+    try {
+      await _db.collection(AppCollections.cubiertasKmPendientes).add({
+        'cubierta_id': cubiertaId,
+        'km_delta': kmDelta,
+        'km_acumulados_esperado_post': kmAcumuladosViejo + kmDelta,
+        'campos_extra': camposExtra,
+        'creado_en': FieldValue.serverTimestamp(),
+        'estado': 'PENDIENTE',
+        'ultimo_error': ultimoError?.toString() ?? 'desconocido',
+      });
+    } catch (e2, st2) {
+      // Si TAMBIEN falla escribir el pendiente, queda solo el log de
+      // Crashlytics. Worst case admite reconstruccion offline desde
+      // CUBIERTAS_INSTALADAS (la suma de km_recorridos cerrados deberia
+      // == km_acumulados de la cubierta).
+      AppLogger.recordError(e2, st2,
+          reason: 'CUBIERTAS_KM_PENDIENTES write tambien fallo');
+    }
   }
 }

@@ -9,6 +9,7 @@
 // `ICM_SEMANAL/{YYYY-WW}` con los agregados ya calculados.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'icm_calculator.dart';
 
@@ -123,11 +124,32 @@ class IcmHistoricoService {
       // patron que icm_calculator). Cap subido de 5000 a 10000 para
       // no descartar choferes de larga distancia (auditoria 2026-05-18).
       double kmReales = 0;
-      for (final t in odometroPorPatente.values) {
+      var capsAplicados = 0;
+      for (final ePat in odometroPorPatente.entries) {
+        final t = ePat.value;
         if (t.max > t.min) {
           final delta = t.max - t.min;
-          if (delta <= 10000) kmReales += delta;
+          if (delta <= 10000) {
+            kmReales += delta;
+          } else {
+            // Cap aplicado (probable reset de odometro). Loguear para
+            // diagnostico — sin esto un chofer SIN_DATOS en una semana
+            // donde manejo solo en una patente con reset quedaba
+            // inexplicado en el reporte historico (auditoria 2026-05-18).
+            capsAplicados++;
+            debugPrint(
+              '[ICM-hist] cap aplicado dni=$choferDni patente=${ePat.key} '
+              'semana=${s.label} delta=${delta.toStringAsFixed(0)}km '
+              '— probable reset de odometro',
+            );
+          }
         }
+      }
+      if (capsAplicados > 0 && kmReales == 0) {
+        debugPrint(
+          '[ICM-hist] dni=$choferDni semana=${s.label} queda SIN_DATOS por '
+          'todos los caps aplicados ($capsAplicados patente(s))',
+        );
       }
       // Mismo umbral que icm_calculator: si no hay km suficientes,
       // categorizamos como sinDatos en lugar de inventar ICM falso.

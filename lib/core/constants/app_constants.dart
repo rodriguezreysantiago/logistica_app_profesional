@@ -201,6 +201,17 @@ class AppCollections {
   /// registrado_por_dni, registrado_por_nombre}`.
   static const String cubiertasControles = 'CUBIERTAS_CONTROLES';
 
+  /// Cola de reconciliacion de km_acumulados. Si una operación de
+  /// retiro/rotar falla en actualizar el contador de la cubierta tras
+  /// 3 reintentos, persiste el delta acá. Auditoría 2026-05-18:
+  /// reemplaza el patrón viejo de try/catch "log y continuar" que
+  /// perdía km permanentemente — la cubierta parecía más nueva en
+  /// reportes y se descartaba tarde.
+  /// Doc: `{cubierta_id, km_delta, km_acumulados_esperado_post,
+  /// campos_extra, creado_en, estado, ultimo_error}`.
+  /// Estados: PENDIENTE | APLICADO | DESCARTADO.
+  static const String cubiertasKmPendientes = 'CUBIERTAS_KM_PENDIENTES';
+
   /// Docs de control transaccional para garantizar unicidad de
   /// instalación. DocId: `{patente}__{POSICION}` (ej.
   /// `AB123CD__DIR_IZQ`). El doc EXISTE si y solo si esa posición está
