@@ -54,12 +54,72 @@ function Log {
     }
 }
 
+# Asegura que el shortcut del escritorio tome el icono EMBEBIDO del
+# .exe (auto-se-actualiza con cada release) en vez del .ico estatico
+# que el instalador Inno Setup deja en Program Files (que requiere
+# re-correr el instalador con UAC para cambiar).
+#
+# Idempotente: si el IconLocation ya apunta al .exe, no hace nada.
+# Si apunta al .ico viejo de Program Files, lo corrige y limpia el
+# cache de iconos de Windows. Cubre dos caminos:
+#   - Shortcut publico: %PUBLIC%\Desktop (Inno Setup como admin)
+#   - Shortcut por usuario: %USERPROFILE%\Desktop (si lo copiaron)
+#
+# Pedido Santiago 2026-05-19: "se puede meter en una actualizacion
+# automatica asi cambia para todas las pc?". Esta es la respuesta —
+# cada vez que el launcher corre, refresca el shortcut.
+function Refrescar-IconoEscritorio {
+    param([string]$ExePath)
+    if (-not (Test-Path $ExePath)) { return }
+    try {
+        $expectedIcon = "$ExePath,0"
+        $candidatos = @(
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Coopertrans Movil.lnk'),
+            (Join-Path "$env:PUBLIC\Desktop" 'Coopertrans Movil.lnk')
+        )
+        $shell = New-Object -ComObject WScript.Shell
+        $algunRefrescado = $false
+        foreach ($lnk in $candidatos) {
+            if (-not (Test-Path $lnk)) { continue }
+            try {
+                $sc = $shell.CreateShortcut($lnk)
+                if ($sc.IconLocation -ne $expectedIcon) {
+                    $sc.IconLocation = $expectedIcon
+                    $sc.Save()
+                    Log "Shortcut icono refrescado: $lnk" 'Green'
+                    $algunRefrescado = $true
+                }
+            } catch {
+                Log "No pude tocar $lnk : $($_.Exception.Message)" 'Yellow'
+            }
+        }
+        if ($algunRefrescado) {
+            # ie4uinit -show fuerza a Windows a releer iconos de
+            # shortcuts sin tener que matar explorer (no disruptivo).
+            try {
+                $ie4 = "$env:WINDIR\System32\ie4uinit.exe"
+                if (Test-Path $ie4) {
+                    Start-Process -FilePath $ie4 -ArgumentList '-show' -WindowStyle Hidden -Wait
+                }
+            } catch {
+                # Best-effort — si falla, el nuevo icono aparece despues
+                # de cerrar/abrir explorer o reboot. No es bloqueante.
+            }
+        }
+    } catch {
+        Log "Refrescar-IconoEscritorio fallo: $($_.Exception.Message)" 'Yellow'
+    }
+}
+
 function Lanzar-App {
     if (-not (Test-Path $exePath)) {
         Log "ERROR: no existe $exePath. El update inicial debe completarse primero." 'Red'
         Read-Host "Enter para cerrar"
         exit 1
     }
+    # Idempotente — solo escribe el .lnk si el icono no estaba apuntando
+    # al .exe. Cuesta ~10ms si ya esta OK.
+    Refrescar-IconoEscritorio -ExePath $exePath
     Log "Lanzando $exeName..." 'Cyan'
     Start-Process -FilePath $exePath -WorkingDirectory $installDir
 }
