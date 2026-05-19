@@ -23,10 +23,10 @@ import '../models/adelanto_chofer.dart';
 ///   - Logo VAVG arriba a la izquierda + "TRANSPORTE SERVI-TOLVA" +
 ///     subtítulo "Resumen de adelantos" en el header.
 ///   - Caja con FECHA: dd-mm-aaaa (o FECHAS si son varios días).
-///   - Tabla con: # | EMPLEADO | DETALLE | ESTADO | ADELANTO $ | N° RECIBO.
-///     (ESTADO agregado 2026-05-19 — el resumen ahora mezcla
-///      pendientes + entregados + eliminados; cada fila refleja
-///      su estado, los eliminados van tachados.)
+///   - Tabla con: # | FECHA | EMPLEADO | DETALLE | ESTADO | ADELANTO $ | N° RECIBO.
+///     (ESTADO + FECHA por fila agregadas 2026-05-19 — el resumen ahora
+///      mezcla pendientes + entregados + eliminados; cada fila refleja
+///      su estado y la fecha del adelanto, los eliminados van tachados.)
 ///   - Footer chico con timestamp de impresión.
 ///
 /// Impresión delegada a `PdfPrinter` (lib/shared/utils/pdf_printer.dart):
@@ -257,20 +257,23 @@ class ReportAdelantosService {
   }
 
   static pw.Widget _tablaAdelantos(List<AdelantoChofer> adelantos) {
-    // 6 columnas (anchos relativos sobre A4 margen 24):
-    //   #          ~4%   centrado
-    //   EMPLEADO   ~25%
-    //   DETALLE    ~32%
-    //   ESTADO     ~10%  centrado (Santiago 2026-05-19)
-    //   ADELANTO   ~16%  derecha
-    //   N° RECIBO  ~13%  centrado
+    // 7 columnas (anchos relativos sobre A4 margen 24):
+    //   #          ~3%   centrado
+    //   FECHA      ~10%  centrado (Santiago 2026-05-19 — agregado tras
+    //                      ver resumen impreso sin fecha por fila)
+    //   EMPLEADO   ~22%
+    //   DETALLE    ~26%
+    //   ESTADO     ~10%  centrado
+    //   ADELANTO   ~15%  derecha
+    //   N° RECIBO  ~11%  centrado
     final colWidths = <int, pw.TableColumnWidth>{
-      0: const pw.FlexColumnWidth(1),
-      1: const pw.FlexColumnWidth(6),
-      2: const pw.FlexColumnWidth(7.5),
-      3: const pw.FlexColumnWidth(2.4),
-      4: const pw.FlexColumnWidth(3),
-      5: const pw.FlexColumnWidth(2.5),
+      0: const pw.FlexColumnWidth(0.8),
+      1: const pw.FlexColumnWidth(2.5),
+      2: const pw.FlexColumnWidth(5.5),
+      3: const pw.FlexColumnWidth(6.5),
+      4: const pw.FlexColumnWidth(2.4),
+      5: const pw.FlexColumnWidth(3),
+      6: const pw.FlexColumnWidth(2.5),
     };
 
     return pw.Table(
@@ -282,6 +285,7 @@ class ReportAdelantosService {
           decoration: const pw.BoxDecoration(color: PdfColors.green800),
           children: [
             _celdaHeader('#', align: pw.TextAlign.center),
+            _celdaHeader('FECHA', align: pw.TextAlign.center),
             _celdaHeader('EMPLEADO'),
             _celdaHeader('DETALLE'),
             _celdaHeader('ESTADO', align: pw.TextAlign.center),
@@ -307,6 +311,7 @@ class ReportAdelantosService {
         ? ''
         : a.numeroRecibo.toString().padLeft(6, '0');
     final monto = AppFormatters.formatearMonto(a.monto);
+    final fechaStr = AppFormatters.formatearFecha(a.fecha);
     // Estado visible en el PDF (Santiago 2026-05-19): el resumen
     // ahora puede mezclar pendientes + pagados + eliminados, hay
     // que distinguirlos a simple vista.
@@ -324,6 +329,8 @@ class ReportAdelantosService {
       verticalAlignment: pw.TableCellVerticalAlignment.middle,
       children: [
         _celdaDato(numero.toString(),
+            align: pw.TextAlign.center, tachado: tachado),
+        _celdaDato(fechaStr,
             align: pw.TextAlign.center, tachado: tachado),
         _celdaDato(nombre, tachado: tachado),
         _celdaDato(detalle, tachado: tachado),
