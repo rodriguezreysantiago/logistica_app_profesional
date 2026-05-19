@@ -154,6 +154,13 @@ export function distanciaMetros(
 
 /**
  * Hora ART (0..23) de un timestamp en ms. ART es UTC-3 fijo.
+ *
+ * Bug fix 2026-05-18 (descubierto por test): Node `Intl.DateTimeFormat`
+ * con `en-CA` + `hour: "2-digit"` + `hour12: false` devuelve **"24"**
+ * para medianoche, no "00". Sin la normalización abajo, durante la hora
+ * 00:00-00:59 ART el vigilador devolvía 24, y la condición de veda
+ * nocturna `horaActual >= 0 && horaActual < 6` daba false → el chofer
+ * que arrancaba 00:30 ART NO recibía aviso de veda. Normalizamos 24→0.
  */
 export function horaArt(tsMs: number): number {
   const partes = new Intl.DateTimeFormat("en-CA", {
@@ -161,8 +168,8 @@ export function horaArt(tsMs: number): number {
     hour: "2-digit",
     hour12: false,
   }).format(new Date(tsMs));
-  // "00".."23"
-  return parseInt(partes, 10);
+  const h = parseInt(partes, 10);
+  return h === 24 ? 0 : h;
 }
 
 // `primerNombre` y `rrPick` movidos a helpers.ts (refactor 2026-05-18).
