@@ -54,6 +54,40 @@ export const EVENT_ID = {
 } as const;
 
 /**
+ * Tiempo mínimo (segundos) que debe durar una sobrevelocidad para
+ * considerarse INFRACCIÓN según CESVI. Slide 6 de Carsync: "En base a
+ * los tiempos de activación se define si es o no una infracción".
+ *
+ * Eventos 8/9 de Sitrack se emiten ante CUALQUIER sobrevelocidad
+ * transitoria (incluso <1 segundo al pasar un camión, frenar y volver
+ * al límite). CESVI las descarta como ruido. Sitrack emite ADEMÁS el
+ * evento 861 ya filtrado por activación — pero no llega a nuestra
+ * cuenta (verificado 2026-05-19 con inspector), así que lo replicamos
+ * client-side usando esta función.
+ *
+ * Tabla CESVI por tipo de segmento (slide 6):
+ *   - Autopista: 15s | Autovía: 12s | Carretera: 6/12s (urb/rur)
+ *   - Calle principal: 6/10s | Calle: 5s | Ruta asfalto YPF: 10s
+ *   - Primario YPF: 6s | Secundario YPF: 5s | Troncal YPF: 6s | Huella: 4s
+ *
+ * Como Sitrack solo nos da `area_type` (urban/rural) — sin sub-tipo —
+ * tomamos valores medios conservadores que cubran la mayoría de los
+ * casos sin sobre-clasificar como infracción:
+ *   - URBAN   → 6s  (calle principal urbana, mediana de la tabla)
+ *   - RURAL   → 10s (ruta asfalto rural, mediana conservadora)
+ *   - UNKNOWN → 10s (rural por default, operación Vecchi es mayoría ruta)
+ *
+ * Cuando Sitrack active el evento 861 en nuestra cuenta + nos mande
+ * sub-tipo de segmento, podremos usar la tabla completa.
+ */
+export function tiempoActivacionSegSeg(
+  areaType: "urban" | "rural" | "unknown" | string,
+): number {
+  if (areaType === "urban") return 6;
+  return 10; // rural / unknown
+}
+
+/**
  * Clasifica un exceso de velocidad en gravedad CESVI según el % de
  * exceso sobre el límite cartográfico. Como Sitrack solo nos da
  * `area_type` (urban/rural) — NO el sub-tipo de segmento (autopista,
@@ -272,10 +306,17 @@ export function calcularIcmJornada(
       countGiro++;
     }
   }
-  // Sobrevelocidades — agrupar 8+9 y calcular según gravedad
+  // Sobrevelocidades — agrupar 8+9 y calcular según gravedad.
+  // FILTRO TIEMPO DE ACTIVACIÓN (Santiago 2026-05-19): pares cuya
+  // duración no supera el umbral del segmento NO son infracción
+  // CESVI (slide 6). Equivalente client-side al evento 861 que
+  // Sitrack emite filtrado pero no llega a nuestra cuenta.
   const pares = agruparSobrevelocidades(eventosDeJornada);
   let puntosSobrevelocidad = 0;
+  let sobrevelocidadesContadas = 0;
   for (const par of pares) {
+    const tActivacion = tiempoActivacionSegSeg(par.inicio.areaType);
+    if (par.duracionSeg < tActivacion) continue; // transitoria, no infracción
     const limiteIni = par.inicio.cartographyLimitSpeed ?? 0;
     const limiteFin = par.fin.cartographyLimitSpeed ?? 0;
     // Usamos el límite máximo de los dos (más conservador con el chofer)
@@ -288,12 +329,14 @@ export function calcularIcmJornada(
     // sample de la ECU mejoramos este cálculo.
     const velProm = (speedIni + speedFin) / 2;
     const grav = gravedadExceso(velMax, velLimite, par.inicio.areaType);
+    if (!grav) continue; // no superó el límite (ej. límite=0 sin cartografía)
     puntosSobrevelocidad += puntajeSobrevelocidad({
       gravedad: grav,
       velMaxKmh: velMax,
       velPromKmh: velProm,
       duracionSeg: par.duracionSeg,
     });
+    sobrevelocidadesContadas++;
   }
   // Fatiga por bloque
   let puntosFatiga = 0;
@@ -315,7 +358,7 @@ export function calcularIcmJornada(
       aceleracionesBruscas: countAcel,
       frenadasBruscas: countFren,
       girosBruscos: countGiro,
-      sobrevelocidades: pares.length,
+      sobrevelocidades: sobrevelocidadesContadas,
       puntosAceleracion,
       puntosFrenada,
       puntosGiro,

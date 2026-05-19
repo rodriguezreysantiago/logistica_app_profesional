@@ -190,6 +190,69 @@ describe('puntajeFatigaPorBloque (escalera slide 3)', () => {
   });
 });
 
+describe('tiempo de activación (slide 6) — filtro de infracción CESVI', () => {
+  test('URBAN → 6s mínimo', () => {
+    // Sobrevelocidad urban de 5s → no infracción
+    const r1 = calcularIcmJornada([
+      { eventId: 8, reportDateMs: 0, assetId: 'A', driverDni: '1',
+        speed: 110, cartographyLimitSpeed: 80, areaType: 'urban', odometer: null },
+      { eventId: 9, reportDateMs: 5000, assetId: 'A', driverDni: '1',
+        speed: 105, cartographyLimitSpeed: 80, areaType: 'urban', odometer: null },
+    ], [0]);
+    assert.strictEqual(r1.desglose.sobrevelocidades, 0);
+    assert.strictEqual(r1.icm, 100);
+    // Sobrevelocidad urban de 7s → SÍ infracción (>6s)
+    const r2 = calcularIcmJornada([
+      { eventId: 8, reportDateMs: 0, assetId: 'A', driverDni: '1',
+        speed: 110, cartographyLimitSpeed: 80, areaType: 'urban', odometer: null },
+      { eventId: 9, reportDateMs: 7000, assetId: 'A', driverDni: '1',
+        speed: 105, cartographyLimitSpeed: 80, areaType: 'urban', odometer: null },
+    ], [0]);
+    assert.strictEqual(r2.desglose.sobrevelocidades, 1);
+    assert.ok(r2.icm < 100);
+  });
+
+  test('RURAL → 10s mínimo', () => {
+    // Sobrevelocidad rural de 9s → no infracción
+    const r1 = calcularIcmJornada([
+      { eventId: 8, reportDateMs: 0, assetId: 'A', driverDni: '1',
+        speed: 120, cartographyLimitSpeed: 100, areaType: 'rural', odometer: null },
+      { eventId: 9, reportDateMs: 9000, assetId: 'A', driverDni: '1',
+        speed: 115, cartographyLimitSpeed: 100, areaType: 'rural', odometer: null },
+    ], [0]);
+    assert.strictEqual(r1.desglose.sobrevelocidades, 0);
+    // Sobrevelocidad rural de 11s → SÍ infracción
+    const r2 = calcularIcmJornada([
+      { eventId: 8, reportDateMs: 0, assetId: 'A', driverDni: '1',
+        speed: 120, cartographyLimitSpeed: 100, areaType: 'rural', odometer: null },
+      { eventId: 9, reportDateMs: 11000, assetId: 'A', driverDni: '1',
+        speed: 115, cartographyLimitSpeed: 100, areaType: 'rural', odometer: null },
+    ], [0]);
+    assert.strictEqual(r2.desglose.sobrevelocidades, 1);
+  });
+
+  test('UNKNOWN tratado como rural (10s)', () => {
+    const r = calcularIcmJornada([
+      { eventId: 8, reportDateMs: 0, assetId: 'A', driverDni: '1',
+        speed: 120, cartographyLimitSpeed: 100, areaType: 'unknown', odometer: null },
+      { eventId: 9, reportDateMs: 8000, assetId: 'A', driverDni: '1',
+        speed: 115, cartographyLimitSpeed: 100, areaType: 'unknown', odometer: null },
+    ], [0]);
+    assert.strictEqual(r.desglose.sobrevelocidades, 0);
+  });
+
+  test('par sin cartografía (límite 0) → no infracción (sin gravedad)', () => {
+    // El par dura >10s pero límite=0 → no podemos calcular gravedad → skip
+    const r = calcularIcmJornada([
+      { eventId: 8, reportDateMs: 0, assetId: 'A', driverDni: '1',
+        speed: 120, cartographyLimitSpeed: 0, areaType: 'rural', odometer: null },
+      { eventId: 9, reportDateMs: 30000, assetId: 'A', driverDni: '1',
+        speed: 115, cartographyLimitSpeed: 0, areaType: 'rural', odometer: null },
+    ], [0]);
+    assert.strictEqual(r.desglose.sobrevelocidades, 0);
+  });
+});
+
 describe('categorizar (umbrales CESVI 80/60)', () => {
   test('ICM ≥ 80 → BAJO (verde)', () => {
     assert.strictEqual(categorizar(80), 'BAJO');
@@ -299,9 +362,9 @@ describe('calcularIcmJornada (integración fórmula completa)', () => {
     assert.strictEqual(r.categoria, 'BAJO');
   });
 
-  test('mezcla CESVI completa', () => {
+  test('mezcla CESVI completa (sobrevelocidad supera tiempo activación)', () => {
     // 2 frenadas (-5.8×2 = -11.6) + 1 acel (-2.8) + 3 giros (-2.8×3 = -8.4)
-    // + 1 sobrevelocidad baja (-1) + bloque >4h (-15)
+    // + 1 sobrevelocidad rural >10s (-1) + bloque >4h (-15)
     // = -38.8 → ICM 61.2 → MEDIO
     const r = calcularIcmJornada([
       { eventId: 67, reportDateMs: 1000, assetId: 'AB1', driverDni: '111',
@@ -316,10 +379,10 @@ describe('calcularIcmJornada (integración fórmula completa)', () => {
         speed: 30, cartographyLimitSpeed: 80, areaType: 'urban', odometer: null },
       { eventId: 383, reportDateMs: 6000, assetId: 'AB1', driverDni: '111',
         speed: 30, cartographyLimitSpeed: 80, areaType: 'urban', odometer: null },
-      // Sobrevelocidad rural baja: 102 sobre 100 → -1
+      // Sobrevelocidad rural baja 102 sobre 100, duración 12s (>10s) → -1
       { eventId: 8, reportDateMs: 10000, assetId: 'AB1', driverDni: '111',
         speed: 102, cartographyLimitSpeed: 100, areaType: 'rural', odometer: null },
-      { eventId: 9, reportDateMs: 15000, assetId: 'AB1', driverDni: '111',
+      { eventId: 9, reportDateMs: 22000, assetId: 'AB1', driverDni: '111',
         speed: 101, cartographyLimitSpeed: 100, areaType: 'rural', odometer: null },
     ], [4.5 * 3600]);
     assert.strictEqual(r.desglose.frenadasBruscas, 2);

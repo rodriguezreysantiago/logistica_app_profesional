@@ -42,6 +42,26 @@ class EventIdCesvi {
   static const int finSobrevelocidad = 9;
 }
 
+/// Tiempo mínimo (segundos) que debe durar una sobrevelocidad para
+/// considerarse INFRACCIÓN según CESVI. Slide 6 de Carsync: "En base
+/// a los tiempos de activación se define si es o no una infracción".
+///
+/// Eventos 8/9 de Sitrack se emiten ante CUALQUIER sobrevelocidad
+/// transitoria (incluso <1 segundo). CESVI las descarta como ruido y
+/// solo cuenta las que superan el umbral del segmento. Sitrack emite
+/// además el evento 861 ya filtrado, pero no llega a nuestra cuenta
+/// — replicamos client-side con esta función.
+///
+/// Como solo tenemos `area_type` (urban/rural) usamos valores medios
+/// conservadores:
+///   - URBAN   → 6s  (calle principal urbana, mediana de la tabla)
+///   - RURAL   → 10s (ruta asfalto rural, mediana conservadora)
+///   - UNKNOWN → 10s (rural por default)
+double tiempoActivacionSeg(String areaType) {
+  if (areaType == 'urban') return 6;
+  return 10;
+}
+
 /// Clasifica un exceso de velocidad en gravedad CESVI según el % de
 /// exceso sobre el límite cartográfico. Sitrack solo nos da `area_type`
 /// (urban/rural) — sin sub-tipo de segmento — así que usamos thresholds
@@ -242,9 +262,17 @@ DesgloseIcm calcularIcmJornada(
       countGiro++;
     }
   }
+  // Sobrevelocidades — agrupar 8+9, aplicar FILTRO DE TIEMPO DE
+  // ACTIVACIÓN (slide 6 CESVI) y calcular según gravedad.
+  // Pares cuya duración no supera el umbral del segmento NO son
+  // infracción CESVI — equivalente client-side al evento 861 que
+  // Sitrack emite pre-filtrado pero no llega a nuestra cuenta.
   final pares = agruparSobrevelocidades(eventosDeJornada);
   double puntosSobrevelocidad = 0;
+  var sobrevelocidadesContadas = 0;
   for (final par in pares) {
+    final tActivacion = tiempoActivacionSeg(par.inicio.areaType);
+    if (par.duracionSeg < tActivacion) continue;
     final limiteIni = par.inicio.cartographyLimitSpeed ?? 0;
     final limiteFin = par.fin.cartographyLimitSpeed ?? 0;
     final velLimite =
@@ -258,12 +286,14 @@ DesgloseIcm calcularIcmJornada(
       velLimiteKmh: velLimite,
       areaType: par.inicio.areaType,
     );
+    if (grav == null) continue;
     puntosSobrevelocidad += puntajeSobrevelocidad(
       gravedad: grav,
       velMaxKmh: velMax,
       velPromKmh: velProm,
       duracionSeg: par.duracionSeg,
     );
+    sobrevelocidadesContadas++;
   }
   double puntosFatiga = 0;
   for (final seg in manejoSegPorBloque) {
@@ -283,7 +313,7 @@ DesgloseIcm calcularIcmJornada(
     aceleracionesBruscas: countAcel,
     frenadasBruscas: countFren,
     girosBruscos: countGiro,
-    sobrevelocidades: pares.length,
+    sobrevelocidades: sobrevelocidadesContadas,
     puntosAceleracion: puntosAceleracion,
     puntosFrenada: puntosFrenada,
     puntosGiro: puntosGiro,

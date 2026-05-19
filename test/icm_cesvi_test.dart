@@ -165,6 +165,66 @@ void main() {
     });
   });
 
+  group('tiempo de activación (slide 6) — filtro infracción CESVI', () {
+    EventoSitrackICM ev({
+      required int id,
+      required int ts,
+      double speed = 110,
+      double limit = 100,
+      String area = 'rural',
+    }) {
+      return EventoSitrackICM(
+        eventId: id, reportDateMs: ts,
+        assetId: 'A', driverDni: '1',
+        speed: speed, cartographyLimitSpeed: limit, areaType: area,
+      );
+    }
+
+    test('URBAN → 6s mínimo', () {
+      final r1 = calcularIcmJornada([
+        ev(id: 8, ts: 0, speed: 110, limit: 80, area: 'urban'),
+        ev(id: 9, ts: 5000, speed: 105, limit: 80, area: 'urban'),
+      ], [0]);
+      expect(r1.sobrevelocidades, 0);
+      expect(r1.icm, 100);
+      final r2 = calcularIcmJornada([
+        ev(id: 8, ts: 0, speed: 110, limit: 80, area: 'urban'),
+        ev(id: 9, ts: 7000, speed: 105, limit: 80, area: 'urban'),
+      ], [0]);
+      expect(r2.sobrevelocidades, 1);
+      expect(r2.icm, lessThan(100));
+    });
+
+    test('RURAL → 10s mínimo', () {
+      final r1 = calcularIcmJornada([
+        ev(id: 8, ts: 0, speed: 120, limit: 100, area: 'rural'),
+        ev(id: 9, ts: 9000, speed: 115, limit: 100, area: 'rural'),
+      ], [0]);
+      expect(r1.sobrevelocidades, 0);
+      final r2 = calcularIcmJornada([
+        ev(id: 8, ts: 0, speed: 120, limit: 100, area: 'rural'),
+        ev(id: 9, ts: 11000, speed: 115, limit: 100, area: 'rural'),
+      ], [0]);
+      expect(r2.sobrevelocidades, 1);
+    });
+
+    test('UNKNOWN tratado como rural (10s)', () {
+      final r = calcularIcmJornada([
+        ev(id: 8, ts: 0, speed: 120, limit: 100, area: 'unknown'),
+        ev(id: 9, ts: 8000, speed: 115, limit: 100, area: 'unknown'),
+      ], [0]);
+      expect(r.sobrevelocidades, 0);
+    });
+
+    test('par sin cartografía (límite 0) → no infracción', () {
+      final r = calcularIcmJornada([
+        ev(id: 8, ts: 0, speed: 120, limit: 0, area: 'rural'),
+        ev(id: 9, ts: 30000, speed: 115, limit: 0, area: 'rural'),
+      ], [0]);
+      expect(r.sobrevelocidades, 0);
+    });
+  });
+
   group('categorizarCesvi (umbrales 80/60)', () {
     test('>= 80 → bajo', () {
       expect(categorizarCesvi(80), CategoriaCesvi.bajo);
@@ -285,9 +345,9 @@ void main() {
       expect(r.icm, 85);
     });
 
-    test('mezcla CESVI completa → ICM 61.2 MEDIO', () {
+    test('mezcla CESVI completa (sobrevelocidad >10s rural)', () {
       // 2 frenadas (-11.6) + 1 acel (-2.8) + 3 giros (-8.4)
-      // + 1 sobrevelocidad baja (-1) + bloque >4h (-15) = -38.8 → ICM 61.2
+      // + 1 sobrevelocidad rural 12s (-1) + bloque >4h (-15) = -38.8 → ICM 61.2
       final r = calcularIcmJornada([
         ev(id: 67, ts: 1000, speed: 60, limit: 80, area: 'urban'),
         ev(id: 67, ts: 2000, speed: 50, limit: 80, area: 'urban'),
@@ -295,9 +355,9 @@ void main() {
         ev(id: 383, ts: 4000, speed: 30, limit: 80, area: 'urban'),
         ev(id: 383, ts: 5000, speed: 30, limit: 80, area: 'urban'),
         ev(id: 383, ts: 6000, speed: 30, limit: 80, area: 'urban'),
-        // Sobrevelocidad rural baja (2%): -1 punto
+        // Sobrevelocidad rural 102 sobre 100 (baja), 12s (supera 10s) → -1
         ev(id: 8, ts: 10000, speed: 102, limit: 100, area: 'rural'),
-        ev(id: 9, ts: 15000, speed: 101, limit: 100, area: 'rural'),
+        ev(id: 9, ts: 22000, speed: 101, limit: 100, area: 'rural'),
       ], [4.5 * 3600]);
       expect(r.frenadasBruscas, 2);
       expect(r.aceleracionesBruscas, 1);
