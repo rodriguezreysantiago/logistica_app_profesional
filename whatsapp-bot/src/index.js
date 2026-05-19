@@ -221,6 +221,15 @@ const _PATRONES_DEFINITIVOS = [
   // no va a cambiar nada.
   /message blocked/i,
   /content rejected/i,
+  // Rate limit de WhatsApp — auditoría 2026-05-18: NO reintentar con
+  // el backoff normal (30s, 120s, 600s). WA "rate limit" significa
+  // "cool off de >10 min, idealmente 30+". Si reintentamos en 30s,
+  // empeoramos: WA endurece el throttle. Marcamos como definitivo y
+  // dejamos que el sweeper (cada 5 min) eventualmente lo retome con
+  // pausa real. El operador puede /forzar-cron si quiere reanudar
+  // manualmente.
+  /rate limit/i,
+  /too many requests/i,
 ];
 
 function _esErrorTransitorio(error) {
@@ -328,6 +337,42 @@ function _widCacheSet(wid, existe) {
   });
 }
 
+// ─── Cache de silenciados (auditoría 2026-05-18) ─────────────────
+// Map<dni, {data: object|null, expiraEn: number}>. Cap 200 entradas
+// (suficiente para 90+ choferes con margen). TTL 60s — un backlog de
+// 200 docs procesados secuencialmente pasa por acá en ~10-20 minutos,
+// pero la mayoría son del mismo puñado de choferes. Sin cache eran N
+// reads a BOT_SILENCIADOS_CHOFER; con cache son ~5 (DNIs distintos).
+// TTL 60s tolerable: /silenciar surte efecto en <1 min de margen.
+//
+// `data=null` significa "el DNI no está silenciado" — se cachea igual
+// para evitar repetir la lectura. `undefined` retornado por _consultar
+// significa "no cacheado, hay que leer".
+const _SILENCIADOS_CACHE = new Map();
+const _SILENCIADOS_CACHE_MAX = 200;
+const _SILENCIADOS_CACHE_TTL_MS = 60 * 1000;
+
+function _consultarCacheSilenciado(dni) {
+  const entry = _SILENCIADOS_CACHE.get(dni);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiraEn) {
+    _SILENCIADOS_CACHE.delete(dni);
+    return undefined;
+  }
+  return entry.data;
+}
+
+function _guardarCacheSilenciado(dni, data) {
+  if (_SILENCIADOS_CACHE.size >= _SILENCIADOS_CACHE_MAX) {
+    const primero = _SILENCIADOS_CACHE.keys().next().value;
+    if (primero !== undefined) _SILENCIADOS_CACHE.delete(primero);
+  }
+  _SILENCIADOS_CACHE.set(dni, {
+    data,
+    expiraEn: Date.now() + _SILENCIADOS_CACHE_TTL_MS,
+  });
+}
+
 // Timestamp del último fallo en `_despacharFalloEnvio()`. Si fue hace
 // menos de 5s, `procesarSiguiente()` corta para no martillar Firestore
 // con reintentos sincrónicos. El polling normal (cada 15s) toma el
@@ -342,11 +387,19 @@ async function procesarSiguiente() {
   if (colaProcesar.length === 0) return;
   procesando = true;
 
-  const docId = colaProcesar.shift();
-  const db = fs.inicializar();
-  const docRef = db.collection(fs.COLECCION).doc(docId);
-
+  // Auditoría 2026-05-18: el shift+inicialización movidos DENTRO del try
+  // para que cualquier excepción sincrónica (poco común pero posible:
+  // fs.inicializar() throw, collection() throw por config rota) caiga
+  // en el catch y NO pierda el docId sin trazas. Antes del fix, una
+  // excepción acá hubiera dejado el doc fuera de la cola en memoria
+  // (sólo el polling de 15s lo retomaba — latencia perdida en time-
+  // sensitive).
+  let docId;
+  let docRef;
   try {
+    docId = colaProcesar.shift();
+    const db = fs.inicializar();
+    docRef = db.collection(fs.COLECCION).doc(docId);
     const snap = await docRef.get();
     if (!snap.exists) {
       log.warn(`${docId} ya no existe; salto.`);
@@ -491,12 +544,23 @@ async function procesarSiguiente() {
     // valer en TODOS los paths, incluido consumer-side.
     if (data.destinatario_coleccion === 'EMPLEADOS' && data.destinatario_id) {
       try {
-        const silSnap = await db
-          .collection('BOT_SILENCIADOS_CHOFER')
-          .doc(String(data.destinatario_id))
-          .get();
-        if (silSnap.exists) {
-          const hasta = silSnap.data() && silSnap.data().silenciado_hasta;
+        // Cache silenciados (TTL 60s): un backlog de 200 docs sin cache
+        // genera 200 reads consecutivos a BOT_SILENCIADOS_CHOFER. Con
+        // cache cae a ~5 reads (cantidad de DNIs distintos en backlog).
+        // TTL bajo porque cuando admin manda /silenciar, queremos que
+        // surta efecto rápido — 60s es tolerable.
+        const dni = String(data.destinatario_id);
+        let silData = _consultarCacheSilenciado(dni);
+        if (silData === undefined) {
+          const silSnap = await db
+            .collection('BOT_SILENCIADOS_CHOFER')
+            .doc(dni)
+            .get();
+          silData = silSnap.exists ? (silSnap.data() || null) : null;
+          _guardarCacheSilenciado(dni, silData);
+        }
+        if (silData) {
+          const hasta = silData.silenciado_hasta;
           if (hasta && typeof hasta.toMillis === 'function' &&
               hasta.toMillis() > Date.now()) {
             log.info(
@@ -616,10 +680,18 @@ async function procesarSiguiente() {
     let chunkError = null;
     for (let i = 0; i < partes.length; i++) {
       if (i > 0) {
-        // 2-3s entre partes: tiempo realista de un humano que escribió
-        // el siguiente chunk. Sin esto, WhatsApp ve N mensajes idénticos
-        // de tiempo en milisegundos = patrón de bot.
-        await sleep(2000 + Math.floor(Math.random() * 1000));
+        // Anti-baneo entre chunks (auditoría 2026-05-18):
+        // Antes: 2-3s entre partes → un mensaje de 5 chunks salía en
+        // ~10s = 5 mensajes/10s al mismo número = patrón de bot fuerte.
+        // Además los chunks NO contaban contra MAX_MESSAGES_PER_HOUR
+        // (el cap se chequea pre-chunk-1, los siguientes lo bypassean).
+        // Ahora: 5-15s random — un mensaje largo tarda 25-75s en
+        // entregarse completo, consistente con un operador que escribió
+        // un texto largo y lo fue mandando por partes. Trade-off:
+        // resúmenes diarios largos tardan más en llegar, pero los time-
+        // sensitive (vigilador jornada, alertas Volvo) son cortos y no
+        // se ven afectados (entran en 1 solo chunk casi siempre).
+        await sleep(5000 + Math.floor(Math.random() * 10000));
       }
       try {
         const id = await wa.enviarMensaje(wid, partes[i]);

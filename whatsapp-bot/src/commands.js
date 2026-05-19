@@ -25,6 +25,7 @@
 //     silenciosamente. NO respondemos para no dar pistas a un atacante
 //     que el comando existe.
 
+const admin = require('firebase-admin');
 const log = require('./logger');
 
 // Minimo de digitos para que un sufijo cuente como match en lookups
@@ -431,10 +432,17 @@ async function _comandoPausar(msg, { db, control }, args) {
   }
   const motivo = `Pausado por admin desde WhatsApp${motivoExtra}`;
 
+  // pausado_en con serverTimestamp para evitar drift si el reloj de la
+  // PC dedicada está desfasado (Windows update mal, batería CMOS).
+  // pausado_hasta queda como Date local: es un timestamp FUTURO calculado
+  // sobre Date.now() local, y el bot al chequearlo también usa Date.now()
+  // del mismo proceso — es internamente coherente aunque la PC esté
+  // desfasada. Si en el futuro otra entidad (CF, otra PC) leyera este
+  // campo, habría que migrar a serverTimestamp + offset persistido.
   await db.collection('BOT_CONTROL').doc('main').set(
     {
       pausado: true,
-      pausado_en: new Date(),
+      pausado_en: admin.firestore.FieldValue.serverTimestamp(),
       pausado_hasta: pausadoHasta, // null = indefinido
       motivo,
       pausado_por_canal: 'WHATSAPP_COMMAND',
@@ -453,10 +461,11 @@ async function _comandoPausar(msg, { db, control }, args) {
 }
 
 async function _comandoReanudar(msg, { db }) {
+  // reanudado_en con serverTimestamp (mismo argumento que pausado_en).
   await db.collection('BOT_CONTROL').doc('main').set(
     {
       pausado: false,
-      reanudado_en: new Date(),
+      reanudado_en: admin.firestore.FieldValue.serverTimestamp(),
       motivo: null,
     },
     { merge: true }
