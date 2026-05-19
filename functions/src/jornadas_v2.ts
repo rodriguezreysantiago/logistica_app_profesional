@@ -27,6 +27,10 @@
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 
+// Helpers compartidos (antes duplicados aca + en index.ts).
+// Ver helpers.ts para historia del refactor 2026-05-18.
+import { expiraEnMin, primerNombre, rrPick } from "./helpers";
+
 // Resolver lazy de Firestore: initializeApp() corre en index.ts antes
 // de invocarse cualquier export de este módulo, pero si llamamos
 // admin.firestore() al top-level se evalúa durante el import (antes
@@ -70,9 +74,7 @@ const TTL_JORNADA_BLOQUE_MIN = 30;       // 3h30, 3h45, cuota cumplida
 const TTL_JORNADA_VEDA_MIN = 180;
 const TTL_RESUMEN_DIARIO_MIN = 24 * 60;  // resumen diario vale el dia
 
-function _expiraEnMin(min: number): FsTimestamp {
-  return Timestamp.fromMillis(Date.now() + min * 60 * 1000);
-}
+// _expiraEnMin movido a helpers.ts como `expiraEnMin` (refactor 2026-05-18).
 export const DESCANSO_MIN_SEGUNDOS = 8 * 3600;
 export const DESCANSO_RADIO_METROS = 1000;
 export const VEDA_NOCTURNA_DESDE_HORA = 0; // 00:00 ART
@@ -163,22 +165,16 @@ export function horaArt(tsMs: number): number {
   return parseInt(partes, 10);
 }
 
-/**
- * Primer nombre de un nombre completo "APELLIDO NOMBRE" (estilo Vecchi).
- */
-function primerNombre(full: string): string {
-  const tokens = full.trim().split(/\s+/);
-  if (tokens.length < 2) return tokens[0] ?? "";
-  // Asumimos formato "APELLIDO NOMBRE" — el primer nombre es el 2do token.
-  return tokens[1] ?? "";
-}
-
-/**
- * Random pick para variantes anti-baneo de WhatsApp.
- */
-function rrPick(n: number): number {
-  return Math.floor(Math.random() * n);
-}
+// `primerNombre` y `rrPick` movidos a helpers.ts (refactor 2026-05-18).
+//
+// NOTA: las versiones nuevas tienen MEJOR comportamiento que las que
+// vivian aca:
+//   - primerNombre ahora CAPITALIZA ("Juan" en vez de "JUAN") — mensajes
+//     al chofer mas naturales: "Hola Juan" en vez de "Hola JUAN".
+//   - rrPick ahora es round-robin con counter (en vez de Math.random()
+//     puro) — garantiza diversidad consecutiva en variantes anti-baneo
+//     de WhatsApp (importante porque mensajes repetidos a corto plazo
+//     son signal de bot).
 
 /**
  * Chequea si el chofer cumplio descanso minimo (>= 8h misma posicion)
@@ -288,7 +284,7 @@ async function encolarAviso3h30(
     error: null,
     intentos: 0,
     origen: "jornada_v2_bloque_3h30",
-    expira_en: _expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
+    expira_en: expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -352,7 +348,7 @@ async function encolarAvisoBloqueExcedido(
     error: null,
     intentos: 0,
     origen: "jornada_v2_bloque_excedido",
-    expira_en: _expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
+    expira_en: expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -396,7 +392,7 @@ async function encolarAvisoCuotaCumplida(
     error: null,
     intentos: 0,
     origen: "jornada_v2_cuota_cumplida",
-    expira_en: _expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
+    expira_en: expiraEnMin(TTL_JORNADA_BLOQUE_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -440,7 +436,7 @@ async function encolarAvisoVedaNocturna(
     error: null,
     intentos: 0,
     origen: "jornada_v2_veda_nocturna",
-    expira_en: _expiraEnMin(TTL_JORNADA_VEDA_MIN),
+    expira_en: expiraEnMin(TTL_JORNADA_VEDA_MIN),
     destinatario_coleccion: "EMPLEADOS",
     destinatario_id: dni,
     campo_base: "JORNADA",
@@ -911,7 +907,7 @@ export async function armarResumenJornadasDiario(): Promise<void> {
     await db().collection("COLA_WHATSAPP").add({
       telefono: tel, mensaje, estado: "PENDIENTE",
       encolado_en: FieldValue.serverTimestamp(),
-      expira_en: _expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
+      expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
       enviado_en: null, error: null, intentos: 0,
       origen: "resumen_jornadas_v2", destinatario_coleccion: "EMPLEADOS",
       destinatario_id: SEG_HIGIENE_DNI, campo_base: "JORNADA",
@@ -979,7 +975,7 @@ export async function armarResumenJornadasDiario(): Promise<void> {
   await db().collection("COLA_WHATSAPP").add({
     telefono: tel, mensaje, estado: "PENDIENTE",
     encolado_en: FieldValue.serverTimestamp(),
-    expira_en: _expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
+    expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
     enviado_en: null, error: null, intentos: 0,
     origen: "resumen_jornadas_v2", destinatario_coleccion: "EMPLEADOS",
     destinatario_id: SEG_HIGIENE_DNI, campo_base: "JORNADA",

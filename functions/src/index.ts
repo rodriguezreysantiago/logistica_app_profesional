@@ -43,6 +43,19 @@ initializeApp();
 // para evitar el orden de inicialización con `initializeApp()`.
 import * as jornadasV2 from "./jornadas_v2";
 
+// Helpers compartidos con jornadas_v2.ts (antes vivían duplicados aca
+// con leves diferencias - drift). Refactor 2026-05-18, ver helpers.ts
+// para historia detallada.
+import {
+  ayerYmdArg,
+  expiraEnMin,
+  formatFechaArg,
+  formatHoraArg,
+  inicioDelDiaArg,
+  primerNombre,
+  rrPick,
+} from "./helpers";
+
 // Configuración global: límite de instancias concurrentes para que un
 // loop de login no me funda la cuenta. La region es southamerica-east1
 // (São Paulo) para estar en el mismo DC que Firestore — eso elimina el
@@ -2731,16 +2744,16 @@ export const onAlertaVolvoCreated = onDocumentCreated(
 
     const apodo = (choferData.APODO ?? "").toString().trim();
     const nombreFull = (choferData.NOMBRE ?? "").toString().trim();
-    const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+    const saludoNombre = apodo || primerNombre(nombreFull) || "";
 
     const creadoMs =
       (data.creado_en as Timestamp | undefined)?.toMillis() ?? Date.now();
-    const horaTxt = _formatHoraArg(creadoMs);
+    const horaTxt = formatHoraArg(creadoMs);
     // Fecha explícita DD/MM en lugar de "hoy a las". El bot tiene horario
     // hábil L-V 8-20 y skip fin de semana — un evento del sábado se manda
     // el lunes y "hoy" sería mentira. Con la fecha explícita el chofer
     // siempre sabe a qué momento se refiere el aviso.
-    const fechaTxt = _formatFechaArg(creadoMs);
+    const fechaTxt = formatFechaArg(creadoMs);
 
     // Nota: NO hay dedup diaria a este nivel — los eventos de manejo
     // (OVERSPEED, IDLING, HARSH, PTO, SEATBELT, etc.) son el insumo
@@ -2835,7 +2848,7 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         "Te pedimos ir más tranquilo. Cualquier comentario lo charlamos.\n\n" +
         BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
     ];
-    const mensaje = variantes[_rrPick(variantes.length)];
+    const mensaje = variantes[rrPick(variantes.length)];
 
     // ─── Silencio del chofer (chequeo PRE-claim) ───────────────────
     // BOT_SILENCIADOS_CHOFER debe valer para TODOS los avisos
@@ -2950,7 +2963,7 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
-        expira_en: _expiraEnMinutos(TTL_VOLVO_MANEJO_MIN),
+        expira_en: expiraEnMin(TTL_VOLVO_MANEJO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -3016,45 +3029,9 @@ export const onAlertaVolvoCreated = onDocumentCreated(
  * instancia se enfría y arranca otra fría, vuelve a 0 — eso es OK,
  * lo importante es la diversidad dentro de la ráfaga.
  */
-let _rrCounter = 0;
-function _rrPick(len: number): number {
-  if (len <= 0) return 0;
-  // Garantizar índice positivo en [0, len). Antes usabamos `| 0` que
-  // wrappea a int32 SIGNED — al cruzar 2^31 saltaba a -2^31 y `idx`
-  // podía dar negativo (en JS `(-3) % 8 = -3`, NO 5 como en otras
-  // lenguas). Eso producía `variantes[-3] = undefined` y mensajes
-  // vacios encolados. `>>> 0` wrappea unsigned y nunca da negativos.
-  const idx = _rrCounter % len;
-  _rrCounter = (_rrCounter + 1) >>> 0;
-  return idx;
-}
-
-/**
- * Devuelve el segundo token capitalizado de un nombre tipo
- * "APELLIDO NOMBRE …", o "" si no se puede determinar.
- * Espejo del helper que usa el panel admin del cliente.
- */
-function _primerNombre(full: string): string {
-  const partes = full.trim().split(/\s+/);
-  if (partes.length < 2) return "";
-  const n = partes[1];
-  if (!n) return "";
-  return n[0].toUpperCase() + n.slice(1).toLowerCase();
-}
-
-/**
- * Formatea HH:MM en TZ Argentina a partir de millis UTC. Independiente
- * de la TZ del runtime (Cloud Functions corre en UTC).
- */
-function _formatHoraArg(millis: number): string {
-  const fmt = new Intl.DateTimeFormat("es-AR", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return fmt.format(new Date(millis));
-}
+// _rrPick, _primerNombre, _formatHoraArg movidos a helpers.ts
+// (refactor 2026-05-18). Importados arriba como rrPick / primerNombre
+// / formatHoraArg.
 
 /**
  * Helper de idempotencia ATOMICA para crons diarios. Usa Firestore
@@ -3166,20 +3143,7 @@ async function fetchWithTimeout(
   }
 }
 
-/**
- * Formatea DD/MM en TZ Argentina a partir de millis UTC. Usado en los
- * mensajes al chofer para que la fecha del evento sea explícita
- * (no "hoy" — el bot puede demorar el envío al lunes si el evento ocurrió
- * el fin de semana).
- */
-function _formatFechaArg(millis: number): string {
-  const fmt = new Intl.DateTimeFormat("es-AR", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    day: "2-digit",
-    month: "2-digit",
-  });
-  return fmt.format(new Date(millis));
-}
+// _formatFechaArg movido a helpers.ts (refactor 2026-05-18) como formatFechaArg.
 
 // ============================================================================
 // volvoScoresPoller — eco-driving (Volvo Group Scores API v2.0.2)
@@ -3263,7 +3227,7 @@ export const volvoScoresPoller = onSchedule(
     // Calculamos "ayer" en ART. La API espera fechas YYYY-MM-DD en TZ
     // de la flota. Ejemplo: corre el 2026-05-03 04:00 ART → pedimos
     // los scores del día 2026-05-02 (cerrado).
-    const fechaYmd = _ayerYmdArg();
+    const fechaYmd = ayerYmdArg();
 
     logger.info("[volvoScoresPoller] iniciando ciclo", { fecha: fechaYmd });
 
@@ -3290,7 +3254,7 @@ export const volvoScoresPoller = onSchedule(
     });
     let url = `${VOLVO_BASE}/score/scores?${qsInicial.toString()}`;
 
-    const fechaTs = Timestamp.fromDate(_inicioDelDiaArg(fechaYmd));
+    const fechaTs = Timestamp.fromDate(inicioDelDiaArg(fechaYmd));
     let totalEscritos = 0;
     let pages = 0;
     let fleetEscrita = false;
@@ -3382,32 +3346,8 @@ export const volvoScoresPoller = onSchedule(
   }
 );
 
-/**
- * Devuelve la fecha "ayer" en TZ Argentina como YYYY-MM-DD.
- * Independiente del runtime (Cloud Functions corre en UTC).
- */
-function _ayerYmdArg(): string {
-  const ahora = new Date();
-  const ymdHoy = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(ahora);
-  // Construimos hoy ART y restamos 1 día.
-  const hoyArg = new Date(`${ymdHoy}T00:00:00-03:00`);
-  const ayer = new Date(hoyArg.getTime() - 24 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(ayer);
-}
-
-function _inicioDelDiaArg(ymd: string): Date {
-  return new Date(`${ymd}T00:00:00-03:00`);
-}
+// _ayerYmdArg + _inicioDelDiaArg movidos a helpers.ts (refactor 2026-05-18)
+// como ayerYmdArg / inicioDelDiaArg.
 
 function buildScoreVehicleDoc(
   v: ScoresApiVehicleScore,
@@ -3552,7 +3492,7 @@ const AVISO_NO_ID_THROTTLE_SEGUNDOS = 30 * 60;
 const TTL_VOLVO_MANEJO_MIN = 120; // OVERSPEED, IDLING, HARSH, PTO
 const TTL_PASA_IBUTTON_MIN = 30; // CHOFER_NO_IDENTIFICADO Sitrack
 const TTL_RESUMEN_DIARIO_MIN = 24 * 60; // resumenes diarios — vence en 24h
-// Note: TTL_SILENCIO_REANUDADO esta inline en _expiraEnMinutos(60)
+// Note: TTL_SILENCIO_REANUDADO esta inline en expiraEnMin(60)
 // en el aviso `silencio_reanudado` (~linea 5370).
 
 // Backstop anti-rafaga Volvo HIGH (Fase auditoria 24/7 2026-05-18):
@@ -3566,9 +3506,7 @@ const TTL_RESUMEN_DIARIO_MIN = 24 * 60; // resumenes diarios — vence en 24h
 const VOLVO_HIGH_THROTTLE_HORA_MAX = 10;
 const VOLVO_HIGH_THROTTLE_VENTANA_SEG = 60 * 60; // 1h rolling
 
-function _expiraEnMinutos(minutos: number): Timestamp {
-  return Timestamp.fromMillis(Date.now() + minutos * 60 * 1000);
-}
+// _expiraEnMinutos movido a helpers.ts (refactor 2026-05-18) como expiraEnMin.
 
 const TIPOS_MANTENIMIENTO_DIRECTOS = new Set(["FUEL", "CATALYST"]);
 
@@ -3982,7 +3920,7 @@ export const resumenBotDiario = onSchedule(
     // era get + skip + set al final, que tenia race con retry de GCP
     // entre el get y el set → mensaje duplicado. Ahora `create()` es
     // atomico: si ya existe tira ALREADY_EXISTS y el helper devuelve false.
-    const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
+    const hoyKey = formatFechaArg(Date.now()).replace(/\//g, "-");
     const histRef = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`bot_resumen_${hoyKey}_${MANTENIMIENTO_DESTINATARIO_DNI}`);
@@ -4022,7 +3960,7 @@ export const resumenBotDiario = onSchedule(
       // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
       // corrió y el bot estuvo sano las últimas 24h).
       if (evSnap.empty) {
-        const fechaTxt = _formatFechaArg(Date.now());
+        const fechaTxt = formatFechaArg(Date.now());
         const mensajeOk =
         `🤖 *Resumen del bot — ${fechaTxt}*\n\n` +
         "✅ Sin caídas ni eventos en las últimas 24 h.\n\n" +
@@ -4034,7 +3972,7 @@ export const resumenBotDiario = onSchedule(
           mensaje: mensajeOk,
           estado: "PENDIENTE",
           encolado_en: FieldValue.serverTimestamp(),
-          expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
+          expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
           enviado_en: null,
           error: null,
           intentos: 0,
@@ -4066,8 +4004,8 @@ export const resumenBotDiario = onSchedule(
         const tipo = String(d.tipo ?? "");
         const detectadoEn = d.detectadoEn as Timestamp | undefined;
         if (!detectadoEn) continue;
-        const horaTxt = _formatHoraArg(detectadoEn.toMillis());
-        const fechaTxt = _formatFechaArg(detectadoEn.toMillis());
+        const horaTxt = formatHoraArg(detectadoEn.toMillis());
+        const fechaTxt = formatFechaArg(detectadoEn.toMillis());
         const pcId = (d.pcId ?? "?").toString();
 
         if (tipo === "caida") {
@@ -4117,7 +4055,7 @@ export const resumenBotDiario = onSchedule(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
-        expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
+        expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -4986,7 +4924,7 @@ async function _encolarAvisoChoferNoIdentificado(
 
   const apodo = (empData.APODO ?? "").toString().trim();
   const nombreFull = (empData.NOMBRE ?? "").toString().trim();
-  const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+  const saludoNombre = apodo || primerNombre(nombreFull) || "";
   const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
 
   // Variantes para no repetir el mismo texto cada 5 min — anti-baneo
@@ -5029,7 +4967,7 @@ async function _encolarAvisoChoferNoIdentificado(
       BANNER_TESTING +
       "_Coopertrans Móvil — Mensaje automático._",
   ];
-  const mensaje = variantes[_rrPick(variantes.length)];
+  const mensaje = variantes[rrPick(variantes.length)];
 
   // Auditoria 2026-05-17: antes el throttle se seteaba SIEMPRE
   // (incluso si el add a COLA_WHATSAPP fallaba), lo que dejaba al
@@ -5041,7 +4979,7 @@ async function _encolarAvisoChoferNoIdentificado(
       mensaje,
       estado: "PENDIENTE",
       encolado_en: FieldValue.serverTimestamp(),
-      expira_en: _expiraEnMinutos(TTL_PASA_IBUTTON_MIN),
+      expira_en: expiraEnMin(TTL_PASA_IBUTTON_MIN),
       enviado_en: null,
       error: null,
       intentos: 0,
@@ -5117,7 +5055,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
     // mandar el mismo resumen 2 veces a Santiago. Antes faltaba este
     // gate y los 3 crons que corren a las 8:00 podian generar mensajes
     // duplicados ante cualquier reintento.
-    const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
+    const hoyKey = formatFechaArg(Date.now()).replace(/\//g, "-");
     const histRef = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`drifts_${hoyKey}_${MANTENIMIENTO_DESTINATARIO_DNI}`);
@@ -5158,7 +5096,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
       }
 
       // ─── Armar mensaje ─────────────────────────────────────────────
-      const fechaTxt = _formatFechaArg(Date.now());
+      const fechaTxt = formatFechaArg(Date.now());
 
       // Sin drifts: mandamos "todo OK" igual (decisión Santiago
       // 2026-05-09: silencio = ambiguo, un mensaje confirma que el cron
@@ -5176,7 +5114,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
           mensaje: mensajeOk,
           estado: "PENDIENTE",
           encolado_en: FieldValue.serverTimestamp(),
-          expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
+          expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
           enviado_en: null,
           error: null,
           intentos: 0,
@@ -5255,7 +5193,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
-        expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
+        expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -5463,7 +5401,7 @@ async function _encolarAvisoSilencioReanudado(
   }
   const apodo = (empData.APODO ?? "").toString().trim();
   const nombreFull = (empData.NOMBRE ?? "").toString().trim();
-  const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+  const saludoNombre = apodo || primerNombre(nombreFull) || "";
   const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
 
   const mensaje =
@@ -5479,7 +5417,7 @@ async function _encolarAvisoSilencioReanudado(
     mensaje,
     estado: "PENDIENTE",
     encolado_en: FieldValue.serverTimestamp(),
-    expira_en: _expiraEnMinutos(60),
+    expira_en: expiraEnMin(60),
     enviado_en: null,
     error: null,
     intentos: 0,
@@ -5515,7 +5453,7 @@ export const resumenExcesosJornadaDiario = onSchedule(
     // Idempotencia diaria (gate compartido para evitar duplicados ante
     // retry de GCP). El destinatario real lo resuelve el modulo
     // jornadas_v2 — usamos un docId generico por dia.
-    const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
+    const hoyKey = formatFechaArg(Date.now()).replace(/\//g, "-");
     const histRef = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`excesos_jornada_${hoyKey}`);
@@ -5606,7 +5544,7 @@ export const resumenConductaManejoDiario = onSchedule(
     // Idempotencia diaria — si GCP re-dispara el cron Molina recibe el
     // mismo resumen 2 veces. Lock ATOMICO con `adquirirIdempotenciaDiaria`
     // — el create() es atomico, no hay ventana de race entre get y set.
-    const hoyKey = _formatFechaArg(Date.now()).replace(/\//g, "-");
+    const hoyKey = formatFechaArg(Date.now()).replace(/\//g, "-");
     const histRefIdem = db
       .collection("AVISOS_AUTOMATICOS_HISTORICO")
       .doc(`conducta_manejo_${hoyKey}`);
@@ -5846,7 +5784,7 @@ export const resumenConductaManejoDiario = onSchedule(
     }
     const apodo = (empData.APODO ?? "").toString().trim();
     const nombreFull = (empData.NOMBRE ?? "").toString().trim();
-    const saludoNombre = apodo || _primerNombre(nombreFull) || "";
+    const saludoNombre = apodo || primerNombre(nombreFull) || "";
     const saludo = saludoNombre ? `Hola ${saludoNombre}` : "Hola";
     const fmtFecha = fechaArtAyer.split("-").reverse().join("/");
 
@@ -5864,7 +5802,7 @@ export const resumenConductaManejoDiario = onSchedule(
         mensaje,
         estado: "PENDIENTE",
         encolado_en: FieldValue.serverTimestamp(),
-        expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
+        expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
         enviado_en: null,
         error: null,
         intentos: 0,
@@ -6004,7 +5942,7 @@ export const resumenConductaManejoDiario = onSchedule(
       mensaje,
       estado: "PENDIENTE",
       encolado_en: FieldValue.serverTimestamp(),
-      expira_en: _expiraEnMinutos(TTL_RESUMEN_DIARIO_MIN),
+      expira_en: expiraEnMin(TTL_RESUMEN_DIARIO_MIN),
       enviado_en: null,
       error: null,
       intentos: 0,
