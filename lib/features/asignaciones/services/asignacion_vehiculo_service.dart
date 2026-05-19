@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/services/audit_log_service.dart';
 import '../../fleet_map/services/sitrack_snapshot_service.dart';
 import '../models/asignacion_vehiculo.dart';
@@ -238,13 +239,18 @@ class AsignacionVehiculoService {
     // ya quedó correcto, los espejos pueden reconciliarse después.
     final empleadoRef =
         _db.collection(AppCollections.empleados).doc(dniLimpio);
+    // DNI maskeado para logs (evita exponer PII en Crashlytics / logcat).
+    final dniMasked = _maskDni(dniLimpio);
     try {
       await empleadoRef.update(
         {'VEHICULO': desvincular ? _sinAsignar : patenteNorm},
       );
-    } catch (e) {
-      // ignore: avoid_print
-      print('Aviso: update espejo EMPLEADOS.$dniLimpio.VEHICULO falló: $e');
+    } catch (e, s) {
+      AppLogger.recordError(
+        e,
+        s,
+        reason: 'update espejo EMPLEADOS.$dniMasked.VEHICULO falló',
+      );
     }
 
     if (!desvincular) {
@@ -253,9 +259,12 @@ class AsignacionVehiculoService {
             .collection(AppCollections.vehiculos)
             .doc(patenteNorm)
             .update({'ESTADO': _estadoOcupado});
-      } catch (e) {
-        // ignore: avoid_print
-        print('Aviso: update espejo VEHICULOS.$patenteNorm.ESTADO falló: $e');
+      } catch (e, s) {
+        AppLogger.recordError(
+          e,
+          s,
+          reason: 'update espejo VEHICULOS.$patenteNorm.ESTADO falló',
+        );
       }
     }
 
@@ -268,10 +277,11 @@ class AsignacionVehiculoService {
             .collection(AppCollections.vehiculos)
             .doc(patenteActualChofer)
             .update({'ESTADO': _estadoLibre});
-      } catch (e) {
-        // ignore: avoid_print
-        print(
-          'Aviso: liberar VEHICULOS.$patenteActualChofer.ESTADO falló: $e',
+      } catch (e, s) {
+        AppLogger.recordError(
+          e,
+          s,
+          reason: 'liberar VEHICULOS.$patenteActualChofer.ESTADO falló',
         );
       }
     }
@@ -435,5 +445,13 @@ class AsignacionVehiculoService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Maskea un DNI para uso en logs sin exponer PII completo.
+  /// Ej: `35244439` → `352***39`. Mantiene 3+2 chars para que sea
+  /// identificable en debugging sin filtrarlo completo a Crashlytics.
+  static String _maskDni(String dni) {
+    if (dni.length < 6) return '***';
+    return '${dni.substring(0, 3)}***${dni.substring(dni.length - 2)}';
   }
 }

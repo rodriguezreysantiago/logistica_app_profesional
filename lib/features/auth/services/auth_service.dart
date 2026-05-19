@@ -258,13 +258,18 @@ class AuthService {
   ///
   /// No await: devolvemos al toque para no bloquear el login del user.
   void _prewarmCacheLegajo(String dni) {
+    // DNI maskeado para logs — debugPrint NO se strippea en release builds,
+    // así que loguear DNI completo expone PII en logcat / consola desktop.
+    final dniMasked = dni.length < 6
+        ? '***'
+        : '${dni.substring(0, 3)}***${dni.substring(dni.length - 2)}';
     FirebaseFirestore.instance
         .collection(AppCollections.empleados)
         .doc(dni)
         .get()
         .timeout(const Duration(seconds: 5))
         .then((_) {
-      debugPrint('✅ pre-warm cache legajo OK ($dni)');
+      debugPrint('✅ pre-warm cache legajo OK ($dniMasked)');
     }).catchError((e) {
       debugPrint('⚠️ pre-warm cache legajo falló (no crítico): $e');
     });

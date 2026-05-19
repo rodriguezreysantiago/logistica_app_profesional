@@ -416,9 +416,23 @@ class _AccesoChecklist extends StatelessWidget {
     final now = DateTime.now();
     final tipoChecklist = tipoLabel == 'CAMIÓN' ? 'TRACTOR' : 'BATEA';
 
+    // Necesitamos el DNI del chofer en el query para evitar permission-
+    // denied: la rule de CHECKLISTS exige `resource.data.DNI == auth.uid`
+    // y Firestore valida la rule per-doc sobre TODOS los docs que matchea
+    // el query, no solo los devueltos. Si otro chofer manejó la misma
+    // patente este mes (rotación de unidades), el query toca docs
+    // ajenos y falla. Filtrar por DNI=self lo previene.
+    // Regresión detectada 2026-05-18 — hardening de rules del 2026-05-17.
+    final dniUser = FirebaseAuth.instance.currentUser?.uid;
+    if (dniUser == null || dniUser.isEmpty) {
+      // Defensa: si no hay sesión, no podemos mostrar nada útil.
+      return const SizedBox.shrink();
+    }
+
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection(AppCollections.checklists)
+          .where('DNI', isEqualTo: dniUser)
           .where('DOMINIO', isEqualTo: patente)
           .where('MES', isEqualTo: now.month)
           .where('ANIO', isEqualTo: now.year)
