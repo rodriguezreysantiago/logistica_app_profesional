@@ -3556,8 +3556,41 @@ export const onAlertaVolvoMantenimientoCreated = onDocumentCreated(
 
 
 
+/**
+ * Eventos Sitrack que disparan el resumen diario de conducta a Molina
+ * (`resumenConductaManejoDiario`). Incluye los CESVI puros + alertas
+ * Volvo/Mobileye que NO son parte del ICM CESVI pero que Molina sigue
+ * queriendo ver en el resumen diario (salida de carril, distancia
+ * frenado insuficiente, colisión, chofer sin identificar). Este set
+ * es operativo, NO sirve para calcular ICM.
+ *
+ * Para el ICM CESVI usar [TIPOS_CESVI_PUROS] — Santiago 2026-05-19.
+ */
 export const TIPOS_PELIGROSOS_SITRACK = new Set<number>([
   8, 9, 66, 67, 267, 326, 383, 444, 1006, 1007,
+]);
+
+/**
+ * Eventos Sitrack que CESVI/YPF cuenta para el cálculo del ICM
+ * (Índice de Conducta de Manejo, homologado por CESVI Argentina).
+ * Subconjunto estricto de [TIPOS_PELIGROSOS_SITRACK]:
+ *   - 66  Aceleración Brusca (peso −2.8 por evento)
+ *   - 67  Frenada Brusca     (peso −5.8 por evento)
+ *   - 383 Giro Brusco        (peso −2.8 por evento)
+ *   - 8   Inicio sobrevelocidad ┐ pareados como UN evento de
+ *   - 9   Fin sobrevelocidad    ┘ sobrevelocidad con duración
+ *                                  (puntaje según gravedad CESVI)
+ *
+ * Fatiga (-5/-10/-15 según rango 2h/3h/>4h) se aplica por bloque del
+ * vigilador de jornada, NO se cuenta por event_id (los eventos
+ * Sitrack 1236-1238 de fatiga NO los recibimos en nuestra cuenta —
+ * verificado 2026-05-19).
+ *
+ * Pesos exactos en la presentación Carsync de YPF
+ * (`G:/Mi unidad/REQUERIMIENTOS YPF/Presentación Avance Carsync...`).
+ */
+export const TIPOS_CESVI_PUROS = new Set<number>([
+  8, 9, 66, 67, 383,
 ]);
 
 

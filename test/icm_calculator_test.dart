@@ -119,22 +119,33 @@ void main() {
     // Drift detection: si alguien agrega o quita un tipo, este test
     // rompe y obliga a verificar que el servidor también se actualizó.
 
-    test('contiene los 10 tipos peligrosos del catálogo Sitrack YPF', () {
-      // Catálogo:
-      //   8/9    Inicio/fin de sobrevelocidad
-      //   66     Aceleración brusca
-      //   67     Frenada brusca
-      //   267    Chofer sin identificar
-      //   326    Advertencia colisión obstáculos
-      //   383    Giro brusco
-      //   444    Distancia frenado insuficiente
-      //   1006   Salida de carril (LDWS/cámara)
-      //   1007   Detección de colisión
-      expect(kTiposInfraccionIcm, {8, 9, 66, 67, 267, 326, 383, 444, 1006, 1007});
+    test('contiene los 5 tipos CESVI puros del catálogo Sitrack', () {
+      // Refactor Santiago 2026-05-19: el set se redujo de 10 a 5
+      // eventos al alinear con la fórmula CESVI homologada YPF.
+      // Los otros eventos (267 chofer sin identificar, 326 advertencia
+      // colisión, 444 distancia frenado, 1006 salida carril, 1007
+      // colisión) son alertas Volvo/Mobileye que NO son parte del ICM
+      // CESVI — viven solo en `TIPOS_PELIGROSOS_SITRACK` (TS) para el
+      // resumen Molina.
+      //
+      // CESVI cuenta:
+      //   8/9    Inicio/fin de sobrevelocidad → pareados como 1 evento
+      //   66     Aceleración brusca           → peso -2.8
+      //   67     Frenada brusca               → peso -5.8
+      //   383    Giro brusco                  → peso -2.8
+      expect(kTiposInfraccionIcm, {8, 9, 66, 67, 383});
     });
 
-    test('cantidad exacta = 10 (no agregamos sin actualizar server)', () {
-      expect(kTiposInfraccionIcm.length, 10);
+    test('cantidad exacta = 5 (CESVI puro)', () {
+      expect(kTiposInfraccionIcm.length, 5);
+    });
+
+    test('NO incluye eventos Volvo/Mobileye (no son CESVI)', () {
+      expect(kTiposInfraccionIcm.contains(267), isFalse);  // chofer sin id
+      expect(kTiposInfraccionIcm.contains(326), isFalse);  // adv colisión
+      expect(kTiposInfraccionIcm.contains(444), isFalse);  // dist frenado
+      expect(kTiposInfraccionIcm.contains(1006), isFalse); // salida carril
+      expect(kTiposInfraccionIcm.contains(1007), isFalse); // colisión
     });
 
     test('un tipo cualquiera que NO debería estar (ej. ignición) NO está', () {
