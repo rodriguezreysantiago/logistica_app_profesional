@@ -30,6 +30,7 @@ import * as logger from "firebase-functions/logger";
 // Helpers compartidos (antes duplicados aca + en index.ts).
 // Ver helpers.ts para historia del refactor 2026-05-18.
 import { expiraEnMin, primerNombre, rrPick } from "./helpers";
+import { cargarExcluidos } from "./excluidos";
 
 // Resolver lazy de Firestore: initializeApp() corre en index.ts antes
 // de invocarse cualquier export de este módulo, pero si llamamos
@@ -524,6 +525,9 @@ export async function tickVigiladorJornada(): Promise<void> {
 
   const snap = await db().collection("SITRACK_POSICIONES").limit(5000).get();
   const silenciados = await cargarSilenciados();
+  // Choferes/patentes de combustibles líquidos NO controlados por
+  // Coopertrans Móvil — skipear sus jornadas (ver excluidos.ts).
+  const excluidos = await cargarExcluidos(db());
 
   // Race condition fix (auditoria 2026-05-16): si por drift de
   // CHOFER_DISTINTO un mismo DNI aparece en 2 patentes (chofer logueado
@@ -540,6 +544,11 @@ export async function tickVigiladorJornada(): Promise<void> {
     const data = docPos.data();
     const dni = (data.driver_dni ?? "").toString().trim();
     if (!dni) continue;
+    // Skip choferes excluidos (combustibles líquidos).
+    if (excluidos.dnis.has(dni)) continue;
+    // Skip patentes excluidas (defensivo: chofer Vecchi manejando un
+    // tanque por algún motivo — sigue siendo operativa que no controlamos).
+    if (excluidos.patentes.has(docPos.id.toUpperCase())) continue;
     const polledMs =
       (data.consultado_en as FsTimestamp | undefined)?.toMillis() ?? 0;
     const previo = choferesProcesados.get(dni);
@@ -862,9 +871,14 @@ export async function armarResumenJornadasDiario(): Promise<void> {
   }
   const excesos: Exceso[] = [];
 
+  // Skip excesos de los 3 choferes de combustibles líquidos — no son
+  // operativa Vecchi (ver excluidos.ts).
+  const excluidos = await cargarExcluidos(db());
+
   for (const d of snapCerradas.docs) {
     const j = d.data() as JornadaDoc;
     if (!j.bloque_excedido && !j.cuota_excedida && !j.veda_excedida) continue;
+    if (excluidos.dnis.has(j.chofer_dni)) continue;
     excesos.push({
       choferDni: j.chofer_dni,
       patente: j.ultima_patente,

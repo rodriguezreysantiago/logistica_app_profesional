@@ -38,6 +38,7 @@ import { db } from "./setup";
 // re-exportan ahí para que múltiples módulos extraidos puedan
 // importarlos sin acoplarse entre sí).
 import { hashId, TIPOS_PELIGROSOS_SITRACK } from "./index";
+import { cargarExcluidos } from "./excluidos";
 
 export const recomputeIcmSemanalScheduled = onSchedule(
   {
@@ -122,13 +123,22 @@ export const recomputeIcmSemanalScheduled = onSchedule(
       eventosPorTipo: Record<string, number>;
       odometroPorPatente: Map<string, OdometroTracking>;
     }
+    // Cargar excluidos UNA vez (cacheado 10 min). Skip eventos de los
+    // 3 choferes/3 tanques de combustibles líquidos — no son operativa
+    // Vecchi (ver excluidos.ts).
+    const excluidos = await cargarExcluidos(db);
+
     const porChofer = new Map<string, AggChofer>();
     for (const d of evSnap.docs) {
       const data = d.data();
       const eventId = data.event_id;
       const dni = (data.driver_dni ?? "").toString().trim();
       if (!dni) continue;
+      // Skip choferes excluidos (combustibles líquidos).
+      if (excluidos.dnis.has(dni)) continue;
       const patente = (data.asset_id ?? "").toString().trim().toUpperCase();
+      // Skip patentes excluidas (tanques + tractores de esos choferes).
+      if (excluidos.patentes.has(patente)) continue;
       const odometer = typeof data.odometer === "number" ? data.odometer : null;
 
       let agg = porChofer.get(dni);

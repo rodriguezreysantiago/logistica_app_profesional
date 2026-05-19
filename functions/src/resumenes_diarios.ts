@@ -36,6 +36,7 @@ import {
 } from "./index";
 import { expiraEnMin, formatFechaArg, formatHoraArg, primerNombre } from "./helpers";
 import * as jornadasV2 from "./jornadas_v2";
+import { cargarExcluidos } from "./excluidos";
 
 // ============================================================================
 // resumenBotDiario — resumen consolidado de eventos del bot (8 AM diario)
@@ -306,10 +307,17 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
       // matchea docs sin el campo). Levantamos toda la colección (~55
       // docs, batch única) y filtramos. .limit(5000) defensivo: la
       // colección tiene 1 doc por patente, no debería crecer mucho.
+      const excluidos = await cargarExcluidos(db);
       const snap = await db.collection("SITRACK_POSICIONES").limit(5000).get();
       const drifts = snap.docs
         .map((d) => ({ patente: d.id, data: d.data() }))
         .filter((x) => {
+          // Skip patentes excluidas (tanques + tractores combustibles).
+          if (excluidos.patentes.has(x.patente.toUpperCase())) return false;
+          // Skip si el chofer fisico es excluido (raro pero defensivo
+          // — un chofer combustibles manejando un tractor normal).
+          const driverDni = (x.data.driver_dni ?? "").toString().trim();
+          if (driverDni && excluidos.dnis.has(driverDni)) return false;
           const tipo = (x.data.drift_tipo ?? "").toString();
           return tipo.length > 0;
         });
@@ -570,6 +578,9 @@ export const resumenConductaManejoDiario = onSchedule(
     // sino Molina no recibe el resumen del dia.
     let exitoCron = false;
     try {
+      // Cargar excluidos UNA vez (cacheado 10 min). Skip eventos de los
+      // 3 choferes/3 tanques de combustibles líquidos (ver excluidos.ts).
+      const excluidos = await cargarExcluidos(db);
 
       // ─── Rango: día calendario AYER en ART ────────────────────────
       const ahora = new Date();
@@ -635,6 +646,10 @@ export const resumenConductaManejoDiario = onSchedule(
         continue;
       }
       const patente = (d.asset_id ?? "").toString().trim().toUpperCase();
+      // Skip eventos excluidos (combustibles líquidos).
+      if (excluidos.patentes.has(patente)) continue;
+      const driverDniRaw = (d.driver_dni ?? "").toString().trim();
+      if (driverDniRaw && excluidos.dnis.has(driverDniRaw)) continue;
       const ts = d.report_date as Timestamp | undefined;
       const tsMs = ts?.toMillis?.() ?? 0;
       // Sobrevelocidad detectada (event_id 8 = inicio, 9 = fin):
@@ -692,6 +707,10 @@ export const resumenConductaManejoDiario = onSchedule(
           null;
       if (!tipoUsado) continue;
       const patente = (d.patente ?? "").toString().trim().toUpperCase();
+      // Skip patentes excluidas (combustibles líquidos).
+      if (excluidos.patentes.has(patente)) continue;
+      const driverDniRaw = (d.chofer_dni ?? "").toString().trim();
+      if (driverDniRaw && excluidos.dnis.has(driverDniRaw)) continue;
       const ts = d.creado_en as Timestamp | undefined;
       const tsMs = ts?.toMillis?.() ?? 0;
       eventos.push({

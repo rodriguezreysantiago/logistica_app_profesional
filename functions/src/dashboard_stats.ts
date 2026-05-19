@@ -32,6 +32,7 @@ import * as logger from "firebase-functions/logger";
 import { FieldValue } from "firebase-admin/firestore";
 
 import { db } from "./setup";
+import { cargarExcluidos } from "./excluidos";
 
 const DASHBOARD_STATS_SCHEMA_VERSION = 1;
 
@@ -198,11 +199,18 @@ async function _statsRecomputeDashboard(): Promise<DashboardCounters & { docs_le
     proximos_30: 0,
   };
 
+  // Cargar excluidos UNA vez (cacheado 10 min). Skip los 3 choferes y
+  // sus vehículos (tanques + tractores asociados) para no inflar los
+  // KPIs con operativa de combustibles líquidos (ver excluidos.ts).
+  const excluidos = await cargarExcluidos(db);
+
   // Empleados con vehículo (.limit(5000) defensivo, igual que cliente).
   const empleadosSnap = await db.collection("EMPLEADOS").limit(5000).get();
   for (const doc of empleadosSnap.docs) {
     const data = doc.data();
     if (!_statsEsActivo(data)) continue;
+    // Skip choferes excluidos (combustibles líquidos).
+    if (excluidos.dnis.has(doc.id)) continue;
     const rol = _statsNormalizarRol(data.ROL);
     if (!ROLES_CON_VEHICULO.has(rol)) continue;
     const estado = String(data.estado_cuenta ?? "ACTIVO").toUpperCase();
@@ -217,6 +225,8 @@ async function _statsRecomputeDashboard(): Promise<DashboardCounters & { docs_le
   for (const doc of vehiculosSnap.docs) {
     const data = doc.data();
     if (!_statsEsActivo(data)) continue;
+    // Skip vehículos excluidos (tanques + tractores de combustibles líquidos).
+    if (excluidos.patentes.has(doc.id.toUpperCase())) continue;
     counters.unidades_total++;
     const estado = String(data.ESTADO ?? "").toUpperCase();
     if (ESTADOS_VEHICULO_OCUPADO.has(estado)) {
