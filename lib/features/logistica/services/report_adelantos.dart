@@ -23,7 +23,10 @@ import '../models/adelanto_chofer.dart';
 ///   - Logo VAVG arriba a la izquierda + "TRANSPORTE SERVI-TOLVA" +
 ///     subtítulo "Resumen de adelantos" en el header.
 ///   - Caja con FECHA: dd-mm-aaaa (o FECHAS si son varios días).
-///   - Tabla con: # | CHOFER | DETALLE | ADELANTO $ | N° RECIBO.
+///   - Tabla con: # | EMPLEADO | DETALLE | ESTADO | ADELANTO $ | N° RECIBO.
+///     (ESTADO agregado 2026-05-19 — el resumen ahora mezcla
+///      pendientes + entregados + eliminados; cada fila refleja
+///      su estado, los eliminados van tachados.)
 ///   - Footer chico con timestamp de impresión.
 ///
 /// Impresión delegada a `PdfPrinter` (lib/shared/utils/pdf_printer.dart):
@@ -65,10 +68,12 @@ class ReportAdelantosService {
 
       final pdfBytes = await _generarPdf(ordenados);
 
-      // Nombre tipo "Adelantos-Pendientes-2026-05-13_HHmmss.pdf".
+      // Nombre tipo "Adelantos-Resumen-2026-05-13_HHmmss.pdf".
+      // (era "Pendientes-" hasta 2026-05-19, ahora el resumen mezcla
+      // pendientes + entregados + eliminados según selección).
       final ts = DateTime.now();
       final nombreArchivo =
-          'Adelantos-Pendientes-${_slugFecha(ts)}_${_hhmmss(ts)}.pdf';
+          'Adelantos-Resumen-${_slugFecha(ts)}_${_hhmmss(ts)}.pdf';
 
       final outcome = await PdfPrinter.imprimir(
         bytes: pdfBytes,
@@ -252,19 +257,20 @@ class ReportAdelantosService {
   }
 
   static pw.Widget _tablaAdelantos(List<AdelantoChofer> adelantos) {
-    // Anchos relativos de las 5 columnas. Ajustados a ojo en una
-    // página A4 con margen 24 + headers de columna razonables:
-    //   #          ~5%   centrado
-    //   CHOFER     ~30%
-    //   DETALLE    ~38%
-    //   ADELANTO   ~15%  derecha
-    //   N° RECIBO  ~12%  centrado
+    // 6 columnas (anchos relativos sobre A4 margen 24):
+    //   #          ~4%   centrado
+    //   EMPLEADO   ~25%
+    //   DETALLE    ~32%
+    //   ESTADO     ~10%  centrado (Santiago 2026-05-19)
+    //   ADELANTO   ~16%  derecha
+    //   N° RECIBO  ~13%  centrado
     final colWidths = <int, pw.TableColumnWidth>{
       0: const pw.FlexColumnWidth(1),
       1: const pw.FlexColumnWidth(6),
       2: const pw.FlexColumnWidth(7.5),
-      3: const pw.FlexColumnWidth(3),
-      4: const pw.FlexColumnWidth(2.5),
+      3: const pw.FlexColumnWidth(2.4),
+      4: const pw.FlexColumnWidth(3),
+      5: const pw.FlexColumnWidth(2.5),
     };
 
     return pw.Table(
@@ -278,6 +284,7 @@ class ReportAdelantosService {
             _celdaHeader('#', align: pw.TextAlign.center),
             _celdaHeader('EMPLEADO'),
             _celdaHeader('DETALLE'),
+            _celdaHeader('ESTADO', align: pw.TextAlign.center),
             _celdaHeader('ADELANTO \$', align: pw.TextAlign.right),
             _celdaHeader('N° RECIBO', align: pw.TextAlign.center),
           ],
@@ -300,15 +307,31 @@ class ReportAdelantosService {
         ? ''
         : a.numeroRecibo.toString().padLeft(6, '0');
     final monto = AppFormatters.formatearMonto(a.monto);
+    // Estado visible en el PDF (Santiago 2026-05-19): el resumen
+    // ahora puede mezclar pendientes + pagados + eliminados, hay
+    // que distinguirlos a simple vista.
+    final estadoLabel = a.eliminado
+        ? 'ELIMINADO'
+        : (a.pagado ? 'ENTREGADO' : 'PENDIENTE');
+    final estadoColor = a.eliminado
+        ? PdfColors.grey600
+        : (a.pagado ? PdfColors.green800 : PdfColors.orange800);
+    // Línea de tachado visual cuando está eliminado para que salte
+    // más a la vista al revisar el papel impreso.
+    final tachado = a.eliminado;
 
     return pw.TableRow(
       verticalAlignment: pw.TableCellVerticalAlignment.middle,
       children: [
-        _celdaDato(numero.toString(), align: pw.TextAlign.center),
-        _celdaDato(nombre),
-        _celdaDato(detalle),
-        _celdaDato('\$ $monto', align: pw.TextAlign.right, bold: true),
-        _celdaDato(recibo, align: pw.TextAlign.center),
+        _celdaDato(numero.toString(),
+            align: pw.TextAlign.center, tachado: tachado),
+        _celdaDato(nombre, tachado: tachado),
+        _celdaDato(detalle, tachado: tachado),
+        _celdaDato(estadoLabel,
+            align: pw.TextAlign.center, bold: true, color: estadoColor),
+        _celdaDato('\$ $monto',
+            align: pw.TextAlign.right, bold: true, tachado: tachado),
+        _celdaDato(recibo, align: pw.TextAlign.center, tachado: tachado),
       ],
     );
   }
@@ -330,7 +353,10 @@ class ReportAdelantosService {
   }
 
   static pw.Widget _celdaDato(String text,
-      {pw.TextAlign align = pw.TextAlign.left, bool bold = false}) {
+      {pw.TextAlign align = pw.TextAlign.left,
+      bool bold = false,
+      bool tachado = false,
+      PdfColor? color}) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 7),
       child: pw.Text(
@@ -339,6 +365,8 @@ class ReportAdelantosService {
         style: pw.TextStyle(
           fontSize: 10,
           fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          color: color ?? (tachado ? PdfColors.grey500 : PdfColors.black),
+          decoration: tachado ? pw.TextDecoration.lineThrough : null,
         ),
       ),
     );

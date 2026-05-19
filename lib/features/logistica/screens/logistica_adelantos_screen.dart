@@ -80,7 +80,11 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
   /// pendientes. El operador puede toggle pagado/pendiente por card.
   final Set<String> _deseleccionados = {};
 
-  bool _seleccionable(AdelantoChofer a) => !a.pagado && !a.eliminado;
+  // Antes (≤2026-05-19): solo los PENDIENTES eran seleccionables — el
+  // resumen impreso solo mostraba pendientes. Cambio Santiago 2026-05-19:
+  // imprimir cualquier mix (pendientes + pagados + eliminados) con
+  // columna ESTADO en el PDF para ver el panorama completo del rango.
+  bool _seleccionable(AdelantoChofer a) => true;
   bool _seleccionado(AdelantoChofer a) =>
       _seleccionable(a) && !_deseleccionados.contains(a.id);
 
@@ -262,24 +266,25 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
                         'Probá cambiar el rango de fechas o el texto.',
                   );
                 }
-                // Barra de selección + imprimir. La lista muestra
-                // todos los adelantos (pagados + pendientes). Solo
-                // los PENDIENTES son seleccionables para el resumen.
-                final pendientes =
+                // Barra de selección + imprimir. Desde Santiago
+                // 2026-05-19: TODOS los adelantos del rango son
+                // seleccionables (pendientes, pagados, eliminados).
+                // El PDF muestra columna ESTADO para distinguirlos.
+                final seleccionables =
                     filtrados.where(_seleccionable).toList();
-                final seleccionados = pendientes
+                final seleccionados = seleccionables
                     .where(_seleccionado)
                     .toList();
                 return Column(
                   children: [
                     _BarraSeleccion(
-                      totalPendientes: pendientes.length,
+                      totalPendientes: seleccionables.length,
                       totalSeleccionados: seleccionados.length,
                       onSeleccionarTodos: () =>
                           setState(() => _deseleccionados.clear()),
                       onDeseleccionarTodos: () => setState(() =>
                           _deseleccionados.addAll(
-                              pendientes.map((a) => a.id))),
+                              seleccionables.map((a) => a.id))),
                       onImprimir: seleccionados.isEmpty
                           ? null
                           : () => _imprimirResumen(seleccionados),
@@ -533,8 +538,8 @@ class _BotonRangoFechas extends StatelessWidget {
 /// botones para seleccionar/deseleccionar todos + botón EXPORTAR.
 /// Aparece arriba de la lista cuando hay al menos 1 adelanto visible.
 class _BarraSeleccion extends StatelessWidget {
-  /// Total de adelantos PENDIENTES en la lista filtrada (los pagados
-  /// no cuentan — no son seleccionables).
+  /// Total de adelantos SELECCIONABLES en la lista filtrada. Desde
+  /// 2026-05-19 todos lo son (pendientes/pagados/eliminados).
   final int totalPendientes;
   final int totalSeleccionados;
   final VoidCallback onSeleccionarTodos;
@@ -557,8 +562,8 @@ class _BarraSeleccion extends StatelessWidget {
         children: [
           Text(
             totalPendientes == 0
-                ? 'Sin pendientes'
-                : '$totalSeleccionados / $totalPendientes pendiente(s)',
+                ? 'Sin adelantos en rango'
+                : '$totalSeleccionados / $totalPendientes seleccionado(s)',
             style: const TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const Spacer(),

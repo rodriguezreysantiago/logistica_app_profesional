@@ -243,14 +243,15 @@ class CalculosViaje {
   }) {
     final pct = comisionPct ?? comisionChoferDefaultPct;
     var totalVecchi = 0.0;
-    var baseBrutaChofer = 0.0;
-    // Suma de los montos fijos del chofer (cada tramo que tenga
-    // `montoFijoChofer` aporta su monto flat, sin pasar por el pct).
-    // Pedido Santiago 2026-05-19: tramos cortos donde se acuerda un
-    // monto a mano conviven con tramos que cobran al 18% en el mismo
-    // viaje (ej. un viaje con 1 tramo largo a Buenos Aires al 18% +
-    // 1 tramo corto interno con monto fijo).
-    var montosFijos = 0.0;
+    // Suma del monto del chofer YA REDONDEADO POR TRAMO.
+    // Pedido Santiago 2026-05-19: redondear a múltiplo de 5
+    // descendente cada tramo individual y después sumar (en lugar de
+    // sumar bruto y redondear al final). Eso permite ver el monto
+    // exacto que cada tramo le aporta al chofer ya redondeado a
+    // criterio operativo, y reduce errores de comparación al revisar
+    // viajes con muchos tramos.
+    var sumaRedondeadaPorTramo = 0.0;
+    var montoSinRedondear = 0.0; // tracking del bruto para reporte
     var hayAlgunTramoConPct = false;
     for (final t in tramos) {
       final brutos = calcularMontosBrutos(
@@ -262,18 +263,22 @@ class CalculosViaje {
       );
       totalVecchi += brutos.montoVecchi;
       final fijo = t.tarifaSnapshot.montoFijoChofer;
+      double montoTramo;
       if (fijo != null) {
-        montosFijos += fijo;
+        // Tramo con monto fijo: ese es el monto del chofer en ese
+        // tramo (sin pct). Igual lo redondeamos para uniformidad.
+        montoTramo = fijo;
       } else {
-        baseBrutaChofer += brutos.montoChofer;
+        // Tramo con porcentaje: aplicamos pct al bruto del tramo.
+        montoTramo = brutos.montoChofer * (pct / 100.0);
         hayAlgunTramoConPct = true;
       }
+      montoSinRedondear += montoTramo;
+      sumaRedondeadaPorTramo +=
+          redondearMultiploDe5Descendente(montoTramo);
     }
-    // Aplicamos la comisión sobre la suma de tramos por porcentaje
-    // (no por tramo individual) para evitar amplificación de errores
-    // de redondeo. Le sumamos los montos fijos al final.
-    final montoChofer = baseBrutaChofer * (pct / 100.0) + montosFijos;
-    final redondeado = redondearMultiploDe5Descendente(montoChofer);
+    final montoChofer = montoSinRedondear;
+    final redondeado = sumaRedondeadaPorTramo;
     // Si TODOS los tramos son monto fijo, reportamos pct=0 porque no
     // hubo aplicación de porcentaje. Si al menos uno usa porcentaje,
     // reportamos el pct vigente (útil para la UI/reportes).

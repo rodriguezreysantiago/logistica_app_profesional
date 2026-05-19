@@ -248,7 +248,7 @@ class _DetalleTramo extends StatelessWidget {
               style: const TextStyle(
                 color: AppColors.accentBlue,
                 fontWeight: FontWeight.bold,
-                fontSize: 12,
+                fontSize: 14,
                 letterSpacing: 1.2,
               ),
             ),
@@ -315,7 +315,7 @@ class _DetalleTramo extends StatelessWidget {
                 'GASTOS EXTRAORDINARIOS',
                 style: TextStyle(
                   color: Colors.white60,
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.2,
                 ),
@@ -323,11 +323,11 @@ class _DetalleTramo extends StatelessWidget {
             ),
             for (final g in tramo.gastos)
               Padding(
-                padding: const EdgeInsets.only(bottom: 2),
+                padding: const EdgeInsets.only(bottom: 3),
                 child: Row(
                   children: [
                     const Icon(Icons.add_circle_outline,
-                        size: 14, color: AppColors.accentTeal),
+                        size: 16, color: AppColors.accentTeal),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -335,14 +335,14 @@ class _DetalleTramo extends StatelessWidget {
                             ? '${g.detalle} (${AppFormatters.formatearFecha(g.fecha)})'
                             : 'Gasto del ${AppFormatters.formatearFecha(g.fecha)}',
                         style: const TextStyle(
-                            color: Colors.white70, fontSize: 12),
+                            color: Colors.white70, fontSize: 14),
                       ),
                     ),
                     Text(
                       '\$ ${AppFormatters.formatearMonto(g.monto)}',
                       style: const TextStyle(
                         color: AppColors.accentTeal,
-                        fontSize: 12,
+                        fontSize: 14,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -868,8 +868,11 @@ class _Linea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Tamaños subidos 2026-05-19 (Santiago): "la letra queda muy chica
+    // cuando el viaje es muy largo". Pasamos 11→13, 12→14, 14→16 para
+    // mejor legibilidad sin romper el layout.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -879,7 +882,7 @@ class _Linea extends StatelessWidget {
               label,
               style: TextStyle(
                 color: sub ? Colors.white38 : Colors.white60,
-                fontSize: sub ? 11 : 12,
+                fontSize: sub ? 13 : 14,
               ),
             ),
           ),
@@ -891,7 +894,7 @@ class _Linea extends StatelessWidget {
                 color: highlight
                     ? AppColors.accentGreen
                     : (sub ? Colors.white54 : Colors.white),
-                fontSize: highlight ? 14 : (sub ? 11 : 12),
+                fontSize: highlight ? 16 : (sub ? 13 : 14),
                 fontWeight:
                     highlight ? FontWeight.bold : FontWeight.normal,
               ),

@@ -436,12 +436,17 @@ void main() {
       expect(m.montoChoferRedondeado % 5, 0);
     });
 
-    test('redondeo se aplica sobre la suma con 18%, no por tramo', () {
-      // base bruta chofer total: 33 + 37 = 70.
-      // 18% × 70 = 12.6 → múltiplo de 5 abajo = 10.
-      // Si redondeáramos por tramo: 33×0.18=5.94→5 + 37×0.18=6.66→5 → 10
-      // que justo coincide acá, pero conceptualmente la fórmula es
-      // sobre el total para evitar acumulación de errores.
+    test('redondeo POR TRAMO (Santiago 2026-05-19): cada tramo redondea solo', () {
+      // Cambio de regla: cada tramo redondea por su lado al múltiplo
+      // de 5 inmediatamente inferior, y la suma de esos redondeados es
+      // el monto del chofer. Antes redondeábamos al final sobre la
+      // suma cruda.
+      //
+      // Ejemplo: tarifaChofer 33 + 37 (POR_VIAJE), 18% por defecto.
+      // - Tramo 1: 33 × 0.18 = 5.94 → floor5 = 5
+      // - Tramo 2: 37 × 0.18 = 6.66 → floor5 = 5
+      // - Suma redondeada: 10 (con la regla vieja sería 12.6→10
+      //   también, pero ver test siguiente para caso que diverge).
       final m = CalculosViaje.calcularTodoMultiTramo(tramos: [
         tramo(
           unidad: UnidadTarifa.porViaje,
@@ -456,6 +461,23 @@ void main() {
       ]);
       expect(m.montoChofer, closeTo(12.6, 0.01));
       expect(m.montoChoferRedondeado, 10);
+    });
+
+    test('redondeo POR TRAMO diverge de redondeo al final (caso explícito)', () {
+      // Caso que demuestra la diferencia: 2 tramos con tarifaChofer 50
+      // cada uno (POR_VIAJE), 18%.
+      // - Tramo 1: 50 × 0.18 = 9.0 → floor5 = 5
+      // - Tramo 2: 50 × 0.18 = 9.0 → floor5 = 5
+      // - Total redondeado por tramo:                10
+      // - Total con regla vieja (redondear al final): 18 → floor5 = 15
+      // Diferencia: 5 pesos. Regla nueva es MÁS conservadora con el
+      // chofer (siempre suma menor o igual a la regla vieja).
+      final m = CalculosViaje.calcularTodoMultiTramo(tramos: [
+        tramo(unidad: UnidadTarifa.porViaje, tarifaReal: 100, tarifaChofer: 50),
+        tramo(unidad: UnidadTarifa.porViaje, tarifaReal: 100, tarifaChofer: 50),
+      ]);
+      expect(m.montoChofer, closeTo(18, 0.01));
+      expect(m.montoChoferRedondeado, 10); // 5 + 5, no 15
     });
 
     test('adelanto + gastos sumados al total del viaje (no por tramo)', () {
@@ -705,10 +727,13 @@ void main() {
       expect(m.comisionChoferPct, 18); // se reporta porque al menos 1 tramo lo usó
     });
 
-    test('redondeo se aplica sobre el TOTAL combinado (no por tramo)', () {
-      // Tramo pct: 31 TN × $1000 = 31000 base. 18% = 5580.
-      // Tramo fijo: $1234.
-      // Total: 5580 + 1234 = 6814. floor5 = 6810.
+    test('redondeo POR TRAMO con mix pct + fijo', () {
+      // Tramo pct: 31 TN × $1000 = 31000 base. 18% = 5580 (ya
+      // múltiplo) → floor5 = 5580.
+      // Tramo fijo: $1234 → floor5 = 1230.
+      // Suma redondeada por tramo: 5580 + 1230 = 6810.
+      // (Antes era: 5580 + 1234 = 6814 → floor5 final = 6810. Coincide
+      // por casualidad — el cambio de regla es transparente acá.)
       final m = CalculosViaje.calcularTodoMultiTramo(tramos: [
         tramo(
           unidad: UnidadTarifa.porTonelada,
