@@ -12,7 +12,7 @@ const BANNER_TESTING = '';
 
 const FIRMA =
   BANNER_TESTING +
-  '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
+  '_Bot-On — Coopertrans Móvil_\n' +
   '_Para responder o gestionar el trámite, comunicate con la oficina._';
 
 /**

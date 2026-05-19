@@ -2776,54 +2776,54 @@ export const onAlertaVolvoCreated = onDocumentCreated(
         `⚠️ ${etiqueta}\n\n` +
         "Te pedimos ajustar tu manejo. Si hubo una situación particular, " +
         "avisanos a la oficina.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
       `${saludo}.\n\n` +
         `Aviso desde la oficina: el ${fechaTxt} a las ${horaTxt} se ` +
         `registró un evento en el tractor ${patente}.\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Si hubo algo particular contanos en la oficina; si no, te " +
         "pedimos prestar atención al manejo.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
       `${saludo}, te escribo desde la oficina.\n\n` +
         `Volvo registró un evento en el tractor ${patente} ` +
         `el ${fechaTxt} a las ${horaTxt}:\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Cualquier comentario sobre la situación, mejor en la oficina.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
       `${saludo}, ¿cómo va el día?\n\n` +
         `Recibimos un aviso del tractor ${patente} ` +
         `(${fechaTxt} a las ${horaTxt}):\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Si pasó algo puntual contanos. Si no, prestá atención al " +
         "próximo tramo.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
       `${saludo}.\n\n` +
         `Te avisamos: el tractor ${patente} disparó un evento ` +
         `el ${fechaTxt} ${horaTxt}.\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Acordate de revisar tu manejo. Cualquier cosa nos contás " +
         "en la oficina.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
       `${saludo},\n\n` +
         `Llegó un alerta del tractor ${patente} ` +
         `(${fechaTxt}, ${horaTxt}):\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Te pedimos un manejo más cuidadoso en lo que sigue. Si hubo " +
         "una situación particular, escribinos.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
       `${saludo}.\n\n` +
         `Saltó un evento en el TRACTOR ${patente} hoy ` +
         `${horaTxt} (${fechaTxt}):\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Si fue una maniobra obligada por el tránsito, dejame saber. " +
         "Si no, ajustá tu manejo en lo que viene.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
       `${saludo}, te paso un aviso desde la oficina.\n\n` +
         `Detectamos un evento en el tractor ${patente} ` +
         `el ${fechaTxt} a las ${horaTxt}:\n\n` +
         `⚠️ ${etiqueta}\n\n` +
         "Te pedimos ir más tranquilo. Cualquier comentario lo charlamos.\n\n" +
-        BANNER_TESTING + "_Coopertrans Móvil — Mensaje automático._",
+        BANNER_TESTING + "_Bot-On — Coopertrans Móvil_",
     ];
     const mensaje = variantes[rrPick(variantes.length)];
 

@@ -222,7 +222,7 @@ function _armarMensajeChoferNoIdentificadoAgrupado(docs) {
     'Por favor pasalo apenas puedas, así quedan registrados los datos ' +
     'del recorrido.\n\n' +
     BANNER_TESTING +
-    '_Coopertrans Móvil — Mensaje automático._'
+    '_Bot-On — Coopertrans Móvil_'
   );
 }
 
@@ -288,7 +288,7 @@ function _armarMensajeAlertHighAgrupado(docs) {
     'Te pedimos prestar atención a estos avisos. Si hubo una situación ' +
     'particular, avisanos a la oficina.\n\n' +
     BANNER_TESTING +
-    '_Coopertrans Móvil — Mensaje automático._'
+    '_Bot-On — Coopertrans Móvil_'
   );
 }
 
@@ -335,7 +335,7 @@ function _armarMensajeMantenimientoAgrupado(docs) {
     `${cantidad} alerta${cantidad !== 1 ? 's' : ''} ` +
     `en ${patentesUnicas} tractor${patentesUnicas !== 1 ? 'es' : ''}:\n\n` +
     `${bloques.join('\n\n')}\n\n` +
-    '_Coopertrans Móvil — Aviso automático._'
+    '_Bot-On — Coopertrans Móvil_'
   );
 }
 

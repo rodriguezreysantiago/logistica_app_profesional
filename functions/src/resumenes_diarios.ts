@@ -341,7 +341,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
         "✅ Sin drifts: todas las asignaciones coinciden con el " +
         "chofer físico de Sitrack.\n\n" +
         BANNER_TESTING +
-        "_Coopertrans Móvil — Aviso automático._";
+        "_Bot-On — Coopertrans Móvil_";
         await db.collection("COLA_WHATSAPP").add({
           telefono: tel,
           mensaje: mensajeOk,
@@ -418,7 +418,7 @@ export const resumenDriftsAsignacionesDiario = onSchedule(
       cola +
       "\n\n" +
       BANNER_TESTING +
-      "_Aviso automático diario de drift — Coopertrans Móvil._";
+      "_Bot-On — Coopertrans Móvil_";
 
       // ─── Encolar en COLA_WHATSAPP ──────────────────────────────────
       await db.collection("COLA_WHATSAPP").add({
@@ -810,7 +810,7 @@ export const resumenConductaManejoDiario = onSchedule(
         "✅ Sin eventos: ningún tractor registró eventos de conducta " +
         "peligrosa ayer.\n\n" +
         BANNER_TESTING +
-        "_Coopertrans Móvil — Aviso automático._";
+        "_Bot-On — Coopertrans Móvil_";
       await db.collection("COLA_WHATSAPP").add({
         telefono: tel,
         mensaje,
@@ -949,7 +949,7 @@ export const resumenConductaManejoDiario = onSchedule(
         "_* atribuido por asignación: el evento no traía login activo, " +
         "se asignó al chofer que tenía la unidad en ese momento._\n\n";
     }
-    mensaje += BANNER_TESTING + "_Coopertrans Móvil — Aviso automático._";
+    mensaje += BANNER_TESTING + "_Bot-On — Coopertrans Móvil_";
 
     await db.collection("COLA_WHATSAPP").add({
       telefono: tel,

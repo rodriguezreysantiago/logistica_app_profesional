@@ -866,36 +866,36 @@ async function _encolarAvisoChoferNoIdentificado(
       "tu iButton de Sitrack. Por favor pasalo apenas puedas, así " +
       "quedan registrados los datos del recorrido.\n\n" +
       BANNER_TESTING +
-      "_Coopertrans Móvil — Mensaje automático._",
+      "_Bot-On — Coopertrans Móvil_",
     `${saludo}.\n\n` +
       `Recordatorio: el TRACTOR ${patente} está en marcha pero ` +
       "Sitrack no te detecta logueado. Pasá el iButton apenas puedas.\n\n" +
       BANNER_TESTING +
-      "_Coopertrans Móvil — Mensaje automático._",
+      "_Bot-On — Coopertrans Móvil_",
     `${saludo}, te avisamos desde la oficina.\n\n` +
       `Estamos viendo que manejás el ${patente} sin haber pasado ` +
       "el iButton de Sitrack. Necesitamos que te identifiques así " +
       "queda el registro del viaje.\n\n" +
       BANNER_TESTING +
-      "_Coopertrans Móvil — Mensaje automático._",
+      "_Bot-On — Coopertrans Móvil_",
     `${saludo}, ¿pasaste el iButton?\n\n` +
       `El ${patente} viene andando pero Sitrack no te tiene ` +
       "identificado. Pasalo apenas tengas un momento para que el " +
       "viaje quede a tu nombre.\n\n" +
       BANNER_TESTING +
-      "_Coopertrans Móvil — Mensaje automático._",
+      "_Bot-On — Coopertrans Móvil_",
     `${saludo}, atención.\n\n` +
       `Estamos detectando movimiento del TRACTOR ${patente} sin ` +
       "tu identificación. Pasá el iButton cuando puedas para no " +
       "perder el registro del tramo.\n\n" +
       BANNER_TESTING +
-      "_Coopertrans Móvil — Mensaje automático._",
+      "_Bot-On — Coopertrans Móvil_",
     `${saludo}.\n\n` +
       `Recordatorio rápido: el ${patente} está en marcha sin chofer ` +
       "logueado en Sitrack. Pasá el iButton cuando puedas — es " +
       "importante para que quede el registro completo.\n\n" +
       BANNER_TESTING +
-      "_Coopertrans Móvil — Mensaje automático._",
+      "_Bot-On — Coopertrans Móvil_",
   ];
   const mensaje = variantes[rrPick(variantes.length)];
 

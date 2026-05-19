@@ -21,7 +21,7 @@ const BANNER_TESTING = '';
 
 const FIRMA =
   BANNER_TESTING +
-  '_Mensaje automático del sistema de gestión Coopertrans Móvil._\n' +
+  '_Bot-On — Coopertrans Móvil_\n' +
   '_Detalle completo en la app → Vencimientos._';
 
 /**

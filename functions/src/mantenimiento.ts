@@ -515,7 +515,7 @@ async function _encolarAvisoSilencioReanudado(
     "*Las notificaciones automáticas del bot vuelven a estar activas* " +
     "(avisos de jornada, descansos, etc.).\n\n" +
     BANNER_TESTING +
-    "_Coopertrans Móvil — Mensaje automático._";
+    "_Bot-On — Coopertrans Móvil_";
 
   await db.collection("COLA_WHATSAPP").add({
     telefono: tel,

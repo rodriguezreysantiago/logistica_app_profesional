@@ -970,7 +970,7 @@ async function _comandoSilenciar(msg, { db, fs }, args) {
         `(hasta ${_fmtFechaHoraCompacto(hasta)} ART).\n\n` +
         `Motivo: ${motivo}\n\n` +
         `Cuando se cumpla el plazo te aviso que se reanudan.\n\n` +
-        `_Mensaje automático._`,
+        `_Bot-On — Coopertrans Móvil_`,
       origen: 'silenciado_aviso',
       campoBase: 'BOT_SILENCIADO',
     });
@@ -1030,7 +1030,7 @@ async function _comandoDesilenciar(msg, { db, fs }, args) {
               `Se levantó el silencio de las notificaciones del bot ` +
               `antes del plazo previsto.\n\n` +
               `*Las notificaciones automáticas vuelven a estar activas.*\n\n` +
-              `_Mensaje automático._`,
+              `_Bot-On — Coopertrans Móvil_`,
             origen: 'desilenciado_aviso',
             campoBase: 'BOT_DESILENCIADO',
           });
