@@ -22,16 +22,20 @@ Coopertrans Móvil centraliza la gestión operativa de una empresa de transporte
 
 ## Perfiles (roles)
 
-La app tiene 4 roles. Cada uno con permisos distintos:
+La app tiene **6 roles**. Cada uno con permisos distintos:
 
 | Rol | Quién es | Qué ve |
 |---|---|---|
-| **CHOFER** | Empleado de manejo con tractor asignado | Sus vencimientos personales + su unidad asignada (tractor + enganche) |
-| **PLANTA** | Empleado sin vehículo (planta, taller, gomería) | Solo sus vencimientos personales |
-| **SUPERVISOR** | Mando medio | Gestiona personal/flota/vencimientos/revisiones/bot. NO crea admins |
-| **ADMIN** | Control total | Todo lo del SUPERVISOR + crear admins, cambiar roles, ver auditoría |
+| **CHOFER** | Empleado de manejo con tractor asignado | Sus vencimientos personales + su unidad asignada (tractor + enganche). NO ve viajes ni adelantos. |
+| **PLANTA** | Empleado sin vehículo (planta, taller administrativo) | Solo sus vencimientos personales. |
+| **GOMERIA** | Operador del módulo de Gomería | Lo de PLANTA + gestionar cubiertas (stock, instalaciones, recapados, controles de presión). |
+| **SEG_HIGIENE** | Encargado/a de Seguridad e Higiene | Lo de PLANTA + tableros Volvo (alertas, scores, conducta) + resumen jornada + ver vencimientos personales de TODOS los empleados (resolver DNI ↔ nombre). |
+| **SUPERVISOR** | Mando medio | Gestiona personal/flota/vencimientos/revisiones/bot/logística (viajes + adelantos + tarifas + ubicaciones) + ICM. NO crea admins. |
+| **ADMIN** | Control total | Todo lo del SUPERVISOR + crear admins, cambiar roles, ver auditoría, descargar backups manuales. |
 
 Cuando un admin crea un nuevo empleado, define su **rol** y **área** (MANEJO/ADMINISTRACION/PLANTA/TALLER/GOMERIA — solo informativo, no afecta permisos).
+
+Las capabilities efectivas viven en `lib/core/services/capabilities.dart` (cliente) y en `firestore.rules` con helpers `puedeOperarGomeria()` / `puedeVerVolvoTableros()` (server).
 
 ---
 

@@ -1,12 +1,15 @@
-// Histórico semanal del ICM — por chofer (comparativa individual) y
-// agregado de toda la flota (reporte semanal). Calcula on-the-fly
-// desde SITRACK_EVENTOS porque hoy NO persistimos snapshots semanales
-// — la cantidad de eventos por flota es manejable (cientos por semana)
-// y queryear directo evita una colección agregada extra.
+// Histórico semanal del ICM — por chofer (comparativa individual).
 //
-// Si el volumen crece (proyectos multi-flota, > 1000 eventos/semana),
-// agregar `recomputeIcmSemanalScheduled` que persista a
-// `ICM_SEMANAL/{YYYY-WW}` con los agregados ya calculados.
+// El AGREGADO de toda la flota (ranking + top5/peores semanal) lo
+// precalcula la Cloud Function `recomputeIcmSemanalScheduled` (lunes
+// 06:00 ART) y persiste en `ICM_SEMANAL/{YYYY-WW}`. La pantalla
+// `icm_reporte_semanal_screen.dart` lee ese doc directo en lugar de
+// recalcular.
+//
+// Este service queryea SITRACK_EVENTOS on-the-fly SOLO para el caso
+// "comparativa de UN chofer en las últimas N semanas" (drill-down
+// individual). Para el agregado semanal de flota, usar el doc de
+// ICM_SEMANAL que ya está precalculado.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';

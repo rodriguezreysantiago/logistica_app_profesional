@@ -108,20 +108,38 @@ Todas en `southamerica-east1`.
 - `volvoProxy` — proxy autenticado a Volvo Connect API.
 - `auditLogWrite` — bitácora de acciones admin (whitelist server-side).
 
-**onSchedule (crons)**
+**onSchedule (crons)** — última actualización 2026-05-18
+
+Pollers de APIs externas:
 - `telemetriaSnapshotScheduled` (cada 6h) — escribe a `TELEMETRIA_HISTORICO`.
-- `volvoAlertasPoller` (cada 5 min) — poll del Vehicle Alerts API → `VOLVO_ALERTAS`.
-- `volvoScoresPoller` (04:00 ART) — poll de Group Scores API → `VOLVO_SCORES_DIARIOS`.
-- `sitrackPosicionPoller` (cada 5 min) — poll de Sitrack → `SITRACK_POSICIONES` + drift detection + aviso "pasá el iButton" con throttle 30 min.
-- `vigiladorJornadaChofer` (cada 5 min) — tracking de horas de manejo (speed > 10 km/h) → avisos a 3h45 continuo y 11h30 diario + persistencia en `JORNADAS_CHOFER`.
+- `volvoAlertasPoller` (cada 5 min) — Vehicle Alerts API Volvo → `VOLVO_ALERTAS`.
+- `volvoScoresPoller` (04:00 ART) — Group Scores API → `VOLVO_SCORES_DIARIOS`.
+- `sitrackPosicionPoller` (cada 5 min) — Sitrack → `SITRACK_POSICIONES` + drift detection + aviso "pasá el iButton" con throttle 30 min.
+- `sitrackEventosPoller` (cada 5 min) — Sitrack `/files/reports` → `SITRACK_EVENTOS` (1400+ tipos de evento crudos para análisis).
+
+Vigilador jornada v2 (refactor 2026-05-15, reemplaza al v1):
+- `vigiladorJornadaV2` (cada 5 min) — tracking de bloques 3×4h (3h45 manejo + 15 min pausa) + descanso 8h + veda nocturna → escribe a `JORNADAS` (no más `JORNADAS_CHOFER` legacy) + encola avisos al chofer.
+- `procesarSilenciadosExpirados` (cada 1h) — limpia silenciamientos vencidos en `BOT_SILENCIADOS_CHOFER`.
+
+Resúmenes diarios a Vecchi:
+- `resumenBotDiario` (08:00 ART) — estado del bot al admin.
+- `resumenDriftsAsignacionesDiario` (08:00 ART) — drifts (chofer manejó patente no asignada) al admin.
+- `resumenExcesosJornadaDiario` (08:00 ART) — excesos del vigilador v2 al jefe Seg e Higiene.
+- `resumenConductaManejoDiario` (08:00 ART) — Sitrack peligrosos + Volvo AEBS/ESP únicos + sobrevelocidad cartográfica detallada por chofer a Molina.
+
+ICM y dashboard:
+- `recomputeIcmSemanalScheduled` (lunes 06:00 ART) — precalcula `ICM_SEMANAL/{YYYY-WW}` con ranking + top 5 mejores/peores.
+- `recomputeDashboardStats` (cada 5 min) — agregado para tablero admin → `STATS/dashboard`.
+
+Salud + mantenimiento:
 - `botHealthWatchdog` (cada 15 min) — alerta si el bot WhatsApp no heartbeatea.
+- `purgarColaWhatsappAntigua` (diario) — cleanup de docs viejos en `COLA_WHATSAPP` con estado ENVIADO/ERROR.
 - `backupFirestoreScheduled` (domingo 06:00 ART) — export semanal a `gs://coopertrans-movil-backups`.
-- `resumenDriftsAsignacionesDiario` (08:00 ART) — resumen diario de drifts al admin.
-- `resumenExcesosJornadaDiario` (08:00 ART) — resumen excesos 4h/12h al jefe Seg e Higiene.
-- `avisoFinJornadaNocturna` (23:30 ART) — flag desactivado por default.
+
+(Cron eliminado en refactor v2: `avisoFinJornadaNocturna` — la veda nocturna 00:00 ART ahora se detecta en tiempo real por `vigiladorJornadaV2`.)
 
 **onDocumentCreated (triggers)**
-- `onAlertaVolvoCreated` — al crear alerta Volvo, encola WhatsApp al chofer (con blacklist mantenimiento).
+- `onAlertaVolvoCreated` — al crear alerta Volvo, encola WhatsApp al chofer (con blacklist mantenimiento + throttle 10/h/chofer + silenciamiento universal).
 - `onAlertaVolvoMantenimientoCreated` — persiste eventos de mantenimiento sin encolar (los recoge el bot 1 vez/día).
 
 Deploy:
