@@ -157,6 +157,12 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.4
+  # fake_cloud_firestore: emulador in-memory de Firestore para tests
+  # de services que leen/escriben docs. NO requiere proceso emulator
+  # aparte (a diferencia de firebase emulators:start) — corre todo en
+  # el mismo isolate del test. Usado por icm_calculator_flujo_test.
+  # Auditoría 2026-05-18: agregado al volcar tests de lógica de negocio.
+  fake_cloud_firestore: ^4.0.0
 
 # Configuracion de iconos de launcher (Android + iOS).
 # Para regenerar despues de cambiar la imagen fuente:
