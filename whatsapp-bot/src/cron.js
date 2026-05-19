@@ -669,6 +669,21 @@ async function _runOnce(fs) {
                 mensaje: mensajeService,
                 estado: fs.ESTADO.pendiente,
                 encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                // TTL 36h (auditoria 2026-05-18): si el bot quedo caido
+                // > 36h y vuelve, este resumen ya es info stale (datos
+                // de hace 1.5+ dias). Mejor descartar que confundir.
+                // Por que 36h y no 24h: caso "bot caido desde 8am hasta
+                // 10am siguiente" (26h) seria falso negativo con 24h.
+                // 36h cubre dia y medio — si esta caido mas, info stale.
+                //
+                // Caso que NO cubre el doc-determinístico (Fase 1):
+                // doc encolado en dia X + bot crashea antes de procesar
+                // + vuelve dias despues. El cron de X no vuelve a
+                // sobrescribir porque el cron de X+1 usa otro docId
+                // (incluye fecha). TTL es la red de seguridad.
+                expira_en: admin.firestore.Timestamp.fromMillis(
+                  Date.now() + 36 * 60 * 60 * 1000
+                ),
                 enviado_en: null,
                 error: null,
                 intentos: 0,
@@ -850,6 +865,10 @@ async function _runOnce(fs) {
                   mensaje: mensajeMant,
                   estado: fs.ESTADO.pendiente,
                   encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                  // TTL 36h — mismo razonamiento que service_diario arriba.
+                  expira_en: admin.firestore.Timestamp.fromMillis(
+                    Date.now() + 36 * 60 * 60 * 1000
+                  ),
                   enviado_en: null,
                   error: null,
                   intentos: 0,
@@ -1053,6 +1072,10 @@ async function _runOnce(fs) {
                   mensaje: mensajeVencProx,
                   estado: fs.ESTADO.pendiente,
                   encolado_en: admin.firestore.FieldValue.serverTimestamp(),
+                  // TTL 36h — mismo razonamiento que service_diario arriba.
+                  expira_en: admin.firestore.Timestamp.fromMillis(
+                    Date.now() + 36 * 60 * 60 * 1000
+                  ),
                   enviado_en: null,
                   error: null,
                   intentos: 0,
