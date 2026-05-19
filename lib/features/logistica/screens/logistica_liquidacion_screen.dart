@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
@@ -65,6 +66,12 @@ class _LogisticaLiquidacionScreenState
     super.initState();
     final ahora = DateTime.now();
     _mesSeleccionado = DateTime(ahora.year, ahora.month, 1);
+    // Pre-cargar el cache de excluidos para que el filtro en
+    // `LiquidacionService.streamEmpleadosCache()` (que usa el cache
+    // sincrónico) aplique desde la primera emisión del stream. Sin
+    // esto, el dropdown podría mostrar testers/tanqueros la primera
+    // vez que se abre la pantalla en una sesión nueva.
+    ExcluidosService.cargar();
   }
 
   /// Inicio del mes seleccionado, hora ART (00:00). Se compara contra

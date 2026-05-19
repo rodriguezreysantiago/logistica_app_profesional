@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/services/capabilities.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/digit_only_formatter.dart';
@@ -44,6 +45,15 @@ class _AdminPersonalListaScreenState
   /// Por default solo activos. Toggle del AppBar lo invierte.
   bool _mostrarInactivos = false;
 
+  /// Por default los 3 tanqueros + 2 testers están ocultos. Toggle del
+  /// AppBar permite verlos para auditoría/mantenimiento de esos perfiles.
+  bool _mostrarExcluidos = false;
+
+  /// Set de DNIs excluidos (cacheado por `ExcluidosService`). Null hasta
+  /// que termine la carga inicial — si quedó null cuando el filter corre,
+  /// `esExcluido` devuelve `false` (fail-safe).
+  ExcluidosSet? _excluidos;
+
   @override
   void initState() {
     super.initState();
@@ -51,6 +61,11 @@ class _AdminPersonalListaScreenState
         .collection(AppCollections.empleados)
         .orderBy('NOMBRE')
         .snapshots();
+    // Cargar set de excluidos en background. Al terminar, setState para
+    // que el StreamBuilder re-renderice aplicando el filtro.
+    ExcluidosService.cargar().then((s) {
+      if (mounted) setState(() => _excluidos = s);
+    });
   }
 
   @override
@@ -58,6 +73,27 @@ class _AdminPersonalListaScreenState
     return AppScaffold(
       title: 'Gestión de Personal',
       actions: [
+        // Toggle de "mostrar excluidos" (tanqueros + testers). Útil
+        // cuando el admin necesita editar perfiles de testers (Apple
+        // Reviewer, Android) o de los choferes de combustibles
+        // líquidos. Por default OFF para que los empleados reales no
+        // se mezclen visualmente con esas cuentas operativas.
+        if ((_excluidos?.dnis.isNotEmpty ?? false))
+          IconButton(
+            tooltip: _mostrarExcluidos
+                ? 'Ocultar tanqueros y testers'
+                : 'Mostrar tanqueros y testers',
+            icon: Icon(
+              _mostrarExcluidos
+                  ? Icons.shield_moon_outlined
+                  : Icons.shield_outlined,
+              color: _mostrarExcluidos
+                  ? AppColors.accentOrange
+                  : Colors.white70,
+            ),
+            onPressed: () =>
+                setState(() => _mostrarExcluidos = !_mostrarExcluidos),
+          ),
         IconButton(
           tooltip: _mostrarInactivos
               ? 'Ocultar empleados inactivos'
@@ -99,6 +135,12 @@ class _AdminPersonalListaScreenState
           // El toggle del AppBar permite verlos cuando hace falta
           // gestionar reactivaciones.
           if (!_mostrarInactivos && !AppActivo.esActivo(data)) {
+            return false;
+          }
+          // Filtro de excluidos (tanqueros + testers). Por default
+          // ocultamos para que los empleados reales no se mezclen.
+          if (!_mostrarExcluidos &&
+              ExcluidosService.esExcluido(_excluidos, dni: doc.id)) {
             return false;
           }
           final hay = '${data['NOMBRE'] ?? ''} '

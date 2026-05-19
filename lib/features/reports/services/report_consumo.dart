@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
@@ -329,6 +330,10 @@ class ReportConsumoService {
           .collection(AppCollections.vehiculos)
           .where('TIPO', isEqualTo: AppTiposVehiculo.tractor)
           .get();
+      // Excluidos: tractores asignados a choferes tanqueros. No
+      // consumimos combustible de unidades que no controlamos —
+      // mezclarlos en el ranking distorsiona los promedios.
+      final excluidos = await ExcluidosService.cargar(db: db);
 
       final excel = ex.Excel.createExcel();
       excel.rename('Sheet1', 'DETALLE');
@@ -371,6 +376,8 @@ class ReportConsumoService {
         final data = doc.data();
         // Soft-delete: vehiculos dados de baja se excluyen del reporte.
         if (!AppActivo.esActivo(data)) continue;
+        // Excluidos: ver comentario arriba.
+        if (ExcluidosService.esExcluido(excluidos, patente: doc.id)) continue;
         final patente = doc.id;
         final vin = (data['VIN'] ?? '').toString().trim().toUpperCase();
         final volvoData = volvoMap[vin];

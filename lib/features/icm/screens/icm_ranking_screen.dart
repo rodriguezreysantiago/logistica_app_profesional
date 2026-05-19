@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../shared/utils/formatters.dart';
 import '../../../shared/widgets/app_widgets.dart';
 import '../services/icm_calculator.dart';
@@ -56,6 +57,10 @@ class _IcmRankingScreenState extends State<IcmRankingScreen> {
 
   Future<List<IcmChofer>> _cargarRanking(int desdeMs, int hastaMs) async {
     final db = FirebaseFirestore.instance;
+    // Cargar excluidos (tanqueros + testers) ANTES de queryear ranking.
+    // Si están en cache se resuelve sincrónico; sino paga 2 queries
+    // (~60 docs) amortizadas en todas las pantallas de la sesión.
+    final excluidos = await ExcluidosService.cargar(db: db);
     // Lookup de nombres de empleados (1 query a EMPLEADOS, ~60 docs).
     final empSnap = await db.collection('EMPLEADOS').get();
     final nombrePorDni = <String, String>{};
@@ -65,12 +70,23 @@ class _IcmRankingScreenState extends State<IcmRankingScreen> {
       final nombre = (data['NOMBRE'] ?? '').toString().trim();
       if (nombre.isNotEmpty) nombrePorDni[dni] = nombre;
     }
-    return IcmCalculator.calcularRanking(
+    final ranking = await IcmCalculator.calcularRanking(
       db: db,
       desdeMs: desdeMs,
       hastaMs: hastaMs,
       nombrePorDni: nombrePorDni,
     );
+    // Removemos a los tanqueros y testers del ranking visible. Sus
+    // eventos no son nuestros (tanqueros) o son ficticios (testers),
+    // así que mezclarlos rompe el ranking de los choferes reales.
+    // El CF `recomputeIcmSemanalScheduled` ya hace el mismo filtro
+    // server-side para el reporte semanal a Molina — esto cubre la
+    // vista en vivo del admin.
+    ranking.removeWhere((c) => ExcluidosService.esExcluido(
+          excluidos,
+          dni: c.choferDni,
+        ));
+    return ranking;
   }
 
   @override

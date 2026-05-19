@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/vencimientos_config.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
@@ -40,12 +41,23 @@ class _AdminVehiculosListaScreenState
   /// Por default solo activos. Toggle del AppBar lo invierte.
   bool _mostrarInactivos = false;
 
+  /// Por default ocultos los tanques de combustibles líquidos y los
+  /// tractores asignados a sus choferes. Toggle del AppBar los muestra
+  /// para auditoría/mantenimiento.
+  bool _mostrarExcluidos = false;
+
+  /// Set de patentes excluidas (cacheado). Null mientras carga.
+  ExcluidosSet? _excluidos;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<VehiculoProvider>().init();
+    });
+    ExcluidosService.cargar().then((s) {
+      if (mounted) setState(() => _excluidos = s);
     });
   }
 
@@ -65,6 +77,25 @@ class _AdminVehiculosListaScreenState
       child: AppScaffold(
         title: 'Gestión de Flota',
         actions: [
+          // Toggle "mostrar excluidos" (tanques combustibles + tractores
+          // de tanqueros). Por default OFF para que la flota operativa
+          // no se mezcle con las unidades que no controlamos.
+          if ((_excluidos?.patentes.isNotEmpty ?? false))
+            IconButton(
+              tooltip: _mostrarExcluidos
+                  ? 'Ocultar tanques de combustibles'
+                  : 'Mostrar tanques de combustibles',
+              icon: Icon(
+                _mostrarExcluidos
+                    ? Icons.shield_moon_outlined
+                    : Icons.shield_outlined,
+                color: _mostrarExcluidos
+                    ? AppColors.accentOrange
+                    : Colors.white70,
+              ),
+              onPressed: () =>
+                  setState(() => _mostrarExcluidos = !_mostrarExcluidos),
+            ),
           IconButton(
             tooltip: _mostrarInactivos
                 ? 'Ocultar unidades inactivas'
@@ -104,7 +135,12 @@ class _AdminVehiculosListaScreenState
         body: TabBarView(
           children: [
             for (final t in tipos)
-              _ListaPorTipo(tipo: t, mostrarInactivos: _mostrarInactivos),
+              _ListaPorTipo(
+                tipo: t,
+                mostrarInactivos: _mostrarInactivos,
+                mostrarExcluidos: _mostrarExcluidos,
+                excluidos: _excluidos,
+              ),
           ],
         ),
       ),

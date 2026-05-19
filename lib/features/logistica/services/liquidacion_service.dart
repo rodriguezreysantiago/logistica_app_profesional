@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../models/viaje.dart';
 
 /// Service de la pantalla LIQUIDACIÓN. Provee:
@@ -88,10 +89,19 @@ class LiquidacionService {
         .where('ROL', isEqualTo: 'CHOFER')
         .snapshots()
         .map((snap) {
+      // Cache de excluidos (testers + tanqueros): usamos el cache
+      // sincrónico. La pantalla de liquidación pre-carga el set en su
+      // initState; si por timing el cache está vacío la primera vez,
+      // el stream re-emite al cambiar EMPLEADOS y la próxima vuelta
+      // sí filtra. Aceptable — el efecto operativo es no liquidarles
+      // a tanqueros, y los pre-existentes ya están filtrados antes
+      // de tocar liquidación.
+      final excluidos = ExcluidosService.cacheActual;
       final out = <String, EmpleadoLiquidacion>{};
       for (final d in snap.docs) {
         final data = d.data();
         if (data['ACTIVO'] == false) continue;
+        if (ExcluidosService.esExcluido(excluidos, dni: d.id)) continue;
         final dni = d.id;
         final nombre = (data['NOMBRE'] ?? '').toString();
         final empresaRaw = (data['EMPRESA'] ?? '').toString();

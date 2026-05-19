@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
 import 'excel_utils.dart' as xu;
@@ -127,6 +128,11 @@ class ReportFlotaService {
           (v['vin']?.toString().toUpperCase() ?? ''): v,
       };
 
+      // Excluidos (tanqueros + tractores asociados + testers).
+      // Aplicamos al EMPLEADOS y VEHICULOS para que el reporte refleje
+      // solo la flota operativa de Vecchi.
+      final excluidos = await ExcluidosService.cargar(db: db);
+
       // Cargar EMPLEADOS para mapear patente → chofer asignado.
       final empleadosSnap =
           await db.collection(AppCollections.empleados).get();
@@ -135,6 +141,8 @@ class ReportFlotaService {
         final data = doc.data();
         // Soft-delete: empleados dados de baja no se mapean.
         if (!AppActivo.esActivo(data)) continue;
+        // Excluidos: tanqueros + testers no figuran en el reporte.
+        if (ExcluidosService.esExcluido(excluidos, dni: doc.id)) continue;
         // Solo CHOFER + MANEJO tienen vehículo asignado real.
         // SUPERVISOR/ADMIN/PLANTA pueden tener el campo VEHICULO con
         // basura legacy — lo ignoramos.
@@ -158,9 +166,14 @@ class ReportFlotaService {
       // en la sección "todas las unidades" del Excel).
       final vehiculosSnap =
           await db.collection(AppCollections.vehiculos).get();
-      final vehiculosActivos = vehiculosSnap.docs
-          .where((d) => AppActivo.esActivo(d.data()))
-          .toList();
+      final vehiculosActivos = vehiculosSnap.docs.where((d) {
+        if (!AppActivo.esActivo(d.data())) return false;
+        // Excluidos: tanques combustibles + tractores asociados.
+        if (ExcluidosService.esExcluido(excluidos, patente: d.id)) {
+          return false;
+        }
+        return true;
+      }).toList();
 
       // Construir filas con la lógica de cada vehículo.
       final filas = vehiculosActivos.map((doc) {

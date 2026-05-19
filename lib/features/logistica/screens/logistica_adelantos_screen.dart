@@ -9,6 +9,7 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../core/services/prefs_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
@@ -54,6 +55,20 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
   /// eliminados quedan en la base para auditoría (saber por qué se
   /// quemó cada número de recibo) y se ven activando este chip.
   bool _mostrarEliminados = false;
+
+  /// Set de excluidos (testers + choferes tanqueros). Se usa en el
+  /// dropdown del form de alta y en el filtro de la lista. Los
+  /// empleados reales preguntaban "quién es Apple Reviewer?" al ver
+  /// el dropdown — Santiago 2026-05-18.
+  ExcluidosSet? _excluidos;
+
+  @override
+  void initState() {
+    super.initState();
+    ExcluidosService.cargar().then((s) {
+      if (mounted) setState(() => _excluidos = s);
+    });
+  }
 
   @override
   void dispose() {
@@ -312,6 +327,16 @@ class _LogisticaAdelantosScreenState extends State<LogisticaAdelantosScreen> {
     // ver auditoría de adelantos cancelados.
     if (!_mostrarEliminados) {
       it = it.where((a) => !a.eliminado);
+    }
+    // Excluir adelantos de testers + tanqueros (Santiago 2026-05-18).
+    // Si en histórico quedó algún adelanto asociado a esos DNIs (ej
+    // de antes de que existiera el filtro), no aparece en el listado
+    // operativo. El registro queda en la base para auditoría.
+    if (_excluidos != null) {
+      it = it.where((a) => !ExcluidosService.esExcluido(
+            _excluidos,
+            dni: a.choferDni,
+          ));
     }
     // Fecha desde (inclusive — comparamos contra inicio del día).
     if (_fechaDesde != null) {
@@ -1036,7 +1061,19 @@ class _AdelantoFormDialogState extends State<_AdelantoFormDialog> {
                   final docs = List<
                           QueryDocumentSnapshot<Map<String, dynamic>>>.from(
                     snap.data?.docs ?? const [],
-                  )..sort((a, b) {
+                  )
+                    // Excluir testers (Apple Reviewer / Android) y los
+                    // 3 choferes asignados a tanques de combustibles
+                    // líquidos. NO tiene sentido cargarles adelantos.
+                    // Usamos el cache sincrónico — la pantalla padre
+                    // (`_LogisticaAdelantosScreenState`) ya pre-cargó
+                    // el set en initState, así que está disponible al
+                    // abrir el dialog.
+                    ..removeWhere((d) => ExcluidosService.esExcluido(
+                          ExcluidosService.cacheActual,
+                          dni: d.id,
+                        ))
+                    ..sort((a, b) {
                       final na =
                           (a.data()['NOMBRE'] ?? '').toString().toUpperCase();
                       final nb =

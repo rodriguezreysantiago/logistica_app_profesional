@@ -24,6 +24,7 @@ const hist = require('./historico');
 const health = require('./health');
 const fs = require('./firestore');
 const { aIsoLocal } = require('./fechas');
+const { cargarExcluidos } = require('./excluidos');
 
 // Banner de etapa de prueba vaciado 2026-05-18 (decision Santiago).
 // Bot opera 24/7 en produccion con choferes reales. Constante queda
@@ -252,6 +253,13 @@ async function _runOnce(fs) {
   const db = fs.inicializar();
   const stats = { encolados: 0, agrupados: 0, salteados: 0, errores: 0 };
 
+  // ─── Cargar set de exclusion UNA vez al inicio del cron ───
+  // Choferes asignados a enganches TANQUE + usuarios tester (Apple
+  // Reviewer, Android tester). Estos NO reciben avisos automáticos del
+  // bot. Ver `whatsapp-bot/src/excluidos.js` para el caso de negocio.
+  // Cacheado in-memory 10 min — costo cero en runs subsiguientes del cron.
+  const excluidos = await cargarExcluidos(db);
+
   try {
     // ─── Cleanup de historico viejo (mantenimiento de coleccion) ──
     // Borra hasta 500 docs de AVISOS_AUTOMATICOS_HISTORICO con
@@ -279,6 +287,10 @@ async function _runOnce(fs) {
       const data = doc.data();
       // Soft-delete: empleados dados de baja NO reciben avisos.
       if (data.ACTIVO === false) continue;
+      // Excluidos: choferes TANQUE + testers. Saltear ANTES de mapear
+      // patentes — sino el choferByPatente apuntaría a un excluido y
+      // los vencimientos de su unidad le llegarían igual.
+      if (excluidos.dnis.has(doc.id.trim())) continue;
       const rolRaw = String(data.ROL || '').toUpperCase().trim();
       if (rolRaw !== 'CHOFER' && rolRaw !== 'USUARIO' && rolRaw !== '') {
         // ADMIN, SUPERVISOR, PLANTA → out. Si ROL viene vacío/null lo
@@ -365,6 +377,9 @@ async function _runOnce(fs) {
       const v = vDoc.data();
       // Soft-delete: vehiculos dados de baja NO reciben avisos.
       if (v.ACTIVO === false) continue;
+      // Excluidos: enganches TANQUE + tractores asociados. NO mandar
+      // vencimientos de unidades que no controlamos.
+      if (excluidos.patentes.has(String(vDoc.id).toUpperCase())) continue;
       const tipo = String(v.TIPO || '').toUpperCase();
       const specs = DOCS_VEHICULO[tipo];
       if (!specs) continue;
@@ -426,6 +441,9 @@ async function _runOnce(fs) {
       const v = vDoc.data();
       // Soft-delete: tractores dados de baja NO entran al resumen.
       if (v.ACTIVO === false) continue;
+      // Excluidos: tractores de choferes tanqueros. Emma no se ocupa
+      // del service de unidades que no controlamos.
+      if (excluidos.patentes.has(String(vDoc.id).toUpperCase())) continue;
       const tipo = String(v.TIPO || '').toUpperCase();
       if (tipo !== 'TRACTOR') continue;
 
@@ -806,6 +824,12 @@ async function _runOnce(fs) {
               const eventosMant = [];
               for (const d of mantSnap.docs) {
                 const data = d.data();
+                // Excluidos: alertas de tractores tanqueros no entran
+                // al resumen de Emma (no controlamos esas unidades).
+                const patenteEvento = String(data.patente || '').toUpperCase();
+                if (patenteEvento && excluidos.patentes.has(patenteEvento)) {
+                  continue;
+                }
                 const tipo = String(data.tipo || '').toUpperCase();
                 let esMant = TIPOS_MANT_DIRECTOS.has(tipo);
                 let subTipo = null;
@@ -995,6 +1019,8 @@ async function _runOnce(fs) {
             for (const vDoc of vehiculosSnap.docs) {
               const v = vDoc.data();
               if (v.ACTIVO === false) continue;
+              // Excluidos: unidades tanqueras + tractores asociados.
+              if (excluidos.patentes.has(String(vDoc.id).toUpperCase())) continue;
               const tipo = String(v.TIPO || '').toUpperCase();
               const specs = DOCS_VEHICULO[tipo];
               if (!specs) continue;

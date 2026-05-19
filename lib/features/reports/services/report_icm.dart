@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' as intl;
 
+import '../../../core/services/excluidos_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../icm/services/icm_calculator.dart';
@@ -119,12 +120,18 @@ class ReportIcmService {
     try {
       final db = FirebaseFirestore.instance;
 
+      // Cargar set de exclusión (tanqueros + testers). El reporte va
+      // a auditoría YPF, no podemos incluir tractores que no
+      // controlamos ni cuentas demo.
+      final excluidos = await ExcluidosService.cargar(db: db);
+
       // Lookup nombres de empleados (para fallback on-the-fly)
       final empSnap = await db.collection('EMPLEADOS').get();
       final nombrePorDni = <String, String>{};
       for (final d in empSnap.docs) {
         final data = d.data();
         final dni = (data['DNI'] ?? d.id).toString();
+        if (ExcluidosService.esExcluido(excluidos, dni: dni)) continue;
         final nombre = (data['NOMBRE'] ?? '').toString().trim();
         if (nombre.isNotEmpty) nombrePorDni[dni] = nombre;
       }
@@ -151,8 +158,17 @@ class ReportIcmService {
         final id = _isoWeekId(s.semanaInicio);
         final snap = await db.collection('ICM_SEMANAL').doc(id).get();
         if (snap.exists && (snap.data()?['choferes'] as List?) != null) {
+          // Filtramos defensivamente los docs preexistentes — los
+          // nuevos ya vienen filtrados desde la Cloud Function
+          // `recomputeIcmSemanalScheduled` (Fase 1), pero las semanas
+          // calculadas antes del 2026-05-19 pueden tener residuos.
           detallePorSemana[id] = ((snap.data()!['choferes'] as List)
-              .cast<Map<String, dynamic>>());
+                  .cast<Map<String, dynamic>>())
+              .where((c) => !ExcluidosService.esExcluido(
+                    excluidos,
+                    dni: (c['dni'] ?? '').toString(),
+                  ))
+              .toList();
         } else {
           // Fallback: calculator on-the-fly (mismas semanas, mismos
           // choferes que aparecerían en el resumen)
@@ -164,6 +180,13 @@ class ReportIcmService {
             hastaMs: fin,
             nombrePorDni: nombrePorDni,
           );
+          // Defensivo: el calculator puede generar entries para DNIs
+          // que están en eventos crudos pero no en nombrePorDni
+          // (excluidos). Filtramos explícito.
+          ranking.removeWhere((c) => ExcluidosService.esExcluido(
+                excluidos,
+                dni: c.choferDni,
+              ));
           detallePorSemana[id] = ranking
               .map((c) => {
                     'dni': c.choferDni,

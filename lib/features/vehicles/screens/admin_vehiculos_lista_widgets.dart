@@ -14,7 +14,14 @@ part of 'admin_vehiculos_lista_screen.dart';
 class _ListaPorTipo extends StatelessWidget {
   final String tipo;
   final bool mostrarInactivos;
-  const _ListaPorTipo({required this.tipo, required this.mostrarInactivos});
+  final bool mostrarExcluidos;
+  final ExcluidosSet? excluidos;
+  const _ListaPorTipo({
+    required this.tipo,
+    required this.mostrarInactivos,
+    required this.mostrarExcluidos,
+    required this.excluidos,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +35,12 @@ class _ListaPorTipo extends StatelessWidget {
         filter: (doc, q) {
           final data = doc.data() as Map<String, dynamic>;
           if (!mostrarInactivos && !AppActivo.esActivo(data)) {
+            return false;
+          }
+          // Excluidos: tanques combustibles + tractores asignados a
+          // tanqueros. La patente es el `doc.id`.
+          if (!mostrarExcluidos &&
+              ExcluidosService.esExcluido(excluidos, patente: doc.id)) {
             return false;
           }
           final hay = '${doc.id} ${data['MARCA'] ?? ''} '

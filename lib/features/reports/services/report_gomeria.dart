@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/excluidos_service.dart';
 import '../../../shared/constants/app_colors.dart';
 import '../../../shared/utils/app_feedback.dart';
 import '../../../shared/utils/formatters.dart';
@@ -153,6 +154,10 @@ class ReportGomeriaService {
         .where('hasta', isNull: true)
         .get();
 
+    // Excluidos: tanques + tractores asociados. Los neumáticos de
+    // esas unidades no los administramos.
+    final excluidos = await ExcluidosService.cargar(db: db);
+
     // Cargar VEHICULOS y CUBIERTAS en bloque para joinear sin N+1.
     final vehicSnap = await db.collection(AppCollections.vehiculos).get();
     final vehiculos = <String, Map<String, dynamic>>{
@@ -221,6 +226,10 @@ class ReportGomeriaService {
     for (final d in docsOrdenados) {
       final inst = d.data();
       final patente = (inst['unidad_id'] ?? '').toString();
+      // Skip cubiertas instaladas en unidades excluidas (tanqueros).
+      if (ExcluidosService.esExcluido(excluidos, patente: patente)) {
+        continue;
+      }
       final unidad = vehiculos[patente] ?? const <String, dynamic>{};
       final cubierta = cubiertas[(inst['cubierta_id'] ?? '').toString()] ??
           const <String, dynamic>{};
